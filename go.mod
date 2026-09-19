@@ -1,4 +1,4 @@
-module github.com/MoonLightSoftware/MoonLightCloud
+module github.com/faroukelabady/MoonLightCloud
 
 go 1.27.0
 

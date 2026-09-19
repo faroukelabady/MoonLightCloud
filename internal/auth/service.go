@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/clock"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // Service implements device provisioning, authentication, and revocation.

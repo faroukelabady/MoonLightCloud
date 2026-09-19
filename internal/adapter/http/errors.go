@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
 
 // Envelope is the stable error contract.

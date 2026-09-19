@@ -16,7 +16,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/migrate"
+	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 )
 
 // Isolated creates a fresh migrated throwaway database and returns its URL.

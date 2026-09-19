@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/config"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/testutil"
+	"github.com/faroukelabady/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 )
 
 func testConfig(url string) config.Config {

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

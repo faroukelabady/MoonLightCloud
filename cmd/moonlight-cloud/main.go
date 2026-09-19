@@ -25,14 +25,14 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	adapterhttp "github.com/MoonLightSoftware/MoonLightCloud/internal/adapter/http"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/adapter/postgres"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/app"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/config"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/migrate"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/clock"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/ids"
+	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
+	"github.com/faroukelabady/MoonLightCloud/internal/app"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // Build metadata (ldflags).

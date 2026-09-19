@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/clock"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // fakeRepo is an in-memory Repository for service tests.

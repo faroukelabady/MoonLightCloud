@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/adapter/postgres/sqlcgen"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

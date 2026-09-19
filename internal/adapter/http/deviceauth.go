@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 )
 
 type deviceKey struct{}

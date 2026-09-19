@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 )
 
 func TestLive(t *testing.T) {

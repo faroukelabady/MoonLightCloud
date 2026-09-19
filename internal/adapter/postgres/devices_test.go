@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/migrate"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/clock"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/platform/ids"
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/testutil"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )

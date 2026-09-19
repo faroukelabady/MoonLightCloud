@@ -12,7 +12,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/db"
+	"github.com/faroukelabady/MoonLightCloud/db"
 	"github.com/pressly/goose/v3"
 )
 

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 )
 
 // Config tunes server safety defaults.

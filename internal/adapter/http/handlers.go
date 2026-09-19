@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/MoonLightSoftware/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
 
 // Health reports liveness/readiness state supplied by the app layer.
