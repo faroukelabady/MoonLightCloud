@@ -1,0 +1,55 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  GOFLAGS: -mod=readonly
+  # Integration tests target the service container, never dev/prod.
+  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: docker.io/library/postgres:18.1-bookworm
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      # Pinned by full SHA; comments carry the reviewed release version.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install sqlc (pinned)
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: gofmt
+        run: test -z "$(gofmt -l cmd/ internal/ db/)"
+      - name: sqlc freshness
+        run: |
+          cp -r internal/adapter/postgres/sqlcgen /tmp/sqlcgen.before
+          $(go env GOPATH)/bin/sqlc generate
+          diff -r /tmp/sqlcgen.before internal/adapter/postgres/sqlcgen
+      - name: Migrate from empty (explicit, binary-owned)
+        run: |
+          go run ./cmd/moonlight-cloud migrate up
+          go run ./cmd/moonlight-cloud migrate status
+        env:
+          ENVIRONMENT: development
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      - name: Tests with race detector
+        run: go test -race ./...
+      - name: go vet
+        run: go vet ./...
+      - name: Dependency audit
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: OCI build verification (no publish)
+        run: docker build -f deploy/Containerfile -t moonlight-cloud:ci .

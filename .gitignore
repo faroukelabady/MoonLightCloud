@@ -1,0 +1,29 @@
+# Local secrets and environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+coverage*.txt
+coverage*.html
+
+# Local DB exports / dumps
+*.dump
+*.sql.gz
+/backups/
+
+# IDE and editor state
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+/tmp/
+*.tmp

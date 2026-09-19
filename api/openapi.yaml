@@ -1,0 +1,126 @@
+openapi: 3.0.3
+info:
+  title: MoonLightCloud API
+  description: >-
+    Phase 1A foundation endpoints. Business APIs are versioned under /api/v1.
+    Health and version stay outside the version boundary.
+  version: 1A
+paths:
+  /health/live:
+    get:
+      summary: Liveness probe
+      operationId: healthLive
+      responses:
+        '200':
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+  /health/ready:
+    get:
+      summary: Readiness probe
+      operationId: healthReady
+      description: >-
+        Returns 200 only when PostgreSQL is reachable and the schema is
+        compatible. Otherwise 503.
+      responses:
+        '200':
+          description: Ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '503':
+          description: Not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+  /version:
+    get:
+      summary: Build version metadata
+      operationId: version
+      responses:
+        '200':
+          description: Version metadata (no secrets).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Version'
+  /api/v1/device/ping:
+    get:
+      summary: Authenticated device ping (proves device auth end to end)
+      operationId: devicePing
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevicePing'
+        '401':
+          description: Missing, unknown, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+components:
+  securitySchemes:
+    deviceAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: '<device_id>.<device_secret_hex> (raw secret shown once at provisioning)'
+      description: >-
+        Authorization: Bearer <device_uuid>.<64-hex-char secret>.
+        Never in query parameters. HTTPS in production.
+  schemas:
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    Version:
+      type: object
+      required: [app, version]
+      properties:
+        app:
+          type: string
+          example: moonlight-cloud
+        version:
+          type: string
+          example: dev
+        commit:
+          type: string
+          example: unknown
+        build_time:
+          type: string
+          example: unknown
+    DevicePing:
+      type: object
+      required: [device_id, authenticated]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        authenticated:
+          type: boolean
+          example: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: UNAUTHORIZED
+            message:
+              type: string
+              example: invalid device credential

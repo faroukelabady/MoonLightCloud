@@ -1,0 +1,24 @@
+# Build with: podman build -f deploy/Containerfile -t moonlight-cloud:dev .
+# Runnable with plain `docker build` as well.
+# Stage 1: build a static Go binary with reproducible metadata.
+FROM docker.io/library/golang:1.27.1-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+RUN CGO_ENABLED=0 go build \
+  -trimpath \
+  -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+  -o /out/moonlight-cloud ./cmd/moonlight-cloud
+
+# Stage 2: minimal runtime, non-root, no toolchain, no source.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/moonlight-cloud /usr/local/bin/moonlight-cloud
+# Distroless nonroot user is 65532:65532.
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/moonlight-cloud"]
+CMD ["serve"]
