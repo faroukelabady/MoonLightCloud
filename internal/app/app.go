@@ -20,6 +20,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
+	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -38,6 +39,7 @@ type App struct {
 	Log     *slog.Logger
 	Pool    *pgxpool.Pool
 	Devices auth.Service
+	Sync    sync.Service
 	Handler http.Handler
 	Health  adapterhttp.Health
 	Version adapterhttp.Version
@@ -50,19 +52,24 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	hasher, err := auth.NewHasher(cfg.Pepper)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	store := postgres.NewDevices(pool, config.DefaultDBQueryTimeout)
 	a := &App{Cfg: cfg, Log: log, Pool: pool}
 	a.Devices = auth.NewService(
-		postgres.NewDevices(pool, config.DefaultDBQueryTimeout),
-		auth.NewHasher(cfg.SecretPepper),
-		clock.System{},
-		ids.System{},
+		store, hasher, cfg.PepperRaw, cfg.PepperVersion,
+		clock.System{}, ids.System{},
 	)
+	a.Sync = sync.NewService(store, clock.System{})
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
-	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices)
+	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

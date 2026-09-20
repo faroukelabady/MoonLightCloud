@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
-	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 )
 
 func TestLive(t *testing.T) {
@@ -91,13 +90,14 @@ func TestRequestIDPropagation(t *testing.T) {
 }
 
 func TestDeviceAuthEndToEnd(t *testing.T) {
-	repo := &memRepo{m: map[string]auth.Device{}}
+	repo := newMemRepo()
 	svc := deviceSvcForTest(repo)
 	ctx := context.Background()
 	p, err := svc.Create(ctx, "shop-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
+	token := p.Device.ID + "." + p.Credential.ID + "." + p.RawSecret
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dev, ok := DeviceOf(r)
 		if !ok {
@@ -108,7 +108,7 @@ func TestDeviceAuthEndToEnd(t *testing.T) {
 	h := DeviceAuth(svc)(next)
 
 	good := httptest.NewRequest("GET", "/api/v1/device/ping", nil)
-	good.Header.Set("Authorization", "Bearer "+p.Device.ID+"."+p.RawSecret)
+	good.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, good)
 	if rec.Code != 200 {
@@ -116,11 +116,13 @@ func TestDeviceAuthEndToEnd(t *testing.T) {
 	}
 
 	for name, header := range map[string]string{
-		"missing":       "",
-		"bad scheme":    "Basic abc",
-		"invalid":       "Bearer " + p.Device.ID + ".wrongsecret",
-		"unknown":       "Bearer 22222222-2222-7222-8222-222222222222." + p.RawSecret,
-		"query exfil ?": "Bearer " + p.Device.ID + ".",
+		"missing":      "",
+		"bad scheme":   "Basic abc",
+		"two parts":    "Bearer " + p.Device.ID + "." + p.RawSecret,
+		"invalid":      "Bearer " + p.Device.ID + "." + p.Credential.ID + ".wrongsecret",
+		"unknown cred": "Bearer " + p.Device.ID + ".99999999-9999-7999-8999-999999999999." + p.RawSecret,
+		"unknown dev":  "Bearer 99999999-9999-7999-8999-999999999999." + p.Credential.ID + "." + p.RawSecret,
+		"empty secret": "Bearer " + p.Device.ID + "." + p.Credential.ID + ".",
 	} {
 		req := httptest.NewRequest("GET", "/api/v1/device/ping", nil)
 		if header != "" {
@@ -138,11 +140,11 @@ func TestDeviceAuthEndToEnd(t *testing.T) {
 		}
 	}
 
-	if err := svc.Revoke(ctx, p.Device.ID); err != nil {
+	if err := svc.RevokeDevice(ctx, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("GET", "/api/v1/device/ping", nil)
-	req.Header.Set("Authorization", "Bearer "+p.Device.ID+"."+p.RawSecret)
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != 401 {

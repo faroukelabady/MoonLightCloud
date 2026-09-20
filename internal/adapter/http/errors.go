@@ -52,6 +52,12 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			status = http.StatusConflict
 		case apperr.Unavailable:
 			status = http.StatusServiceUnavailable
+		case apperr.TooLarge:
+			status = http.StatusRequestEntityTooLarge
+		case apperr.UnsupportedMedia:
+			status = http.StatusUnsupportedMediaType
+		case apperr.Unprocessable:
+			status = http.StatusUnprocessableEntity
 		}
 		if ae.Kind == apperr.Internal && ae.Err != nil {
 			slog.Default().Error("request failed",

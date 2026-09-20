@@ -12,18 +12,16 @@ import (
 )
 
 const createDevice = `-- name: CreateDevice :exec
-INSERT INTO devices (id, name, status, secret_hash, secret_salt, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO devices (id, name, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateDeviceParams struct {
-	ID         pgtype.UUID        `json:"id"`
-	Name       string             `json:"name"`
-	Status     string             `json:"status"`
-	SecretHash []byte             `json:"secret_hash"`
-	SecretSalt []byte             `json:"secret_salt"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) error {
@@ -31,8 +29,6 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) erro
 		arg.ID,
 		arg.Name,
 		arg.Status,
-		arg.SecretHash,
-		arg.SecretSalt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -40,7 +36,7 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) erro
 }
 
 const deviceByID = `-- name: DeviceByID :one
-SELECT id, name, status, secret_hash, secret_salt, created_at, updated_at, last_seen_at, revoked_at
+SELECT id, name, status, created_at, updated_at, last_seen_at, revoked_at
 FROM devices WHERE id = $1
 `
 
@@ -51,8 +47,6 @@ func (q *Queries) DeviceByID(ctx context.Context, id pgtype.UUID) (Device, error
 		&i.ID,
 		&i.Name,
 		&i.Status,
-		&i.SecretHash,
-		&i.SecretSalt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastSeenAt,
@@ -61,17 +55,50 @@ func (q *Queries) DeviceByID(ctx context.Context, id pgtype.UUID) (Device, error
 	return i, err
 }
 
-const revokeDevice = `-- name: RevokeDevice :exec
+const listDevices = `-- name: ListDevices :many
+SELECT id, name, status, created_at, updated_at, last_seen_at, revoked_at
+FROM devices ORDER BY created_at
+`
+
+func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
+	rows, err := q.db.Query(ctx, listDevices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Device{}
+	for rows.Next() {
+		var i Device
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastSeenAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeDeviceRow = `-- name: RevokeDeviceRow :exec
 UPDATE devices SET status = 'revoked', revoked_at = $2, updated_at = $2 WHERE id = $1
 `
 
-type RevokeDeviceParams struct {
+type RevokeDeviceRowParams struct {
 	ID        pgtype.UUID        `json:"id"`
 	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
 }
 
-func (q *Queries) RevokeDevice(ctx context.Context, arg RevokeDeviceParams) error {
-	_, err := q.db.Exec(ctx, revokeDevice, arg.ID, arg.RevokedAt)
+func (q *Queries) RevokeDeviceRow(ctx context.Context, arg RevokeDeviceRowParams) error {
+	_, err := q.db.Exec(ctx, revokeDeviceRow, arg.ID, arg.RevokedAt)
 	return err
 }
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR-0015 (final HMAC construction, pepper encoding, legacy v0 path). Kept for history.
 
 ## Context
 

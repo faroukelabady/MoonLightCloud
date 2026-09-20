@@ -12,5 +12,8 @@ Concise, irreversible-or-important choices only.
 - [0008](0008-notification-adapter.md) — notification provider behind an adapter
 - [0009](0009-no-shared-domain-package.md) — no shared desktop/cloud domain package
 - [0010](0010-railway-is-target.md) — Railway is a deployment target, not a dependency
-- [0011](0011-device-secret-hashing.md) — device secret hashing design
+- [0011](0011-device-secret-hashing.md) — device secret hashing design (superseded by 0015)
 - [0012](0012-explicit-migrations.md) — explicit migrations, verified schema at startup
+- [0013](0013-device-credential-lifecycle.md) — device credential lifecycle
+- [0014](0014-sync-ingestion-protocol.md) — sync ingestion protocol
+- [0015](0015-device-secret-hmac.md) — final HMAC construction (supersedes 0011)

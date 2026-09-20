@@ -12,10 +12,33 @@ type Device struct {
 	ID         pgtype.UUID        `json:"id"`
 	Name       string             `json:"name"`
 	Status     string             `json:"status"`
-	SecretHash []byte             `json:"secret_hash"`
-	SecretSalt []byte             `json:"secret_salt"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type DeviceCredential struct {
+	ID              pgtype.UUID        `json:"id"`
+	DeviceID        pgtype.UUID        `json:"device_id"`
+	Salt            []byte             `json:"salt"`
+	Verifier        []byte             `json:"verifier"`
+	VerifierVersion int32              `json:"verifier_version"`
+	PepperVersion   int32              `json:"pepper_version"`
+	Status          string             `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ActivatedAt     pgtype.Timestamptz `json:"activated_at"`
+	RevokedAt       pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
+}
+
+type SyncEvent struct {
+	EventID      pgtype.UUID        `json:"event_id"`
+	DeviceID     pgtype.UUID        `json:"device_id"`
+	CredentialID pgtype.UUID        `json:"credential_id"`
+	EventType    string             `json:"event_type"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
+	Payload      []byte             `json:"payload"`
+	PayloadHash  []byte             `json:"payload_hash"`
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
 // Config tunes server safety defaults.
@@ -20,18 +21,24 @@ type Config struct {
 
 const (
 	defaultMaxHeaderBytes = 1 << 20 // 1 MiB
-	defaultMaxBodyBytes   = 1 << 20 // 1 MiB; Phase 1A has no large payloads
+	// 8 MiB global ceiling; the sync endpoint enforces its own tighter
+	// envelope limits (max events, max payload) inside this bound.
+	defaultMaxBodyBytes = 8 << 20
 )
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
 	mux.HandleFunc("GET /version", version.Handler)
 	mux.Handle("GET /api/v1/device/ping",
 		DeviceAuth(devices)(http.HandlerFunc(DevicePing)))
+	mux.Handle("GET /api/v1/sync/capabilities",
+		DeviceAuth(devices)(SyncCapabilities(syncSvc)))
+	mux.Handle("POST /api/v1/sync/batches",
+		DeviceAuth(devices)(SyncBatch(syncSvc)))
 	mux.HandleFunc("/", NotFound)
 
 	var h http.Handler = mux

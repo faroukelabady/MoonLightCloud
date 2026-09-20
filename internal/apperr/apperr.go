@@ -13,6 +13,9 @@ const (
 	Conflict
 	Unavailable
 	Internal
+	TooLarge
+	UnsupportedMedia
+	Unprocessable
 )
 
 // Error is a classified application error.
@@ -46,6 +49,12 @@ func (e *Error) Code() string {
 		return "CONFLICT"
 	case Unavailable:
 		return "UNAVAILABLE"
+	case TooLarge:
+		return "REQUEST_TOO_LARGE"
+	case UnsupportedMedia:
+		return "UNSUPPORTED_MEDIA_TYPE"
+	case Unprocessable:
+		return "UNSUPPORTED_EVENT"
 	default:
 		return "INTERNAL"
 	}
