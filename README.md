@@ -20,8 +20,10 @@ cp .env.example .env.local   # safe placeholders; edit as needed
 curl localhost:8080/health/live
 curl localhost:8080/health/ready
 curl localhost:8080/version
-./scripts/dev-provision-device.sh my-shop   # DEVELOPMENT ONLY, secret shown once
-curl -H "Authorization: Bearer <id>.<secret>" localhost:8080/api/v1/device/ping
+./scripts/dev-provision-device.sh my-shop   # DEVELOPMENT ONLY, credential shown once
+AUTH="Bearer <device-id>.<credential-id>.<secret>"
+curl -H "Authorization: $AUTH" localhost:8080/api/v1/device/ping
+curl -H "Authorization: $AUTH" localhost:8080/api/v1/sync/capabilities
 ./scripts/dev-down.sh        # stop, keep data
 ./scripts/dev-reset.sh       # DESTROYS local dev DB only (gated to development)
 ```
@@ -42,6 +44,7 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 | Tests (race) | `./scripts/test.sh` | `make test` |
 | Full gate | `./scripts/check.sh` | `make check` |
 | Provision device (dev) | `./scripts/dev-provision-device.sh [name]` | — |
+| Device admin | `device list / rotate <id> / revoke <id>` via `go run ./cmd/moonlight-cloud` | — |
 
 ## Layout
 

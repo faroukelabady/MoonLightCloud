@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-type ctxKey string
-
 const requestIDKey ctxKey = "request_id"
 
 // RequestID returns the request/correlation ID for logs and responses.

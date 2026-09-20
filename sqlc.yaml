@@ -2,7 +2,10 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "db/queries"
-    schema: "db/migrations/00001_devices.sql"
+    schema:
+      - "db/migrations/00001_devices.sql"
+      - "db/migrations/00002_device_credentials.sql"
+      - "db/migrations/00003_sync_events.sql"
     gen:
       go:
         package: "sqlcgen"

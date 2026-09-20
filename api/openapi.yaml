@@ -2,9 +2,10 @@ openapi: 3.0.3
 info:
   title: MoonLightCloud API
   description: >-
-    Phase 1A foundation endpoints. Business APIs are versioned under /api/v1.
-    Health and version stay outside the version boundary.
-  version: 1A
+    Phase 1B: device lifecycle + versioned sync ingestion. Business APIs are
+    versioned under /api/v1. Health and version stay outside the version
+    boundary. ACK means durable PostgreSQL commit, never queueing alone.
+  version: 1B
 paths:
   /health/live:
     get:
@@ -62,7 +63,103 @@ paths:
               schema:
                 $ref: '#/components/schemas/DevicePing'
         '401':
-          description: Missing, unknown, or invalid credential.
+          description: Missing, unknown, revoked, or invalid credential (no enumeration detail).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/sync/capabilities:
+    get:
+      summary: Sync protocol capabilities for desktop compatibility
+      operationId: syncCapabilities
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Protocol support, limits, server time. No internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Capabilities'
+        '401':
+          description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/sync/batches:
+    post:
+      summary: Durably ingest a batch of sync events (all-or-nothing)
+      operationId: syncBatches
+      security:
+        - deviceAuth: []
+      parameters:
+        - in: header
+          name: Content-Type
+          required: true
+          schema:
+            type: string
+            example: application/json
+          description: Must be application/json (415 otherwise).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncBatch'
+      responses:
+        '200':
+          description: >-
+            Batch durably committed. Per-event accepted/already_accepted.
+            ACK means PostgreSQL commit, not queueing or projection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResult'
+        '400':
+          description: Malformed envelope or duplicate IDs inside batch. Not retryable without fixing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Invalid device authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Event device_id does not match authenticated device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: EVENT_ID_REUSE — same event ID with different device or payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: Batch or payload exceeds limits. Shrink and resend as new batches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '415':
+          description: Content-Type must be application/json.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: Unsupported event type or absurd timestamp. Not retryable as-is.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Transient unavailability. Retry with backoff.
           content:
             application/json:
               schema:
@@ -72,9 +169,9 @@ components:
     deviceAuth:
       type: http
       scheme: bearer
-      bearerFormat: '<device_id>.<device_secret_hex> (raw secret shown once at provisioning)'
+      bearerFormat: '<device-id>.<credential-id>.<secret-hex> (raw secret shown once at provisioning/rotation)'
       description: >-
-        Authorization: Bearer <device_uuid>.<64-hex-char secret>.
+        Authorization: Bearer <device_uuid>.<credential_uuid>.<64-hex secret>.
         Never in query parameters. HTTPS in production.
   schemas:
     Status:
@@ -110,6 +207,86 @@ components:
         authenticated:
           type: boolean
           example: true
+    Capabilities:
+      type: object
+      required: [api_version, supported_events, max_batch_events, max_payload_bytes, max_body_bytes, server_time]
+      properties:
+        api_version:
+          type: string
+          example: v1
+        supported_events:
+          type: array
+          items:
+            type: string
+          example: [system.test.v1]
+        max_batch_events:
+          type: integer
+          example: 100
+        max_payload_bytes:
+          type: integer
+          example: 65536
+        max_body_bytes:
+          type: integer
+          example: 8388608
+        server_time:
+          type: string
+          format: date-time
+    SyncBatch:
+      type: object
+      required: [events]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: Optional client correlation, echoed back. Never replaces event idempotency.
+        events:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SyncEvent'
+    SyncEvent:
+      type: object
+      required: [event_id, event_type, occurred_at, payload]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          description: Generated once with the desktop outbox row; never regenerated on retry.
+        event_type:
+          type: string
+          example: system.test.v1
+          description: Immutable name.version; only registered types are accepted.
+        device_id:
+          type: string
+          format: uuid
+          description: Optional echo; must equal the authenticated device.
+        occurred_at:
+          type: string
+          format: date-time
+          description: Business timestamp; bounded (2020-01-01 .. now+24h), never authority.
+        payload:
+          type: object
+          description: Required JSON object, max 64 KiB. Money as integer minor units + currency.
+    BatchResult:
+      type: object
+      required: [events]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        events:
+          type: array
+          items:
+            type: object
+            required: [event_id, status]
+            properties:
+              event_id:
+                type: string
+                format: uuid
+              status:
+                type: string
+                enum: [accepted, already_accepted]
     ErrorEnvelope:
       type: object
       required: [error]

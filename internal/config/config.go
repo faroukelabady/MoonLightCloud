@@ -9,6 +9,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -38,8 +39,23 @@ const (
 	DefaultDBQueryTimeout   = 5 * time.Second
 )
 
-// Known development credentials. Production startup is rejected when the
-// DATABASE_URL still carries one of these markers.
+// Device-secret pepper rules (ADR-0015). The pepper is a 256-bit server-side
+// HMAC key, base64 StdEncoding, exactly 32 bytes decoded. It lives only in
+// configuration — never in PostgreSQL, never in logs.
+// Development uses a documented fixed value when DEVICE_SECRET_PEPPER is
+// unset; staging/production require an explicit value that decodes to 32
+// bytes and is not the dev placeholder.
+const (
+	PepperBytes = 32
+	// DevPepper is the documented development-only pepper (base64 of the
+	// ASCII string "moonlight-cloud-dev-pepper-00001"). Rejected outside
+	// development. It exists so local development works with zero secrets
+	// while production can never silently inherit it.
+	DevPepper = "bW9vbmxpZ2h0LWNsb3VkLWRldi1wZXBwZXItMDAwMDE="
+	// CurrentPepperVersion tags new credentials; enables future rotation.
+	CurrentPepperVersion = 1
+)
+
 var devDBMarkers = []string{
 	"moonlight:moonlight@",
 	"postgres:postgres@",
@@ -54,7 +70,9 @@ type Config struct {
 	HTTPAddr      string
 	DatabaseURL   string
 	LogLevel      string
-	SecretPepper  string
+	PepperRaw     string
+	Pepper        []byte
+	PepperVersion int
 	ShutdownAfter time.Duration
 
 	DBMaxConns       int32
@@ -72,7 +90,8 @@ func Load() (Config, error) {
 		HTTPAddr:         envOr("HTTP_ADDR", DefaultHTTPAddr),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		LogLevel:         strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
-		SecretPepper:     os.Getenv("DEVICE_SECRET_PEPPER"),
+		PepperRaw:        strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
+		PepperVersion:    CurrentPepperVersion,
 		ShutdownAfter:    DefaultShutdownTimeout,
 		DBMaxConns:       DefaultDBMaxConns,
 		DBMinConns:       DefaultDBMinConns,
@@ -107,8 +126,9 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// Validate rejects missing or unsafe configuration.
-func (c Config) Validate() error {
+// Validate rejects missing or unsafe configuration. It also resolves the
+// pepper (pointer receiver: decoded bytes are stored back into Config).
+func (c *Config) Validate() error {
 	switch c.Environment {
 	case EnvDevelopment, EnvStaging, EnvProduction:
 	default:
@@ -138,17 +158,44 @@ func (c Config) Validate() error {
 	if c.DBMaxConns < 1 || c.DBMaxConns > 100 {
 		return fmt.Errorf("DB_MAX_CONNS must be within [1, 100]")
 	}
-	if c.Environment == EnvProduction {
+	if c.Environment == EnvProduction || c.Environment == EnvStaging {
 		lowered := strings.ToLower(c.DatabaseURL)
 		for _, m := range devDBMarkers {
 			if strings.Contains(lowered, m) {
 				return fmt.Errorf("production ENVIRONMENT refuses development DATABASE_URL marker %q", m)
 			}
 		}
-		if c.SecretPepper == "" {
-			return fmt.Errorf("production ENVIRONMENT requires DEVICE_SECRET_PEPPER")
+	}
+	if err := c.resolvePepper(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// resolvePepper decodes and validates the server-side HMAC pepper.
+// Development falls back to the documented DevPepper when unset; every
+// other environment requires an explicit base64 value decoding to exactly
+// 32 bytes that is not the dev placeholder.
+func (c *Config) resolvePepper() error {
+	raw := c.PepperRaw
+	if raw == "" {
+		if c.Environment == EnvDevelopment {
+			raw = DevPepper
+		} else {
+			return fmt.Errorf("DEVICE_SECRET_PEPPER is required outside development")
 		}
 	}
+	if c.Environment != EnvDevelopment && raw == DevPepper {
+		return fmt.Errorf("DEVICE_SECRET_PEPPER must not be the development placeholder outside development")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return fmt.Errorf("DEVICE_SECRET_PEPPER must be base64: %w", err)
+	}
+	if len(decoded) != PepperBytes {
+		return fmt.Errorf("DEVICE_SECRET_PEPPER must decode to %d bytes, got %d", PepperBytes, len(decoded))
+	}
+	c.Pepper = decoded
 	return nil
 }
 

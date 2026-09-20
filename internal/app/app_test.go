@@ -10,11 +10,13 @@ import (
 )
 
 func testConfig(url string) config.Config {
-	return config.Config{
+	c := config.Config{
 		Environment:      config.EnvDevelopment,
 		HTTPAddr:         ":0",
 		DatabaseURL:      url,
 		LogLevel:         "error",
+		PepperRaw:        config.DevPepper,
+		PepperVersion:    config.CurrentPepperVersion,
 		ShutdownAfter:    config.DefaultShutdownTimeout,
 		DBMaxConns:       4,
 		DBMinConns:       1,
@@ -23,6 +25,10 @@ func testConfig(url string) config.Config {
 		DBConnectTimeout: config.DefaultDBConnectTimeout,
 		DBQueryTimeout:   config.DefaultDBQueryTimeout,
 	}
+	if err := c.Validate(); err != nil {
+		panic(err)
+	}
+	return c
 }
 
 func TestNewHealthyAndReady(t *testing.T) {

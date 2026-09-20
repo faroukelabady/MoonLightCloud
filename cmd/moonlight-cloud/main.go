@@ -2,8 +2,10 @@
 //
 //	moonlight-cloud serve                  run the HTTP server (default)
 //	moonlight-cloud migrate up|status       explicit schema migrations
-//	moonlight-cloud device create --name N  provision a device (secret shown once)
-//	moonlight-cloud device revoke <id>      revoke a device
+//	moonlight-cloud device create --name N  provision a device (credential shown once)
+//	moonlight-cloud device list             safe operator visibility (no secrets)
+//	moonlight-cloud device rotate <id>      rotate a device credential (new secret once)
+//	moonlight-cloud device revoke <id>      revoke a device and all its credentials
 //	moonlight-cloud probe --url U           single health probe (container healthcheck)
 //
 // Version metadata injects at build time:
@@ -17,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -82,6 +85,8 @@ func isFlag(s string) bool { return len(s) > 0 && s[0] == '-' }
 
 // serve runs the HTTP server with graceful SIGINT/SIGTERM shutdown:
 // stop accepting, bounded in-flight completion, close server, close pool.
+// Server errors propagate through runServer to main orchestration; the
+// server goroutine never calls os.Exit so deferred cleanup always runs.
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	doMigrate := fs.Bool("migrate", false, "run pending migrations before serving (explicit operator opt-in)")
@@ -106,23 +111,43 @@ func serve(args []string) error {
 	srv := adapterhttp.Server(cfg.HTTPAddr, a.Handler, adapterhttp.Config{})
 	a.Log.Info("listening", "addr", cfg.HTTPAddr, "env", cfg.Environment,
 		"version", version, "commit", commit)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			a.Log.Error("server error", "err", err.Error())
-			os.Exit(1)
-		}
-	}()
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	a.Log.Info("shutting down")
-	shutCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownAfter)
-	defer cancel()
-	if err := srv.Shutdown(shutCtx); err != nil {
-		return fmt.Errorf("shutdown: %w", err)
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
+		return err
 	}
 	a.Log.Info("shutdown complete")
 	return nil
+}
+
+// runServer orchestrates one http.Server: serve in a goroutine, report
+// bind/serve errors on the error channel, shut down gracefully on context
+// cancellation with a bounded timeout. http.ErrServerClosed after Shutdown
+// is clean (nil). No os.Exit anywhere on this path.
+func runServer(ctx context.Context, srv *http.Server, shutdownAfter time.Duration, log *slog.Logger) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+	select {
+	case err := <-errCh:
+		// Server failed before any shutdown signal (e.g. port occupied).
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("serve: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		log.Info("shutting down")
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownAfter)
+		defer cancel()
+		if err := srv.Shutdown(shutCtx); err != nil {
+			return fmt.Errorf("shutdown: %w", err)
+		}
+		if err := <-errCh; err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("serve: %w", err)
+		}
+		return nil
+	}
 }
 
 func migrateUp(ctx context.Context, databaseURL string) error {
@@ -165,7 +190,7 @@ func migrateCmd(args []string) error {
 
 func deviceCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: moonlight-cloud device create|revoke ...")
+		return fmt.Errorf("usage: moonlight-cloud device create|list|rotate|revoke ...")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -177,9 +202,13 @@ func deviceCmd(args []string) error {
 		return err
 	}
 	defer pool.Close()
+	hasher, err := auth.NewHasher(cfg.Pepper)
+	if err != nil {
+		return err
+	}
 	svc := auth.NewService(
 		postgres.NewDevices(pool, cfg.DBQueryTimeout),
-		auth.NewHasher(cfg.SecretPepper),
+		hasher, cfg.PepperRaw, cfg.PepperVersion,
 		clock.System{}, ids.System{},
 	)
 	switch args[0] {
@@ -193,14 +222,59 @@ func deviceCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("device id: %s\ndevice secret: %s\n", p.Device.ID, p.RawSecret)
-		fmt.Println("Store this securely. It cannot be recovered; the raw secret is shown only once.")
+		fmt.Println("Device created.")
+		fmt.Printf("\nDevice ID:\n%s\n", p.Device.ID)
+		fmt.Printf("\nCredential ID:\n%s\n", p.Credential.ID)
+		fmt.Printf("\nCredential:\n%s.%s.%s\n", p.Device.ID, p.Credential.ID, p.RawSecret)
+		fmt.Println("\nStore this credential securely. It cannot be recovered.")
+		return nil
+	case "list":
+		devs, creds, err := svc.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range devs {
+			active, revoked := 0, 0
+			for _, c := range creds[d.ID] {
+				if c.Active() {
+					active++
+				} else {
+					revoked++
+				}
+			}
+			lastSeen := "-"
+			if d.LastSeenAt != nil {
+				lastSeen = d.LastSeenAt.UTC().Format(time.RFC3339)
+			}
+			fmt.Printf("%s  %-20s  %-8s  created=%s  last_seen=%s  credentials=active:%d revoked:%d\n",
+				d.ID, d.Name, d.Status,
+				d.CreatedAt.UTC().Format(time.RFC3339), lastSeen, active, revoked)
+		}
+		return nil
+	case "rotate":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: moonlight-cloud device rotate <device-id>")
+		}
+		p, err := svc.Rotate(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Println("Credential rotated. The previous credential no longer works.")
+		fmt.Printf("\nDevice ID:\n%s\n", p.Device.ID)
+		fmt.Printf("\nNew credential ID:\n%s\n", p.Credential.ID)
+		fmt.Printf("\nNew credential:\n%s.%s.%s\n", p.Device.ID, p.Credential.ID, p.RawSecret)
+		fmt.Println("\nStore this credential securely. It cannot be recovered.")
 		return nil
 	case "revoke":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: moonlight-cloud device revoke <id>")
+			return fmt.Errorf("usage: moonlight-cloud device revoke <device-id>")
 		}
-		return svc.Revoke(ctx, args[1])
+		return svc.RevokeDevice(ctx, args[1])
+	case "revoke-credential":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: moonlight-cloud device revoke-credential <credential-id>")
+		}
+		return svc.RevokeCredential(ctx, args[1])
 	default:
 		return fmt.Errorf("unknown device subcommand %q", args[0])
 	}
