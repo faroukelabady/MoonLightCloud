@@ -13,6 +13,10 @@
 - **Race**: `go test -race ./...` is the canonical gate (test.sh defaults
   to it; check.sh enforces it).
 - **Static**: `go vet ./...`; dependency audit via govulncheck.
+- **Contract**: golden `sale.finalized.v1` fixtures mirror the desktop DTO
+  semantics exactly (no shared module); validation, projection, snapshot,
+  size-boundary, conflict, rollback, replay, and out-of-order tests pin
+  compatibility. Drift surfaces as test failure, by design.
 - **Manual/canonical**: fresh compose up → migrate → live/ready/version →
   provision → ping → invalid/revoked rejected → restart persistence →
   deliberate reset (see README + §81 checklist in planning).

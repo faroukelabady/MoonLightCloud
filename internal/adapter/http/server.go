@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func()) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -38,7 +38,7 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	mux.Handle("GET /api/v1/sync/capabilities",
 		DeviceAuth(devices)(SyncCapabilities(syncSvc)))
 	mux.Handle("POST /api/v1/sync/batches",
-		DeviceAuth(devices)(SyncBatch(syncSvc)))
+		DeviceAuth(devices)(SyncBatch(syncSvc, onSyncIngest)))
 	mux.HandleFunc("/", NotFound)
 
 	var h http.Handler = mux

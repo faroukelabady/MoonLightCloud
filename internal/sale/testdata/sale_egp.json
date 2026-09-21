@@ -1,0 +1,47 @@
+{
+  "sale_id": "44444444-4444-4444-8444-444444444444",
+  "sale_number": "MLR-20260920-44444444",
+  "channel": "STORE",
+  "occurred_at": "2026-09-20T11:00:00Z",
+  "paid_at": "2026-09-20T11:05:00Z",
+  "shop": {
+    "name_ar": "مكتبة البردي",
+    "name_en": "Papyrus Shop",
+    "address_ar": "القاهرة",
+    "address_en": "Cairo",
+    "phone": "+201000000000",
+    "receipt_footer_ar": "شكرا",
+    "receipt_footer_en": "Thanks"
+  },
+  "actor": {
+    "cashier_id": "cashier-2",
+    "cashier_name": "Omar"
+  },
+  "currency": "EGP",
+  "totals": {
+    "subtotal": {"amount_minor": 200000, "currency": "EGP"},
+    "discount": {"amount_minor": 0, "currency": "EGP"},
+    "tax": {"amount_minor": 0, "currency": "EGP"},
+    "total": {"amount_minor": 200000, "currency": "EGP"}
+  },
+  "lines": [
+    {
+      "sale_item_id": "55555555-5555-5555-8555-555555555555",
+      "product_id": "66666666-6666-6666-8666-666666666666",
+      "sku": "PAP-002",
+      "product_name": "Papyrus Scroll",
+      "quantity": 2,
+      "unit_price": {"amount_minor": 100000, "currency": "EGP"},
+      "line_total": {"amount_minor": 200000, "currency": "EGP"},
+      "classifications": {
+        "roots": [
+          {"category_id": "00000000-0000-0000-0000-000000000102", "name_ar": "فرعوني", "name_en": "Pharaonic"}
+        ],
+        "subcategories": []
+      }
+    }
+  ],
+  "payments": [
+    {"method": "cash", "amount": {"amount_minor": 200000, "currency": "EGP"}, "change_given": {"amount_minor": 0, "currency": "EGP"}, "transaction_ref": "till-7"}
+  ]
+}

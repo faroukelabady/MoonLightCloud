@@ -8,3 +8,7 @@ RETURNING event_id;
 -- name: SyncEventByID :one
 SELECT event_id, device_id, payload_hash
 FROM sync_events WHERE event_id = $1;
+
+-- name: SaleEventByID :one
+SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload
+FROM sync_events WHERE event_id = $1;

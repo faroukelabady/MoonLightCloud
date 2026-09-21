@@ -17,3 +17,4 @@ Concise, irreversible-or-important choices only.
 - [0013](0013-device-credential-lifecycle.md) — device credential lifecycle
 - [0014](0014-sync-ingestion-protocol.md) — sync ingestion protocol
 - [0015](0015-device-secret-hmac.md) — final HMAC construction (supersedes 0011)
+- [0016](0016-async-sale-projection.md) — durable inbox + asynchronous projection

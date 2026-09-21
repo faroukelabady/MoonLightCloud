@@ -12,8 +12,9 @@ import (
 
 // SyncBatch ingests a validated batch for the authenticated device.
 // Requires Content-Type: application/json. Body is bounded by the sync
-// limit; envelope validation decides 400/403/409/413/422.
-func SyncBatch(svc sync.Service) http.HandlerFunc {
+// limit; envelope validation decides 400/403/409/413/422. onIngested wakes
+// the projector (non-blocking); durability never depends on the wake.
+func SyncBatch(svc sync.Service, onIngested func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		dev, ok := DeviceOf(r)
 		if !ok {
@@ -38,6 +39,9 @@ func SyncBatch(svc sync.Service) http.HandlerFunc {
 		if err != nil {
 			WriteError(w, r, err)
 			return
+		}
+		if onIngested != nil {
+			onIngested()
 		}
 		// Structured outcome fields; never full payloads (commercially
 		// sensitive future data stays out of logs).
