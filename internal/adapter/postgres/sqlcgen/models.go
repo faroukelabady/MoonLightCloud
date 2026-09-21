@@ -32,6 +32,13 @@ type DeviceCredential struct {
 	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type SaleEventOwnership struct {
+	SaleID          pgtype.UUID        `json:"sale_id"`
+	WinningEventID  pgtype.UUID        `json:"winning_event_id"`
+	WinningDeviceID pgtype.UUID        `json:"winning_device_id"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
 type SaleLineClassificationsProjection struct {
 	SaleID             pgtype.UUID `json:"sale_id"`
 	SaleItemID         pgtype.UUID `json:"sale_item_id"`
@@ -103,14 +110,15 @@ type SalesProjection struct {
 }
 
 type SyncEvent struct {
-	EventID      pgtype.UUID        `json:"event_id"`
-	DeviceID     pgtype.UUID        `json:"device_id"`
-	CredentialID pgtype.UUID        `json:"credential_id"`
-	EventType    string             `json:"event_type"`
-	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
-	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
-	Payload      []byte             `json:"payload"`
-	PayloadHash  []byte             `json:"payload_hash"`
+	EventID            pgtype.UUID        `json:"event_id"`
+	DeviceID           pgtype.UUID        `json:"device_id"`
+	CredentialID       pgtype.UUID        `json:"credential_id"`
+	EventType          string             `json:"event_type"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt         pgtype.Timestamptz `json:"received_at"`
+	Payload            []byte             `json:"payload"`
+	PayloadHash        []byte             `json:"payload_hash"`
+	PayloadHashVersion int32              `json:"payload_hash_version"`
 }
 
 type SyncEventProcessing struct {

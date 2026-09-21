@@ -66,8 +66,8 @@ Field rules:
 
 Accepted events persist in `sync_events` (`event_id` PK globally unique,
 `device_id`, `credential_id` audit, `event_type`, `occurred_at`,
-`received_at`, `payload` JSONB, `payload_hash`). Events are immutable and
-never deleted in Phase 1B; corrections are new events
+`received_at`, `payload` JSONB, `payload_hash`, `payload_hash_version`).
+Events are immutable and never deleted; corrections are new events
 (`sale.corrected.v1`, never rewrites).
 
 > **ACK means MoonLightCloud durably committed the event to PostgreSQL and
@@ -77,13 +77,38 @@ never deleted in Phase 1B; corrections are new events
 
 ## Idempotency
 
-- First send → `accepted`. Identical retry (same ID, same canonical
-  payload) → `already_accepted`. Both let the desktop clear the outbox item.
-- Same ID + different payload (or different device) → `409 EVENT_ID_REUSE`.
-  Payload sameness compares SHA-256 over canonical JSON (sorted keys,
-  normalized numbers), so field order/whitespace never cause false mismatch.
-- Idempotency is tied to **event identity + device**, not credential:
-  rotating credentials then retrying still deduplicates.
+- First send → `accepted`. Identical retry (same ID, same immutable
+  identity) → `already_accepted`. Both let the desktop clear the outbox item.
+- Same ID + different immutable identity → `409 EVENT_ID_REUSE`. Identity
+  compares `device_id`, `event_type`, `occurred_at` (normalized UTC instant —
+  `2026-09-21T10:00:00Z` and `2026-09-21T13:00:00+03:00` are the same
+  instant; sub-microsecond digits normalize to microsecond storage
+  resolution), and the exact canonical payload. For pre-fix v1 rows the
+  stored immutable payload itself is re-canonicalized exactly (fail-closed);
+  the v1 hash alone never proves equality (ADR-0019). Credential identity
+  and `batch_id` are never part of event identity: rotation and re-batching
+  still deduplicate.
+
+## Canonical JSON numbers
+
+Numeric rule A (semantic equivalence, exact): `1`, `1.0`, `1e0`, `10e-1`
+canonicalize identically via bounded exact decimal normalization — never
+IEEE-754, never rounded integers, never enormous expansions (hostile
+exponents that would force >10,000 chars are rejected as malformed before
+ACK). `2^53-1`, `2^53`, `2^53+1`, `MaxInt64`/`MinInt64` are preserved
+exactly; distinct integers never share a hash. `sale.finalized.v1` money
+fields additionally require strict integers (`1.5` is invalid) at DTO
+validation.
+
+## Envelope vs payload timestamps
+
+`envelope.occurred_at` (transport business timestamp: bounded, recorded,
+never authority) and `payload.occurred_at`/`paid_at` (authoritative sale
+instants used by the projector) are separate concepts validated
+independently. Retail currently emits envelope and payload `occurred_at` as
+the same instant from one clock read, but in different textual layouts
+(fixed-width storage vs RFC3339Nano), so the cloud compares instants, never
+raw strings, and does not require cross-equality before ACK.
 
 ## Batch semantics
 

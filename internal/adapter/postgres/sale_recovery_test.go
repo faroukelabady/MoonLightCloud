@@ -57,26 +57,59 @@ func TestProjectionRollback(t *testing.T) {
 	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err == nil {
 		t.Fatal("injected failure must surface")
 	}
-	// Zero partial projection rows; source event intact; still discoverable.
+	// Zero partial projection rows; source event intact.
 	for _, table := range []string{"sales_projection", "sale_lines_projection", "sale_payments_projection", "sale_line_classifications_projection"} {
 		if n := saleCount(t, env.pool, table); n != 0 {
 			t.Fatalf("%s must be empty after rollback, got %d", table, n)
 		}
+	}
+	// HIGH-04: durable retry state committed despite the rollback.
+	var status string
+	var attempts int
+	var nextAt *time.Time
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT status, attempt_count, next_attempt_at FROM sync_event_processing WHERE event_id=$1`, eventID).Scan(&status, &attempts, &nextAt); err != nil {
+		t.Fatalf("retry state: %v", err)
+	}
+	if status != "retry" || attempts < 1 || nextAt == nil || !nextAt.After(time.Now().Add(time.Second)) {
+		t.Fatalf("want retry with future next_attempt_at, got %q/%d/%v", status, attempts, nextAt)
 	}
 	var processed int
 	if err := env.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM sync_event_processing WHERE event_id=$1 AND status='processed'`, eventID).Scan(&processed); err != nil || processed != 0 {
 		t.Fatalf("must not be marked processed: %d (%v)", processed, err)
 	}
-	// Remove sabotage: retry succeeds completely.
+	// Not retried before due time: a drain inside the backoff window
+	// projects nothing.
+	env.drain(t)
+	if n := saleCount(t, env.pool, "sales_projection"); n != 0 {
+		t.Fatalf("must not retry before due time, got %d sales", n)
+	}
+	// Remove sabotage and simulate clock advance past due: retry succeeds
+	// completely (restart-safe: a fresh projector instance does the work).
 	if _, err := env.pool.Exec(context.Background(),
 		`DROP TRIGGER trg_fail_second_line ON sale_lines_projection; DROP FUNCTION fail_second_line();`); err != nil {
 		t.Fatal(err)
 	}
-	env.drain(t)
+	if _, err := env.pool.Exec(context.Background(),
+		`UPDATE sync_event_processing SET next_attempt_at = now() - interval '1 second' WHERE event_id=$1`, eventID); err != nil {
+		t.Fatal(err)
+	}
+	fresh := sale.NewProjector(NewDevices(env.pool, 5*time.Second), testSystemClock(), nilLogger())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); fresh.Run(ctx) }()
 	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "retry after rollback")
+	cancel()
+	<-done
 	if n := saleCount(t, env.pool, "sale_lines_projection"); n != 2 {
 		t.Fatalf("want 2 lines after retry, got %d", n)
+	}
+	var final string
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT status FROM sync_event_processing WHERE event_id=$1`, eventID).Scan(&final); err != nil || final != "processed" {
+		t.Fatalf("successful retry must mark processed, got %q (%v)", final, err)
 	}
 }
 

@@ -1,4 +1,7 @@
-# MoonLightCloud — Architecture Overview (Phase 1A)
+# MoonLightCloud — Architecture Overview
+
+Modular monolith in Go. PostgreSQL is the only state. HTTP is the only
+ingress. Everything else is a documented future boundary, not code.
 
 Modular monolith in Go. PostgreSQL is the only state. HTTP is the only
 ingress. Everything else is a documented future boundary, not code.
@@ -32,7 +35,11 @@ ingress. Everything else is a documented future boundary, not code.
   implements them. Domain packages never import pgx or net/http.
 - `internal/commerce` and `internal/notifications` are interfaces + docs.
   The core never imports a vendor SDK (ADR-0007/0008).
-- `internal/sync` is documentation only until a later phase.
+- `internal/sync` owns the versioned ingestion protocol: envelope parsing,
+  exact canonical JSON (no float64), and durable `sync_events` acceptance.
+- `internal/sale` owns the `sale.finalized.v1` DTO, strict pre-ACK
+  validation (payment aggregate, classifications, FX pair, integer money),
+  and the async projector with atomic sale ownership.
 - Desktop and cloud share no domain package (ADR-0009). The versioned HTTPS
   contract (`api/openapi.yaml`) is the boundary; model duplication is intended.
 
@@ -46,7 +53,12 @@ ingress. Everything else is a documented future boundary, not code.
 ## Data
 
 - Fresh MoonLightCloud migration history (goose, embedded, applied
-  explicitly). Phase 1A schema: `devices` only.
+  explicitly). Current schema: `devices`, `device_credentials`,
+  `sync_events` (durable inbox with `payload_hash_version`),
+  `sale_event_ownership` (durable Sale conflict arbitration, never deleted
+  on rebuild), sale projection tables (`sales_projection` + lines/payments/
+  classifications, disposable derived state), `sync_event_processing`
+  (pending/retry/blocked/processed).
 - UUIDv7 domain identities (app-generated), `TIMESTAMPTZ` UTC timestamps.
 - Device secrets: 256-bit random, stored as salted keyed hash
   (SHA-256(salt||secret) or HMAC-SHA256 with `DEVICE_SECRET_PEPPER`).
@@ -63,7 +75,9 @@ ingress. Everything else is a documented future boundary, not code.
 HTTP commits immutable events to `sync_events` and ACKs; a PostgreSQL-backed
 in-process projector derives `sales_projection` (+ lines, payments,
 classifications) asynchronously with durable `sync_event_processing` state
-(ADR-0016). ACK never waits for projection; restarts recover from the inbox.
+(ADR-0016). Sale identity arbitration persists separately in
+`sale_event_ownership` (ADR-0018) so rebuilds reproduce the same winner.
+ACK never waits for projection; restarts recover from the inbox.
 - Request IDs assigned/propagated (`X-Request-ID`), bounded client values.
 - Timeouts + 1 MiB body/header caps. CORS disabled (no browser client yet).
 

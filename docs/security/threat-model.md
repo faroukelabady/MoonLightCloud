@@ -19,7 +19,10 @@ is solved for features that do not exist yet.
 | Credential rotation failure | Single transaction (never zero usable credentials from partial op); failure before commit keeps old usable; documented re-rotation recovery |
 | Credential replay | New secret per rotation; old verifiers revoked server-side |
 | Event replay | Idempotent ingestion: identical → already_accepted, altered → 409; replay-safe by construction |
-| Event ID reuse / payload substitution | Canonical-payload SHA-256 compare on conflict; deterministic EVENT_ID_REUSE |
+| Event ID reuse / payload substitution | Full immutable-identity compare (device, type, normalized instant, exact stored-payload canonicalization, fail-closed); deterministic EVENT_ID_REUSE; v1 hash never proof of equality |
+| Float-precision payload confusion | Exact decimal canonicalization, no float64; distinct large integers never share a hash; hostile exponents rejected before ACK |
+| Legacy comparison as attack surface | Duplicate verification re-canonicalizes the stored payload; colliding variants conflict; hash upgrades never mutate payload |
+| Auth timing oracle on unknown credential | Fixed dummy HMAC over constant-sized material on unknown-ID paths; credential IDs are high-entropy UUIDs so residual DB-lookup deltas are an accepted LOW note |
 | Lost ACK | Retry returns already_accepted; ACK only after commit |
 | DB outage during ingestion | No ACK before commit; all-or-nothing batches; 503 retryable |
 

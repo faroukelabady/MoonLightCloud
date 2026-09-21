@@ -38,18 +38,21 @@ ORDER BY updated_at DESC LIMIT 1;
 
 -- name: ResetProcessing :exec
 UPDATE sync_event_processing
-SET status = 'pending', next_attempt_at = now(), updated_at = now()
+SET status = 'pending', next_attempt_at = NULL, updated_at = now()
 WHERE event_id = $1 AND processor = $2 AND status IN ('retry', 'blocked');
 
 -- name: PendingSaleEvents :many
--- Durable discovery: accepted sale events with no terminal processing row
--- (or a due retry). Survivor of restarts; no in-memory signal required.
+-- Durable discovery: accepted sale events with no processing row (missing),
+-- a pending row, or a due retry. Blocked and processed rows are never
+-- returned; retry rows are returned only when next_attempt_at <= now (NULL
+-- counts as due). Survivor of restarts; no in-memory signal required.
 SELECT e.event_id
 FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $1
 WHERE e.event_type = 'sale.finalized.v1'
   AND (p.event_id IS NULL
+       OR p.status = 'pending'
        OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
 ORDER BY e.received_at
 LIMIT $2;

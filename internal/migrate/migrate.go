@@ -16,8 +16,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TargetVersion is the schema version Phase 2B code requires.
-const TargetVersion int64 = 5
+// TargetVersion is the schema version Phase 2E code requires.
+const TargetVersion int64 = 7
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())
@@ -47,6 +47,20 @@ func UpTo(ctx context.Context, conn *sql.DB, version int64) error {
 	}
 	if _, err := p.UpTo(ctx, version); err != nil {
 		return fmt.Errorf("goose up-to: %w", err)
+	}
+	return nil
+}
+
+// DownTo rolls migrations back down to a version (downgrade-policy tests).
+// Policy-guarded Down migrations raise SQL exceptions when rollback would
+// destroy unreadable semantics; those errors surface here.
+func DownTo(ctx context.Context, conn *sql.DB, version int64) error {
+	p, err := provider(conn)
+	if err != nil {
+		return err
+	}
+	if _, err := p.DownTo(ctx, version); err != nil {
+		return fmt.Errorf("goose down-to: %w", err)
 	}
 	return nil
 }

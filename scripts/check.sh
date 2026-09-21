@@ -15,6 +15,9 @@ sqlc generate
 diff -r /tmp/sqlcgen.before internal/adapter/postgres/sqlcgen || { echo "stale generated code: run ./scripts/generate.sh" >&2; exit 1; }
 rm -rf /tmp/sqlcgen.before
 
+echo "== required files (baseline completeness) =="
+./scripts/check-required-files.sh
+
 echo "== migration validity (throwaway postgres:18) =="
 cname="moonlight-check-pg-$$"
 cleanup() { podman rm -f "$cname" >/dev/null 2>&1 || docker rm -f "$cname" >/dev/null 2>&1 || true; }

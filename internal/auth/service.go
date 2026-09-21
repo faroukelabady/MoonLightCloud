@@ -58,13 +58,22 @@ func (s Service) Create(ctx context.Context, name string) (Provisioned, error) {
 // Every failure — unknown device, unknown credential, revoked, wrong
 // secret, rotated — is the same UNAUTHORIZED: no enumeration. Timestamps
 // refresh on success; their failure does not fail auth.
+//
+// Timing (LOW-02): an unknown credential ID still performs one fixed dummy
+// HMAC verification over constant-sized material so the primary
+// cryptographic work is not skipped entirely. Credential IDs are
+// high-entropy UUIDs, so residual DB-lookup timing differences remain an
+// accepted LOW design note (see docs/security/threat-model.md). No fake
+// database state is invented to chase perfect equality.
 func (s Service) Authenticate(ctx context.Context, deviceID, credID, rawSecret string) (Device, Credential, error) {
 	fail := apperr.New(apperr.Unauthorized, "invalid device credential")
 	if strings.TrimSpace(deviceID) == "" || strings.TrimSpace(credID) == "" || strings.TrimSpace(rawSecret) == "" {
+		s.dummyVerify()
 		return Device{}, Credential{}, fail
 	}
 	cred, err := s.store.CredentialByID(ctx, credID)
 	if err != nil {
+		s.dummyVerify()
 		return Device{}, Credential{}, fail
 	}
 	if cred.DeviceID != deviceID || !cred.Active() {
@@ -90,6 +99,16 @@ func (s Service) verifySecret(raw string, cred Credential) bool {
 		return VerifyLegacyV0(raw, cred.Verifier, cred.Salt, s.pepperRaw)
 	}
 	return s.hasher.Verify(raw, cred.Verifier, cred.Salt)
+}
+
+// dummyVerify performs one fixed HMAC verification over constant-sized
+// dummy material (32-byte verifier, 16-byte salt shape) so unknown-credential
+// paths do not skip the primary cryptographic work. The result is discarded;
+// response behavior is unchanged (generic 401).
+func (s Service) dummyVerify() {
+	dummySalt := make([]byte, 16)
+	dummyVerifier := make([]byte, 32)
+	_ = s.hasher.Verify("0000000000000000000000000000000000000000000000000000000000000000", dummyVerifier, dummySalt)
 }
 
 // Rotate creates a successor credential and revokes all other active ones

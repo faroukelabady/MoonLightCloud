@@ -284,13 +284,10 @@ func Validate(p Payload) (Validated, error) {
 		if err != nil {
 			return fail("subtotal overflows")
 		}
-		if len(line.Classifications.Roots) < 1 {
-			return fail("lines[%d] must carry at least one root classification", i)
+		if len(line.Classifications.Roots) != 1 {
+			return fail("lines[%d] must carry exactly one root classification", i)
 		}
-		if err := checkClassifications(line.Classifications.Roots, i, "roots"); err != nil {
-			return fail("%v", err)
-		}
-		if err := checkClassifications(line.Classifications.Subcategories, i, "subcategories"); err != nil {
+		if err := checkLineClassifications(&line.Classifications, i); err != nil {
 			return fail("%v", err)
 		}
 	}
@@ -329,7 +326,36 @@ func Validate(p Payload) (Validated, error) {
 			return fail("payments[%d].change_given must not be negative", i)
 		}
 	}
+	// Payment parity with MoonLightRetail Checkout (service/sale/service.go
+	// buildPayments): aggregate SUM(amount) must equal the authoritative
+	// total within ±1 minor unit. Change is NOT netted — Retail sums
+	// AmountCents only and ignores ChangeGivenCents in the balance check.
+	// Checked integer arithmetic; overflow rejects before ACK.
+	if err := checkPaymentAggregate(p.Payments, p.Totals.Total.AmountMinor); err != nil {
+		return fail("%v", err)
+	}
 	return Validated{Payload: p, Occurred: occurred, Paid: paid}, nil
+}
+
+// checkPaymentAggregate mirrors Retail buildPayments exactly: sum of
+// payment amounts (change ignored) within ±1 of the sale total.
+func checkPaymentAggregate(payments []EventPayment, total int64) error {
+	var sum int64
+	for i := range payments {
+		var err error
+		sum, err = addChecked(sum, payments[i].Amount.AmountMinor)
+		if err != nil {
+			return fmt.Errorf("payments aggregate overflows")
+		}
+	}
+	diff, err := subChecked(sum, total)
+	if err != nil {
+		return fmt.Errorf("payments aggregate overflows")
+	}
+	if diff < -1 || diff > 1 {
+		return fmt.Errorf("payments must equal the authoritative total within ±1 minor unit")
+	}
+	return nil
 }
 
 func checkShop(s ShopSnapshot) error {
@@ -343,22 +369,39 @@ func checkShop(s ShopSnapshot) error {
 	return nil
 }
 
-func checkClassifications(list []ClassificationSnapshot, line int, group string) error {
-	for j := range list {
-		c := &list[j]
-		if !isUUID(c.CategoryID) {
-			return fmt.Errorf("lines[%d].%s[%d].category_id must be a UUID", line, group, j)
+// checkLineClassifications validates one line's full classification
+// snapshot (P2D-MED-03): exactly one root is enforced by the caller; all
+// category IDs must be unique across roots AND subcategories combined — a
+// category may not appear as both root and subcategory on one line.
+func checkLineClassifications(c *LineClassifications, line int) error {
+	seen := make(map[string]string, len(c.Roots)+len(c.Subcategories))
+	check := func(list []ClassificationSnapshot, group string) error {
+		for j := range list {
+			item := &list[j]
+			if !isUUID(item.CategoryID) {
+				return fmt.Errorf("lines[%d].%s[%d].category_id must be a UUID", line, group, j)
+			}
+			if prev, dup := seen[item.CategoryID]; dup {
+				return fmt.Errorf("lines[%d] duplicate category_id %s across %s and %s", line, item.CategoryID, prev, group)
+			}
+			seen[item.CategoryID] = group
+			if strings.TrimSpace(item.NameAR) == "" || strings.TrimSpace(item.NameEN) == "" {
+				return fmt.Errorf("lines[%d].%s[%d] names are required", line, group, j)
+			}
 		}
-		if c.NameAR == "" || c.NameEN == "" {
-			return fmt.Errorf("lines[%d].%s[%d] names are required", line, group, j)
-		}
+		return nil
 	}
-	return nil
+	if err := check(c.Roots, "roots"); err != nil {
+		return err
+	}
+	return check(c.Subcategories, "subcategories")
 }
 
-// checkFx validates the historical snapshot: EGP sales never carry FX
-// (desktop only fetches USD→EGP rates for USD sales); a present snapshot
-// must be internally exact — microrate equals the decimal rate × 1e6.
+// checkFx validates the historical snapshot: EGP sales never carry FX;
+// USD sales require the exact USD→EGP pair the desktop emits
+// (BuildSaleFinalized hardcodes Base USD / Quote EGP; the desktop only
+// fetches GetLatestExchangeRate("USD","EGP")). A present snapshot must be
+// internally exact — microrate equals the decimal rate × 1e6.
 func checkFx(fx *FxSnapshot, currency string) error {
 	if currency == CurrencyEGP {
 		if fx != nil {
@@ -369,8 +412,8 @@ func checkFx(fx *FxSnapshot, currency string) error {
 	if fx == nil {
 		return fmt.Errorf("fx is required for USD sales")
 	}
-	if strings.TrimSpace(fx.Base) == "" || strings.TrimSpace(fx.Quote) == "" {
-		return fmt.Errorf("fx base/quote are required")
+	if fx.Base != CurrencyUSD || fx.Quote != CurrencyEGP {
+		return fmt.Errorf("fx pair must be USD→EGP for USD sales")
 	}
 	micro, err := parseMicrorate(fx.Rate)
 	if err != nil {
@@ -445,6 +488,16 @@ func addChecked(a, b int64) (int64, error) {
 		return 0, fmt.Errorf("overflow")
 	}
 	return a + b, nil
+}
+
+func subChecked(a, b int64) (int64, error) {
+	if b > 0 && a < math.MinInt64+b {
+		return 0, fmt.Errorf("overflow")
+	}
+	if b < 0 && a > math.MaxInt64+b {
+		return 0, fmt.Errorf("overflow")
+	}
+	return a - b, nil
 }
 
 func isUUID(s string) bool {

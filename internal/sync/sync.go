@@ -62,14 +62,24 @@ var (
 	maxFutureSkew = 24 * time.Hour
 )
 
+// Canonical payload-hash versions. v1 marks rows stored with the pre-2D
+// float64 canonicalizer; v2 is the exact decimal canonicalizer used for all
+// new events. v1 hashes are version metadata only — never proof of payload
+// equality (duplicate verification re-canonicalizes the stored immutable
+// payload with the exact canonicalizer, fail-closed).
+const (
+	HashVersionLegacy = 1
+	HashVersionExact  = 2
+)
+
 // Event is one validated sync event ready for durable ingestion.
 type Event struct {
 	EventID    string
 	EventType  string
 	DeviceID   string // always the authenticated device, never trusted input
 	OccurredAt time.Time
-	Payload    json.RawMessage // canonical form
-	Hash       []byte          // SHA-256 over canonical payload
+	Payload    json.RawMessage // exact canonical form (v2)
+	Hash       []byte          // SHA-256 over exact canonical payload
 }
 
 // Batch is a validated ingestion batch.
@@ -245,6 +255,11 @@ func parseEvent(raw json.RawMessage, authedDeviceID string, now time.Time) (Even
 		}
 	}
 	occurred = occurred.UTC()
+	// Envelope instants have microsecond resolution (PostgreSQL TIMESTAMPTZ):
+	// sub-microsecond digits are normalized at ingest so retries of the same
+	// event compare equal after the storage round-trip. Business ordering
+	// never depends on sub-microsecond precision.
+	occurred = occurred.Truncate(time.Microsecond)
 	if occurred.Before(minOccurredAt) || occurred.After(now.Add(maxFutureSkew)) {
 		return Event{}, apperr.New(apperr.Unprocessable, "event occurred_at outside acceptable bounds")
 	}
@@ -269,22 +284,43 @@ func parseEvent(raw json.RawMessage, authedDeviceID string, now time.Time) (Even
 
 // canonicalJSON re-marshals parsed JSON so semantically identical payloads
 // hash identically regardless of field order or insignificant whitespace.
-// encoding/json emits map keys sorted; numbers normalize through float64.
-// Payloads must be JSON objects (future event validators build on this).
+//
+// Number semantics (rule A, exact): numerically equivalent JSON spellings
+// (1, 1.0, 1e0, 10e-1) canonicalize identically via bounded exact decimal
+// normalization in canonical.go. No number passes through float64; integer
+// values (including MaxInt64 and 2^53+1) are preserved exactly. Hostile
+// exponents that would force enormous expansions are rejected as malformed
+// before ACK. Payloads must be JSON objects.
 func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
-	var v map[string]any
+	var v any
 	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
 	if dec.More() {
 		return nil, fmt.Errorf("trailing data")
 	}
-	out, err := json.Marshal(v)
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("payload must be a JSON object")
+	}
+	norm, err := normalizeCanonicalValue(obj)
+	if err != nil {
+		return nil, err
+	}
+	out, err := json.Marshal(norm)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Canonicalize re-canonicalizes stored JSON bytes with the exact v2
+// canonicalizer. Used to verify duplicate retries against the immutable
+// stored payload (fail-closed); never for new-event hashing outside ingest.
+func Canonicalize(raw json.RawMessage) (json.RawMessage, error) {
+	return canonicalJSON(raw)
 }
 
 // rejectDuplicateKeys walks the JSON token stream and rejects objects with

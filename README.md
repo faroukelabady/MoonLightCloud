@@ -2,8 +2,10 @@
 
 Always-online integration and analytics layer for MoonLightRetail
 (Go + Wails + Svelte desktop, SQLite, offline-first — separate repository,
-never modified here). Phase 1A is foundation only: modular Go monolith,
-PostgreSQL, device-auth skeleton, OCI-portable.
+never modified here). Durable sync inbox plus the first Sale-sync vertical
+slice: versioned ingestion (`sale.finalized.v1` validated before ACK),
+async PostgreSQL projection with durable processing state, modular Go
+monolith, OCI-portable.
 
 ## Prerequisites
 
@@ -49,7 +51,7 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 
 ## Layout
 
-`cmd/moonlight-cloud` · `internal/{app,config,auth,sync,commerce,notifications,adapter/{http,postgres},platform/*,migrate,testutil}` ·
+`cmd/moonlight-cloud` · `internal/{app,config,auth,sync,sale,commerce,notifications,adapter/{http,postgres},platform/*,migrate,testutil}` ·
 `db/{migrations,queries}` · `api/openapi.yaml` · `deploy/{Containerfile,compose.yaml}` ·
 `docs/{architecture,decisions,operations,security,sync,testing,reviews}`.
 

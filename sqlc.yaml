@@ -8,6 +8,8 @@ sql:
       - "db/migrations/00003_sync_events.sql"
       - "db/migrations/00004_sale_projection.sql"
       - "db/migrations/00005_sync_event_processing.sql"
+      - "db/migrations/00006_sync_event_hash_version.sql"
+      - "db/migrations/00007_sale_event_ownership.sql"
     gen:
       go:
         package: "sqlcgen"

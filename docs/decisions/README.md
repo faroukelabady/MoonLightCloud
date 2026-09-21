@@ -18,3 +18,6 @@ Concise, irreversible-or-important choices only.
 - [0014](0014-sync-ingestion-protocol.md) — sync ingestion protocol
 - [0015](0015-device-secret-hmac.md) — final HMAC construction (supersedes 0011)
 - [0016](0016-async-sale-projection.md) — durable inbox + asynchronous projection
+- [0017](0017-canonical-hash-compat.md) — exact canonical JSON + payload-hash compatibility (compat rule superseded by 0019)
+- [0018](0018-durable-sale-ownership.md) — durable Sale ownership arbitration
+- [0019](0019-fail-closed-legacy-hash.md) — fail-closed legacy payload-hash policy

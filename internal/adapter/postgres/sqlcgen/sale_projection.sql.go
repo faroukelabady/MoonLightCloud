@@ -128,7 +128,7 @@ func (q *Queries) InsertSalePayment(ctx context.Context, arg InsertSalePaymentPa
 	return err
 }
 
-const insertSaleProjection = `-- name: InsertSaleProjection :exec
+const insertSaleProjection = `-- name: InsertSaleProjection :one
 INSERT INTO sales_projection (
     sale_id, source_event_id, source_device_id, sale_number, channel,
     occurred_at, paid_at,
@@ -143,6 +143,7 @@ INSERT INTO sales_projection (
     $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
 )
 ON CONFLICT (sale_id) DO NOTHING
+RETURNING sale_id, source_event_id
 `
 
 type InsertSaleProjectionParams struct {
@@ -174,8 +175,17 @@ type InsertSaleProjectionParams struct {
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 }
 
-func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjectionParams) error {
-	_, err := q.db.Exec(ctx, insertSaleProjection,
+type InsertSaleProjectionRow struct {
+	SaleID        pgtype.UUID `json:"sale_id"`
+	SourceEventID pgtype.UUID `json:"source_event_id"`
+}
+
+// Atomic ownership claim (CRIT-01): exactly one event owns a sale_id. The
+// INSERT decides; RETURNING reports the winner. Losers get no row back and
+// must read the existing owner inside the same transaction — never insert
+// children without proving ownership or idempotent replay.
+func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjectionParams) (InsertSaleProjectionRow, error) {
+	row := q.db.QueryRow(ctx, insertSaleProjection,
 		arg.SaleID,
 		arg.SourceEventID,
 		arg.SourceDeviceID,
@@ -203,7 +213,9 @@ func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjec
 		arg.FxRateMicrorate,
 		arg.ReceivedAt,
 	)
-	return err
+	var i InsertSaleProjectionRow
+	err := row.Scan(&i.SaleID, &i.SourceEventID)
+	return i, err
 }
 
 const saleProjectionByEventID = `-- name: SaleProjectionByEventID :one

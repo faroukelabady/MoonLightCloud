@@ -68,39 +68,77 @@ const (
 	ErrProjection     = "PROJECTION_FAILED"
 )
 
-// ProjectSale runs one atomic claim+project transaction:
+// ProjectSale projects one sale with durable ownership arbitration
+// (P2D-HIGH-02, CRIT-01):
 //
-//	claim processing row, lock it
-//	load event, decode + validate (defensive; ingest already validated)
-//	sale_id pre-check: same source → already; other source → SALE_ID_CONFLICT
-//	insert header + children (deterministic IDs, ON CONFLICT DO NOTHING)
-//	mark processed
+//  1. pure decode + validate (no tx). Invalid → deterministic blocked.
+//     Invalid events never claim ownership.
+//  2. arbitration tx: INSERT sale_event_ownership ON CONFLICT DO NOTHING
+//     RETURNING; loser reads the durable winner in the same tx. The winner
+//     is permanent the moment this tx commits — before any projection row
+//     exists. A first owner's later projection failure never transfers
+//     ownership: late events become SALE_ID_CONFLICT and the owner retries
+//     through durable retry semantics.
+//  3. projection tx: claim/lock processing, re-verify the durable winner,
+//     then (and only then) write header + children, mark processed/blocked.
 //
-// Either a complete Sale projection commits or nothing does. Transient DB
-// failures roll back and surface retryable; the event stays discoverable.
+// Either a complete Sale projection commits or nothing does. Only a winning
+// event may populate Sale projection tables. Rebuilds clear projections but
+// never ownership, so the historical winner always reproduces.
 func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now time.Time) (sale.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
+	euid, err := parseUUID(event.EventID)
+	if err != nil {
+		return sale.ProjectResult{}, apperr.New(apperr.InvalidInput, "event_id must be a UUID")
+	}
+	// Defensive decode: ingest validated, but persisted rows may predate or
+	// bypass validation. Deterministic failure → blocked, never panic, and
+	// never ownership (invalid events own nothing).
+	raw, derr := sale.Decode(event.Payload)
+	if derr != nil {
+		return d.markBlocked(ctx, euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := sale.Validate(raw)
+	if verr != nil {
+		return d.markBlocked(ctx, euid, now, ErrValidation, safeErr(verr))
+	}
+	saleUID, err := parseUUID(valid.SaleID)
+	if err != nil {
+		return d.markBlocked(ctx, euid, now, ErrValidation, "sale_id must be a UUID")
+	}
+	duid, err := parseUUID(event.DeviceID)
+	if err != nil {
+		return d.markBlocked(ctx, euid, now, ErrValidation, "device_id must be a UUID")
+	}
+	// Durable arbitration first: permanent winner before any projection row.
+	winner, err := d.arbitrate(ctx, saleUID, euid, duid, now)
+	if err != nil {
+		return d.persistRetry(ctx, euid, now, ErrProjection, "ownership arbitration failed")
+	}
+	if winner != event.EventID {
+		// Another event permanently owns this sale_id: ZERO children.
+		return d.markBlocked(ctx, euid, now, ErrSaleIDConflict,
+			"sale_id already owned by another event")
+	}
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return sale.ProjectResult{}, transient(redact(err))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
-	euid, err := parseUUID(event.EventID)
-	if err != nil {
-		return sale.ProjectResult{}, apperr.New(apperr.InvalidInput, "event_id must be a UUID")
-	}
 	if err := q.ClaimProcessing(ctx, sqlcgen.ClaimProcessingParams{
 		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
 	}); err != nil {
-		return sale.ProjectResult{}, transient(redact(err))
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "claim failed")
 	}
 	claim, err := q.LockProcessing(ctx, sqlcgen.LockProcessingParams{
 		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
 	})
 	if err != nil {
-		return sale.ProjectResult{}, transient(redact(err))
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "lock failed")
 	}
 	mark := func(status string, attempt int32, next *time.Time, processed *time.Time, code, msg string) (sale.ProjectResult, error) {
 		if err := q.MarkProcessing(ctx, sqlcgen.MarkProcessingParams{
@@ -110,10 +148,11 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 			ProcessedAt:   pgTimePtr(processed),
 			LastErrorCode: pgText(code), LastErrorMessage: pgText(boundMsg(msg)),
 		}); err != nil {
-			return sale.ProjectResult{}, transient(redact(err))
+			_ = tx.Rollback(ctx)
+			return d.persistRetry(ctx, euid, now, ErrProjection, "mark failed")
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return sale.ProjectResult{}, transient(redact(err))
+			return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
 		}
 		res := sale.ProjectResult{ErrorCode: code}
 		switch status {
@@ -135,49 +174,194 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 	if claim.Status == sale.ProcRetry && claim.NextAttemptAt.Valid && claim.NextAttemptAt.Time.After(now) {
 		return sale.ProjectResult{Outcome: sale.OutcomeNotDue}, commitTx(ctx, tx)
 	}
-	// Defensive decode: ingest validated, but persisted rows may predate or
-	// bypass validation. Deterministic failure → blocked, never panic.
-	raw, err := sale.Decode(event.Payload)
+	// Re-verify the durable winner inside the projection tx: ownership could
+	// only have been established by this event (arbitration above), but the
+	// check makes the invariant explicit at the write boundary.
+	owner, err := q.SaleOwnershipBySaleID(ctx, saleUID)
 	if err != nil {
-		return mark(sale.ProcBlocked, claim.AttemptCount+1, nil, nil, ErrValidation, safeErr(err))
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "ownership verify failed")
 	}
-	valid, err := sale.Validate(raw)
-	if err != nil {
-		return mark(sale.ProcBlocked, claim.AttemptCount+1, nil, nil, ErrValidation, safeErr(err))
+	if uuidString(owner.WinningEventID) != event.EventID {
+		_ = tx.Rollback(ctx)
+		return d.markBlocked(ctx, euid, now, ErrSaleIDConflict,
+			"sale_id already owned by another event")
 	}
-	saleUID, err := parseUUID(valid.SaleID)
-	if err != nil {
-		return mark(sale.ProcBlocked, claim.AttemptCount+1, nil, nil, ErrValidation, "sale_id must be a UUID")
-	}
-	// Logical duplicate check: same sale_id from another event must not
-	// overwrite history; same event replay is idempotent recognition.
-	existing, err := q.SaleProjectionBySaleID(ctx, saleUID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return sale.ProjectResult{}, transient(redact(err))
-	}
-	if err == nil {
-		if uuidString(existing.SourceEventID) == event.EventID {
+	// Winner only: populate header, then children. Same-event replay uses
+	// ON CONFLICT DO NOTHING throughout and stays idempotent.
+	headerParams := projectionHeaderParams(saleUID, euid, duid, event, valid)
+	if _, err := q.InsertSaleProjection(ctx, headerParams); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			existing, ferr := q.SaleProjectionBySaleID(ctx, saleUID)
+			if ferr != nil {
+				_ = tx.Rollback(ctx)
+				return d.persistRetry(ctx, euid, now, ErrProjection, "header race with rollback")
+			}
+			if uuidString(existing.SourceEventID) != event.EventID {
+				// Header from another event despite durable ownership:
+				// projection/ownership integrity failure — never overwrite.
+				_ = tx.Rollback(ctx)
+				return d.markBlocked(ctx, euid, now, ErrProjection,
+					"projection source differs from durable ownership")
+			}
+			if err := insertProjectionChildren(ctx, q, saleUID, valid); err != nil {
+				_ = tx.Rollback(ctx)
+				return d.persistRetry(ctx, euid, now, ErrProjection, "replay insert failed")
+			}
 			return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 		}
-		return mark(sale.ProcBlocked, claim.AttemptCount+1, nil, nil, ErrSaleIDConflict,
-			"sale_id already projected from another event")
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "projection insert failed")
 	}
-	if err := insertProjection(ctx, q, event, valid, now); err != nil {
-		// Serialization/deadlock-style failures are transient; anything
-		// else inside a clean tx is unexpected → retry with backoff.
-		return sale.ProjectResult{}, transient(err)
+	if err := insertProjectionChildren(ctx, q, saleUID, valid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "projection insert failed")
 	}
 	return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 }
 
-// insertProjection writes header + lines + payments + classifications with
-// deterministic identities and ON CONFLICT DO NOTHING, so replaying the
-// same event yields identical rows. Historical snapshots only: no lookups
-// against mutable state anywhere on this path.
-func insertProjection(ctx context.Context, q *sqlcgen.Queries, event sale.EventRecord, v sale.Validated, now time.Time) error {
-	saleUID, _ := parseUUID(v.SaleID)
-	euid, _ := parseUUID(event.EventID)
-	duid, _ := parseUUID(event.DeviceID)
+// arbitrate durably establishes the permanent winner for sale_id and returns
+// the winning event ID. The decision commits in its own transaction before
+// any projection row exists, so it survives projection rollback, restart,
+// and rebuild. First writer wins; concurrent losers serialize on the row
+// lock and read the same winner. A transient failure here decides nothing —
+// the caller persists retry state and a later attempt re-arbitrates.
+func (d Devices) arbitrate(ctx context.Context, saleUID, euid, duid pgtype.UUID, now time.Time) (string, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return "", transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	row, err := q.ClaimSaleOwnership(ctx, sqlcgen.ClaimSaleOwnershipParams{
+		SaleID: saleUID, WinningEventID: euid, WinningDeviceID: duid,
+		DecidedAt: pgTime(now),
+	})
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return "", transient(redact(err))
+		}
+		return uuidString(row), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", transient(redact(err))
+	}
+	owner, err := q.SaleOwnershipBySaleID(ctx, saleUID)
+	if err != nil {
+		return "", transient(redact(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", transient(redact(err))
+	}
+	return uuidString(owner.WinningEventID), nil
+}
+
+// markBlocked records a deterministic blocked outcome (validation or
+// conflict) in one short transaction. Zero projection writes precede it.
+func (d Devices) markBlocked(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return sale.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	if err := q.ClaimProcessing(ctx, sqlcgen.ClaimProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "claim failed")
+	}
+	claim, err := q.LockProcessing(ctx, sqlcgen.LockProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "lock failed")
+	}
+	if claim.Status == sale.ProcProcessed {
+		if err := tx.Commit(ctx); err != nil {
+			return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
+		}
+		return sale.ProjectResult{Outcome: sale.OutcomeProcessed}, nil
+	}
+	if err := q.MarkProcessing(ctx, sqlcgen.MarkProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		Status: sale.ProcBlocked, AttemptCount: claim.AttemptCount + 1,
+		LastAttemptAt: pgTime(now), NextAttemptAt: pgtype.Timestamptz{},
+		ProcessedAt:   pgtype.Timestamptz{},
+		LastErrorCode: pgText(code), LastErrorMessage: pgText(boundMsg(msg)),
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistRetry(ctx, euid, now, ErrProjection, "mark failed")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
+	}
+	return sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: code}, nil
+}
+
+// persistRetry writes retry state in a SEPARATE durable transaction after
+// the projection transaction rolled back (HIGH-04). The schedule
+// (attempt_count, next_attempt_at, bounded diagnostic) commits even though
+// the projection itself did not, so failures never hot-loop and survive
+// restarts. Deterministic conflicts never reach here (they commit blocked).
+// The returned error stays non-nil so callers observe the failed attempt;
+// the retry state is already committed when it does.
+func (d Devices) persistRetry(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
+	fail := func() (sale.ProjectResult, error) {
+		return sale.ProjectResult{Outcome: sale.OutcomeRetryable, ErrorCode: code},
+			transient(errors.New("projection transient failure"))
+	}
+	ctx2, cancel := d.ctx(context.Background())
+	defer cancel()
+	tx, err := d.pool.Begin(ctx2)
+	if err != nil {
+		return fail()
+	}
+	defer func() { _ = tx.Rollback(ctx2) }()
+	q := sqlcgen.New(tx)
+	if err := q.ClaimProcessing(ctx2, sqlcgen.ClaimProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+	}); err != nil {
+		return fail()
+	}
+	claim, err := q.LockProcessing(ctx2, sqlcgen.LockProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+	})
+	if err != nil {
+		return fail()
+	}
+	if claim.Status == sale.ProcProcessed || claim.Status == sale.ProcBlocked {
+		if err := tx.Commit(ctx2); err != nil {
+			return fail()
+		}
+		if claim.Status == sale.ProcProcessed {
+			return sale.ProjectResult{Outcome: sale.OutcomeProcessed}, nil
+		}
+		return sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: code}, nil
+	}
+	next := now.Add(sale.Backoff(int(claim.AttemptCount)))
+	if err := q.MarkProcessing(ctx2, sqlcgen.MarkProcessingParams{
+		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		Status: sale.ProcRetry, AttemptCount: claim.AttemptCount + 1,
+		LastAttemptAt: pgTime(now), NextAttemptAt: pgTime(next),
+		ProcessedAt:   pgtype.Timestamptz{},
+		LastErrorCode: pgText(code), LastErrorMessage: pgText(boundMsg(msg)),
+	}); err != nil {
+		return fail()
+	}
+	if err := tx.Commit(ctx2); err != nil {
+		return fail()
+	}
+	return fail()
+}
+
+// projectionHeaderParams builds the ownership-claim header insert.
+func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRecord, v sale.Validated) sqlcgen.InsertSaleProjectionParams {
 	var fxBase, fxQuote, fxRate pgtype.Text
 	var fxMicro pgtype.Int8
 	if v.Fx != nil {
@@ -186,7 +370,7 @@ func insertProjection(ctx context.Context, q *sqlcgen.Queries, event sale.EventR
 		fxRate = pgText(v.Fx.Rate)
 		fxMicro = pgtype.Int8{Int64: v.Fx.RateMicrorate, Valid: true}
 	}
-	if err := q.InsertSaleProjection(ctx, sqlcgen.InsertSaleProjectionParams{
+	return sqlcgen.InsertSaleProjectionParams{
 		SaleID: saleUID, SourceEventID: euid, SourceDeviceID: duid,
 		SaleNumber: v.SaleNumber, Channel: v.Channel,
 		OccurredAt: pgTime(v.Occurred), PaidAt: pgTime(v.Paid),
@@ -200,9 +384,15 @@ func insertProjection(ctx context.Context, q *sqlcgen.Queries, event sale.EventR
 		TaxMinor: v.Totals.Tax.AmountMinor, TotalMinor: v.Totals.Total.AmountMinor,
 		FxBase: fxBase, FxQuote: fxQuote, FxRate: fxRate, FxRateMicrorate: fxMicro,
 		ReceivedAt: pgTime(event.ReceivedAt),
-	}); err != nil {
-		return redact(err)
 	}
+}
+
+// insertProjectionChildren writes lines + payments + classifications with
+// deterministic identities and ON CONFLICT DO NOTHING, so replaying the
+// owning event yields identical rows. It must only run after ownership of
+// sale_id is proven inside the same transaction. Historical snapshots only:
+// no lookups against mutable state anywhere on this path.
+func insertProjectionChildren(ctx context.Context, q *sqlcgen.Queries, saleUID pgtype.UUID, v sale.Validated) error {
 	for i := range v.Lines {
 		line := &v.Lines[i]
 		itemUID, _ := parseUUID(line.SaleItemID)

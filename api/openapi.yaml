@@ -2,10 +2,12 @@ openapi: 3.0.3
 info:
   title: MoonLightCloud API
   description: >-
-    Phase 1B: device lifecycle + versioned sync ingestion. Business APIs are
+    Device lifecycle + versioned sync ingestion with the first Sale-sync
+    vertical slice: durable inbox, sale.finalized.v1 validated before ACK,
+    async projection with durable processing state. Business APIs are
     versioned under /api/v1. Health and version stay outside the version
     boundary. ACK means durable PostgreSQL commit, never queueing alone.
-  version: 1B
+  version: 2D
 paths:
   /health/live:
     get:
@@ -246,20 +248,22 @@ components:
           items:
             $ref: '#/components/schemas/SyncEvent'
     SyncEvent:
+      oneOf:
+        - $ref: '#/components/schemas/SaleFinalizedV1Event'
+        - $ref: '#/components/schemas/SystemTestV1Event'
+      discriminator:
+        propertyName: event_type
+        mapping:
+          sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
+          system.test.v1: '#/components/schemas/SystemTestV1Event'
+    SyncEventEnvelope:
       type: object
-      required: [event_id, event_type, occurred_at, payload]
+      required: [event_id, event_type, occurred_at]
       properties:
         event_id:
           type: string
           format: uuid
           description: Generated once with the desktop outbox row; never regenerated on retry.
-        event_type:
-          type: string
-          example: sale.finalized.v1
-          description: >-
-            Immutable name.version; only registered types are accepted
-            (system.test.v1, sale.finalized.v1). v1 payload rules: integer
-            minor-unit money, no floats; historical snapshots only.
         device_id:
           type: string
           format: uuid
@@ -268,9 +272,29 @@ components:
           type: string
           format: date-time
           description: Business timestamp; bounded (2020-01-01 .. now+24h), never authority.
-        payload:
-          type: object
-          description: Required JSON object, max 256 KiB. Money as integer minor units + currency.
+    SaleFinalizedV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [sale.finalized.v1]
+            payload:
+              $ref: '#/components/schemas/SaleFinalizedV1'
+    SystemTestV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [system.test.v1]
+            payload:
+              type: object
+              description: Diagnostic ping object, max 256 KiB.
     BatchResult:
       type: object
       required: [events]
@@ -304,3 +328,130 @@ components:
             message:
               type: string
               example: invalid device credential
+    Money:
+      type: object
+      required: [amount_minor, currency]
+      properties:
+        amount_minor:
+          type: integer
+          format: int64
+          description: Integer minor units only. Floats are rejected.
+          example: 1250
+        currency:
+          type: string
+          enum: [EGP, USD]
+    FxSnapshot:
+      type: object
+      required: [base, quote, rate, rate_microrate]
+      properties:
+        base:
+          type: string
+          example: USD
+        quote:
+          type: string
+          example: EGP
+        rate:
+          type: string
+          description: Exact decimal string; rate_microrate must equal rate × 1000000.
+          example: "52.000000"
+        rate_microrate:
+          type: integer
+          format: int64
+          example: 52000000
+      description: Required for USD sales with the exact USD→EGP pair; absent for EGP sales.
+    ShopSnapshot:
+      type: object
+      required: [name_ar, name_en, address_ar, address_en, phone, receipt_footer_ar, receipt_footer_en]
+      properties:
+        name_ar: {type: string}
+        name_en: {type: string}
+        address_ar: {type: string}
+        address_en: {type: string}
+        phone: {type: string}
+        receipt_footer_ar: {type: string}
+        receipt_footer_en: {type: string}
+    ActorSnapshot:
+      type: object
+      properties:
+        cashier_id: {type: string, format: uuid, nullable: true}
+        cashier_name: {type: string, nullable: true}
+    ClassificationSnapshot:
+      type: object
+      required: [category_id, name_ar, name_en]
+      properties:
+        category_id: {type: string, format: uuid}
+        name_ar: {type: string}
+        name_en: {type: string}
+    LineClassifications:
+      type: object
+      required: [roots, subcategories]
+      properties:
+        roots:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items: {$ref: '#/components/schemas/ClassificationSnapshot'}
+          description: Exactly one root per line (Retail parity).
+        subcategories:
+          type: array
+          items: {$ref: '#/components/schemas/ClassificationSnapshot'}
+    SaleLine:
+      type: object
+      required: [sale_item_id, sku, product_name, quantity, unit_price, line_total, classifications]
+      properties:
+        sale_item_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        variant_id: {type: string, format: uuid, nullable: true}
+        sku: {type: string}
+        product_name: {type: string}
+        width_cm: {type: integer, nullable: true}
+        height_cm: {type: integer, nullable: true}
+        quantity: {type: integer, minimum: 1}
+        unit_price: {$ref: '#/components/schemas/Money'}
+        cost: {$ref: '#/components/schemas/Money'}
+        line_total: {$ref: '#/components/schemas/Money'}
+        classifications: {$ref: '#/components/schemas/LineClassifications'}
+    EventPayment:
+      type: object
+      required: [method, amount, change_given]
+      properties:
+        method: {type: string, enum: [cash, card]}
+        amount: {$ref: '#/components/schemas/Money'}
+        change_given: {$ref: '#/components/schemas/Money'}
+        transaction_ref: {type: string, nullable: true}
+      description: Aggregate SUM(amount) must equal the sale total within ±1 minor unit (change ignored).
+    SaleTotals:
+      type: object
+      required: [subtotal, discount, tax, total]
+      properties:
+        subtotal: {$ref: '#/components/schemas/Money'}
+        discount: {$ref: '#/components/schemas/Money'}
+        tax: {$ref: '#/components/schemas/Money'}
+        total: {$ref: '#/components/schemas/Money'}
+    SaleFinalizedV1:
+      type: object
+      required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]
+      properties:
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string}
+        channel: {type: string, enum: [STORE]}
+        occurred_at: {type: string, format: date-time}
+        paid_at: {type: string, format: date-time}
+        shop: {$ref: '#/components/schemas/ShopSnapshot'}
+        actor: {$ref: '#/components/schemas/ActorSnapshot'}
+        currency: {type: string, enum: [EGP, USD]}
+        fx:
+          $ref: '#/components/schemas/FxSnapshot'
+        totals: {$ref: '#/components/schemas/SaleTotals'}
+        lines:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/SaleLine'}
+        payments:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/EventPayment'}
+      description: >-
+        sale.finalized.v1 — the only business event in this phase. No v2
+        fields exist. Integer money throughout; subtotal = Σ lines;
+        total = max(0, subtotal + tax − discount).
