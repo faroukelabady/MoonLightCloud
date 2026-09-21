@@ -55,8 +55,15 @@ ingress. Everything else is a documented future boundary, not code.
 ## HTTP
 
 - Public: `GET /health/live`, `GET /health/ready`, `GET /version`.
-- Versioned: `GET /api/v1/device/ping` (device auth proves the credential loop).
+- Versioned: device ping, sync capabilities, `POST /api/v1/sync/batches`.
 - Stable error envelope `{"error":{"code","message"}}`; no SQL/traces/paths.
+
+## Ingestion vs projection
+
+HTTP commits immutable events to `sync_events` and ACKs; a PostgreSQL-backed
+in-process projector derives `sales_projection` (+ lines, payments,
+classifications) asynchronously with durable `sync_event_processing` state
+(ADR-0016). ACK never waits for projection; restarts recover from the inbox.
 - Request IDs assigned/propagated (`X-Request-ID`), bounded client values.
 - Timeouts + 1 MiB body/header caps. CORS disabled (no browser client yet).
 

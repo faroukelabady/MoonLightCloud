@@ -45,6 +45,7 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 | Full gate | `./scripts/check.sh` | `make check` |
 | Provision device (dev) | `./scripts/dev-provision-device.sh [name]` | — |
 | Device admin | `device list / rotate <id> / revoke <id>` via `go run ./cmd/moonlight-cloud` | — |
+| Projection ops | `projection status` / `projection retry <event-id>` (safe, auditable) | — |
 
 ## Layout
 

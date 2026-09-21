@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
+	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -35,14 +37,16 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg     config.Config
-	Log     *slog.Logger
-	Pool    *pgxpool.Pool
-	Devices auth.Service
-	Sync    sync.Service
-	Handler http.Handler
-	Health  adapterhttp.Health
-	Version adapterhttp.Version
+	Cfg       config.Config
+	Log       *slog.Logger
+	Pool      *pgxpool.Pool
+	Devices   auth.Service
+	Sync      sync.Service
+	Projector *sale.Projector
+	SaleStore sale.Store
+	Handler   http.Handler
+	Health    adapterhttp.Health
+	Version   adapterhttp.Version
 }
 
 // New builds the app in startup order.
@@ -64,17 +68,46 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		clock.System{}, ids.System{},
 	)
 	a.Sync = sync.NewService(store, clock.System{})
+	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
+	a.SaleStore = store
+	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
-	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync)
+	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return a, nil
+}
+
+// ValidateSalePayload is the ingestion-time sale.finalized.v1 gate: decode
+// the canonical payload, run the strict validator. One authoritative
+// Decode+Validate shared with the projector's defensive re-check.
+func ValidateSalePayload(raw json.RawMessage) error {
+	p, err := sale.Decode(raw)
+	if err != nil {
+		return err
+	}
+	_, err = sale.Validate(p)
+	return err
+}
+
+// ProjectOne loads one inbox event and runs a single atomic projection
+// attempt. Used by tests and operator tooling; serve-path projection goes
+// through the background Projector.
+func (a *App) ProjectOne(ctx context.Context, eventID string) (sale.ProjectResult, error) {
+	rec, ok, err := a.SaleStore.LoadSaleEvent(ctx, eventID)
+	if err != nil {
+		return sale.ProjectResult{}, err
+	}
+	if !ok {
+		return sale.ProjectResult{}, fmt.Errorf("event %s not found", eventID)
+	}
+	return a.SaleStore.ProjectSale(ctx, rec, clock.System{}.Now())
 }
 
 // VerifySchema fails startup when the database is not at TargetVersion.

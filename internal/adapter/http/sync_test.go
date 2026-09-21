@@ -42,7 +42,7 @@ func syncTestSetup(t *testing.T) (http.Handler, string) {
 	syncSvc := sync.NewService(&memSyncRepo{committed: map[string]bool{}},
 		clock.Fixed{T: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)})
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/sync/batches", DeviceAuth(authSvc)(SyncBatch(syncSvc)))
+	mux.Handle("POST /api/v1/sync/batches", DeviceAuth(authSvc)(SyncBatch(syncSvc, nil)))
 	mux.Handle("GET /api/v1/sync/capabilities", DeviceAuth(authSvc)(SyncCapabilities(syncSvc)))
 	return mux, token
 }
@@ -113,7 +113,20 @@ func TestSyncBatchErrors(t *testing.T) {
 	}
 }
 
-func TestSyncCapabilities(t *testing.T) {
+func TestSyncBodyTooLarge(t *testing.T) {
+	h, token := syncTestSetup(t)
+	// Body over 8 MiB must be rejected even with valid framing.
+	big := `{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"system.test.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{"pad":"`
+	big += strings.Repeat("x", 8*1024*1024) + `"}}]}`
+	rec := postBatch(t, h, token, big, "application/json")
+	if rec.Code != 413 {
+		t.Fatalf("want 413, got %d", rec.Code)
+	}
+}
+
+func TestSyncCapabilitiesAdvertisesSale(t *testing.T) {
+	// Mirror app wiring: registration advertises the type + limits.
+	sync.RegisterEventType("sale.finalized.v1", func(json.RawMessage) error { return nil })
 	h, token := syncTestSetup(t)
 	req := httptest.NewRequest("GET", "/api/v1/sync/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -128,5 +141,17 @@ func TestSyncCapabilities(t *testing.T) {
 	}
 	if caps.APIVersion != "v1" || len(caps.SupportedEvents) == 0 || caps.ServerTime == "" {
 		t.Fatalf("bad capabilities: %+v", caps)
+	}
+	found := false
+	for _, e := range caps.SupportedEvents {
+		if e == "sale.finalized.v1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("capabilities must advertise sale.finalized.v1: %+v", caps)
+	}
+	if caps.MaxPayloadBytes != 262144 || caps.MaxBatchEvents != 100 || caps.MaxBodyBytes != 8*1024*1024 {
+		t.Fatalf("capabilities must report finalized limits: %+v", caps)
 	}
 }

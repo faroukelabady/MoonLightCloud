@@ -32,6 +32,76 @@ type DeviceCredential struct {
 	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type SaleLineClassificationsProjection struct {
+	SaleID             pgtype.UUID `json:"sale_id"`
+	SaleItemID         pgtype.UUID `json:"sale_item_id"`
+	ClassificationKind string      `json:"classification_kind"`
+	ClassificationID   pgtype.UUID `json:"classification_id"`
+	NameAr             string      `json:"name_ar"`
+	NameEn             string      `json:"name_en"`
+	Position           int32       `json:"position"`
+}
+
+type SaleLinesProjection struct {
+	SaleID         pgtype.UUID `json:"sale_id"`
+	SaleItemID     pgtype.UUID `json:"sale_item_id"`
+	Position       int32       `json:"position"`
+	ProductID      pgtype.UUID `json:"product_id"`
+	VariantID      pgtype.UUID `json:"variant_id"`
+	Sku            string      `json:"sku"`
+	ProductName    string      `json:"product_name"`
+	WidthCm        pgtype.Int4 `json:"width_cm"`
+	HeightCm       pgtype.Int4 `json:"height_cm"`
+	Quantity       int32       `json:"quantity"`
+	UnitPriceMinor int64       `json:"unit_price_minor"`
+	UnitCurrency   string      `json:"unit_currency"`
+	CostMinor      pgtype.Int8 `json:"cost_minor"`
+	CostCurrency   pgtype.Text `json:"cost_currency"`
+	LineTotalMinor int64       `json:"line_total_minor"`
+	LineCurrency   string      `json:"line_currency"`
+}
+
+type SalePaymentsProjection struct {
+	SaleID         pgtype.UUID `json:"sale_id"`
+	Position       int32       `json:"position"`
+	Method         string      `json:"method"`
+	AmountMinor    int64       `json:"amount_minor"`
+	AmountCurrency string      `json:"amount_currency"`
+	ChangeMinor    int64       `json:"change_minor"`
+	ChangeCurrency string      `json:"change_currency"`
+	TransactionRef pgtype.Text `json:"transaction_ref"`
+}
+
+type SalesProjection struct {
+	SaleID              pgtype.UUID        `json:"sale_id"`
+	SourceEventID       pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID      pgtype.UUID        `json:"source_device_id"`
+	SaleNumber          string             `json:"sale_number"`
+	Channel             string             `json:"channel"`
+	OccurredAt          pgtype.Timestamptz `json:"occurred_at"`
+	PaidAt              pgtype.Timestamptz `json:"paid_at"`
+	ShopNameAr          string             `json:"shop_name_ar"`
+	ShopNameEn          string             `json:"shop_name_en"`
+	ShopAddressAr       string             `json:"shop_address_ar"`
+	ShopAddressEn       string             `json:"shop_address_en"`
+	ShopPhone           string             `json:"shop_phone"`
+	ShopReceiptFooterAr string             `json:"shop_receipt_footer_ar"`
+	ShopReceiptFooterEn string             `json:"shop_receipt_footer_en"`
+	CashierID           pgtype.Text        `json:"cashier_id"`
+	CashierName         pgtype.Text        `json:"cashier_name"`
+	Currency            string             `json:"currency"`
+	SubtotalMinor       int64              `json:"subtotal_minor"`
+	DiscountMinor       int64              `json:"discount_minor"`
+	TaxMinor            int64              `json:"tax_minor"`
+	TotalMinor          int64              `json:"total_minor"`
+	FxBase              pgtype.Text        `json:"fx_base"`
+	FxQuote             pgtype.Text        `json:"fx_quote"`
+	FxRate              pgtype.Text        `json:"fx_rate"`
+	FxRateMicrorate     pgtype.Int8        `json:"fx_rate_microrate"`
+	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
+	ProjectedAt         pgtype.Timestamptz `json:"projected_at"`
+}
+
 type SyncEvent struct {
 	EventID      pgtype.UUID        `json:"event_id"`
 	DeviceID     pgtype.UUID        `json:"device_id"`
@@ -41,4 +111,18 @@ type SyncEvent struct {
 	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
 	Payload      []byte             `json:"payload"`
 	PayloadHash  []byte             `json:"payload_hash"`
+}
+
+type SyncEventProcessing struct {
+	EventID          pgtype.UUID        `json:"event_id"`
+	Processor        string             `json:"processor"`
+	Status           string             `json:"status"`
+	AttemptCount     int32              `json:"attempt_count"`
+	LastAttemptAt    pgtype.Timestamptz `json:"last_attempt_at"`
+	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
+	ProcessedAt      pgtype.Timestamptz `json:"processed_at"`
+	LastErrorCode    pgtype.Text        `json:"last_error_code"`
+	LastErrorMessage pgtype.Text        `json:"last_error_message"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }

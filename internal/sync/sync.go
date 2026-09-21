@@ -23,7 +23,7 @@ import (
 const (
 	APIVersion       = "v1"
 	MaxBatchEvents   = 100
-	MaxPayloadBytes  = 64 * 1024
+	MaxPayloadBytes  = 256 * 1024
 	MaxSyncBodyBytes = 8 * 1024 * 1024
 )
 
@@ -34,13 +34,23 @@ const (
 	StatusAlreadyAccepted = "already_accepted"
 )
 
-// SupportedEvents is the registry of ingestible event types. Phase 1B
-// carries only the diagnostic test event; business types arrive with
-// their projectors in later phases. Unknown-but-well-formed types are
-// rejected (422) so clients fail fast instead of assuming durability.
+// SupportedEvents is the registry of ingestible event types. Unknown-
+// but-well-formed types are rejected (422) so clients fail fast instead
+// of assuming durability. Entries are added at startup once their
+// validator, projection schema, projector, and migrations exist.
 var SupportedEvents = map[string]bool{
 	"system.test.v1": true,
 }
+
+// RegisterEventType advertises a business event with its payload validator.
+// The validator runs before durable ACK (invalid payloads reject the whole
+// batch); the projector consumes accepted events asynchronously.
+func RegisterEventType(eventType string, validate func(json.RawMessage) error) {
+	SupportedEvents[eventType] = true
+	validators[eventType] = validate
+}
+
+var validators = map[string]func(json.RawMessage) error{}
 
 var eventTypeFormat = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.v[0-9]+$`)
 
@@ -125,6 +135,15 @@ func (s Service) Ingest(ctx context.Context, deviceID, credentialID string, body
 	b, err := ParseBatch(body, deviceID, s.clock.Now())
 	if err != nil {
 		return BatchResult{}, err
+	}
+	// Event-specific validation before durable ACK: a structurally invalid
+	// business payload rejects the entire batch; nothing commits.
+	for i := range b.Events {
+		if validate, ok := validators[b.Events[i].EventType]; ok {
+			if err := validate(b.Events[i].Payload); err != nil {
+				return BatchResult{}, fmt.Errorf("event %d: %w", i, err)
+			}
+		}
 	}
 	receivedAt := s.clock.Now()
 	results, err := s.repo.IngestBatch(ctx, deviceID, credentialID, b.Events, receivedAt)

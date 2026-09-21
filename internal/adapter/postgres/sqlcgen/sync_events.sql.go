@@ -46,6 +46,36 @@ func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams
 	return event_id, err
 }
 
+const saleEventByID = `-- name: SaleEventByID :one
+SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload
+FROM sync_events WHERE event_id = $1
+`
+
+type SaleEventByIDRow struct {
+	EventID      pgtype.UUID        `json:"event_id"`
+	DeviceID     pgtype.UUID        `json:"device_id"`
+	CredentialID pgtype.UUID        `json:"credential_id"`
+	EventType    string             `json:"event_type"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
+	Payload      []byte             `json:"payload"`
+}
+
+func (q *Queries) SaleEventByID(ctx context.Context, eventID pgtype.UUID) (SaleEventByIDRow, error) {
+	row := q.db.QueryRow(ctx, saleEventByID, eventID)
+	var i SaleEventByIDRow
+	err := row.Scan(
+		&i.EventID,
+		&i.DeviceID,
+		&i.CredentialID,
+		&i.EventType,
+		&i.OccurredAt,
+		&i.ReceivedAt,
+		&i.Payload,
+	)
+	return i, err
+}
+
 const syncEventByID = `-- name: SyncEventByID :one
 SELECT event_id, device_id, payload_hash
 FROM sync_events WHERE event_id = $1

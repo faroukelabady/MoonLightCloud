@@ -6,6 +6,8 @@
 //	moonlight-cloud device list             safe operator visibility (no secrets)
 //	moonlight-cloud device rotate <id>      rotate a device credential (new secret once)
 //	moonlight-cloud device revoke <id>      revoke a device and all its credentials
+//	moonlight-cloud projection status       projector diagnostics (safe counts)
+//	moonlight-cloud projection retry <id>   return one event to pending
 //	moonlight-cloud probe --url U           single health probe (container healthcheck)
 //
 // Version metadata injects at build time:
@@ -36,6 +38,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 )
 
 // Build metadata (ldflags).
@@ -69,6 +72,8 @@ func run(args []string) error {
 		return migrateCmd(args)
 	case "device":
 		return deviceCmd(args)
+	case "projection":
+		return projectionCmd(args)
 	case "probe":
 		return probe(args)
 	case "dbprobe":
@@ -113,6 +118,11 @@ func serve(args []string) error {
 		"version", version, "commit", commit)
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	// Projector starts only after config/DB/schema/app wiring are ready; it
+	// obeys the same lifecycle context and stops claiming on cancellation.
+	projCtx, projCancel := context.WithCancel(sigCtx)
+	defer projCancel()
+	go a.Projector.Run(projCtx)
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err
 	}
@@ -185,6 +195,58 @@ func migrateCmd(args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown migrate subcommand %q", args[0])
+	}
+}
+
+// projectionCmd is the small operator surface for the sale projector:
+// status shows pending/retry/blocked/processed counts, oldest pending age,
+// and the last error; retry returns one blocked/retryable event to pending.
+// The immutable source event is never touched. No destructive fix exists.
+func projectionCmd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: moonlight-cloud projection status|retry <event-id>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := postgres.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	switch args[0] {
+	case "status":
+		stats, err := store.ProcessingStats(ctx, sale.ProcessorSaleProjectionV1)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("processor: %s\n", sale.ProcessorSaleProjectionV1)
+		for _, s := range []string{sale.ProcPending, sale.ProcRetry, sale.ProcBlocked, sale.ProcProcessed} {
+			fmt.Printf("  %-9s %d\n", s, stats.Counts[s])
+		}
+		if stats.OldestPending != nil {
+			fmt.Printf("oldest pending: %s (age %s)\n",
+				stats.OldestPending.UTC().Format(time.RFC3339),
+				time.Since(*stats.OldestPending).Round(time.Second))
+		} else {
+			fmt.Println("oldest pending: -")
+		}
+		if stats.LastErrorCode != "" {
+			fmt.Printf("last error: %s %s: %s\n", stats.LastErrorEvent, stats.LastErrorCode, stats.LastErrorMsg)
+		} else {
+			fmt.Println("last error: -")
+		}
+		return nil
+	case "retry":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: moonlight-cloud projection retry <event-id>")
+		}
+		return store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV1, args[1])
+	default:
+		return fmt.Errorf("unknown projection subcommand %q", args[0])
 	}
 }
 

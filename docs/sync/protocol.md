@@ -1,8 +1,9 @@
-# Sync Protocol Contract (Phase 1B — implements transport + durable acceptance)
+# Sync Protocol Contract (Phase 1B transport + Phase 2B business events)
 
 This is the contract MoonLightRetail's transactional outbox implements
-against in Phase 2. Generic envelope and ingestion semantics only; no
-business projection exists yet (only `system.test.v1` is ingestible).
+against: generic envelope and ingestion semantics plus the first business
+event `sale.finalized.v1` — validated before ACK, projected asynchronously
+(see docs/operations/projection.md and ADR-0016).
 
 ## Authentication
 
@@ -53,7 +54,7 @@ Field rules:
   auth/dedup/ordering. Bounds: not before 2020-01-01, not more than 24h in
   the future, else `422`. Desktop clocks are untrusted.
 - `received_at`: server clock at commit. Never substituted for `occurred_at`.
-- `payload`: required JSON **object**, max 64 KiB. Future money uses integer
+- `payload`: required JSON **object**, max 256 KiB. Future money uses integer
   minor units + currency code (`{"amount_minor":125000,"currency":"EGP"}`),
   never floats. Domain references are UUID strings. Never credentials,
   tokens, card data, or provider secrets in payloads.
@@ -86,7 +87,7 @@ never deleted in Phase 1B; corrections are new events
 
 ## Batch semantics
 
-- Limits: max 100 events, max 64 KiB per payload, max 8 MiB body.
+- Limits: max 100 events, max 256 KiB per payload, max 8 MiB body.
 - **All-or-nothing**: one malformed event → nothing commits; retry the
   whole batch. Success response is `200` with per-event statuses
   (`accepted` / `already_accepted` only).

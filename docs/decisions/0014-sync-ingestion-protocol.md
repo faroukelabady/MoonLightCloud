@@ -10,7 +10,7 @@ Desktop outbox drains need efficient multi-event sends with clear retry semantic
 
 ## Decision
 
-POST /api/v1/sync/batches only; all-or-nothing commit; event_id PK (globally unique) + canonical-payload SHA-256; identical retry → already_accepted; same-ID-different-content → 409 EVENT_ID_REUSE; intra-batch duplicate IDs → 400; limits 100 events / 64 KiB payload / 8 MiB body; ACK means durable commit only. No sync_batches table; batch_id is an optional echoed client UUID.
+POST /api/v1/sync/batches only; all-or-nothing commit; event_id PK (globally unique) + canonical-payload SHA-256; identical retry → already_accepted; same-ID-different-content → 409 EVENT_ID_REUSE; intra-batch duplicate IDs → 400; limits 100 events / 64 KiB payload / 8 MiB body (payload raised to 256 KiB in Phase 2B; see protocol); ACK means durable commit only. No sync_batches table; batch_id is an optional echoed client UUID.
 
 ## Consequences
 

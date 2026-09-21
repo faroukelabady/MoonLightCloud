@@ -13,7 +13,7 @@ is solved for features that do not exist yet.
 | SQL injection | sqlc parameterized queries + pgx; no string-built SQL |
 | Unauthorized device | Bearer `<device>.<credential>.<secret>` verified per request; all failures same 401 without enumeration |
 | Revoked device continuing access | Status checked on every auth, no cache; `device revoke` kills all credentials immediately; history preserved |
-| Malformed/unbounded payload | 8 MiB body ceiling, sync envelope limits (100 events / 64 KiB), 1 MiB header cap, timeouts, duplicate-key rejection |
+| Malformed/unbounded payload | 8 MiB body ceiling, sync envelope limits (100 events / 256 KiB), 1 MiB header cap, timeouts, duplicate-key rejection |
 | Container running as root | Distroless nonroot (65532), no toolchain/source/secrets in image |
 | Public PostgreSQL exposure | Compose binds 127.0.0.1; prod: private connection only, cloud is the sole client |
 | Credential rotation failure | Single transaction (never zero usable credentials from partial op); failure before commit keeps old usable; documented re-rotation recovery |

@@ -218,13 +218,13 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1]
+          example: [system.test.v1, sale.finalized.v1]
         max_batch_events:
           type: integer
           example: 100
         max_payload_bytes:
           type: integer
-          example: 65536
+          example: 262144
         max_body_bytes:
           type: integer
           example: 8388608
@@ -255,8 +255,11 @@ components:
           description: Generated once with the desktop outbox row; never regenerated on retry.
         event_type:
           type: string
-          example: system.test.v1
-          description: Immutable name.version; only registered types are accepted.
+          example: sale.finalized.v1
+          description: >-
+            Immutable name.version; only registered types are accepted
+            (system.test.v1, sale.finalized.v1). v1 payload rules: integer
+            minor-unit money, no floats; historical snapshots only.
         device_id:
           type: string
           format: uuid
@@ -267,7 +270,7 @@ components:
           description: Business timestamp; bounded (2020-01-01 .. now+24h), never authority.
         payload:
           type: object
-          description: Required JSON object, max 64 KiB. Money as integer minor units + currency.
+          description: Required JSON object, max 256 KiB. Money as integer minor units + currency.
     BatchResult:
       type: object
       required: [events]
