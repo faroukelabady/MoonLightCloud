@@ -8,11 +8,14 @@ read-only: zero business-state side effects per request.
 - `STORE_TIMEZONE`: IANA identifier (production: `Africa/Cairo`, explicit
   and validated at startup; invalid values fail boot). Development defaults
   to `Africa/Cairo`.
-- `REPORTING_API_TOKEN`: temporary report-read Bearer secret (high-entropy,
-  16+ chars). Required in staging/production; development may leave it empty
-  (open reports + one startup warning). Never logged. Report scope only —
-  device sync credentials are rejected on report routes. Replace with
-  dashboard user auth when it lands (this token is documented temporary).
+- `REPORTING_API_TOKEN` + `ALLOW_UNAUTHENTICATED_REPORTING`: fail-closed
+  reporting auth. A valid token (16+ chars) enables authenticated reporting
+  anywhere. Without a token, open reports require ALL of
+  `ENVIRONMENT=development`, `ALLOW_UNAUTHENTICATED_REPORTING=true`, and no
+  token — anything else (staging/production, missing environment, flag with
+  token) fails startup. A missing `ENVIRONMENT` never grants open reporting.
+  Never logged. Report scope only — device sync credentials are rejected on
+  report routes. Replace with dashboard user auth when it lands.
 
 ## Example calls
 
@@ -54,5 +57,28 @@ curl -H "Authorization: $AUTH" "$base/breakdown?period=today&dimension=subcatego
 
 Terminology is gross finalized sales: refunds are not yet synchronized
 (Phase 4B introduces net reporting). Subcategory rows are facet-style and
-may sum above line totals; root-category rows are additive. Product
-`line_sales_minor` excludes Sale-level discount/tax (no allocation).
+may sum above line totals; root-category rows are additive.
+
+## Breakdown financial model
+
+Two mutually exclusive row shapes (never mixed):
+
+- `product`, `root_category`, `subcategory` rows carry `line_sales`:
+  pre-adjustment historical line amounts (`line_sales_minor` always means
+  this). Sale-level discount/tax are never allocated to lines.
+- `cashier`, `channel` rows carry `currency_totals` with exact header
+  `subtotal_minor` / `discount_minor` / `tax_minor` / `sales_total_minor`
+  plus `transactions` and `units`. No `line_sales` on these rows.
+
+## Cost semantics
+
+`line_cost_minor` is extended historical cost: unit `cost_minor` ×
+`quantity`, summed exactly (integer math; per-line and aggregate overflow
+fail explicitly). A snapshot sum, never a profit/margin basis.
+
+## Category identity
+
+Breakdown groups by snapshot tuple (kind + category ID + both historical
+names). A renamed category yields separate historical rows with their own
+totals; buckets merge only within exact snapshot identity. Never MIN/MAX,
+latest, or current names.

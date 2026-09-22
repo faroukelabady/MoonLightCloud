@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$REPO_ROOT"
 load_env
+ensure_dev_reporting_env
 
 echo "== gofmt =="
 test -z "$(gofmt -l cmd/ internal/ db/)" || { echo "unformatted files above" >&2; exit 1; }

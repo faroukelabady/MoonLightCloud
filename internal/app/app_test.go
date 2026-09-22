@@ -16,21 +16,23 @@ func testConfig(url string) config.Config {
 		panic(err)
 	}
 	c := config.Config{
-		Environment:      config.EnvDevelopment,
-		HTTPAddr:         ":0",
-		DatabaseURL:      url,
-		LogLevel:         "error",
-		PepperRaw:        config.DevPepper,
-		PepperVersion:    config.CurrentPepperVersion,
-		StoreTimezone:    "Africa/Cairo",
-		StoreLocation:    loc,
-		ShutdownAfter:    config.DefaultShutdownTimeout,
-		DBMaxConns:       4,
-		DBMinConns:       1,
-		DBMaxConnLife:    config.DefaultDBMaxConnLife,
-		DBMaxConnIdle:    config.DefaultDBMaxConnIdle,
-		DBConnectTimeout: config.DefaultDBConnectTimeout,
-		DBQueryTimeout:   config.DefaultDBQueryTimeout,
+		Environment:   config.EnvDevelopment,
+		HTTPAddr:      ":0",
+		DatabaseURL:   url,
+		LogLevel:      "error",
+		PepperRaw:     config.DevPepper,
+		PepperVersion: config.CurrentPepperVersion,
+		StoreTimezone: "Africa/Cairo",
+		StoreLocation: loc,
+		// Explicit dev-open reporting (mirrors the dev compose default).
+		AllowUnauthenticatedReporting: true,
+		ShutdownAfter:                 config.DefaultShutdownTimeout,
+		DBMaxConns:                    4,
+		DBMinConns:                    1,
+		DBMaxConnLife:                 config.DefaultDBMaxConnLife,
+		DBMaxConnIdle:                 config.DefaultDBMaxConnIdle,
+		DBConnectTimeout:              config.DefaultDBConnectTimeout,
+		DBQueryTimeout:                config.DefaultDBQueryTimeout,
 	}
 	if err := c.Validate(); err != nil {
 		panic(err)

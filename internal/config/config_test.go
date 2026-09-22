@@ -11,7 +11,15 @@ func setenv(t *testing.T, k, v string) {
 	t.Setenv(k, v)
 }
 
+// setReportingToken pins a valid token so tests focus on other settings.
+func setReportingToken(t *testing.T) {
+	t.Helper()
+	t.Setenv("REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+}
+
 func TestLoadDevelopmentDefaults(t *testing.T) {
+	setReportingToken(t)
 	setenv(t, "ENVIRONMENT", "development")
 	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
 	os.Unsetenv("HTTP_ADDR")
@@ -64,6 +72,7 @@ func TestProductionValid(t *testing.T) {
 	setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 	setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 	setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +115,7 @@ func TestStoreTimezoneMatrix(t *testing.T) {
 			}
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+			os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
 			if tc.tz == "" {
 				os.Unsetenv("STORE_TIMEZONE")
 			} else {
@@ -124,26 +134,44 @@ func TestStoreTimezoneMatrix(t *testing.T) {
 
 func TestReportingTokenMatrix(t *testing.T) {
 	const url = "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
+	const devURL = "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	const goodToken = "0123456789abcdef0123456789abcdef"
 	cases := []struct {
-		name    string
+		name string
+		// env "" means ENVIRONMENT unset entirely.
 		env     string
 		token   string // "" means unset
+		open    string // "" means unset
 		wantErr bool
 	}{
-		{"dev open allowed", "development", "", false},
-		{"dev token allowed", "development", "0123456789abcdef", false},
-		{"prod missing rejected", "production", "", true},
-		{"prod short rejected", "production", "short", true},
-		{"prod valid accepted", "production", "0123456789abcdef0123456789abcdef", false},
-		{"staging missing rejected", "staging", "", true},
+		{"production + token PASS", "production", goodToken, "", false},
+		{"production + no token FAIL", "production", "", "", true},
+		{"production + open flag FAIL", "production", "", "true", true},
+		{"production + token + open flag FAIL", "production", goodToken, "true", true},
+		{"staging + token PASS", "staging", goodToken, "", false},
+		{"staging + no token FAIL", "staging", "", "", true},
+		{"staging + open flag FAIL", "staging", "", "true", true},
+		{"development + token PASS", "development", goodToken, "", false},
+		{"development + no token + open flag PASS", "development", "", "true", false},
+		{"development + no token + no flag FAIL", "development", "", "", true},
+		{"development + token + open flag FAIL", "development", goodToken, "true", true},
+		{"development + bad flag value FAIL", "development", "", "yes", true},
+		{"missing env + token PASS (authenticated)", "", goodToken, "", false},
+		{"missing env + no token FAIL", "", "", "", true},
+		{"missing env + open flag FAIL", "", "", "true", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			setenv(t, "ENVIRONMENT", tc.env)
-			if tc.env == "development" {
-				setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
+			if tc.env == "" {
+				os.Unsetenv("ENVIRONMENT")
+				setenv(t, "DATABASE_URL", devURL)
 			} else {
-				setenv(t, "DATABASE_URL", url)
+				setenv(t, "ENVIRONMENT", tc.env)
+				if tc.env == "development" {
+					setenv(t, "DATABASE_URL", devURL)
+				} else {
+					setenv(t, "DATABASE_URL", url)
+				}
 			}
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
@@ -151,6 +179,11 @@ func TestReportingTokenMatrix(t *testing.T) {
 				os.Unsetenv("REPORTING_API_TOKEN")
 			} else {
 				setenv(t, "REPORTING_API_TOKEN", tc.token)
+			}
+			if tc.open == "" {
+				os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+			} else {
+				setenv(t, "ALLOW_UNAUTHENTICATED_REPORTING", tc.open)
 			}
 			_, err := Load()
 			if (err != nil) != tc.wantErr {
@@ -223,6 +256,7 @@ func TestPortOverride(t *testing.T) {
 	setenv(t, "ENVIRONMENT", "development")
 	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
 	os.Unsetenv("HTTP_ADDR")
+	setReportingToken(t)
 	setenv(t, "PORT", "1234")
 	c, err := Load()
 	if err != nil {

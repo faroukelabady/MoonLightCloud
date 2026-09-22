@@ -114,7 +114,7 @@ SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en, l.line_currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
-    COALESCE(SUM(l.cost_minor), 0)::bigint AS cost
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
 FROM sale_line_classifications_projection c
 JOIN sale_lines_projection l
   ON l.sale_id = c.sale_id AND l.sale_item_id = c.sale_item_id
@@ -246,7 +246,7 @@ const reportSalesByProduct = `-- name: ReportSalesByProduct :many
 SELECT l.product_id, l.sku, l.product_name, l.line_currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
-    COALESCE(SUM(l.cost_minor), 0)::bigint AS line_cost
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
@@ -307,12 +307,12 @@ SELECT ((s.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
     COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
     COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
     COALESCE(SUM(l.units), 0)::bigint AS units,
-    COALESCE(SUM(l.cost), 0)::bigint AS line_cost
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS line_cost
 FROM sales_projection s
 LEFT JOIN (
     SELECT sale_id,
         COALESCE(SUM(quantity), 0)::bigint AS units,
-        COALESCE(SUM(cost_minor), 0)::bigint AS cost
+        SUM(cost_minor::numeric * quantity) AS ext_cost
     FROM sale_lines_projection
     GROUP BY sale_id
 ) l ON l.sale_id = s.sale_id
@@ -435,12 +435,12 @@ SELECT s.currency,
     COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
     COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
     COALESCE(SUM(l.units), 0)::bigint AS units,
-    COALESCE(SUM(l.cost), 0)::bigint AS line_cost
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS line_cost
 FROM sales_projection s
 LEFT JOIN (
     SELECT sale_id,
         COALESCE(SUM(quantity), 0)::bigint AS units,
-        COALESCE(SUM(cost_minor), 0)::bigint AS cost
+        SUM(cost_minor::numeric * quantity) AS ext_cost
     FROM sale_lines_projection
     GROUP BY sale_id
 ) l ON l.sale_id = s.sale_id

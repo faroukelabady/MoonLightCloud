@@ -99,8 +99,15 @@ type Daily struct {
 }
 
 // BreakdownRow is one dimension value. Money stays in per-currency
-// buckets; line_sales_minor is the pre-adjustment line snapshot total
-// (Sale-level discount/tax are never allocated to lines).
+// buckets. Two mutually exclusive financial groups exist, populated by
+// dimension family (never mixed in one row):
+//   - line-level dimensions (product, root_category, subcategory) set
+//     LineSales: pre-adjustment historical line snapshot amounts.
+//     Sale-level discount/tax are never allocated to lines.
+//   - Sale-header-level dimensions (cashier, channel) set CurrencyTotals:
+//     exact header subtotal/discount/tax/sales_total aggregates.
+//
+// line_sales_minor therefore has one stable meaning everywhere it appears.
 type BreakdownRow struct {
 	Dimension string `json:"dimension"`
 	// Product fields.
@@ -121,8 +128,12 @@ type BreakdownRow struct {
 	// (cashier, channel) only.
 	Transactions int64 `json:"transactions,omitempty"`
 	Units        int64 `json:"units"`
-	// LineSales holds per-currency line snapshot totals.
-	LineSales []LineSaleTotal `json:"line_sales"`
+	// LineSales holds per-currency line snapshot totals (line-level
+	// dimensions only; omitted otherwise).
+	LineSales []LineSaleTotal `json:"line_sales,omitempty"`
+	// CurrencyTotals holds exact Sale-header aggregates (cashier and
+	// channel dimensions only; omitted otherwise).
+	CurrencyTotals []CurrencyTotal `json:"currency_totals,omitempty"`
 }
 
 // LineSaleTotal is one currency bucket of line snapshot money.
@@ -410,7 +421,10 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
 		for _, r := range rows {
-			key := r.ID
+			// Snapshot identity: kind + id + both historical names.
+			// Renamed snapshots of one category stay separate rows;
+			// buckets merge only within exact snapshot identity.
+			key := r.Kind + "\x00" + r.ID + "\x00" + r.NameAR + "\x00" + r.NameEN
 			row, ok := byKey[key]
 			if !ok {
 				kind, id, ar, en := r.Kind, r.ID, r.NameAR, r.NameEN
@@ -438,14 +452,18 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			row, ok := byKey[key]
 			if !ok {
 				row = &BreakdownRow{Dimension: dimension,
-					CashierID: r.CashierID, CashierName: r.CashierName, LineSales: []LineSaleTotal{}}
+					CashierID: r.CashierID, CashierName: r.CashierName}
 				byKey[key] = row
 				order = append(order, key)
 			}
 			row.Units += r.Units
 			row.Transactions += r.Transactions
-			row.LineSales = append(row.LineSales, LineSaleTotal{
-				Currency: r.Currency, LineSalesMinor: r.SalesTotal, LineCostMinor: 0})
+			row.CurrencyTotals = append(row.CurrencyTotals, CurrencyTotal{
+				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
+				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
+		}
+		for _, row := range byKey {
+			sortCurrencyTotals(row.CurrencyTotals)
 		}
 		out.Rows = sortCashierRows(byKey, order)
 	case DimensionChannel:
@@ -459,14 +477,18 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			row, ok := byKey[r.Channel]
 			if !ok {
 				ch := r.Channel
-				row = &BreakdownRow{Dimension: dimension, Channel: &ch, LineSales: []LineSaleTotal{}}
+				row = &BreakdownRow{Dimension: dimension, Channel: &ch}
 				byKey[r.Channel] = row
 				order = append(order, r.Channel)
 			}
 			row.Units += r.Units
 			row.Transactions += r.Transactions
-			row.LineSales = append(row.LineSales, LineSaleTotal{
-				Currency: r.Currency, LineSalesMinor: r.SalesTotal})
+			row.CurrencyTotals = append(row.CurrencyTotals, CurrencyTotal{
+				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
+				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
+		}
+		for _, row := range byKey {
+			sortCurrencyTotals(row.CurrencyTotals)
 		}
 		for _, k := range order {
 			out.Rows = append(out.Rows, *byKey[k])
@@ -499,10 +521,19 @@ func sortCurrencyTotals(t []CurrencyTotal) {
 	sort.Slice(t, func(i, j int) bool { return t[i].Currency < t[j].Currency })
 }
 
+// sortLineSales orders nested line buckets alphabetically by currency.
+// SQL GROUP BY order is never relied upon for response order.
+func sortLineSales(t []LineSaleTotal) {
+	sort.Slice(t, func(i, j int) bool { return t[i].Currency < t[j].Currency })
+}
+
 // Deterministic ordering: units descending, then identity tie-breakers.
 // Channel rows arrive one per (channel, currency) and sort by channel code.
 func sortProductRows(byKey map[string]*BreakdownRow, order []string) []BreakdownRow {
 	out := rowsInOrder(byKey, order)
+	for i := range out {
+		sortLineSales(out[i].LineSales)
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units
@@ -520,6 +551,9 @@ func sortProductRows(byKey map[string]*BreakdownRow, order []string) []Breakdown
 
 func sortCategoryRows(byKey map[string]*BreakdownRow, order []string) []BreakdownRow {
 	out := rowsInOrder(byKey, order)
+	for i := range out {
+		sortLineSales(out[i].LineSales)
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units

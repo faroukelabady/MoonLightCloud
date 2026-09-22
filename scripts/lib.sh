@@ -28,8 +28,18 @@ load_env() {
   fi
 }
 
-# require_dev aborts unless ENVIRONMENT is development (or unset, which
-# defaults to development). Destructive scripts must call this first.
+# ensure_dev_reporting_env defaults the explicit dev-open reporting flag
+# for local development scripts only: when the effective environment is
+# development, no reporting token is configured, and the flag is unset, it
+# opts into the documented development behavior so `go run`/`dbprobe` paths
+# pass the fail-closed startup gate. Explicit values (including an explicit
+# false, or any token) are never overridden. Production application
+# behavior is unchanged: the raw image without this env still fails closed.
+ensure_dev_reporting_env() {
+  if [[ -z "${ALLOW_UNAUTHENTICATED_REPORTING:-}" && -z "${REPORTING_API_TOKEN:-}" && "${ENVIRONMENT:-development}" == "development" ]]; then
+    export ALLOW_UNAUTHENTICATED_REPORTING=true
+  fi
+}
 require_dev() {
   local env="${ENVIRONMENT:-development}"
   if [[ "$env" != "development" ]]; then
@@ -66,7 +76,7 @@ wait_db_ready() {
   local url="${1:?usage: wait_db_ready DATABASE_URL}"
   (cd "$REPO_ROOT" && go build -o /tmp/moonlight-cloud-probe ./cmd/moonlight-cloud) >/dev/null 2>&1
   for _ in $(seq 1 60); do
-    if DATABASE_URL="$url" ENVIRONMENT=development /tmp/moonlight-cloud-probe dbprobe >/dev/null 2>&1; then
+    if DATABASE_URL="$url" ENVIRONMENT=development ALLOW_UNAUTHENTICATED_REPORTING=true /tmp/moonlight-cloud-probe dbprobe >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

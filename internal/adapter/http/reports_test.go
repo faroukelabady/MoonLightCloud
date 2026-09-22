@@ -103,6 +103,23 @@ func TestReportAuthBoundary(t *testing.T) {
 	}
 }
 
+func TestReportOpenModeRequiresExplicitOptIn(t *testing.T) {
+	// Empty configured token = explicit dev-open wiring only. The
+	// fail-closed decision lives in config; the middleware honors an
+	// explicitly empty token and warns once.
+	loc, _ := time.LoadLocation("Africa/Cairo")
+	svc := report.NewService(stubReportRepo{}, clock.Fixed{T: time.Date(2026, 9, 22, 7, 0, 0, 0, time.UTC)}, loc)
+	h := NewReportHandlers(svc, slog.Default())
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/reports/sales/summary", ReportAuth("")(http.HandlerFunc(h.SalesSummary)))
+	req := httptest.NewRequest("GET", "/api/v1/reports/sales/summary?period=today", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("explicit dev-open wiring allows: want 200, got %d", rec.Code)
+	}
+}
+
 func TestReportParamErrors(t *testing.T) {
 	mux := reportTestMux()
 	const good = "test-token-0123456789"
@@ -148,5 +165,66 @@ func TestReportNoDataContract(t *testing.T) {
 	// Token never appears in logs or bodies (spot check body).
 	if strings.Contains(rec.Body.String(), "test-token-0123456789") {
 		t.Fatal("token leaked into response body")
+	}
+}
+
+// shapeRepo returns one cashier row and one product row for DTO shape tests.
+type shapeRepo struct{ stubReportRepo }
+
+func (s shapeRepo) SalesByCashier(context.Context, time.Time, time.Time, string) ([]report.CashierRow, error) {
+	id, name := "cashier-1", "Amal"
+	return []report.CashierRow{{CashierID: &id, CashierName: &name, Transactions: 1,
+		Units: 2, Currency: "EGP", Subtotal: 200000, Discount: 20000, Tax: 14000, SalesTotal: 194000}}, nil
+}
+
+func (s shapeRepo) SalesByProduct(context.Context, time.Time, time.Time, string) ([]report.ProductRow, error) {
+	pid := "66666666-6666-6666-8666-666666666666"
+	return []report.ProductRow{{ProductID: &pid, SKU: "SKU-1", ProductName: "Alpha",
+		Units: 2, Currency: "EGP", LineSales: 200000, LineCost: 20000}}, nil
+}
+
+// TestBreakdownDTOShapesMatchOpenAPI proves runtime JSON matches the
+// documented split contract: header rows carry currency_totals (never
+// line_sales); line rows carry line_sales (never currency_totals).
+func TestBreakdownDTOShapesMatchOpenAPI(t *testing.T) {
+	loc, _ := time.LoadLocation("Africa/Cairo")
+	svc := report.NewService(shapeRepo{}, clock.Fixed{T: time.Date(2026, 9, 22, 7, 0, 0, 0, time.UTC)}, loc)
+	h := NewReportHandlers(svc, slog.Default())
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/reports/sales/breakdown", ReportAuth("test-token-0123456789")(http.HandlerFunc(h.SalesBreakdown)))
+
+	cashier := getReport(t, mux, "/api/v1/reports/sales/breakdown?period=today&dimension=cashier", "test-token-0123456789")
+	if cashier.Code != 200 {
+		t.Fatalf("cashier: %d", cashier.Code)
+	}
+	var cashBody map[string]any
+	if err := json.Unmarshal(cashier.Body.Bytes(), &cashBody); err != nil {
+		t.Fatal(err)
+	}
+	cashRow := cashBody["rows"].([]any)[0].(map[string]any)
+	if _, ok := cashRow["currency_totals"]; !ok {
+		t.Fatal("cashier row must carry currency_totals")
+	}
+	if _, ok := cashRow["line_sales"]; ok {
+		t.Fatal("cashier row must not carry line_sales")
+	}
+	ct := cashRow["currency_totals"].([]any)[0].(map[string]any)
+	for _, k := range []string{"subtotal_minor", "discount_minor", "tax_minor", "sales_total_minor"} {
+		if _, ok := ct[k]; !ok {
+			t.Fatalf("cashier bucket missing %s", k)
+		}
+	}
+
+	product := getReport(t, mux, "/api/v1/reports/sales/breakdown?period=today&dimension=product", "test-token-0123456789")
+	var prodBody map[string]any
+	if err := json.Unmarshal(product.Body.Bytes(), &prodBody); err != nil {
+		t.Fatal(err)
+	}
+	prodRow := prodBody["rows"].([]any)[0].(map[string]any)
+	if _, ok := prodRow["line_sales"]; !ok {
+		t.Fatal("product row must carry line_sales")
+	}
+	if _, ok := prodRow["currency_totals"]; ok {
+		t.Fatal("product row must not carry currency_totals")
 	}
 }

@@ -88,11 +88,23 @@ type Config struct {
 	StoreTimezone string
 	// StoreLocation is the resolved timezone; never nil after Validate.
 	StoreLocation *time.Location
-	// ReportingToken is the temporary report-read Bearer secret. Empty is
-	// allowed only in development (open reports with a startup warning);
-	// staging/production require an explicit high-entropy value.
+	// ReportingToken is the temporary report-read Bearer secret.
+	// Fail-closed policy (see resolveReportingToken):
+	//   token configured (16+ chars) ............ authenticated reporting
+	//   no token + ENVIRONMENT=development
+	//     + ALLOW_UNAUTHENTICATED_REPORTING=true .. open local-dev reporting
+	//   anything else ........................... startup failure
+	// A missing ENVIRONMENT never implies development permission: without
+	// an explicit development environment the open mode is unreachable.
 	ReportingToken string
-	ShutdownAfter  time.Duration
+	// AllowUnauthenticatedReporting enables open reports. Valid only with
+	// ENVIRONMENT=development and no reporting token; true anywhere else
+	// (or with a token configured) is a startup failure.
+	AllowUnauthenticatedReporting bool
+	// envExplicit records whether ENVIRONMENT was set. Missing-environment
+	// defaults still apply for other settings, but never grant open access.
+	envExplicit   bool
+	ShutdownAfter time.Duration
 
 	DBMaxConns       int32
 	DBMinConns       int32
@@ -105,22 +117,33 @@ type Config struct {
 // Load reads configuration from the environment.
 func Load() (Config, error) {
 	c := Config{
-		Environment:      envOr("ENVIRONMENT", EnvDevelopment),
-		HTTPAddr:         envOr("HTTP_ADDR", DefaultHTTPAddr),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		LogLevel:         strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
-		PepperRaw:        strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
-		PepperVersion:    CurrentPepperVersion,
-		StoreTimezone:    strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
-		ReportingToken:   strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
-		ShutdownAfter:    DefaultShutdownTimeout,
-		DBMaxConns:       DefaultDBMaxConns,
-		DBMinConns:       DefaultDBMinConns,
-		DBMaxConnLife:    DefaultDBMaxConnLife,
-		DBMaxConnIdle:    DefaultDBMaxConnIdle,
-		DBConnectTimeout: DefaultDBConnectTimeout,
-		DBQueryTimeout:   DefaultDBQueryTimeout,
+		Environment:    envOr("ENVIRONMENT", EnvDevelopment),
+		HTTPAddr:       envOr("HTTP_ADDR", DefaultHTTPAddr),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		LogLevel:       strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
+		PepperRaw:      strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
+		PepperVersion:  CurrentPepperVersion,
+		StoreTimezone:  strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
+		ReportingToken: strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
+		ShutdownAfter:  DefaultShutdownTimeout,
+		envExplicit:    strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
 	}
+	allowOpen, err := parseBoolFlag("ALLOW_UNAUTHENTICATED_REPORTING")
+	if err != nil {
+		return Config{}, err
+	}
+	c.AllowUnauthenticatedReporting = allowOpen
+	// A missing ENVIRONMENT never grants unauthenticated reporting, even
+	// with the open flag: fail closed before any other default applies.
+	if !c.envExplicit && c.ReportingToken == "" {
+		return Config{}, fmt.Errorf("REPORTING_API_TOKEN is required (or explicit ENVIRONMENT=development open mode)")
+	}
+	c.DBMaxConns = DefaultDBMaxConns
+	c.DBMinConns = DefaultDBMinConns
+	c.DBMaxConnLife = DefaultDBMaxConnLife
+	c.DBMaxConnIdle = DefaultDBMaxConnIdle
+	c.DBConnectTimeout = DefaultDBConnectTimeout
+	c.DBQueryTimeout = DefaultDBQueryTimeout
 	// Railway and similar hosts inject PORT; honor it when HTTP_ADDR is default.
 	if c.HTTPAddr == DefaultHTTPAddr {
 		if port := strings.TrimSpace(os.Getenv("PORT")); port != "" {
@@ -248,20 +271,51 @@ func (c *Config) resolveStoreTimezone() error {
 	return nil
 }
 
-// resolveReportingToken enforces the temporary reporting guard: an explicit
-// high-entropy Bearer secret outside development; development may leave it
-// empty (reports unauthenticated, with a startup warning from the caller).
+// resolveReportingToken enforces fail-closed reporting authentication:
+//   - a valid token (16+ chars) enables authenticated reporting in any
+//     environment, including an unset ENVIRONMENT (auth is enforced, so
+//     nothing is exposed);
+//   - without a token, open reporting requires ALL of: explicitly set
+//     ENVIRONMENT=development AND ALLOW_UNAUTHENTICATED_REPORTING=true;
+//   - everything else (staging/production without token, open flag outside
+//     development, open flag with a token set, missing environment without
+//     token) is a startup failure.
+//
+// A missing ENVIRONMENT therefore never grants unauthenticated reporting.
 func (c *Config) resolveReportingToken() error {
-	if c.ReportingToken == "" {
-		if c.Environment == EnvDevelopment {
-			return nil
+	if c.ReportingToken != "" {
+		if len(c.ReportingToken) < MinReportingTokenLen {
+			return fmt.Errorf("REPORTING_API_TOKEN must be at least %d characters", MinReportingTokenLen)
 		}
-		return fmt.Errorf("REPORTING_API_TOKEN is required outside development")
+		if c.AllowUnauthenticatedReporting {
+			return fmt.Errorf("ALLOW_UNAUTHENTICATED_REPORTING must not be set when REPORTING_API_TOKEN is configured")
+		}
+		return nil
 	}
-	if len(c.ReportingToken) < MinReportingTokenLen {
-		return fmt.Errorf("REPORTING_API_TOKEN must be at least %d characters", MinReportingTokenLen)
+	if c.AllowUnauthenticatedReporting {
+		if c.Environment != EnvDevelopment {
+			return fmt.Errorf("ALLOW_UNAUTHENTICATED_REPORTING is development-only with explicit ENVIRONMENT=development")
+		}
+		return nil
 	}
-	return nil
+	return fmt.Errorf("REPORTING_API_TOKEN is required (or explicit development open mode)")
+}
+
+// parseBoolFlag parses an opt-in flag strictly: unset/false/0 deny,
+// true/1 allow, anything else fails startup (typos must not silently
+// change security posture).
+func parseBoolFlag(key string) (bool, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	switch {
+	case v == "":
+		return false, nil
+	case strings.EqualFold(v, "true") || v == "1":
+		return true, nil
+	case strings.EqualFold(v, "false") || v == "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid %s %q: want true|false|1|0", key, v)
+	}
 }
 
 // IsDev reports local development mode (destructive scripts gate on this).

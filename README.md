@@ -61,8 +61,11 @@ See `.env.example` (placeholders only, never commit secrets):
 
 - `STORE_TIMEZONE`: IANA business timezone (`Africa/Cairo` default in dev,
   explicit + validated in staging/production).
-- `REPORTING_API_TOKEN`: temporary report-read Bearer secret (open reports
-  in dev with a startup warning; required 16+ chars elsewhere).
+- `REPORTING_API_TOKEN`: temporary report-read Bearer secret. Fail-closed:
+  16+ chars enables authenticated reporting anywhere; without a token, open
+  reports need ALL of `ENVIRONMENT=development`,
+  `ALLOW_UNAUTHENTICATED_REPORTING=true`, and no token — anything else
+  (including a missing `ENVIRONMENT`) fails startup.
 
 ## Docs
 

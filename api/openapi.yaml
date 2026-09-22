@@ -293,8 +293,10 @@ components:
       bearerFormat: 'REPORTING_API_TOKEN (temporary report-read secret until dashboard user auth)'
       description: >-
         Authorization: Bearer <reporting-api-token>. Report scope only;
-        device sync credentials are never valid here. Required outside
-        development.
+        device sync credentials are never valid here. Fail-closed: required
+        16+ chars in staging/production; open reports need ALL of
+        ENVIRONMENT=development, ALLOW_UNAUTHENTICATED_REPORTING=true, and no
+        token. Anything else (including missing ENVIRONMENT) fails startup.
   parameters:
     ReportPeriod:
       name: period
@@ -703,10 +705,20 @@ components:
         line_sales_minor:
           type: integer
           description: Pre-adjustment line snapshot total; Sale-level discount/tax never allocated.
-        line_cost_minor: {type: integer}
+        line_cost_minor:
+          type: integer
+          description: Extended historical cost (unit cost × quantity); snapshot sum, not a profit basis.
     BreakdownRow:
       type: object
-      required: [dimension, units, line_sales]
+      required: [dimension, units]
+      description: >-
+        One dimension value. Two mutually exclusive financial groups exist and
+        are never mixed in one row: line-level dimensions (product,
+        root_category, subcategory) set line_sales (pre-adjustment historical
+        line amounts; Sale-level discount/tax are never allocated); header
+        dimensions (cashier, channel) set currency_totals (exact Sale-header
+        subtotal/discount/tax/sales_total). line_sales_minor always means the
+        pre-adjustment line amount wherever it appears.
       properties:
         dimension: {type: string}
         product_id: {type: string, format: uuid, nullable: true}
@@ -724,7 +736,11 @@ components:
         line_sales:
           type: array
           items: {$ref: '#/components/schemas/LineSaleTotal'}
-          description: Subcategory rows are facet-style and may sum above the line total.
+          description: Line-level dimensions only; omitted for cashier/channel. Subcategory rows are facet-style and may sum above the line total.
+        currency_totals:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyTotal'}
+          description: Cashier/channel dimensions only; omitted for product/category.
     SalesBreakdown:
       type: object
       required: [generated_at, timezone, period, dimension, rows, freshness]
