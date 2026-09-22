@@ -102,6 +102,106 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	return winner
 }
 
+// TestFirstOwnerFailureRivalConflicts is the §16 sequence: E1 claims S,
+// E1's projection fails after ownership is durable, E2 arrives and must
+// conflict without children, then E1 retries to processed. Ownership never
+// changes hands.
+func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
+	url := testURL(t)
+	pool := openPool(t, url)
+	_, authSvc := openTestRepoOnURL(t, url)
+	ctx := context.Background()
+	p, err := authSvc.Create(ctx, "shop-firstowner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := newSaleEnvOnPool(t, pool, p.Device.ID, p.Credential.ID)
+	base := fixture(t, "sale_egp.json")
+	saleID := "5aaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"
+	e1 := "51111111-1111-7111-8111-111111111111"
+	e2 := "52222222-2222-7222-8222-222222222222"
+	ingestRaw(t, env, e1, "2026-09-20T10:00:00Z",
+		variantSale(t, base, saleID, "5aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "PAP-A", 200000, 1))
+	ingestRaw(t, env, e2, "2026-09-20T10:00:01Z",
+		variantSale(t, base, saleID, "5bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "PAP-B", 300000, 1))
+
+	// Sabotage child inserts: E1's projection fails AFTER owning S.
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION fail_firstowner_line() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'injected failure';
+			RETURN NEW;
+		END; $$ LANGUAGE plpgsql;
+		CREATE TRIGGER trg_fail_firstowner BEFORE INSERT ON sale_lines_projection
+		FOR EACH ROW EXECUTE FUNCTION fail_firstowner_line();`); err != nil {
+		t.Fatal(err)
+	}
+	store := NewDevices(pool, 10*time.Second)
+	rec1, ok, err := store.LoadSaleEvent(ctx, e1)
+	if err != nil || !ok {
+		t.Fatal("load e1")
+	}
+	if _, err := store.ProjectSale(ctx, rec1, time.Now().UTC()); err == nil {
+		t.Fatal("E1 projection must fail under sabotage")
+	}
+	var owner string
+	if err := pool.QueryRow(ctx,
+		`SELECT winning_event_id::text FROM sale_event_ownership WHERE sale_id=$1`, saleID).Scan(&owner); err != nil || owner != e1 {
+		t.Fatalf("ownership must be E1 despite projection failure: %q (%v)", owner, err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM sync_event_processing WHERE event_id=$1`, e1).Scan(&status); err != nil || status != "retry" {
+		t.Fatalf("E1 must hold durable retry: %q (%v)", status, err)
+	}
+
+	// E2 arrives while E1 is unprojected: conflicts, zero children.
+	rec2, ok, err := store.LoadSaleEvent(ctx, e2)
+	if err != nil || !ok {
+		t.Fatal("load e2")
+	}
+	res2, err := store.ProjectSale(ctx, rec2, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("E2 must resolve deterministically: %v", err)
+	}
+	if res2.Outcome != sale.OutcomeBlocked || res2.ErrorCode != ErrSaleIDConflict {
+		t.Fatalf("E2 must conflict: %+v", res2)
+	}
+	var lines int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sale_lines_projection`).Scan(&lines); err != nil || lines != 0 {
+		t.Fatalf("E2 must create zero children: %d (%v)", lines, err)
+	}
+
+	// Remove sabotage, E1 retries to processed; ownership never changes.
+	if _, err := pool.Exec(ctx,
+		`DROP TRIGGER trg_fail_firstowner ON sale_lines_projection; DROP FUNCTION fail_firstowner_line();`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE sync_event_processing SET next_attempt_at = now() - interval '1 second' WHERE event_id=$1`, e1); err != nil {
+		t.Fatal(err)
+	}
+	res1, err := store.ProjectSale(ctx, rec1, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("E1 retry: %v", err)
+	}
+	if res1.Outcome != sale.OutcomeProcessed {
+		t.Fatalf("E1 must process: %+v", res1)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT winning_event_id::text FROM sale_event_ownership WHERE sale_id=$1`, saleID).Scan(&owner); err != nil || owner != e1 {
+		t.Fatalf("ownership must remain E1: %q (%v)", owner, err)
+	}
+	var sku string
+	var amount int64
+	if err := pool.QueryRow(ctx, `SELECT sku FROM sale_lines_projection WHERE sale_id=$1`, saleID).Scan(&sku); err != nil || sku != "PAP-A" {
+		t.Fatalf("winner lines: %q (%v)", sku, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT amount_minor FROM sale_payments_projection WHERE sale_id=$1`, saleID).Scan(&amount); err != nil || amount != 200000 {
+		t.Fatalf("winner payments: %d (%v)", amount, err)
+	}
+}
+
 // dumpSale renders one sale's derived rows deterministically.
 func dumpSale(t *testing.T, pool *pgxpool.Pool, saleID string) string {
 	t.Helper()

@@ -33,18 +33,42 @@ on its next wake/scan (no cross-process wake channel).
   Never hot-looped: the projection transaction rolls back, then retry state
   commits in a separate durable transaction, so restarts preserve the
   schedule and attempts never spin before due time.
-- `blocked` — deterministic integrity failure (`SALE_ID_CONFLICT`,
-  `VALIDATION_FAILED`); never retried automatically, never deleted, never
-  returned by discovery scans.
+- `blocked` — deterministic failure (`SALE_ID_CONFLICT`,
+  `VALIDATION_FAILED`, `OWNERSHIP_INTEGRITY`); never retried automatically,
+  never deleted, never returned by discovery scans.
 - `processed` — complete projection committed. Never rediscovered.
 
-## Ownership (CRIT-01)
+## Ownership
 
-Exactly one event owns a `sale_id`, decided atomically by
-`INSERT ... ON CONFLICT DO NOTHING RETURNING` inside the projection
-transaction — never SELECT-then-INSERT. The loser inserts zero children.
-Same `source_event_id` replays idempotently; any other event with the same
-sale_id becomes `SALE_ID_CONFLICT`.
+Exactly one event owns a `sale_id`, decided by a bare
+`INSERT ... ON CONFLICT DO NOTHING RETURNING` that absorbs either uniqueness
+race (same-sale rivals on `sale_id`, same-event replays on
+`winning_event_id`) — never SELECT-then-INSERT. The loser inserts zero
+children. Same `winning_event_id` replays idempotently; any other event
+with the same sale_id becomes `SALE_ID_CONFLICT`; a winner bound to a
+different sale is a deterministic `OWNERSHIP_INTEGRITY` failure.
+
+## Transaction model
+
+Two separate transactions — ownership is NOT established inside the
+projection transaction:
+
+```text
+Transaction A:
+    durable Sale ownership arbitration
+    COMMIT
+        ↓
+Transaction B:
+    derived Sale projection
+    processing-state transition
+    COMMIT / ROLLBACK
+```
+
+If projection transaction B fails and rolls back, ownership from A remains:
+that is intentional. `sale_event_ownership` is durable correctness history,
+not disposable projection state. Projection rollback does not roll back
+Sale ownership. Projection rebuild must retain `sale_event_ownership`.
+Operators must never delete ownership rows during ordinary rebuild.
 
 ## Logical sale conflict
 

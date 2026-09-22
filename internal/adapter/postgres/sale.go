@@ -114,6 +114,12 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 	// Durable arbitration first: permanent winner before any projection row.
 	winner, err := d.arbitrate(ctx, saleUID, euid, duid, now)
 	if err != nil {
+		var ierr *integrityError
+		if errors.As(err, &ierr) {
+			// Impossible invariant (winner bound to another sale): blocked
+			// deterministically, never transient, never normal replay.
+			return d.markBlocked(ctx, euid, now, ErrOwnershipIntegrity, ierr.msg)
+		}
 		return d.persistRetry(ctx, euid, now, ErrProjection, "ownership arbitration failed")
 	}
 	if winner != event.EventID {
@@ -220,12 +226,28 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 	return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 }
 
+// Deterministic ownership-integrity failure code (persisted, operational).
+const ErrOwnershipIntegrity = "OWNERSHIP_INTEGRITY"
+
+// integrityError marks the impossible invariant: winning_event_id E already
+// owns a different sale_id. Deterministic — never transient, never replay.
+type integrityError struct{ msg string }
+
+func (e *integrityError) Error() string { return e.msg }
+
 // arbitrate durably establishes the permanent winner for sale_id and returns
 // the winning event ID. The decision commits in its own transaction before
 // any projection row exists, so it survives projection rollback, restart,
-// and rebuild. First writer wins; concurrent losers serialize on the row
-// lock and read the same winner. A transient failure here decides nothing —
-// the caller persists retry state and a later attempt re-arbitrates.
+// and rebuild. First writer wins; concurrent rivals serialize and read the
+// same winner. The bare ON CONFLICT absorbs either uniqueness race:
+//
+//   - INSERT returns a row → this event just won.
+//   - no row + sale S owned by E → same event already owns: idempotent success.
+//   - no row + sale S owned by E2 ≠ E → rival owns: SALE_ID_CONFLICT downstream.
+//   - no row + no sale row + winner E owns S2 ≠ S → impossible invariant:
+//     deterministic integrity error (never transient, never replay).
+//   - no row + no sale row + no winner row → arbitration undecided
+//     (concurrent rollback): transient, re-arbitrate later.
 func (d Devices) arbitrate(ctx context.Context, saleUID, euid, duid pgtype.UUID, now time.Time) (string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -248,14 +270,38 @@ func (d Devices) arbitrate(ctx context.Context, saleUID, euid, duid pgtype.UUID,
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", transient(redact(err))
 	}
+	// No row back: determine explicit state instead of assuming failure.
 	owner, err := q.SaleOwnershipBySaleID(ctx, saleUID)
-	if err != nil {
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return "", transient(redact(err))
+		}
+		// Same event already owns (INSERT absorbed the winning_event_id
+		// race) → idempotent success; rival owner → conflict downstream.
+		return uuidString(owner.WinningEventID), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", transient(redact(err))
 	}
-	if err := tx.Commit(ctx); err != nil {
+	// No sale row: the conflict (if any) was on winning_event_id. Check
+	// whether this winner already owns a different sale.
+	byWinner, err := q.SaleOwnershipByWinner(ctx, euid)
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return "", transient(redact(err))
+		}
+		if uuidString(byWinner.SaleID) == uuidString(saleUID) {
+			// Sale row appeared between lookups and names this event:
+			// idempotent success.
+			return uuidString(euid), nil
+		}
+		return "", &integrityError{msg: "winning event already owns another sale_id"}
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", transient(redact(err))
 	}
-	return uuidString(owner.WinningEventID), nil
+	// Truly undecided (concurrent rollback race): transient, re-arbitrate.
+	return "", transient(errors.New("ownership arbitration undecided"))
 }
 
 // markBlocked records a deterministic blocked outcome (validation or

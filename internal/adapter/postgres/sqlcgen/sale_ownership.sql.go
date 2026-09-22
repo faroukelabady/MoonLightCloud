@@ -14,7 +14,7 @@ import (
 const claimSaleOwnership = `-- name: ClaimSaleOwnership :one
 INSERT INTO sale_event_ownership (sale_id, winning_event_id, winning_device_id, decided_at)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (sale_id) DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING winning_event_id
 `
 
@@ -25,10 +25,13 @@ type ClaimSaleOwnershipParams struct {
 	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
 }
 
-// Durable arbitration (P2D-HIGH-02): the INSERT decides the permanent
-// winner for a sale_id. Exactly one event ever gets a row back; losers read
-// the existing winner in the same transaction. Never delete this table on
-// rebuild: projections are disposable, ownership is not.
+// Durable arbitration (P2D-HIGH-02, P2E-MED-01): the INSERT decides the
+// permanent winner for a sale_id. The bare ON CONFLICT absorbs either
+// uniqueness race — same-sale rivals on sale_id, and same-event replays on
+// winning_event_id — returning no row in both cases. Callers must then
+// read explicit state (by sale, then by winner) instead of assuming
+// failure. Never delete this table on rebuild: projections are disposable,
+// ownership is not.
 func (q *Queries) ClaimSaleOwnership(ctx context.Context, arg ClaimSaleOwnershipParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, claimSaleOwnership,
 		arg.SaleID,
@@ -86,6 +89,26 @@ FOR UPDATE
 // concurrent arbiters serialized on the same sale_id).
 func (q *Queries) SaleOwnershipBySaleID(ctx context.Context, saleID pgtype.UUID) (SaleEventOwnership, error) {
 	row := q.db.QueryRow(ctx, saleOwnershipBySaleID, saleID)
+	var i SaleEventOwnership
+	err := row.Scan(
+		&i.SaleID,
+		&i.WinningEventID,
+		&i.WinningDeviceID,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const saleOwnershipByWinner = `-- name: SaleOwnershipByWinner :one
+SELECT sale_id, winning_event_id, winning_device_id, decided_at
+FROM sale_event_ownership WHERE winning_event_id = $1
+`
+
+// Reverse lookup for the impossible-invariant check: a winning event may
+// own exactly one sale_id. A hit here with a different sale_id is a
+// deterministic integrity failure, never idempotent success.
+func (q *Queries) SaleOwnershipByWinner(ctx context.Context, winningEventID pgtype.UUID) (SaleEventOwnership, error) {
+	row := q.db.QueryRow(ctx, saleOwnershipByWinner, winningEventID)
 	var i SaleEventOwnership
 	err := row.Scan(
 		&i.SaleID,
