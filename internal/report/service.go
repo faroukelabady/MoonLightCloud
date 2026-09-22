@@ -22,8 +22,10 @@ const (
 // Supported currencies for v1 reporting (no new currencies in Phase 3A).
 var supportedCurrencies = map[string]bool{"EGP": true, "USD": true}
 
-// CurrencyTotal is one currency bucket. EGP and USD are never summed:
-// no FX conversion rule exists for reporting.
+// CurrencyTotal is one currency bucket for summary and daily responses,
+// where extended historical line cost is computed and therefore truthful.
+// Breakdown rows never use this type (see LineSaleTotal/SaleCurrencyTotal).
+// EGP and USD are never summed: no FX conversion rule exists for reporting.
 type CurrencyTotal struct {
 	Currency        string `json:"currency"`
 	SubtotalMinor   int64  `json:"subtotal_minor"`
@@ -33,6 +35,19 @@ type CurrencyTotal struct {
 	// LineCostMinor sums historical line cost snapshots where present.
 	// It is a cost snapshot total, not a profit/margin basis.
 	LineCostMinor int64 `json:"line_cost_minor"`
+}
+
+// SaleCurrencyTotal is one currency bucket for Sale-header breakdown rows
+// (cashier, channel): exact header subtotal/discount/tax/sales_total.
+// It deliberately carries no cost field — header dimensions do not compute
+// historical cost, and a zero would falsely claim zero cost. Summary and
+// daily responses (which do compute extended cost) keep CurrencyTotal.
+type SaleCurrencyTotal struct {
+	Currency        string `json:"currency"`
+	SubtotalMinor   int64  `json:"subtotal_minor"`
+	DiscountMinor   int64  `json:"discount_minor"`
+	TaxMinor        int64  `json:"tax_minor"`
+	SalesTotalMinor int64  `json:"sales_total_minor"`
 }
 
 // PaymentTotal is tender by method. Secondary to finalized Sale totals:
@@ -132,8 +147,9 @@ type BreakdownRow struct {
 	// dimensions only; omitted otherwise).
 	LineSales []LineSaleTotal `json:"line_sales,omitempty"`
 	// CurrencyTotals holds exact Sale-header aggregates (cashier and
-	// channel dimensions only; omitted otherwise).
-	CurrencyTotals []CurrencyTotal `json:"currency_totals,omitempty"`
+	// channel dimensions only; omitted otherwise). The element type has
+	// no cost field by design: header dimensions do not compute cost.
+	CurrencyTotals []SaleCurrencyTotal `json:"currency_totals,omitempty"`
 }
 
 // LineSaleTotal is one currency bucket of line snapshot money.
@@ -458,12 +474,12 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			}
 			row.Units += r.Units
 			row.Transactions += r.Transactions
-			row.CurrencyTotals = append(row.CurrencyTotals, CurrencyTotal{
+			row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{
 				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
 				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
 		}
 		for _, row := range byKey {
-			sortCurrencyTotals(row.CurrencyTotals)
+			sortSaleCurrencyTotals(row.CurrencyTotals)
 		}
 		out.Rows = sortCashierRows(byKey, order)
 	case DimensionChannel:
@@ -483,12 +499,12 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			}
 			row.Units += r.Units
 			row.Transactions += r.Transactions
-			row.CurrencyTotals = append(row.CurrencyTotals, CurrencyTotal{
+			row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{
 				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
 				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
 		}
 		for _, row := range byKey {
-			sortCurrencyTotals(row.CurrencyTotals)
+			sortSaleCurrencyTotals(row.CurrencyTotals)
 		}
 		for _, k := range order {
 			out.Rows = append(out.Rows, *byKey[k])
@@ -518,6 +534,11 @@ func (s Service) freshness(ctx context.Context) (Freshness, error) {
 }
 
 func sortCurrencyTotals(t []CurrencyTotal) {
+	sort.Slice(t, func(i, j int) bool { return t[i].Currency < t[j].Currency })
+}
+
+// sortSaleCurrencyTotals orders header buckets alphabetically by currency.
+func sortSaleCurrencyTotals(t []SaleCurrencyTotal) {
 	sort.Slice(t, func(i, j int) bool { return t[i].Currency < t[j].Currency })
 }
 
@@ -558,7 +579,19 @@ func sortCategoryRows(byKey map[string]*BreakdownRow, order []string) []Breakdow
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units
 		}
-		return ptrStr(out[i].ClassificationID) < ptrStr(out[j].ClassificationID)
+		// Complete historical-identity tie-breaker: kind, ID, both names.
+		// Two distinct rows never compare equal, so response order cannot
+		// depend on SQL arrival order.
+		if ptrStr(out[i].ClassificationKind) != ptrStr(out[j].ClassificationKind) {
+			return ptrStr(out[i].ClassificationKind) < ptrStr(out[j].ClassificationKind)
+		}
+		if ptrStr(out[i].ClassificationID) != ptrStr(out[j].ClassificationID) {
+			return ptrStr(out[i].ClassificationID) < ptrStr(out[j].ClassificationID)
+		}
+		if ptrStr(out[i].NameAR) != ptrStr(out[j].NameAR) {
+			return ptrStr(out[i].NameAR) < ptrStr(out[j].NameAR)
+		}
+		return ptrStr(out[i].NameEN) < ptrStr(out[j].NameEN)
 	})
 	return out
 }

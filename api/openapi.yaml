@@ -708,19 +708,30 @@ components:
         line_cost_minor:
           type: integer
           description: Extended historical cost (unit cost × quantity); snapshot sum, not a profit basis.
-    BreakdownRow:
+    SaleCurrencyTotal:
       type: object
-      required: [dimension, units]
-      description: >-
-        One dimension value. Two mutually exclusive financial groups exist and
-        are never mixed in one row: line-level dimensions (product,
-        root_category, subcategory) set line_sales (pre-adjustment historical
-        line amounts; Sale-level discount/tax are never allocated); header
-        dimensions (cashier, channel) set currency_totals (exact Sale-header
-        subtotal/discount/tax/sales_total). line_sales_minor always means the
-        pre-adjustment line amount wherever it appears.
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor]
       properties:
-        dimension: {type: string}
+        currency: {type: string}
+        subtotal_minor: {type: integer}
+        discount_minor: {type: integer}
+        tax_minor: {type: integer}
+        sales_total_minor:
+          type: integer
+          description: Gross finalized sales (refunds not yet synchronized).
+      description: >-
+        Sale-header currency bucket for cashier/channel rows. No cost field
+        by design: header dimensions do not compute historical cost.
+    LineBreakdownRow:
+      type: object
+      required: [dimension, units, line_sales]
+      description: >-
+        Line-level dimension row (product, root_category, subcategory).
+        line_sales carries pre-adjustment historical line amounts;
+        Sale-level discount/tax are never allocated. Never carries
+        currency_totals.
+      properties:
+        dimension: {type: string, enum: [product, root_category, subcategory]}
         product_id: {type: string, format: uuid, nullable: true}
         sku: {type: string, nullable: true}
         product_name: {type: string, nullable: true}
@@ -728,19 +739,36 @@ components:
         classification_id: {type: string, format: uuid}
         name_ar: {type: string}
         name_en: {type: string}
-        cashier_id: {type: string, nullable: true, description: Null means unattributed bucket.}
-        cashier_name: {type: string, nullable: true}
-        channel: {type: string}
-        transactions: {type: integer, description: Header-additive dimensions (cashier, channel) only.}
         units: {type: integer}
         line_sales:
           type: array
           items: {$ref: '#/components/schemas/LineSaleTotal'}
-          description: Line-level dimensions only; omitted for cashier/channel. Subcategory rows are facet-style and may sum above the line total.
+          description: Subcategory rows are facet-style and may sum above the line total.
+    HeaderBreakdownRow:
+      type: object
+      required: [dimension, transactions, units, currency_totals]
+      description: >-
+        Sale-header dimension row (cashier, channel). currency_totals
+        carries exact header subtotal/discount/tax/sales_total. Never
+        carries line_sales or any cost field.
+      properties:
+        dimension: {type: string, enum: [cashier, channel]}
+        cashier_id: {type: string, nullable: true, description: Null means unattributed bucket.}
+        cashier_name: {type: string, nullable: true}
+        channel: {type: string}
+        transactions: {type: integer}
+        units: {type: integer}
         currency_totals:
           type: array
-          items: {$ref: '#/components/schemas/CurrencyTotal'}
-          description: Cashier/channel dimensions only; omitted for product/category.
+          items: {$ref: '#/components/schemas/SaleCurrencyTotal'}
+    BreakdownRow:
+      oneOf:
+        - $ref: '#/components/schemas/LineBreakdownRow'
+        - $ref: '#/components/schemas/HeaderBreakdownRow'
+      description: >-
+        One dimension value, structurally split by family. Consumers must
+        not infer shape from dimension names alone: validate against the
+        oneOf branches.
     SalesBreakdown:
       type: object
       required: [generated_at, timezone, period, dimension, rows, freshness]

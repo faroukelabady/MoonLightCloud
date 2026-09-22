@@ -2,13 +2,27 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// reportErr classifies reporting storage failures: connection-level and
+// cancellation/timeout failures are transient (503, retryable); everything
+// else (overflow casts, unexpected planner errors) is a 500. Driver
+// internals never cross the boundary (see redact).
+func reportErr(op string, err error) error {
+	var ce *pgconn.ConnectError
+	if errors.As(err, &ce) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return apperr.Wrap(apperr.Unavailable, op+" temporarily unavailable", redact(err))
+	}
+	return apperr.Wrap(apperr.Internal, op, redact(err))
+}
 
 // Reporting implements report.Repository with static aggregate queries.
 // Currency ” means all currencies (rows stay bucketed; never summed).
@@ -19,7 +33,7 @@ func (d Devices) SalesSummary(ctx context.Context, startUTC, endUTC time.Time, c
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales summary", redact(err))
+		return nil, reportErr("sales summary", err)
 	}
 	out := make([]report.SummaryRow, 0, len(rows))
 	for _, r := range rows {
@@ -39,7 +53,7 @@ func (d Devices) SalesPayments(ctx context.Context, startUTC, endUTC time.Time, 
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales payments", redact(err))
+		return nil, reportErr("sales payments", err)
 	}
 	out := make([]report.PaymentRow, 0, len(rows))
 	for _, r := range rows {
@@ -57,7 +71,7 @@ func (d Devices) SalesDaily(ctx context.Context, startUTC, endUTC time.Time, cur
 		Timezone: timezone, StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales daily", redact(err))
+		return nil, reportErr("sales daily", err)
 	}
 	out := make([]report.DailyRowRaw, 0, len(rows))
 	for _, r := range rows {
@@ -77,7 +91,7 @@ func (d Devices) SalesByProduct(ctx context.Context, startUTC, endUTC time.Time,
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales by product", redact(err))
+		return nil, reportErr("sales by product", err)
 	}
 	out := make([]report.ProductRow, 0, len(rows))
 	for _, r := range rows {
@@ -99,7 +113,7 @@ func categoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC 
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind, Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales by category", redact(err))
+		return nil, reportErr("sales by category", err)
 	}
 	out := make([]report.CategoryRow, 0, len(rows))
 	for _, r := range rows {
@@ -130,7 +144,7 @@ func (d Devices) SalesByCashier(ctx context.Context, startUTC, endUTC time.Time,
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales by cashier", redact(err))
+		return nil, reportErr("sales by cashier", err)
 	}
 	out := make([]report.CashierRow, 0, len(rows))
 	for _, r := range rows {
@@ -159,7 +173,7 @@ func (d Devices) SalesByChannel(ctx context.Context, startUTC, endUTC time.Time,
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
 	})
 	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "sales by channel", redact(err))
+		return nil, reportErr("sales by channel", err)
 	}
 	out := make([]report.ChannelRow, 0, len(rows))
 	for _, r := range rows {
@@ -177,7 +191,7 @@ func (d Devices) SalesProjectionFreshness(ctx context.Context) (report.Freshness
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).ReportFreshness(ctx, sale.ProcessorSaleProjectionV1)
 	if err != nil {
-		return report.FreshnessRow{}, apperr.Wrap(apperr.Internal, "projection freshness", redact(err))
+		return report.FreshnessRow{}, reportErr("projection freshness", err)
 	}
 	out := report.FreshnessRow{Backlog: r.Backlog, Blocked: r.Blocked}
 	if r.LatestReceived.Valid {

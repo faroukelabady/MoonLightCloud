@@ -61,14 +61,18 @@ may sum above line totals; root-category rows are additive.
 
 ## Breakdown financial model
 
-Two mutually exclusive row shapes (never mixed):
+Two mutually exclusive row shapes (never mixed, enforced by OpenAPI
+`oneOf` over `LineBreakdownRow` / `HeaderBreakdownRow`):
 
 - `product`, `root_category`, `subcategory` rows carry `line_sales`:
   pre-adjustment historical line amounts (`line_sales_minor` always means
-  this). Sale-level discount/tax are never allocated to lines.
+  this) plus extended `line_cost_minor`. Sale-level discount/tax are never
+  allocated to lines. No header buckets on these rows.
 - `cashier`, `channel` rows carry `currency_totals` with exact header
   `subtotal_minor` / `discount_minor` / `tax_minor` / `sales_total_minor`
-  plus `transactions` and `units`. No `line_sales` on these rows.
+  plus `transactions` and `units`. No `line_sales` and no cost field on
+  these rows: header dimensions do not compute cost, so no field claims
+  otherwise (a zero would falsely mean zero cost).
 
 ## Cost semantics
 

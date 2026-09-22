@@ -220,7 +220,7 @@ func TestIntegratedAdversarialFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cv := map[string]report.CurrencyTotal{}
+	cv := map[string]report.SaleCurrencyTotal{}
 	var amalTxns int64
 	for _, r := range cash.Rows {
 		if r.CashierName != nil && *r.CashierName == "Amal" {

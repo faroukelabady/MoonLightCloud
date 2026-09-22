@@ -3,10 +3,13 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
@@ -313,11 +316,172 @@ func assertBucketOrder(t *testing.T, dim string, buckets []report.LineSaleTotal)
 	}
 }
 
-func assertCurrencyTotalOrder(t *testing.T, dim string, buckets []report.CurrencyTotal) {
+func assertCurrencyTotalOrder(t *testing.T, dim string, buckets []report.SaleCurrencyTotal) {
 	t.Helper()
 	for i := 1; i < len(buckets); i++ {
 		if buckets[i-1].Currency >= buckets[i].Currency {
 			t.Fatalf("%s header buckets unordered: %+v", dim, buckets)
 		}
+	}
+}
+
+// TestM2NoFalseZeroCost serializes real cashier/channel responses and
+// proves line_cost_minor never appears (not even as zero), while
+// line-level rows keep truthful extended cost and no header keys.
+func TestM2NoFalseZeroCost(t *testing.T) {
+	env := openSaleEnv(t)
+	auditSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", "EGP")
+	svc := repService(env)
+	req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
+	for _, dim := range []string{report.DimensionCashier, report.DimensionChannel} {
+		res, err := svc.Breakdown(context.Background(), req, dim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range body["rows"].([]any) {
+			row := r.(map[string]any)
+			if _, ok := row["line_cost_minor"]; ok {
+				t.Fatalf("%s row leaks line_cost_minor: %v", dim, row)
+			}
+			if _, ok := row["line_sales"]; ok {
+				t.Fatalf("%s row leaks line_sales: %v", dim, row)
+			}
+			ct := row["currency_totals"].([]any)[0].(map[string]any)
+			for _, k := range []string{"currency", "subtotal_minor", "discount_minor", "tax_minor", "sales_total_minor"} {
+				if _, ok := ct[k]; !ok {
+					t.Fatalf("%s bucket missing %s: %v", dim, k, ct)
+				}
+			}
+		}
+	}
+	for _, dim := range []string{report.DimensionProduct, report.DimensionRootCategory, report.DimensionSubcategory} {
+		res, err := svc.Breakdown(context.Background(), req, dim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(res)
+		var body map[string]any
+		_ = json.Unmarshal(raw, &body)
+		for _, r := range body["rows"].([]any) {
+			row := r.(map[string]any)
+			if _, ok := row["currency_totals"]; ok {
+				t.Fatalf("%s row leaks header buckets: %v", dim, row)
+			}
+			ls := row["line_sales"].([]any)[0].(map[string]any)
+			for _, k := range []string{"currency", "line_sales_minor", "line_cost_minor"} {
+				if _, ok := ls[k]; !ok {
+					t.Fatalf("%s bucket missing %s: %v", dim, k, ls)
+				}
+			}
+			for _, k := range []string{"subtotal_minor", "discount_minor", "tax_minor", "sales_total_minor"} {
+				if _, ok := ls[k]; ok {
+					t.Fatalf("%s bucket leaks header key %s: %v", dim, k, ls)
+				}
+			}
+		}
+	}
+}
+
+// TestL2EqualUnitRenameOrdering proves equal-unit renamed category rows
+// keep one exact top-level order across repeated executions.
+func TestL2EqualUnitRenameOrdering(t *testing.T) {
+	for _, tc := range []struct {
+		dimension string
+		group     string
+		newName   string
+		oldName   string
+	}{
+		{report.DimensionRootCategory, "roots", "New Root", "Old Root"},
+		{report.DimensionSubcategory, "subcategories", "New Sub", "Old Sub"},
+	} {
+		t.Run(tc.dimension, func(t *testing.T) {
+			env := openSaleEnv(t)
+			mkSale := func(saleID, name string) {
+				projectSale(t, env, saleID, "2026-09-20T10:00:00Z", func(m map[string]any) {
+					line := m["lines"].([]any)[0].(map[string]any)
+					groups := map[string]any{
+						"roots": []any{map[string]any{
+							"category_id": "00000000-0000-0000-0000-000000000102",
+							"name_ar":     "ثابت", "name_en": "Constant",
+						}},
+						"subcategories": []any{},
+					}
+					groups[tc.group] = []any{map[string]any{
+						"category_id": "00000000-0000-0000-0000-000000000101",
+						"name_ar":     "x-" + name, "name_en": name,
+					}}
+					line["classifications"] = groups
+				})
+			}
+			// Equal units (fixture qty 2 each), same ID, different names.
+			mkSale("11111111-1111-4111-8111-111111111111", tc.newName)
+			mkSale("22222222-2222-4222-8222-222222222222", tc.oldName)
+			svc := repService(env)
+			var first []string
+			for i := 0; i < 5; i++ {
+				req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
+				res, err := svc.Breakdown(context.Background(), req, tc.dimension)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var order []string
+				for _, r := range res.Rows {
+					id := ""
+					if r.ClassificationID != nil {
+						id = *r.ClassificationID
+					}
+					nm := ""
+					if r.NameEN != nil {
+						nm = *r.NameEN
+					}
+					order = append(order, id+"/"+nm)
+				}
+				if first == nil {
+					first = order
+					continue
+				}
+				if strings.Join(first, "|") != strings.Join(order, "|") {
+					t.Fatalf("order changed across executions: %v vs %v", first, order)
+				}
+			}
+			// Complete tie-break: names decide (New < Old alphabetically).
+			if len(first) != 2 || !strings.HasSuffix(first[0], tc.newName) {
+				t.Fatalf("expected name tie-break order, got %v", first)
+			}
+		})
+	}
+}
+
+// TestReportDBFailureSafeEnvelope proves a dead database yields a
+// classified 5xx error (503 for typed transient failures, 500 otherwise),
+// never SQL internals.
+func TestReportDBFailureSafeEnvelope(t *testing.T) {
+	env := openSaleEnv(t)
+	env.pool.Close() // simulate database outage
+	svc := repService(env)
+	req, err := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Summary(context.Background(), req)
+	if err == nil {
+		t.Fatal("dead database must fail")
+	}
+	var ae *apperr.Error
+	if !errors.As(err, &ae) ||
+		(ae.Kind != apperr.Unavailable && ae.Kind != apperr.Internal) {
+		t.Fatalf("must be classified 5xx, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "SELECT") {
+		t.Fatalf("must not leak driver internals: %v", err)
 	}
 }
