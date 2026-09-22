@@ -11,6 +11,8 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
+	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // auditSale projects a fixture sale with the audit shape: line sum 200000,
@@ -483,5 +485,50 @@ func TestReportDBFailureSafeEnvelope(t *testing.T) {
 	if strings.Contains(err.Error(), "connection refused") ||
 		strings.Contains(err.Error(), "SELECT") {
 		t.Fatalf("must not leak driver internals: %v", err)
+	}
+}
+
+// TestReportConnectionRefusedIs503 proves a real PostgreSQL outage (refused
+// connection) classifies as UNAVAILABLE with a generic safe message.
+func TestReportConnectionRefusedIs503(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(),
+		"postgres://moonlight:moonlight@127.0.0.1:1/moonlight_dev?sslmode=disable&connect_timeout=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	store := NewDevices(pool, 5*time.Second)
+	_, err = store.SalesSummary(context.Background(), time.Now(), time.Now(), "")
+	if err == nil {
+		t.Fatal("refused connection must fail")
+	}
+	ae, ok := err.(*apperr.Error)
+	if !ok || ae.Kind != apperr.Unavailable || ae.Code() != "UNAVAILABLE" {
+		t.Fatalf("want 503 UNAVAILABLE, got: %v", err)
+	}
+	for _, leak := range []string{"127.0.0.1", "moonlight", "connection refused", "SELECT", "sales_projection"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("leaks %q: %v", leak, err)
+		}
+	}
+}
+
+// TestReportMissingTablesIs500 proves an internal query failure (schema
+// object absent) classifies as INTERNAL, never 503/success/4xx.
+func TestReportMissingTablesIs500(t *testing.T) {
+	url := testutil.Raw(t) // empty database, no migrations
+	pool, err := pgxpool.New(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	store := NewDevices(pool, 5*time.Second)
+	_, err = store.SalesSummary(context.Background(), time.Now(), time.Now(), "")
+	if err == nil {
+		t.Fatal("missing tables must fail")
+	}
+	ae, ok := err.(*apperr.Error)
+	if !ok || ae.Kind != apperr.Internal || ae.Code() != "INTERNAL" {
+		t.Fatalf("want 500 INTERNAL, got: %v", err)
 	}
 }

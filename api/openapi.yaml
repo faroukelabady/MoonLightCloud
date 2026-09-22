@@ -202,6 +202,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal reporting failure (e.g. aggregate overflow). Generic envelope, no internals. Not retryable as-is.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary reporting dependency unavailable (PostgreSQL unreachable/timeout). Generic UNAVAILABLE envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/reports/sales/daily:
     get:
       summary: Daily finalized-sales series (store-local dates, ascending)
@@ -232,6 +244,18 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: Missing or invalid reporting credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal reporting failure (e.g. aggregate overflow). Generic envelope, no internals. Not retryable as-is.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary reporting dependency unavailable (PostgreSQL unreachable/timeout). Generic UNAVAILABLE envelope. Retry with backoff.
           content:
             application/json:
               schema:
@@ -274,6 +298,18 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: Missing or invalid reporting credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal reporting failure (e.g. aggregate overflow). Generic envelope, no internals. Not retryable as-is.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary reporting dependency unavailable (PostgreSQL unreachable/timeout). Generic UNAVAILABLE envelope. Retry with backoff.
           content:
             application/json:
               schema:
@@ -699,6 +735,7 @@ components:
         freshness: {$ref: '#/components/schemas/Freshness'}
     LineSaleTotal:
       type: object
+      additionalProperties: false
       required: [currency, line_sales_minor, line_cost_minor]
       properties:
         currency: {type: string}
@@ -710,6 +747,7 @@ components:
           description: Extended historical cost (unit cost × quantity); snapshot sum, not a profit basis.
     SaleCurrencyTotal:
       type: object
+      additionalProperties: false
       required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor]
       properties:
         currency: {type: string}
@@ -724,6 +762,7 @@ components:
         by design: header dimensions do not compute historical cost.
     LineBreakdownRow:
       type: object
+      additionalProperties: false
       required: [dimension, units, line_sales]
       description: >-
         Line-level dimension row (product, root_category, subcategory).
@@ -746,6 +785,7 @@ components:
           description: Subcategory rows are facet-style and may sum above the line total.
     HeaderBreakdownRow:
       type: object
+      additionalProperties: false
       required: [dimension, transactions, units, currency_totals]
       description: >-
         Sale-header dimension row (cashier, channel). currency_totals

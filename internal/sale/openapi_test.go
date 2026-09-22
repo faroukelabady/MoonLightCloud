@@ -73,3 +73,50 @@ func TestOpenAPIEventModel(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenAPIBreakdownExclusivity pins the F1 contract in the committed
+// spec: the four breakdown shapes reject unknown properties, and rows
+// split over an exclusive oneOf. Structural companion to the runtime
+// key-set test in the http adapter package.
+func TestOpenAPIBreakdownExclusivity(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	for _, schema := range []string{
+		"LineSaleTotal:", "SaleCurrencyTotal:", "LineBreakdownRow:", "HeaderBreakdownRow:",
+	} {
+		block := sectionAfter(spec, schema)
+		if !strings.Contains(block, "additionalProperties: false") {
+			t.Fatalf("%s must set additionalProperties: false", schema)
+		}
+	}
+	if !strings.Contains(spec, "oneOf:") {
+		t.Fatal("breakdown rows must split over oneOf")
+	}
+	if !strings.Contains(spec, "- $ref: '#/components/schemas/LineBreakdownRow'") ||
+		!strings.Contains(spec, "- $ref: '#/components/schemas/HeaderBreakdownRow'") {
+		t.Fatal("oneOf must reference exactly the two row branches")
+	}
+}
+
+// sectionAfter returns the spec text following a schema header, bounded at
+// the next same-indent schema key, so assertions stay scoped.
+func sectionAfter(spec, header string) string {
+	idx := strings.Index(spec, "    "+header)
+	if idx < 0 {
+		return ""
+	}
+	rest := spec[idx:]
+	// Same-indent keys are "\n" + exactly 4 spaces + non-space.
+	for i := len(header) + 4; i+5 < len(rest); i++ {
+		if rest[i] == '\n' && rest[i+1] == ' ' && rest[i+2] == ' ' &&
+			rest[i+3] == ' ' && rest[i+4] == ' ' && rest[i+5] != ' ' {
+			return rest[:i]
+		}
+	}
+	return rest
+}
+
+var _ = json.Marshal

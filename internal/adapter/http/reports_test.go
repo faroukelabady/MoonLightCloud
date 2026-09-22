@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
@@ -226,5 +227,132 @@ func TestBreakdownDTOShapesMatchOpenAPI(t *testing.T) {
 	}
 	if _, ok := prodRow["currency_totals"]; ok {
 		t.Fatal("product row must not carry currency_totals")
+	}
+}
+
+// TestBreakdownNegativeRowContract enforces the F1 split at runtime using
+// exact key sets: valid rows carry only their family's keys, and any
+// cross-shape mixture is rejected. Structural companion to the OpenAPI
+// additionalProperties/oneOf assertions.
+func TestBreakdownNegativeRowContract(t *testing.T) {
+	loc, _ := time.LoadLocation("Africa/Cairo")
+	svc := report.NewService(shapeRepo{}, clock.Fixed{T: time.Date(2026, 9, 22, 7, 0, 0, 0, time.UTC)}, loc)
+	h := NewReportHandlers(svc, slog.Default())
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/reports/sales/breakdown", ReportAuth("test-token-0123456789")(http.HandlerFunc(h.SalesBreakdown)))
+
+	lineKeys := map[string]bool{"dimension": true, "units": true, "line_sales": true,
+		"product_id": true, "sku": true, "product_name": true,
+		"classification_kind": true, "classification_id": true, "name_ar": true, "name_en": true}
+	headerKeys := map[string]bool{"dimension": true, "units": true, "transactions": true,
+		"currency_totals": true, "cashier_id": true, "cashier_name": true, "channel": true}
+	lineBucketKeys := map[string]bool{"currency": true, "line_sales_minor": true, "line_cost_minor": true}
+	headerBucketKeys := map[string]bool{"currency": true, "subtotal_minor": true, "discount_minor": true,
+		"tax_minor": true, "sales_total_minor": true}
+
+	check := func(dim string, isLine bool) {
+		rec := getReport(t, mux,
+			"/api/v1/reports/sales/breakdown?period=today&dimension="+dim, "test-token-0123456789")
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d", dim, rec.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		rows := body["rows"].([]any)
+		if len(rows) == 0 {
+			t.Fatalf("%s: no rows", dim)
+		}
+		for _, r := range rows {
+			row := r.(map[string]any)
+			allowed := lineKeys
+			forbidden := "currency_totals"
+			if !isLine {
+				allowed = headerKeys
+				forbidden = "line_sales"
+			}
+			for k := range row {
+				if !allowed[k] {
+					t.Fatalf("%s row carries forbidden key %q: %v", dim, k, row)
+				}
+			}
+			if _, ok := row[forbidden]; ok {
+				t.Fatalf("%s row carries %s: %v", dim, forbidden, row)
+			}
+			bucketKey := "line_sales"
+			if !isLine {
+				bucketKey = "currency_totals"
+			}
+			buckets, ok := row[bucketKey].([]any)
+			if !ok || len(buckets) == 0 {
+				t.Fatalf("%s row missing buckets: %v", dim, row)
+			}
+			wantKeys := lineBucketKeys
+			if !isLine {
+				wantKeys = headerBucketKeys
+			}
+			for _, b := range buckets {
+				bm := b.(map[string]any)
+				if len(bm) != len(wantKeys) {
+					t.Fatalf("%s bucket key count: %v", dim, bm)
+				}
+				for k := range bm {
+					if !wantKeys[k] {
+						t.Fatalf("%s bucket carries forbidden key %q: %v", dim, k, bm)
+					}
+				}
+			}
+		}
+	}
+	check("product", true)
+	check("cashier", false)
+}
+
+// errRepo injects storage failures for error-contract tests.
+type errRepo struct {
+	stubReportRepo
+	err error
+}
+
+func (e errRepo) SalesSummary(context.Context, time.Time, time.Time, string) ([]report.SummaryRow, error) {
+	return nil, e.err
+}
+
+// TestReportServerErrorEnvelope proves 500/503 map to the shared envelope
+// schema with stable codes and no internals.
+func TestReportServerErrorEnvelope(t *testing.T) {
+	loc, _ := time.LoadLocation("Africa/Cairo")
+	mk := func(err error) http.Handler {
+		svc := report.NewService(errRepo{err: err},
+			clock.Fixed{T: time.Date(2026, 9, 22, 7, 0, 0, 0, time.UTC)}, loc)
+		h := NewReportHandlers(svc, slog.Default())
+		mux := http.NewServeMux()
+		mux.Handle("GET /api/v1/reports/sales/summary",
+			ReportAuth("test-token-0123456789")(http.HandlerFunc(h.SalesSummary)))
+		return mux
+	}
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"unavailable", apperr.New(apperr.Unavailable, "sales summary temporarily unavailable"), 503, "UNAVAILABLE"},
+		{"internal", apperr.New(apperr.Internal, "sales summary"), 500, "INTERNAL"},
+	}
+	for _, tc := range cases {
+		rec := getReport(t, mk(tc.err),
+			"/api/v1/reports/sales/summary?period=today", "test-token-0123456789")
+		if rec.Code != tc.status {
+			t.Fatalf("%s: want %d, got %d", tc.name, tc.status, rec.Code)
+		}
+		var env Envelope
+		if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+			t.Fatalf("%s: body must be the shared envelope: %v", tc.name, err)
+		}
+		if env.Error.Code != tc.code || env.Error.Message == "" {
+			t.Fatalf("%s: envelope fields: %+v", tc.name, env)
+		}
 	}
 }

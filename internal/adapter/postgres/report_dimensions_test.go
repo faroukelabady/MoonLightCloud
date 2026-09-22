@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
@@ -303,5 +305,12 @@ func TestReportAggregateOverflow(t *testing.T) {
 	}
 	if _, err := svc.Summary(context.Background(), req); err == nil {
 		t.Fatal("overflowing aggregates must fail explicitly, never wrap")
+	} else {
+		// Financial overflow is an internal processing failure (500),
+		// never a dependency outage (503) and never success-with-zero.
+		var ae *apperr.Error
+		if !errors.As(err, &ae) || ae.Kind != apperr.Internal {
+			t.Fatalf("overflow must classify INTERNAL, got: %v", err)
+		}
 	}
 }

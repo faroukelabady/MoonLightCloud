@@ -59,6 +59,23 @@ Terminology is gross finalized sales: refunds are not yet synchronized
 (Phase 4B introduces net reporting). Subcategory rows are facet-style and
 may sum above line totals; root-category rows are additive.
 
+## Failure policy (500 vs 503)
+
+Report routes share the common error envelope (`error.code`,
+`error.message`); neither status ever carries SQL, connection strings,
+table names, or traces:
+
+- `503 UNAVAILABLE` — temporary dependency outage: PostgreSQL
+  unreachable, connection acquisition failure, deadline/cancellation of
+  storage work. Generic message, safe to retry with backoff.
+- `500 INTERNAL` — the query ran but hit an unexpected internal failure
+  (e.g. aggregate overflow beyond int64, invariant/scan failure).
+  Generic message, not retryable as-is.
+
+Client cancellation surfaces through normal request-context handling; a
+disconnected client simply stops receiving. Overflow is deterministic
+internal failure, never success-with-zero and never 503.
+
 ## Breakdown financial model
 
 Two mutually exclusive row shapes (never mixed, enforced by OpenAPI
