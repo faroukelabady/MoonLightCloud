@@ -56,6 +56,17 @@ const (
 	CurrentPepperVersion = 1
 )
 
+// Store timezone rules. Business days are IANA calendar days in the store
+// timezone; production (Africa/Cairo) requires an explicit value.
+// Development defaults to Africa/Cairo. Nothing ever falls back to UTC,
+// system local time, or fixed offsets: LoadLocation failure fails startup.
+const (
+	// DefaultStoreTimezone is the development/test default.
+	DefaultStoreTimezone = "Africa/Cairo"
+	// MinReportingTokenLen requires a high-entropy reporting token.
+	MinReportingTokenLen = 16
+)
+
 var devDBMarkers = []string{
 	"moonlight:moonlight@",
 	"postgres:postgres@",
@@ -73,7 +84,15 @@ type Config struct {
 	PepperRaw     string
 	Pepper        []byte
 	PepperVersion int
-	ShutdownAfter time.Duration
+	// StoreTimezone is the IANA identifier for business-day semantics.
+	StoreTimezone string
+	// StoreLocation is the resolved timezone; never nil after Validate.
+	StoreLocation *time.Location
+	// ReportingToken is the temporary report-read Bearer secret. Empty is
+	// allowed only in development (open reports with a startup warning);
+	// staging/production require an explicit high-entropy value.
+	ReportingToken string
+	ShutdownAfter  time.Duration
 
 	DBMaxConns       int32
 	DBMinConns       int32
@@ -92,6 +111,8 @@ func Load() (Config, error) {
 		LogLevel:         strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
 		PepperRaw:        strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
 		PepperVersion:    CurrentPepperVersion,
+		StoreTimezone:    strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
+		ReportingToken:   strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
 		ShutdownAfter:    DefaultShutdownTimeout,
 		DBMaxConns:       DefaultDBMaxConns,
 		DBMinConns:       DefaultDBMinConns,
@@ -169,6 +190,12 @@ func (c *Config) Validate() error {
 	if err := c.resolvePepper(); err != nil {
 		return err
 	}
+	if err := c.resolveStoreTimezone(); err != nil {
+		return err
+	}
+	if err := c.resolveReportingToken(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -196,6 +223,44 @@ func (c *Config) resolvePepper() error {
 		return fmt.Errorf("DEVICE_SECRET_PEPPER must decode to %d bytes, got %d", PepperBytes, len(decoded))
 	}
 	c.Pepper = decoded
+	return nil
+}
+
+// resolveStoreTimezone applies the timezone policy: explicit value in
+// staging/production, Africa/Cairo default in development. Resolution uses
+// time.LoadLocation against the IANA database; any failure fails startup
+// (never UTC, never system local, never fixed offsets).
+func (c *Config) resolveStoreTimezone() error {
+	tz := c.StoreTimezone
+	if tz == "" {
+		if c.Environment == EnvDevelopment {
+			tz = DefaultStoreTimezone
+		} else {
+			return fmt.Errorf("STORE_TIMEZONE is required outside development")
+		}
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return fmt.Errorf("invalid STORE_TIMEZONE %q: %w", tz, err)
+	}
+	c.StoreTimezone = tz
+	c.StoreLocation = loc
+	return nil
+}
+
+// resolveReportingToken enforces the temporary reporting guard: an explicit
+// high-entropy Bearer secret outside development; development may leave it
+// empty (reports unauthenticated, with a startup warning from the caller).
+func (c *Config) resolveReportingToken() error {
+	if c.ReportingToken == "" {
+		if c.Environment == EnvDevelopment {
+			return nil
+		}
+		return fmt.Errorf("REPORTING_API_TOKEN is required outside development")
+	}
+	if len(c.ReportingToken) < MinReportingTokenLen {
+		return fmt.Errorf("REPORTING_API_TOKEN must be at least %d characters", MinReportingTokenLen)
+	}
 	return nil
 }
 

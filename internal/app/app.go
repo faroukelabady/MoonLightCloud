@@ -21,6 +21,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
+	"github.com/faroukelabady/MoonLightCloud/internal/report"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,6 +43,7 @@ type App struct {
 	Pool      *pgxpool.Pool
 	Devices   auth.Service
 	Sync      sync.Service
+	Reports   report.Service
 	Projector *sale.Projector
 	SaleStore sale.Store
 	Handler   http.Handler
@@ -71,12 +73,14 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
+	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
-	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify)
+	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify,
+		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

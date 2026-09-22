@@ -8,7 +8,8 @@ is solved for features that do not exist yet.
 | Threat | Current mitigation |
 |---|---|
 | Stolen device secret | 256-bit random; HMAC-SHA256 salted verifier at rest; 32B base64 pepper required outside dev; revocation immediate; rotation bounds exposure window |
-| Credential leakage in logs | Never log secrets/headers/DATABASE_URL/pepper; info allowlist only, device_id at debug; tests assert envelope/handler behavior |
+| Credential leakage in logs | Never log secrets/headers/DATABASE_URL/pepper/reporting tokens; info allowlist only, device_id at debug; tests assert envelope/handler behavior |
+| Reporting token exposure | Temporary report-read Bearer, high-entropy (16+ chars), constant-time compare, required outside dev, never logged, report scope only; device credentials rejected on report routes |
 | DB credential leakage | `.env.local` never committed; `.env.example` placeholders; prod refuses dev markers; Desktop never receives DATABASE_URL |
 | SQL injection | sqlc parameterized queries + pgx; no string-built SQL |
 | Unauthorized device | Bearer `<device>.<credential>.<secret>` verified per request; all failures same 401 without enumeration |

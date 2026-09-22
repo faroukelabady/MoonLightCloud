@@ -28,6 +28,11 @@ import (
 	"syscall"
 	"time"
 
+	// Embedded IANA timezone database: the distroless runtime ships no
+	// zoneinfo files, so Africa/Cairo (and any STORE_TIMEZONE) resolves
+	// deterministically inside the production image.
+	_ "time/tzdata"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"

@@ -21,3 +21,4 @@ Concise, irreversible-or-important choices only.
 - [0017](0017-canonical-hash-compat.md) — exact canonical JSON + payload-hash compatibility (compat rule superseded by 0019)
 - [0018](0018-durable-sale-ownership.md) — durable Sale ownership arbitration
 - [0019](0019-fail-closed-legacy-hash.md) — fail-closed legacy payload-hash policy
+- [0020](0020-reporting-time-semantics.md) — sales reporting and store-timezone semantics

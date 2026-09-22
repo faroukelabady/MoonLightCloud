@@ -166,6 +166,118 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/reports/sales/summary:
+    get:
+      summary: Finalized-sales summary for a business period
+      operationId: salesSummary
+      security:
+        - reportAuth: []
+      description: >-
+        Gross finalized sales (refunds not yet synchronized). Money in
+        integer minor units, EGP and USD in separate buckets, never summed.
+        Business days are STORE_TIMEZONE calendar days; timestamps are the
+        sale occurred_at instants. Includes Cloud projection-freshness
+        metadata (which does not prove Desktop sync completeness).
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/ReportCurrency'
+      responses:
+        '200':
+          description: Summary with currency buckets, payment totals, freshness.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesSummary'
+        '400':
+          description: Invalid period, dates, range, or currency.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid reporting credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/reports/sales/daily:
+    get:
+      summary: Daily finalized-sales series (store-local dates, ascending)
+      operationId: salesDaily
+      security:
+        - reportAuth: []
+      description: >-
+        One row per store-local calendar date derived from occurred_at in
+        STORE_TIMEZONE (never UTC date). Days group exactly the sales whose
+        business timestamp falls in [local midnight, next local midnight).
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/ReportCurrency'
+      responses:
+        '200':
+          description: Daily rows with per-currency buckets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesDaily'
+        '400':
+          description: Invalid period, dates, range, or currency.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid reporting credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/reports/sales/breakdown:
+    get:
+      summary: Dimension breakdown of finalized sales
+      operationId: salesBreakdown
+      security:
+        - reportAuth: []
+      description: >-
+        Fixed dimensions only (product, root_category, subcategory, cashier,
+        channel). Historical snapshots only. Root-category rows are additive;
+        subcategory rows are facet-style and may sum above the line total.
+        Product line_sales_minor excludes Sale-level discount/tax (no
+        allocation). Unattributed sales form an explicit null cashier bucket.
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/ReportCurrency'
+        - name: dimension
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [product, root_category, subcategory, cashier, channel]
+      responses:
+        '200':
+          description: Dimension rows, units descending with identity tie-break.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesBreakdown'
+        '400':
+          description: Invalid period, dates, range, currency, or dimension.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid reporting credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 components:
   securitySchemes:
     deviceAuth:
@@ -175,6 +287,50 @@ components:
       description: >-
         Authorization: Bearer <device_uuid>.<credential_uuid>.<64-hex secret>.
         Never in query parameters. HTTPS in production.
+    reportAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 'REPORTING_API_TOKEN (temporary report-read secret until dashboard user auth)'
+      description: >-
+        Authorization: Bearer <reporting-api-token>. Report scope only;
+        device sync credentials are never valid here. Required outside
+        development.
+  parameters:
+    ReportPeriod:
+      name: period
+      in: query
+      required: true
+      schema:
+        type: string
+        enum: [today, yesterday, last_10_completed_days, custom]
+      description: >-
+        today = local midnight through request now; yesterday = prior local
+        day; last_10_completed_days = 10 completed local dates ending at
+        today midnight (excludes the partial day); custom needs from/to dates.
+    ReportFromDate:
+      name: from_date
+      in: query
+      required: false
+      schema:
+        type: string
+        example: 2026-09-01
+      description: Inclusive local date (YYYY-MM-DD) for period=custom.
+    ReportToDate:
+      name: to_date
+      in: query
+      required: false
+      schema:
+        type: string
+        example: 2026-09-15
+      description: Inclusive local date (YYYY-MM-DD) for period=custom. Max 366 days.
+    ReportCurrency:
+      name: currency
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [EGP, USD]
+      description: Optional single-currency filter. Absent means all currencies in separate buckets.
   schemas:
     Status:
       type: object
@@ -455,3 +611,130 @@ components:
         sale.finalized.v1 — the only business event in this phase. No v2
         fields exist. Integer money throughout; subtotal = Σ lines;
         total = max(0, subtotal + tax − discount).
+    CurrencyTotal:
+      type: object
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor]
+      properties:
+        currency: {type: string, example: EGP}
+        subtotal_minor: {type: integer, example: 100000}
+        discount_minor: {type: integer, example: 5000}
+        tax_minor: {type: integer, example: 14000}
+        sales_total_minor:
+          type: integer
+          example: 109000
+          description: Gross finalized sales (refunds not yet synchronized).
+        line_cost_minor:
+          type: integer
+          description: Historical line cost snapshot sum; not a profit basis.
+      description: One currency bucket. EGP and USD are never summed.
+    PaymentTotal:
+      type: object
+      required: [method, currency, amount_minor, change_minor]
+      properties:
+        method: {type: string, enum: [cash, card]}
+        currency: {type: string, example: EGP}
+        amount_minor: {type: integer}
+        change_minor: {type: integer}
+      description: Tender by method; secondary to finalized Sale totals.
+    PeriodMeta:
+      type: object
+      required: [kind, timezone, start_local, end_local_exclusive, start_utc, end_utc]
+      properties:
+        kind: {type: string, example: last_10_completed_days}
+        timezone: {type: string, example: Africa/Cairo}
+        start_local: {type: string, example: '2026-09-12T00:00:00+03:00'}
+        end_local_exclusive: {type: string, example: '2026-09-22T00:00:00+03:00'}
+        start_utc: {type: string, example: '2026-09-11T21:00:00Z'}
+        end_utc: {type: string, example: '2026-09-21T21:00:00Z'}
+    Freshness:
+      type: object
+      required: [projection_backlog_count, blocked_sale_event_count, cloud_projection_complete]
+      properties:
+        latest_sale_event_received_at: {type: string, format: date-time, nullable: true}
+        latest_projected_sale_occurred_at: {type: string, format: date-time, nullable: true}
+        projection_backlog_count: {type: integer}
+        blocked_sale_event_count: {type: integer}
+        cloud_projection_complete:
+          type: boolean
+          description: All accepted sale events terminal (processed/blocked), no backlog. Does NOT mean Retail is fully synchronized.
+    SalesSummary:
+      type: object
+      required: [generated_at, timezone, period, transaction_count, units_sold, currency_totals, payment_totals, freshness]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string, example: Africa/Cairo}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        transaction_count: {type: integer}
+        units_sold: {type: integer}
+        currency_totals:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyTotal'}
+        payment_totals:
+          type: array
+          items: {$ref: '#/components/schemas/PaymentTotal'}
+        freshness: {$ref: '#/components/schemas/Freshness'}
+    DailyRow:
+      type: object
+      required: [date, transactions, units, currency_totals]
+      properties:
+        date: {type: string, example: '2026-09-22', description: Store-local calendar date.}
+        transactions: {type: integer}
+        units: {type: integer}
+        currency_totals:
+          type: array
+          items: {$ref: '#/components/schemas/CurrencyTotal'}
+    SalesDaily:
+      type: object
+      required: [generated_at, timezone, period, days, freshness]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string, example: Africa/Cairo}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        days:
+          type: array
+          items: {$ref: '#/components/schemas/DailyRow'}
+          description: Ascending store-local dates.
+        freshness: {$ref: '#/components/schemas/Freshness'}
+    LineSaleTotal:
+      type: object
+      required: [currency, line_sales_minor, line_cost_minor]
+      properties:
+        currency: {type: string}
+        line_sales_minor:
+          type: integer
+          description: Pre-adjustment line snapshot total; Sale-level discount/tax never allocated.
+        line_cost_minor: {type: integer}
+    BreakdownRow:
+      type: object
+      required: [dimension, units, line_sales]
+      properties:
+        dimension: {type: string}
+        product_id: {type: string, format: uuid, nullable: true}
+        sku: {type: string, nullable: true}
+        product_name: {type: string, nullable: true}
+        classification_kind: {type: string, enum: [root, subcategory]}
+        classification_id: {type: string, format: uuid}
+        name_ar: {type: string}
+        name_en: {type: string}
+        cashier_id: {type: string, nullable: true, description: Null means unattributed bucket.}
+        cashier_name: {type: string, nullable: true}
+        channel: {type: string}
+        transactions: {type: integer, description: Header-additive dimensions (cashier, channel) only.}
+        units: {type: integer}
+        line_sales:
+          type: array
+          items: {$ref: '#/components/schemas/LineSaleTotal'}
+          description: Subcategory rows are facet-style and may sum above the line total.
+    SalesBreakdown:
+      type: object
+      required: [generated_at, timezone, period, dimension, rows, freshness]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string, example: Africa/Cairo}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        dimension: {type: string, enum: [product, root_category, subcategory, cashier, channel]}
+        rows:
+          type: array
+          items: {$ref: '#/components/schemas/BreakdownRow'}
+          description: Units descending, deterministic identity tie-break.
+        freshness: {$ref: '#/components/schemas/Freshness'}

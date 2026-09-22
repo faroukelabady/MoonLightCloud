@@ -51,9 +51,18 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 
 ## Layout
 
-`cmd/moonlight-cloud` · `internal/{app,config,auth,sync,sale,commerce,notifications,adapter/{http,postgres},platform/*,migrate,testutil}` ·
+`cmd/moonlight-cloud` · `internal/{app,config,auth,sync,sale,report,commerce,notifications,adapter/{http,postgres},platform/*,migrate,testutil}` ·
 `db/{migrations,queries}` · `api/openapi.yaml` · `deploy/{Containerfile,compose.yaml}` ·
 `docs/{architecture,decisions,operations,security,sync,testing,reviews}`.
+
+## Configuration
+
+See `.env.example` (placeholders only, never commit secrets):
+
+- `STORE_TIMEZONE`: IANA business timezone (`Africa/Cairo` default in dev,
+  explicit + validated in staging/production).
+- `REPORTING_API_TOKEN`: temporary report-read Bearer secret (open reports
+  in dev with a startup warning; required 16+ chars elsewhere).
 
 ## Docs
 

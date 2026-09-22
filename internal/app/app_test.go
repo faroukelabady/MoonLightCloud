@@ -4,12 +4,17 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 )
 
 func testConfig(url string) config.Config {
+	loc, err := time.LoadLocation("Africa/Cairo")
+	if err != nil {
+		panic(err)
+	}
 	c := config.Config{
 		Environment:      config.EnvDevelopment,
 		HTTPAddr:         ":0",
@@ -17,6 +22,8 @@ func testConfig(url string) config.Config {
 		LogLevel:         "error",
 		PepperRaw:        config.DevPepper,
 		PepperVersion:    config.CurrentPepperVersion,
+		StoreTimezone:    "Africa/Cairo",
+		StoreLocation:    loc,
 		ShutdownAfter:    config.DefaultShutdownTimeout,
 		DBMaxConns:       4,
 		DBMinConns:       1,
