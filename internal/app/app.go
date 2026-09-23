@@ -90,7 +90,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	secureCookies := cfg.Environment == config.EnvProduction
 	dashAuth := adapterhttp.NewDashboardHandlers(
 		dashboard.Credentials{Username: cfg.DashboardUsername, PasswordHash: cfg.DashboardPasswordHash},
-		sessionKey, cfg.DashboardSessionTTL, secureCookies, log)
+		sessionKey, cfg.DashboardSessionTTL, secureCookies, cfg.TrustedProxyCIDRs, log)
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,

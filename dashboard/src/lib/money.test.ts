@@ -22,6 +22,22 @@ describe('formatMinor', () => {
 	it('never uses parseFloat paths', () => {
 		expect(formatMinor('0000123', 'EGP')).toBe('1.23 ج.م');
 	});
+	it('renders the audit boundary values exactly', () => {
+		expect(formatMinor('0', 'EGP')).toBe('0 ج.م');
+		expect(formatMinor('1', 'EGP')).toBe('0.01 ج.م');
+		expect(formatMinor('99', 'EGP')).toBe('0.99 ج.م');
+		expect(formatMinor('100', 'EGP')).toBe('1 ج.م');
+		expect(formatMinor('9007199254740991', 'EGP')).toBe('90,071,992,547,409.91 ج.م');
+		expect(formatMinor('9007199254740992', 'EGP')).toBe('90,071,992,547,409.92 ج.م');
+	});
+	it('preserves BFF→JSON→browser parity for unsafe integers', () => {
+		// Server emits the decimal string; JSON keeps it verbatim and the
+		// formatter never routes through Number().
+		const wire = JSON.stringify({ sales_total_minor: '9007199254740993' });
+		const parsed = JSON.parse(wire) as { sales_total_minor: string };
+		expect(typeof parsed.sales_total_minor).toBe('string');
+		expect(formatMinor(parsed.sales_total_minor, 'EGP')).toBe('90,071,992,547,409.93 ج.م');
+	});
 });
 
 describe('formatInt', () => {

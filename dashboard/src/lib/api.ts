@@ -23,11 +23,11 @@ export interface PeriodMeta {
 
 export interface CurrencyBucket {
 	currency: string;
-	subtotal_minor: number;
-	discount_minor: number;
-	tax_minor: number;
-	sales_total_minor: number;
-	line_cost_minor?: number;
+	subtotal_minor: string;
+	discount_minor: string;
+	tax_minor: string;
+	sales_total_minor: string;
+	line_cost_minor: string;
 }
 
 export interface Freshness {
@@ -48,6 +48,7 @@ export interface OverviewResponse {
 		currency_totals: CurrencyBucket[];
 	};
 	normalized: { normalized_total_minor: string; transactions: number; units: number; usd_sale_count: number };
+	averages: { all: ModeAverage; egp: ModeAverage; usd: ModeAverage };
 	fx: {
 		has_usd: boolean;
 		latest_rate?: string;
@@ -62,7 +63,22 @@ export interface OverviewResponse {
 export interface DailyRow {
 	date: string;
 	transactions: number;
-	normalized_minor: string;
+	units: number;
+	amount_minor: string;
+}
+
+export interface DailyResponse {
+	timezone: string;
+	period: PeriodMeta;
+	mode: 'all' | 'EGP' | 'USD';
+	display_currency: string;
+	normalized: boolean;
+	days: DailyRow[];
+}
+
+export interface ModeAverage {
+	transactions: number;
+	average_minor: string;
 }
 
 export interface ProductRow {
@@ -115,6 +131,7 @@ export interface LatestSale {
 
 export interface SyncHealth {
 	freshness: Freshness;
+	queue_count: number;
 	pending_count: number;
 	processed_count: number;
 	blocked_count: number;
@@ -122,7 +139,8 @@ export interface SyncHealth {
 	oldest_pending_at?: string | null;
 	last_error_event?: string;
 	last_error_code?: string;
-	last_error_message?: string;
+	last_error_label_ar?: string;
+	last_error_label_en?: string;
 }
 
 export interface PeriodParams {
@@ -170,8 +188,8 @@ export const dashboardApi = {
 		await fetch('/api/v1/dashboard/auth/logout', { method: 'POST', credentials: 'same-origin' });
 	},
 	overview: (p: PeriodParams, s?: AbortSignal) => get<OverviewResponse>(`/api/v1/dashboard/overview?${query(p)}`, s),
-	daily: (p: PeriodParams, s?: AbortSignal) =>
-		get<{ days: DailyRow[] }>(`/api/v1/dashboard/daily?${query(p)}`, s),
+	daily: (p: PeriodParams, mode: 'all' | 'EGP' | 'USD', s?: AbortSignal) =>
+		get<DailyResponse>(`/api/v1/dashboard/daily?${query(p)}&mode=${mode}`, s),
 	products: (p: PeriodParams, mode: 'all' | 'native', currency: string, s?: AbortSignal) =>
 		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}`, s),
 	categories: (p: PeriodParams, kind: string, mode: 'all' | 'native', currency: string, s?: AbortSignal) =>

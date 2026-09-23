@@ -7,43 +7,52 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 )
 
-func testConfig(url string) config.Config {
+func testConfig(t *testing.T, url string) config.Config {
+	t.Helper()
 	loc, err := time.LoadLocation("Africa/Cairo")
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
-	c := config.Config{
-		Environment:   config.EnvDevelopment,
-		HTTPAddr:      ":0",
-		DatabaseURL:   url,
-		LogLevel:      "error",
-		PepperRaw:     config.DevPepper,
-		PepperVersion: config.CurrentPepperVersion,
-		StoreTimezone: "Africa/Cairo",
-		StoreLocation: loc,
-		// Explicit dev-open reporting (mirrors the dev compose default).
-		AllowUnauthenticatedReporting: true,
-		DashboardSessionTTL:           config.DefaultSessionTTL,
-		ShutdownAfter:                 config.DefaultShutdownTimeout,
-		DBMaxConns:                    4,
-		DBMinConns:                    1,
-		DBMaxConnLife:                 config.DefaultDBMaxConnLife,
-		DBMaxConnIdle:                 config.DefaultDBMaxConnIdle,
-		DBConnectTimeout:              config.DefaultDBConnectTimeout,
-		DBQueryTimeout:                config.DefaultDBQueryTimeout,
+	_ = loc
+	t.Setenv("ENVIRONMENT", config.EnvDevelopment)
+	t.Setenv("HTTP_ADDR", ":0")
+	t.Setenv("DATABASE_URL", url)
+	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("DEVICE_SECRET_PEPPER", config.DevPepper)
+	t.Setenv("STORE_TIMEZONE", "Africa/Cairo")
+	// Explicit dev-open reporting (mirrors the dev compose default).
+	t.Setenv("ALLOW_UNAUTHENTICATED_REPORTING", "true")
+	t.Setenv("DASHBOARD_USERNAME", "op")
+	t.Setenv("DASHBOARD_PASSWORD_HASH", testPasswordHash())
+	c, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
 	}
+	// Fixed-point overrides the env cannot express.
+	c.HTTPAddr = ":0"
+	c.DBMaxConns = 4
+	c.DBMinConns = 1
 	if err := c.Validate(); err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return c
 }
 
+func testPasswordHash() string {
+	h, err := dashboard.HashPassword("op-test-password")
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
 func TestNewHealthyAndReady(t *testing.T) {
 	url := testutil.Isolated(t)
-	a, err := New(context.Background(), testConfig(url))
+	a, err := New(context.Background(), testConfig(t, url))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,14 +67,14 @@ func TestNewHealthyAndReady(t *testing.T) {
 
 func TestNewRejectsUnmigratedSchema(t *testing.T) {
 	url := testutil.Raw(t)
-	if _, err := New(context.Background(), testConfig(url)); err == nil {
+	if _, err := New(context.Background(), testConfig(t, url)); err == nil {
 		t.Fatal("startup must fail on unmigrated schema")
 	}
 }
 
 func TestReadyFailsWithoutDB(t *testing.T) {
 	url := testutil.Isolated(t)
-	a, err := New(context.Background(), testConfig(url))
+	a, err := New(context.Background(), testConfig(t, url))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +91,7 @@ func TestReadyFailsWithoutDB(t *testing.T) {
 // operational condition, not process unavailability: readiness stays 200.
 func TestBlockedProjectionKeepsHealth(t *testing.T) {
 	url := testutil.Isolated(t)
-	a, err := New(context.Background(), testConfig(url))
+	a, err := New(context.Background(), testConfig(t, url))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,7 +42,8 @@ func (d Devices) DashboardNormalizedDaily(ctx context.Context, startUTC, endUTC 
 	out := make([]dashboard.NormalizedDailyRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, dashboard.NormalizedDailyRow{
-			Date: r.Day, Transactions: r.Transactions, Normalized: r.NormalizedTotal,
+			Date: r.Day, Transactions: r.Transactions, Units: r.Units,
+			Normalized: r.NormalizedTotal, USDMissingFx: r.UsdMissingFx,
 		})
 	}
 	return out, nil

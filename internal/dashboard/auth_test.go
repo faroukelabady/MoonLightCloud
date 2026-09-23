@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,26 @@ func TestSessionTamperAndExpiry(t *testing.T) {
 	if _, err := VerifySession(key, tok, now.Add(2*time.Hour)); err == nil {
 		t.Fatal("expired session must fail")
 	}
-	if _, err := VerifySession(key, "not-base64!!!", now); err == nil {
+}
+
+func TestSessionExpiryBoundary(t *testing.T) {
+	key := testKey(t)
+	base := time.Unix(1_700_000_000, 0).UTC()
+	exp := base.Add(time.Hour)
+	tok, err := IssueSession(key, "operator", exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifySession(key, tok, exp.Add(-time.Second)); err != nil {
+		t.Fatalf("before expiry must pass: %v", err)
+	}
+	if _, err := VerifySession(key, tok, exp); err == nil {
+		t.Fatal("exact expiry instant must fail")
+	}
+	if _, err := VerifySession(key, tok, exp.Add(time.Second)); err == nil {
+		t.Fatal("after expiry must fail")
+	}
+	if _, err := VerifySession(key, "not-base64!!!", base); err == nil {
 		t.Fatal("malformed token must fail")
 	}
 }
@@ -99,5 +119,43 @@ func TestLoginLimiter(t *testing.T) {
 	}
 	if l.Blocked("9.9.9.9", now.Add(LoginWindow+time.Minute)) {
 		t.Fatal("window must expire")
+	}
+}
+
+func TestClientIPMatrix(t *testing.T) {
+	mustCIDRs := func(ss []string) []net.IPNet {
+		var out []net.IPNet
+		for _, s := range ss {
+			_, n, err := net.ParseCIDR(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, *n)
+		}
+		return out
+	}
+	trusted := mustCIDRs([]string{"10.0.0.0/8", "2001:db8::/32"})
+	cases := []struct {
+		name    string
+		remote  string
+		xff     string
+		trusted []net.IPNet
+		want    string
+	}{
+		{"direct IPv4", "1.2.3.4:1234", "", nil, "1.2.3.4"},
+		{"direct IPv6", "[2001:db8::5]:443", "", nil, "2001:db8::5"},
+		{"untrusted peer ignores spoofed XFF", "9.9.9.9:1", "1.2.3.4", nil, "9.9.9.9"},
+		{"trusted proxy single client", "10.1.2.3:999", "1.2.3.4", trusted, "1.2.3.4"},
+		{"trusted proxy multiple hops use nearest untrusted", "10.1.2.3:999", "1.2.3.4, 10.9.9.9", trusted, "1.2.3.4"},
+		{"all-trusted chain returns leftmost", "10.1.2.3:9", "10.4.4.4, 10.5.5.5", trusted, "10.4.4.4"},
+		{"malformed XFF falls back to peer", "10.1.2.3:9", "not-an-ip", trusted, "10.1.2.3"},
+		{"empty XFF falls back to peer", "10.1.2.3:9", "", trusted, "10.1.2.3"},
+		{"IPv6 via trusted proxy", "2001:db8::1:443", "2001:db8:abcd::9", trusted, "2001:db8:abcd::9"},
+		{"quoted XFF entry", "10.1.2.3:9", "\"1.2.3.4\"", trusted, "1.2.3.4"},
+	}
+	for _, tc := range cases {
+		if got := ClientIP(tc.remote, tc.xff, tc.trusted); got != tc.want {
+			t.Fatalf("%s: got %q want %q", tc.name, got, tc.want)
+		}
 	}
 }

@@ -25,3 +25,4 @@ Concise, irreversible-or-important choices only.
 - [0021](0021-reporting-audit-remediation.md) — sales reporting audit remediation (H1/H2/H3/H4/M1/L1)
 - [0022](0022-breakdown-dto-split.md) — final breakdown DTO split (M2) and category ordering (L2)
 - [0023](0023-cloud-dashboard.md) — cloud reporting dashboard architecture
+- [0024](0024-dashboard-review-remediation.md) — dashboard review remediation (3B-R)

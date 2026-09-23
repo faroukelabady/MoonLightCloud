@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import PeriodSelector from './PeriodSelector.svelte';
+
+afterEach(() => cleanup());
 
 describe('PeriodSelector', () => {
 	it('renders all four periods Arabic-first and selects', async () => {
@@ -30,5 +32,21 @@ describe('PeriodSelector', () => {
 		await rerender({ params: { period: 'custom' }, timezone: 'Africa/Cairo', onchange });
 		expect(screen.getByLabelText(/من/)).toBeTruthy();
 		expect(screen.getByLabelText(/إلى/)).toBeTruthy();
+	});
+});
+
+describe('PeriodSelector URL sync (L01)', () => {
+	it('synchronizes inputs when params change (back/forward) without clobbering typing', async () => {
+		const onchange = vi.fn();
+		const { rerender } = render(PeriodSelector, {
+			props: { params: { period: 'custom', from_date: '2026-09-20', to_date: '2026-09-21' }, timezone: 'Africa/Cairo', onchange }
+		});
+		expect((screen.getByLabelText(/من/) as HTMLInputElement).value).toBe('2026-09-20');
+		// Simulate browser Back: params change -> inputs follow.
+		await rerender({
+			props: { params: { period: 'custom', from_date: '2026-09-22', to_date: '2026-09-23' }, timezone: 'Africa/Cairo', onchange }
+		});
+		expect((screen.getByLabelText(/من/) as HTMLInputElement).value).toBe('2026-09-22');
+		expect((screen.getByLabelText(/إلى/) as HTMLInputElement).value).toBe('2026-09-23');
 	});
 });

@@ -11,6 +11,7 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -127,6 +128,10 @@ type Config struct {
 	DashboardPasswordHash string
 	// DashboardSessionTTL bounds dashboard sessions.
 	DashboardSessionTTL time.Duration
+	// TrustedProxyCIDRs are the only peers whose X-Forwarded-For chain is
+	// believed for login rate limiting. Empty (default) trusts none:
+	// forwarded headers from untrusted peers are ignored entirely.
+	TrustedProxyCIDRs []net.IPNet
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -265,28 +270,69 @@ func (c *Config) Validate() error {
 	if err := c.resolveDashboardAuth(); err != nil {
 		return err
 	}
+	if err := c.resolveTrustedProxies(); err != nil {
+		return err
+	}
 	return nil
 }
 
-// resolveDashboardAuth validates the operator credential. Development
-// falls back to the documented constants when unset; every other
-// environment requires explicit values and rejects the dev placeholder.
+// resolveTrustedProxies parses TRUSTED_PROXY_CIDRS (comma-separated CIDRs,
+// empty by default). Invalid entries fail startup; no undocumented Railway
+// or cloud IP ranges are ever trusted implicitly.
+func (c *Config) resolveTrustedProxies() error {
+	raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if raw == "" {
+		return nil
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(part)
+		if err != nil {
+			// Accept a bare IP as a /32 (or /128) CIDR.
+			bits := 32
+			if ip := net.ParseIP(part); ip == nil {
+				return fmt.Errorf("invalid TRUSTED_PROXY_CIDRS entry %q: %w", part, err)
+			} else if ip.To4() == nil {
+				bits = 128
+			}
+			_, cidr, err = net.ParseCIDR(fmt.Sprintf("%s/%d", part, bits))
+			if err != nil {
+				return fmt.Errorf("invalid TRUSTED_PROXY_CIDRS entry %q: %w", part, err)
+			}
+		}
+		c.TrustedProxyCIDRs = append(c.TrustedProxyCIDRs, *cidr)
+	}
+	return nil
+}
+
+// resolveDashboardAuth validates the operator credential. Dashboard
+// authentication requires an explicitly configured ENVIRONMENT: dev
+// defaults activate only with explicit ENVIRONMENT=development, and even
+// explicit production-quality credentials fail closed when the environment
+// is omitted (an operator must declare which environment serves login).
 func (c *Config) resolveDashboardAuth() error {
+	if !c.envExplicit {
+		return fmt.Errorf("ENVIRONMENT must be explicitly set for dashboard authentication")
+	}
+	devExplicit := c.Environment == EnvDevelopment
 	if c.DashboardUsername == "" {
-		if c.Environment == EnvDevelopment {
+		if devExplicit {
 			c.DashboardUsername = DefaultDashboardUsername
 		} else {
 			return fmt.Errorf("DASHBOARD_USERNAME is required outside development")
 		}
 	}
 	if c.DashboardPasswordHash == "" {
-		if c.Environment == EnvDevelopment {
+		if devExplicit {
 			c.DashboardPasswordHash = DevDashboardPasswordHash
 		} else {
 			return fmt.Errorf("DASHBOARD_PASSWORD_HASH is required outside development")
 		}
 	}
-	if c.Environment != EnvDevelopment && c.DashboardPasswordHash == DevDashboardPasswordHash {
+	if !devExplicit && c.DashboardPasswordHash == DevDashboardPasswordHash {
 		return fmt.Errorf("DASHBOARD_PASSWORD_HASH must not be the development placeholder outside development")
 	}
 	if c.DashboardSessionTTL < MinSessionTTL || c.DashboardSessionTTL > MaxSessionTTL {

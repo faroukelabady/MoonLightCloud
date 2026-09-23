@@ -43,3 +43,46 @@ New/Preparing/Shipped/Delivered/Refunded states.
 `/api/v1/reports/...` (Phase 3A token auth) is unchanged. Dashboard BFF
 (`/api/v1/dashboard/...`, session cookie) reuses the same services.
 `REPORTING_API_TOKEN` never leaves the server.
+
+## Reporting failure policy
+
+Dashboard BFF failures share the common envelope:
+
+- `503 UNAVAILABLE` — temporary dependency outage (PostgreSQL
+  unreachable, timeouts). Safe to retry; the UI offers Retry.
+- `500 INTERNAL` — unexpected internal failure (e.g. aggregate overflow).
+  Not retryable as-is; contains no SQL or driver details.
+
+Financial overflow is deterministic internal failure, never
+success-with-zero and never 503.
+
+## Trusted proxies
+
+`TRUSTED_PROXY_CIDRS` (comma-separated CIDRs or bare IPs, empty by
+default) declares which direct peers may supply `X-Forwarded-For` for
+login rate-limit identity. Right-to-left algorithm: from the rightmost
+chain entry leftward, skipping trusted proxies; the first untrusted entry
+is the client. Untrusted peers and malformed chains fall back to the
+direct peer. Never trust ranges you do not operate; arbitrary
+`X-Forwarded-For` from the open internet is ignored.
+
+## Queue semantics
+
+`queue_count` is pending + retry counted exactly once. The UI shows it as
+"In queue" with the pending/retry sub-breakdown. Blocked events are
+terminal conflicts shown separately with allowlisted bilingual labels;
+raw stored diagnostics never reach the browser.
+
+## Rounding rule
+
+Historical FX normalization converts each atomic amount (per Sale for
+header totals, per Sale line for line metrics) and rounds with
+`round(numeric)` (half away from zero) before aggregation. Grouping
+(summary vs daily vs branches) therefore cannot change totals.
+
+## Averages
+
+Overview carries per-mode averages (`all`, `egp`, `usd`): truncating
+integer division of the mode total by the mode transaction count, computed
+server-side and serialized as strings. Absent currencies report zero
+transactions with a zero average.

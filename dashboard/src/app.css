@@ -132,3 +132,36 @@ table.data th {
 	unicode-bidi: embed;
 	font-variant-numeric: tabular-nums;
 }
+
+.sub-en {
+	font-size: 0.78rem;
+}
+
+.pad {
+	padding: 24px;
+}
+
+.stack-sm {
+	margin-top: 6px;
+}
+
+.label-gap {
+	margin-bottom: 4px;
+}
+
+.w0 { width: 0%; }
+.w1 { width: 10%; }
+.w2 { width: 20%; }
+.w3 { width: 30%; }
+.w4 { width: 40%; }
+.w5 { width: 50%; }
+.w6 { width: 60%; }
+.w7 { width: 70%; }
+.w8 { width: 80%; }
+.w9 { width: 90%; }
+.w10 { width: 100%; }
+
+.skel-line {
+	height: 14px;
+	margin: 8px 0;
+}

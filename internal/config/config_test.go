@@ -166,7 +166,7 @@ func TestReportingTokenMatrix(t *testing.T) {
 		{"development + no token + no flag FAIL", "development", "", "", true},
 		{"development + token + open flag FAIL", "development", goodToken, "true", true},
 		{"development + bad flag value FAIL", "development", "", "yes", true},
-		{"missing env + token PASS (authenticated)", "", goodToken, "", false},
+		{"missing env + token FAIL (dashboard needs explicit env)", "", goodToken, "", true},
 		{"missing env + no token FAIL", "", "", "", true},
 		{"missing env + open flag FAIL", "", "", "true", true},
 	}
@@ -285,29 +285,42 @@ func TestDashboardAuthMatrix(t *testing.T) {
 	const goodHash = "$argon2id$v=19$m=65536,t=3,p=2$FUDrA/wAq/7mONAYJerxEg$5GSTO+qp6PL1LIy8JoXcPBN6eKU5YLD53VMkJCdYw/U"
 	cases := []struct {
 		name    string
-		env     string
+		env     string // "∅" means ENVIRONMENT unset entirely
 		user    string // "" means unset
 		hash    string // "" means unset
 		ttl     string // "" means unset
 		wantErr bool
 	}{
-		{"dev defaults accepted", "development", "", "", "", false},
-		{"dev explicit accepted", "development", "boss", goodHash, "1h", false},
+		{"explicit development + defaults", "development", "", "", "", false},
+		{"explicit development + explicit credentials", "development", "boss", goodHash, "1h", false},
 		{"dev bad ttl rejected", "development", "boss", goodHash, "forever", true},
 		{"dev short ttl rejected", "development", "boss", goodHash, "1m", true},
+		{"explicit staging + credentials", "staging", "boss", goodHash, "", false},
+		{"explicit staging + missing credentials", "staging", "", "", "", true},
+		{"explicit production + credentials", "production", "boss", goodHash, "", false},
+		{"explicit production + missing credentials", "production", "", "", "", true},
 		{"prod missing user rejected", "production", "", goodHash, "", true},
 		{"prod missing hash rejected", "production", "boss", "", "", true},
 		{"prod placeholder rejected", "production", "boss", DevDashboardPasswordHash, "", true},
-		{"prod valid accepted", "production", "boss", goodHash, "", false},
 		{"staging placeholder rejected", "staging", "boss", DevDashboardPasswordHash, "", true},
+		{"missing environment + report token", "∅", "", "", "", true},
+		{"missing environment + dashboard defaults", "∅", "", "", "", true},
+		{"missing environment + both configs", "∅", "boss", goodHash, "", true},
+		{"blank environment string", "", "", "", "", true},
+		{"unknown environment", "mars", "boss", goodHash, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			setenv(t, "ENVIRONMENT", tc.env)
-			if tc.env == "development" {
+			if tc.env == "∅" || tc.env == "" {
+				os.Unsetenv("ENVIRONMENT")
 				setenv(t, "DATABASE_URL", devURL)
 			} else {
-				setenv(t, "DATABASE_URL", url)
+				setenv(t, "ENVIRONMENT", tc.env)
+				if tc.env == "development" {
+					setenv(t, "DATABASE_URL", devURL)
+				} else {
+					setenv(t, "DATABASE_URL", url)
+				}
 			}
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
@@ -340,4 +353,46 @@ func TestDashboardAuthMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTrustedProxyCIDRs(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Helper()
+		setenv(t, "ENVIRONMENT", "development")
+		setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
+		setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
+		setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
+		setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+		os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+		setDashboardAuth(t)
+	}
+	t.Run("empty trusts none", func(t *testing.T) {
+		base(t)
+		os.Unsetenv("TRUSTED_PROXY_CIDRS")
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(c.TrustedProxyCIDRs) != 0 {
+			t.Fatal("default must trust none")
+		}
+	})
+	t.Run("cidrs and bare IPs parse", func(t *testing.T) {
+		base(t)
+		setenv(t, "TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.1.7, 2001:db8::/32")
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(c.TrustedProxyCIDRs) != 3 {
+			t.Fatalf("got %d", len(c.TrustedProxyCIDRs))
+		}
+	})
+	t.Run("garbage fails closed", func(t *testing.T) {
+		base(t)
+		setenv(t, "TRUSTED_PROXY_CIDRS", "not-a-cidr")
+		if _, err := Load(); err == nil {
+			t.Fatal("invalid CIDR must fail startup")
+		}
+	})
 }

@@ -15,7 +15,7 @@ import (
 func testDashboardAuth() DashboardHandlers {
 	return NewDashboardHandlers(
 		dashboard.Credentials{Username: "operator", PasswordHash: mustTestHash()},
-		mustTestKey(), time.Hour, false, slog.Default())
+		mustTestKey(), time.Hour, false, nil, slog.Default())
 }
 
 func mustTestHash() string {
@@ -189,11 +189,42 @@ func TestDashboardLogout(t *testing.T) {
 func TestDashboardProductionSecureCookie(t *testing.T) {
 	h := NewDashboardHandlers(
 		dashboard.Credentials{Username: "operator", PasswordHash: mustTestHash()},
-		mustTestKey(), time.Hour, true, slog.Default())
+		mustTestKey(), time.Hour, true, nil, slog.Default())
 	rec := login(t, h, "operator", "correct-password", "10.0.0.5:1234")
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == dashboard.SessionCookie && !c.Secure {
 			t.Fatal("production cookies must be Secure")
 		}
+	}
+}
+
+func TestDashboardLoginIgnoresSpoofedForwardedHeader(t *testing.T) {
+	h := testDashboardAuth() // nil trusted proxies: peer only
+	req := httptest.NewRequest("POST", "/api/v1/dashboard/auth/login",
+		strings.NewReader(`{"username":"operator","password":"wrong"}`))
+	req.RemoteAddr = "9.9.9.9:1234"
+	req.Header.Set("X-Forwarded-For", "10.0.0.1")
+	rec := httptest.NewRecorder()
+	h.Login(rec, req)
+	if rec.Code != 401 {
+		t.Fatalf("want 401, got %d", rec.Code)
+	}
+	// Ten failures from the spoofed identity must not lock out the peer,
+	// and ten failures from the peer must not lock out anyone else.
+	for i := 0; i < dashboard.LoginMaxFailures; i++ {
+		r := httptest.NewRequest("POST", "/api/v1/dashboard/auth/login",
+			strings.NewReader(`{"username":"operator","password":"wrong"}`))
+		r.RemoteAddr = "9.9.9.9:1234"
+		r.Header.Set("X-Forwarded-For", "10.0.0.99")
+		rr := httptest.NewRecorder()
+		h.Login(rr, r)
+	}
+	r := httptest.NewRequest("POST", "/api/v1/dashboard/auth/login",
+		strings.NewReader(`{"username":"operator","password":"wrong"}`))
+	r.RemoteAddr = "10.8.8.8:1234"
+	rr := httptest.NewRecorder()
+	h.Login(rr, r)
+	if rr.Code != 401 {
+		t.Fatalf("other peer must be unaffected, got %d", rr.Code)
 	}
 }

@@ -3,10 +3,11 @@
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import WidgetError from './WidgetError.svelte';
 	import { formatMinor, formatInt } from '../lib/money.js';
 	import type { BranchRow } from '../lib/api.js';
 
-	let { rows, status }: { rows: BranchRow[]; status: 'loading' | 'loaded' | 'empty' | 'error' } = $props();
+	let { rows, status, errStatus, onretry }: { rows: BranchRow[]; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } = $props();
 
 	let metric: 'value' | 'transactions' | 'units' = $state('value');
 
@@ -45,19 +46,19 @@
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
-		<EmptyState ar="تعذر تحميل البيانات" en="Could not load data" />
+		<WidgetError status={errStatus} {onretry} />
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد فروع في هذه الفترة" en="No branches in this period" />
 	{:else}
 		<div class="bars">
 			{#each rows as r}
-				{@const pct = Math.min(100, (numOf(r) / maxValue()) * 100)}
+				{@const bucket = Math.min(10, Math.round(numOf(r) / maxValue() * 10))}
 				<div class="row">
 					<div class="label">
 						<div>{r.shop_name_ar}</div>
 						<div class="muted">{r.shop_name_en} · {r.channel}</div>
 					</div>
-					<div class="track"><div class="fill" style="width: {pct}%"></div></div>
+					<div class="track"><div class="fill w{bucket}"></div></div>
 					<div class="num val">{valueOf(r)}</div>
 				</div>
 			{/each}

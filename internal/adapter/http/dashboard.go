@@ -56,7 +56,10 @@ func (h DashboardDataHandlers) Overview(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, res)
 }
 
-// Daily serves GET /api/v1/dashboard/daily (normalized trend).
+// Daily serves GET /api/v1/dashboard/daily?mode=all|EGP|USD.
+// All returns normalized EGP per Cairo date; EGP/USD return native buckets
+// only. The contract metadata (mode, display_currency, normalized) makes
+// mislabeling impossible.
 func (h DashboardDataHandlers) Daily(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	req, err := h.parse(r)
@@ -64,17 +67,17 @@ func (h DashboardDataHandlers) Daily(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	days, err := h.dash.DailyNormalized(r.Context(), req)
+	modeName := r.URL.Query().Get("mode")
+	if modeName == "" {
+		modeName = "all"
+	}
+	res, err := h.dash.Daily(r.Context(), req, modeName)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	h.observe(r, "dashboard_daily", req, start)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"timezone": req.Period.Timezone,
-		"period":   periodMetaJSON(req),
-		"days":     days,
-	})
+	h.observe(r, "dashboard_daily_"+res.Mode, req, start)
+	writeJSON(w, http.StatusOK, res)
 }
 
 // Products serves GET /api/v1/dashboard/products?mode=all|native.

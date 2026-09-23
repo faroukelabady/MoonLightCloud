@@ -4,7 +4,7 @@
 
 <div class="empty muted">
 	<div>{ar}</div>
-	{#if en}<div style="font-size: 0.8rem;">{en}</div>{/if}
+	{#if en}<div class="sub-en">{en}</div>{/if}
 </div>
 
 <style>

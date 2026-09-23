@@ -5,30 +5,38 @@ import SalesCard from './SalesCard.svelte';
 const loaded = {
 	summary: { transaction_count: 2, units_sold: 3, currency_totals: [] },
 	normalized: { normalized_total_minor: '386250', transactions: 2, units: 3, usd_sale_count: 1 },
+	averages: {
+		all: { transactions: 2, average_minor: '193125' },
+		egp: { transactions: 1, average_minor: '200000' },
+		usd: { transactions: 1, average_minor: '1250' }
+	},
 	fx: { has_usd: true, latest_rate: '52.000000', multiple_rates_used: false }
 } as never;
 
 describe('SalesCard', () => {
 	it('shows skeleton while loading, never stale numbers', () => {
-		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'loading' } });
+		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'loading', errStatus: null, onretry: () => {} } });
 		expect(document.querySelector('.skeleton')).toBeTruthy();
 		expect(document.body.textContent).not.toContain('386,250');
 	});
 
 	it('shows empty state without data', () => {
-		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'empty' } });
+		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'empty', errStatus: null, onretry: () => {} } });
 		expect(screen.getByText(/لا توجد مبيعات/)).toBeTruthy();
 	});
 
-	it('shows error state', () => {
-		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'error' } });
-		expect(screen.getByText(/تعذر تحميل البيانات/)).toBeTruthy();
+	it('shows error state', async () => {
+		const onretry = vi.fn();
+		render(SalesCard, { props: { data: null, mode: 'all', onmode: () => {}, status: 'error', errStatus: 503, onretry } });
+		expect(screen.getByText(/غير متاحة مؤقتًا/)).toBeTruthy();
+		await fireEvent.click(screen.getByText(/إعادة المحاولة/));
+		expect(onretry).toHaveBeenCalled();
 	});
 
 	it('renders normalized All total with helper text and switches modes', async () => {
 		const onmode = vi.fn();
 		const { container } = render(SalesCard, {
-			props: { data: loaded, mode: 'all', onmode, status: 'loaded' }
+			props: { data: loaded, mode: 'all', onmode, status: 'loaded', errStatus: null, onretry: () => {} }
 		});
 		const q = within(container as HTMLElement);
 		expect(container.textContent).toContain('3,862.50');

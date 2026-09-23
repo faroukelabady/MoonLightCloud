@@ -21,6 +21,12 @@ func DashboardAssets(dir string, log *slog.Logger) http.Handler {
 		abs = dir
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Reject path traversal before Clean resolves it away (ServeFile
+		// would 400 on the raw path; fail closed with 404 instead).
+		if strings.Contains(r.URL.EscapedPath(), "..") {
+			WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
 			return
@@ -42,6 +48,13 @@ func DashboardAssets(dir string, log *slog.Logger) http.Handler {
 			return
 		}
 		if st, err := os.Stat(full); err != nil || st.IsDir() {
+			// /dashboard/assets/* is static content: missing files 404
+			// (never the SPA shell, and never text/html for .js/.css).
+			// Application routes fall back to index.html.
+			if rel == "assets" || strings.HasPrefix(rel, "assets/") {
+				WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+				return
+			}
 			// SPA subroutes fall back to the shell.
 			serveDashboardFile(w, r, filepath.Join(abs, "index.html"), log)
 			return

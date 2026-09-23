@@ -292,7 +292,7 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/daily:
     get:
-      summary: Normalized daily EGP trend (Cairo dates, ascending)
+      summary: Daily trend in one currency mode (Cairo dates, ascending)
       operationId: dashboardDaily
       security:
         - dashboardSession: []
@@ -300,9 +300,16 @@ paths:
         - $ref: '#/components/parameters/ReportPeriod'
         - $ref: '#/components/parameters/ReportFromDate'
         - $ref: '#/components/parameters/ReportToDate'
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [all, EGP, USD]
+            default: all
+          description: all = normalized EGP per Cairo date; EGP/USD = native buckets only (never converted). Contract metadata (mode, display_currency, normalized) travels with the data so mislabeling is impossible.
       responses:
         '200':
-          description: Per-day normalized totals (each day's own historical FX).
+          description: Per-day amounts in the requested mode with explicit currency metadata.
           content:
             application/json:
               schema:
@@ -1285,31 +1292,79 @@ components:
         min_rate_microrate: {type: string}
         max_rate_microrate: {type: string}
         multiple_rates_used: {type: boolean}
+    DashboardSummaryBucket:
+      type: object
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor]
+      properties:
+        currency: {type: string}
+        subtotal_minor: {type: string}
+        discount_minor: {type: string}
+        tax_minor: {type: string}
+        sales_total_minor: {type: string, description: Gross finalized sales (refunds not yet synchronized).}
+        line_cost_minor: {type: string, description: Extended historical cost (unit cost × quantity).}
+      description: String-backed money (never JSON numbers). Same numbers as Phase 3A, decimal-string encoding.
+    DashboardSummaryPayment:
+      type: object
+      required: [method, currency, amount_minor, change_minor]
+      properties:
+        method: {type: string}
+        currency: {type: string}
+        amount_minor: {type: string}
+        change_minor: {type: string}
+    DashboardModeAverage:
+      type: object
+      required: [transactions, average_minor]
+      properties:
+        transactions: {type: integer, description: Transaction count for this mode only (never the all-currency count).}
+        average_minor: {type: string, description: Server-computed truncating integer division of the mode total by the mode count.}
     DashboardOverview:
       type: object
-      required: [generated_at, timezone, period, summary, normalized, fx]
+      required: [generated_at, timezone, period, summary, normalized, averages, fx]
       properties:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
-        summary: {$ref: '#/components/schemas/SalesSummary'}
+        summary:
+          type: object
+          required: [transaction_count, units_sold, currency_totals, payment_totals]
+          properties:
+            transaction_count: {type: integer}
+            units_sold: {type: integer}
+            currency_totals:
+              type: array
+              items: {$ref: '#/components/schemas/DashboardSummaryBucket'}
+            payment_totals:
+              type: array
+              items: {$ref: '#/components/schemas/DashboardSummaryPayment'}
         normalized: {$ref: '#/components/schemas/DashboardNormalized'}
+        averages:
+          type: object
+          required: [all, egp, usd]
+          properties:
+            all: {$ref: '#/components/schemas/DashboardModeAverage'}
+            egp: {$ref: '#/components/schemas/DashboardModeAverage'}
+            usd: {$ref: '#/components/schemas/DashboardModeAverage'}
+          description: Per-mode server averages (truncating division). Absent currencies report zero transactions with zero average.
         fx: {$ref: '#/components/schemas/DashboardFx'}
     DashboardDaily:
       type: object
-      required: [timezone, period, days]
+      required: [timezone, period, mode, display_currency, normalized, days]
       properties:
         timezone: {type: string}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        mode: {type: string, enum: [all, EGP, USD]}
+        display_currency: {type: string, description: Currency unit of amount_minor. Never relabeled client-side.}
+        normalized: {type: boolean, description: True only for All mode (historical per-sale FX).}
         days:
           type: array
           items:
             type: object
-            required: [date, transactions, normalized_minor]
+            required: [date, transactions, units, amount_minor]
             properties:
               date: {type: string, description: Store-local calendar date.}
               transactions: {type: integer}
-              normalized_minor: {type: string, description: Exact EGP minor units for that Cairo date.}
+              units: {type: integer}
+              amount_minor: {type: string, description: Exact minor units in display_currency (normalized EGP in All mode).}
     DashboardProductList:
       type: object
       required: [timezone, period, mode, unit, rows]
@@ -1378,17 +1433,19 @@ components:
           description: Grouped by full historical shop snapshot tuple + channel. Native buckets only. No ONLINE fabrication.
     DashboardSyncHealth:
       type: object
-      required: [freshness, pending_count, processed_count, blocked_count, retry_count]
+      required: [freshness, queue_count, pending_count, processed_count, blocked_count, retry_count]
       properties:
         freshness: {$ref: '#/components/schemas/Freshness'}
+        queue_count: {type: integer, description: In-queue events (pending + retry counted exactly once).}
         pending_count: {type: integer}
         processed_count: {type: integer}
         blocked_count: {type: integer}
         retry_count: {type: integer}
         oldest_pending_at: {type: string, format: date-time, nullable: true}
         last_error_event: {type: string}
-        last_error_code: {type: string}
-        last_error_message: {type: string}
+        last_error_code: {type: string, description: Safe error code only; raw stored messages never cross into browser JSON.}
+        last_error_label_ar: {type: string}
+        last_error_label_en: {type: string}
       description: cloud_projection_complete never proves Retail sync completeness.
     DashboardActivityList:
       type: object

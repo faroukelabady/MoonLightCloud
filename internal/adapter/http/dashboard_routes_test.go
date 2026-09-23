@@ -15,7 +15,7 @@ import (
 func TestDashboardRoutesWired(t *testing.T) {
 	auth := NewDashboardHandlers(
 		dashboard.Credentials{Username: "op", PasswordHash: mustTestHash()},
-		mustTestKey(), time.Hour, false, slog.Default())
+		mustTestKey(), time.Hour, false, nil, slog.Default())
 	for _, path := range []string{
 		"/api/v1/dashboard/overview?period=today",
 		"/api/v1/dashboard/daily?period=today",

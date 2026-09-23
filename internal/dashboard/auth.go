@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,7 +96,7 @@ func VerifySession(key []byte, token string, now time.Time) (string, error) {
 		return "", fail
 	}
 	exp, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || now.Unix() > exp {
+	if err != nil || now.Unix() >= exp {
 		return "", fail
 	}
 	return parts[0], nil
@@ -153,8 +154,62 @@ func VerifyPassword(password, phc string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// LoginLimiter is a small process-local per-IP failure counter with a
-// sliding window. Bounded (oldest evicted past capacity); no distribution.
+// ClientIP resolves the login rate-limit identity. Default: the direct
+// TCP peer; forwarded headers are ignored. When the peer matches a trusted
+// proxy CIDR, the client is derived from X-Forwarded-For with the standard
+// right-to-left algorithm: walk from the rightmost entry (added by the
+// closest proxy) leftward, skipping trusted proxies; the first untrusted
+// entry is the client. Malformed chains fall back to the peer (never to a
+// spoofed value). No Railway or cloud ranges are trusted implicitly.
+func ClientIP(remoteAddr, forwardedFor string, trusted []net.IPNet) string {
+	peer := remoteAddr
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		peer = host
+	}
+	peerIP := net.ParseIP(strings.TrimSpace(peer))
+	if peerIP == nil || !ipTrusted(peerIP, trusted) {
+		return peer
+	}
+	chain := parseForwardedChain(forwardedFor)
+	if len(chain) == 0 {
+		return peer
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if !ipTrusted(chain[i], trusted) {
+			return chain[i].String()
+		}
+	}
+	return chain[0].String()
+}
+
+func ipTrusted(ip net.IP, trusted []net.IPNet) bool {
+	for _, cidr := range trusted {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseForwardedChain(header string) []net.IP {
+	var out []net.IP
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		// Strip optional port and surrounding quotes/brackets.
+		part = strings.Trim(part, "\"'")
+		if host, _, err := net.SplitHostPort(part); err == nil {
+			part = host
+		}
+		part = strings.Trim(part, "[]")
+		if ip := net.ParseIP(part); ip != nil {
+			out = append(out, ip)
+		} else {
+			return nil // malformed chain: caller falls back to peer
+		}
+	}
+	return out
+}
+
 type LoginLimiter struct {
 	mu       sync.Mutex
 	failures map[string][]time.Time

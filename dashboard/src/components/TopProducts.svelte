@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import echarts from '../lib/echarts.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import WidgetError from './WidgetError.svelte';
 	import { formatMinor, toChartNumber } from '../lib/money.js';
+	import { chart } from '../lib/chartAction.js';
+	import type { EChartsCoreOption } from 'echarts/core';
 
 	export interface ProductDisplayRow {
 		name: string;
@@ -14,55 +15,44 @@
 		amount_minor: string;
 	}
 
-	let { rows, money, unit, status }: { rows: ProductDisplayRow[]; money: 'EGP' | 'USD'; unit: string; status: 'loading' | 'loaded' | 'empty' | 'error' } =
+	let { rows, money, unit, status, errStatus, onretry }: { rows: ProductDisplayRow[]; money: 'EGP' | 'USD'; unit: string; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } =
 		$props();
 
 	let view: 'table' | 'chart' = $state('table');
-	let el: HTMLDivElement | null = null;
-	let chart: echarts.ECharts | null = null;
-	let ro: ResizeObserver | null = null;
 
-	function render() {
-		if (!el || status !== 'loaded' || view !== 'chart' || rows.length === 0) return;
-		chart ??= echarts.init(el);
-		chart.setOption(
-			{
-				animation: false,
-				grid: { left: 48, right: 16, top: 24, bottom: 60 },
-				xAxis: {
-					type: 'category',
-					data: rows.map((r) => r.name),
-					axisLabel: { fontSize: 10, rotate: 20 }
-				},
-				yAxis: { type: 'value', name: unit },
-				tooltip: { trigger: 'item' },
-				series: [
-					{
-						type: 'bar',
-						data: rows.map((r) => toChartNumber(r.amount_minor)),
-						itemStyle: { color: '#1d4ed8' }
-					}
-				]
-			},
-			true
-		);
-	}
-
-	onMount(() => {
-		if (el) {
-			ro = new ResizeObserver(() => chart?.resize());
-			ro.observe(el);
+	// M04: chart inputs are validated during data preparation (not render).
+	// Unsafe magnitudes yield a stable widget error; exact table values
+	// stay visible and the page never crashes.
+	let chartError = $derived.by(() => {
+		if (status !== 'loaded' || view !== 'chart') return false;
+		try {
+			rows.forEach((r) => toChartNumber(r.amount_minor));
+			return false;
+		} catch {
+			return true;
 		}
 	});
-	onDestroy(() => {
-		ro?.disconnect();
-		chart?.dispose();
-		chart = null;
-	});
-	$effect(() => {
-		rows;
-		view;
-		render();
+
+	let option: EChartsCoreOption | null = $derived.by(() => {
+		if (status !== 'loaded' || view !== 'chart' || chartError || rows.length === 0) return null;
+		return {
+			animation: false,
+			grid: { left: 48, right: 16, top: 24, bottom: 60 },
+			xAxis: {
+				type: 'category',
+				data: rows.map((r) => r.name),
+				axisLabel: { fontSize: 10, rotate: 20 }
+			},
+			yAxis: { type: 'value', name: unit },
+			tooltip: { trigger: 'item' },
+			series: [
+				{
+					type: 'bar',
+					data: rows.map((r) => toChartNumber(r.amount_minor)),
+					itemStyle: { color: '#1d4ed8' }
+				}
+			]
+		} satisfies EChartsCoreOption;
 	});
 </script>
 
@@ -78,7 +68,7 @@
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
-		<EmptyState ar="تعذر تحميل البيانات" en="Could not load data" />
+		<WidgetError status={errStatus} {onretry} />
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد منتجات في هذه الفترة" en="No products in this period" />
 	{:else if view === 'table'}
@@ -94,8 +84,13 @@
 				{/each}
 			</tbody>
 		</table>
+	{:else if chartError}
+		<EmptyState
+			ar="تعذر عرض الرسم البياني لهذا النطاق"
+			en="Chart value is outside the supported display range"
+		/>
 	{:else}
-		<div bind:this={el} class="chart" role="img" aria-label="Top products chart"></div>
+		<div use:chart={option} class="chart" role="img" aria-label="Top products chart"></div>
 	{/if}
 </Card>
 

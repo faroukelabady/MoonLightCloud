@@ -95,6 +95,8 @@
 	let overview: OverviewResponse | null = $state(null);
 	let overviewState: WidgetState = $state('loading');
 	let daily: DailyRow[] = $state([]);
+	let trend: { labels: string[]; values: number[] } = $state({ labels: [], values: [] });
+	let dailyMeta: { display_currency: string; normalized: boolean } = $state({ display_currency: 'EGP', normalized: true });
 	let dailyState: WidgetState = $state('loading');
 	let products: ProductDisplayRow[] = $state([]);
 	let productsState: WidgetState = $state('loading');
@@ -109,6 +111,17 @@
 	let activityState: WidgetState = $state('loading');
 	let latest: LatestSale[] = $state([]);
 	let latestState: WidgetState = $state('loading');
+	let overviewErr: number | null = $state(null);
+	let dailyErr: number | null = $state(null);
+	let productsErr: number | null = $state(null);
+	let categoriesErr: number | null = $state(null);
+	let branchesErr: number | null = $state(null);
+	let syncErr: number | null = $state(null);
+	let activityErr: number | null = $state(null);
+	let latestErr: number | null = $state(null);
+	function retryAll() {
+		void reloadAll();
+	}
 
 	function emptyOf<T>(v: T[] | null | undefined): WidgetState {
 		if (!v) return 'error';
@@ -121,13 +134,19 @@
 		const signal = freshSignal();
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
 			'loading';
-		const done = async <T>(p: Promise<T>, apply: (v: T) => void, setState: (s: WidgetState) => void) => {
+		const done = async <T>(
+			p: Promise<T>,
+			apply: (v: T) => void,
+			setState: (s: WidgetState) => void,
+			setErr: (n: number | null) => void
+		) => {
 			try {
 				apply(await p);
 			} catch (err) {
 				if (err instanceof DOMException && err.name === 'AbortError') return;
 				if (requireAuth(err)) return;
 				setState('error');
+				setErr(err instanceof ApiError ? err.status : 0);
 			}
 		};
 		const mode = currency === 'all' ? 'all' : 'native';
@@ -135,11 +154,23 @@
 			done(dashboardApi.overview(params, signal), (v) => {
 				overview = v;
 				overviewState = v.summary.transaction_count === 0 ? 'empty' : 'loaded';
-			}, (s) => (overviewState = s)),
-			done(dashboardApi.daily(params, signal), (v) => {
+			}, (s) => (overviewState = s), (n) => (overviewErr = n)),
+			done(dashboardApi.daily(params, mode, signal), (v) => {
 				daily = v.days;
-				dailyState = emptyOf(v.days);
-			}, (s) => (dailyState = s)),
+				dailyMeta = { display_currency: v.display_currency, normalized: v.normalized };
+				try {
+					trend = {
+						labels: v.days.map((d) => d.date),
+						values: v.days.map((d) => toChartNumber(d.amount_minor))
+					};
+					dailyState = emptyOf(v.days);
+				} catch {
+					// Unsafe chart magnitude: table/exact values stay
+					// available; only the chart reports an error.
+					trend = { labels: [], values: [] };
+					dailyState = 'error';
+				}
+			}, (s) => (dailyState = s), (n) => (dailyErr = n)),
 			done(dashboardApi.products(params, mode, currency === 'all' ? '' : currency, signal), (v) => {
 				products = v.rows.map((r) => ({
 					name: r.product_name,
@@ -148,7 +179,7 @@
 					amount_minor: r.amount_minor
 				}));
 				productsState = emptyOf(products);
-			}, (s) => (productsState = s)),
+			}, (s) => (productsState = s), (n) => (productsErr = n)),
 			done(dashboardApi.categories(params, catKind, mode, currency === 'all' ? '' : currency, signal), (v) => {
 				categories = v.rows.map((r) => ({
 					name: r.name_en ? `${r.name_ar} / ${r.name_en}` : r.name_ar,
@@ -156,40 +187,28 @@
 					amount_minor: r.amount_minor
 				}));
 				categoriesState = emptyOf(categories);
-			}, (s) => (categoriesState = s)),
+			}, (s) => (categoriesState = s), (n) => (categoriesErr = n)),
 			done(dashboardApi.branches(params, signal), (v) => {
 				branches = v.rows;
 				branchesState = emptyOf(v.rows);
-			}, (s) => (branchesState = s)),
+			}, (s) => (branchesState = s), (n) => (branchesErr = n)),
 			done(dashboardApi.syncHealth(signal), (v) => {
 				syncHealth = v;
 				syncState = 'loaded';
-			}, (s) => (syncState = s)),
+			}, (s) => (syncState = s), (n) => (syncErr = n)),
 			done(dashboardApi.activity(signal), (v) => {
 				activity = v.items;
 				activityState = emptyOf(v.items);
-			}, (s) => (activityState = s)),
+			}, (s) => (activityState = s), (n) => (activityErr = n)),
 			done(dashboardApi.latestSales(signal), (v) => {
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
-			}, (s) => (latestState = s))
+			}, (s) => (latestState = s), (n) => (latestErr = n))
 		]);
 	}
 
 	function trendUnit(): string {
-		return currency === 'all' ? 'EGP normalized' : currency;
-	}
-
-	function trendData(): { labels: string[]; values: number[] } {
-		try {
-			return {
-				labels: daily.map((d) => d.date),
-				values: daily.map((d) => toChartNumber(d.normalized_minor))
-			};
-		} catch {
-			dailyState = 'error';
-			return { labels: [], values: [] };
-		}
+		return dailyMeta.normalized ? `${dailyMeta.display_currency} normalized` : dailyMeta.display_currency;
 	}
 
 	function setMode(m: 'all' | 'EGP' | 'USD') {
@@ -222,7 +241,7 @@
 </script>
 
 {#if authed === null}
-	<div class="muted" style="padding: 24px;">جارٍ التحميل… / Loading…</div>
+	<div class="muted pad">جارٍ التحميل… / Loading…</div>
 {:else if !authed}
 	<LoginPage onlogin={() => ((authed = true), reloadAll())} />
 {:else}
@@ -239,37 +258,39 @@
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
 			<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} />
 			{#if route === 'overview' || route === 'sales'}
-				<SalesCard data={overview} mode={currency} onmode={setMode} status={overviewState} />
+				<SalesCard data={overview} mode={currency} onmode={setMode} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
 			{/if}
 			{#if route === 'overview' || route === 'sales' || route === 'daily'}
 				<div class="grid">
 					<TrendChart
 						titleAr="الاتجاه اليومي للمبيعات"
 						titleEn="Sales over time"
-						labels={trendData().labels}
-						values={trendData().values}
+						labels={trend.labels}
+						values={trend.values}
 						unit={trendUnit()}
 						status={dailyState}
+						errStatus={dailyErr}
+						onretry={retryAll}
 					/>
 				</div>
 			{/if}
 			{#if route === 'overview' || route === 'products'}
-				<TopProducts rows={products} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={productsState} />
+				<TopProducts rows={products} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={productsState} errStatus={productsErr} onretry={retryAll} />
 			{/if}
 			{#if route === 'overview' || route === 'categories'}
 				<div class="kindswitch">
 					<button type="button" class:active={catKind === 'root'} onclick={() => setCatKind('root')}>الفئات الرئيسية / Roots</button>
 					<button type="button" class:active={catKind === 'subcategory'} onclick={() => setCatKind('subcategory')}>الفئات الفرعية / Subcategories</button>
 				</div>
-				<CategoryCard rows={categories} kind={catKind} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} />
+				<CategoryCard rows={categories} kind={catKind} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
 			{/if}
 			{#if route === 'overview' || route === 'sales'}
-				<BranchCard rows={branches} status={branchesState} />
+				<BranchCard rows={branches} status={branchesState} errStatus={branchesErr} onretry={retryAll} />
 			{/if}
 			{#if route === 'overview' || route === 'sync'}
-				<SyncHealthCard health={syncHealth} status={syncState} onrefresh={() => reloadAll()} />
-				<ActivityCard items={activity} status={activityState} />
-				<LatestSalesCard sales={latest} status={latestState} />
+				<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
+				<ActivityCard items={activity} status={activityState} errStatus={activityErr} onretry={retryAll} />
+				<LatestSalesCard sales={latest} status={latestState} errStatus={latestErr} onretry={retryAll} />
 			{/if}
 		</main>
 	</div>

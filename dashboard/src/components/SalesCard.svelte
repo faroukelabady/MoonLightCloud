@@ -3,6 +3,7 @@
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import WidgetError from './WidgetError.svelte';
 	import { formatMinor, formatInt } from '../lib/money.js';
 	import type { OverviewResponse } from '../lib/api.js';
 
@@ -10,12 +11,16 @@
 		data,
 		mode,
 		onmode,
-		status
+		status,
+		errStatus,
+		onretry
 	}: {
 		data: OverviewResponse | null;
 		mode: 'all' | 'EGP' | 'USD';
 		onmode: (m: 'all' | 'EGP' | 'USD') => void;
 		status: 'loading' | 'loaded' | 'empty' | 'error';
+		errStatus: number | null;
+		onretry: () => void;
 	} = $props();
 
 	function bucket() {
@@ -24,10 +29,23 @@
 		return null;
 	}
 
-	function allTotal(): string | null {
-		if (!data || mode !== 'all') return null;
-		return formatMinor(data.normalized.normalized_total_minor, 'EGP');
+	function average(): { transactions: number; average_minor: string } | null {
+		if (!data) return null;
+		if (mode === 'all') return data.averages.all;
+		if (mode === 'EGP') return data.averages.egp;
+		return data.averages.usd;
 	}
+
+	let avgDisplay = $derived.by(() => {
+		const avg = average();
+		if (!avg) return '—';
+		return formatMinor(avg.average_minor, mode === 'all' ? 'EGP' : mode);
+	});
+
+	let txnDisplay = $derived.by(() => {
+		const avg = average();
+		return formatInt(avg?.transactions ?? data?.summary.transaction_count ?? 0);
+	});
 </script>
 
 <Card ar="إجمالي المبيعات" en="Total sales">
@@ -43,16 +61,16 @@
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
-		<EmptyState ar="تعذر تحميل البيانات" en="Could not load data" />
+		<WidgetError status={errStatus} {onretry} />
 	{:else if !data || data.summary.transaction_count === 0}
 		<EmptyState ar="لا توجد مبيعات في هذه الفترة" en="No sales in this period" />
 	{:else}
 		<div class="total num">
 			{#if mode === 'all'}
-				{allTotal()}
+				{formatMinor(data.normalized.normalized_total_minor, 'EGP')}
 			{:else}
 				{@const b = bucket()}
-				{b ? formatMinor(String(b.sales_total_minor), mode) : '—'}
+				{b ? formatMinor(b.sales_total_minor, mode) : '—'}
 			{/if}
 		</div>
 		{#if mode === 'all'}
@@ -62,31 +80,11 @@
 		<div class="kpis">
 			<div class="kpi">
 				<div class="kpi-label">عدد المعاملات<br /><span class="muted">Transactions</span></div>
-				<div class="kpi-value num">{formatInt(data.summary.transaction_count)}</div>
+				<div class="kpi-value num">{txnDisplay}</div>
 			</div>
 			<div class="kpi">
 				<div class="kpi-label">متوسط قيمة العملية<br /><span class="muted">Average transaction value</span></div>
-				<div class="kpi-value num">
-					{#if mode === 'all'}
-						{formatMinor(
-							String(
-								BigInt(data.normalized.normalized_total_minor) /
-									BigInt(Math.max(1, data.summary.transaction_count))
-							),
-							'EGP'
-						)}
-					{:else}
-						{@const b2 = bucket()}
-						{b2
-							? formatMinor(
-									String(
-										BigInt(b2.sales_total_minor) / BigInt(Math.max(1, data.summary.transaction_count))
-									),
-									mode
-								)
-							: '—'}
-					{/if}
-				</div>
+				<div class="kpi-value num">{avgDisplay}</div>
 			</div>
 			<div class="kpi">
 				<div class="kpi-label">الوحدات المباعة<br /><span class="muted">Units Sold</span></div>

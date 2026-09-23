@@ -14,6 +14,20 @@
 	let customFrom = $state(params.from_date ?? '');
 	let customTo = $state(params.to_date ?? '');
 
+	// L01: keep visible inputs synchronized with authoritative URL/filter
+	// state on history navigation. Syncs only when the params themselves
+	// change (tracked by key), so typing in one field never clobbers the
+	// other and active edits are never overwritten.
+	let syncedKey = $state('');
+	$effect(() => {
+		const key = params.period + '|' + (params.from_date ?? '') + '|' + (params.to_date ?? '');
+		if (key !== syncedKey) {
+			syncedKey = key;
+			customFrom = params.from_date ?? '';
+			customTo = params.to_date ?? '';
+		}
+	});
+
 	const periods = [
 		{ v: 'last_10_completed_days', ar: 'آخر 10 أيام', en: 'Last 10 days' },
 		{ v: 'yesterday', ar: 'أمس', en: 'Yesterday' },

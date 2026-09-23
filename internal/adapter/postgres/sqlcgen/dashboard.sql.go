@@ -100,8 +100,8 @@ const dashboardCategoriesNormalized = `-- name: DashboardCategoriesNormalized :m
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
-        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END), 0)::bigint AS normalized,
+    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
     COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_line_classifications_projection c
 JOIN sale_lines_projection l
@@ -265,14 +265,23 @@ func (q *Queries) DashboardLatestSales(ctx context.Context, limitN int32) ([]Das
 const dashboardNormalizedDaily = `-- name: DashboardNormalizedDaily :many
 SELECT day.day AS day,
     COUNT(*)::bigint AS transactions,
-    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_total
+    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COUNT(*) FILTER (WHERE day.usd_missing_fx)::bigint AS usd_missing_fx
 FROM (
-    SELECT ((s.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
-        CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
-        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END AS normalized
+    SELECT s.sale_id,
+        ((s.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
+        round(CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
+        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END) AS normalized,
+        (s.currency = 'USD' AND s.fx_rate_microrate IS NULL) AS usd_missing_fx
     FROM sales_projection s
     WHERE s.occurred_at >= $2 AND s.occurred_at < $3
 ) day
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = day.sale_id
 GROUP BY day.day
 ORDER BY day.day
 `
@@ -287,6 +296,8 @@ type DashboardNormalizedDailyRow struct {
 	Day             string `json:"day"`
 	Transactions    int64  `json:"transactions"`
 	NormalizedTotal int64  `json:"normalized_total"`
+	Units           int64  `json:"units"`
+	UsdMissingFx    int64  `json:"usd_missing_fx"`
 }
 
 func (q *Queries) DashboardNormalizedDaily(ctx context.Context, arg DashboardNormalizedDailyParams) ([]DashboardNormalizedDailyRow, error) {
@@ -298,7 +309,13 @@ func (q *Queries) DashboardNormalizedDaily(ctx context.Context, arg DashboardNor
 	items := []DashboardNormalizedDailyRow{}
 	for rows.Next() {
 		var i DashboardNormalizedDailyRow
-		if err := rows.Scan(&i.Day, &i.Transactions, &i.NormalizedTotal); err != nil {
+		if err := rows.Scan(
+			&i.Day,
+			&i.Transactions,
+			&i.NormalizedTotal,
+			&i.Units,
+			&i.UsdMissingFx,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -314,8 +331,8 @@ const dashboardNormalizedSummary = `-- name: DashboardNormalizedSummary :one
 SELECT
     count(*)::bigint AS transactions,
     COALESCE(SUM(l.units), 0)::bigint AS units,
-    COALESCE(SUM(CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
-        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END), 0)::bigint AS normalized_total,
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
+        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_total,
     COUNT(*) FILTER (WHERE s.currency = 'USD')::bigint AS usd_sales,
     COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS usd_missing_fx
 FROM sales_projection s
@@ -343,8 +360,10 @@ type DashboardNormalizedSummaryRow struct {
 // Dashboard read queries (Phase 3B). Read-only aggregates over the frozen
 // sale.finalized.v1 projection. Historical FX normalization converts each
 // USD Sale with ITS OWN fx_rate_microrate snapshot (never a current rate):
-// normalized = EGP native + SUM(USD total * microrate / 1e6). Rounding is
-// PostgreSQL numeric-to-bigint conversion (half away from zero), exact
+// normalized = EGP native + SUM(per-sale rounded conversion). Atomic rule
+// (M01): every atomic historical amount is converted and rounded exactly
+// once with round(numeric) (half away from zero) BEFORE aggregation, so
+// grouping (summary vs daily vs branches) cannot change the total. Exact
 // integer math throughout, no floats; overflow fails explicitly via the
 // bigint casts.
 // bigint casts so overflow fails instead of wrapping. All windows are
@@ -365,8 +384,8 @@ func (q *Queries) DashboardNormalizedSummary(ctx context.Context, arg DashboardN
 const dashboardProductsNormalized = `-- name: DashboardProductsNormalized :many
 SELECT l.product_id, l.sku, l.product_name,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
-        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END), 0)::bigint AS normalized,
+    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
     COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
@@ -435,7 +454,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     ORDER BY ts DESC
     LIMIT $1::int)
 ) feed
-ORDER BY ts DESC
+ORDER BY ts DESC, kind ASC, event_id ASC
 LIMIT $1::int
 `
 

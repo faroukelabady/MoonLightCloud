@@ -12,7 +12,7 @@
 	} = $props();
 </script>
 
-{#if label}<div class="muted" style="margin-bottom: 4px;">{label}</div>{/if}
+{#if label}<div class="muted label-gap">{label}</div>{/if}
 <div class="segmented" role="group">
 	{#each options as o}
 		<button

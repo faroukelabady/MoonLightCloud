@@ -1,9 +1,11 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -242,4 +244,88 @@ func TestDashboardMissingFxFailsLoudly(t *testing.T) {
 	if _, err := env.dash.Overview(ctx, req); err == nil {
 		t.Fatal("USD without FX must fail loudly, never silently drop revenue")
 	}
+}
+
+// TestDashboardMoneyLexicalStrings marshals every dashboard money response
+// to JSON and asserts each monetary leaf is a JSON string (never a
+// number): the source-level guard against float-precision regressions.
+func TestDashboardMoneyLexicalStrings(t *testing.T) {
+	env := openDashEnv(t)
+	projectDashSale(t, env, "22222222-2222-7222-8222-222222222222", "2026-09-20T10:00:00Z", fixture(t, "sale_egp.json"))
+	ctx := context.Background()
+	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
+	over, err := env.dash.Overview(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dres, err := env.dash.Daily(ctx, req, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	days := dres.Days
+	prods, err := env.dash.ProductsNormalized(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cats, err := env.dash.CategoriesNormalized(ctx, req, report.DimensionRootCategory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	branches, err := env.dash.Branches(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := env.dash.LatestSales(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]any{
+		"overview": over, "daily": days, "products": prods,
+		"categories": cats, "branches": branches, "latest": latest,
+	} {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertMoneyStrings(t, name, raw)
+	}
+}
+
+// moneyKeys are DTO fields that must serialize as JSON strings.
+var moneyKeys = map[string]bool{
+	"subtotal_minor": true, "discount_minor": true, "tax_minor": true,
+	"sales_total_minor": true, "line_cost_minor": true, "line_sales_minor": true,
+	"amount_minor": true, "change_minor": true, "total_minor": true,
+	"normalized_minor": true, "normalized_total_minor": true,
+	"latest_rate_microrate": true, "min_rate_microrate": true, "max_rate_microrate": true,
+}
+
+func assertMoneyStrings(t *testing.T, name string, raw []byte) {
+	t.Helper()
+	var v any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(path string, x any)
+	walk = func(path string, x any) {
+		switch n := x.(type) {
+		case map[string]any:
+			for k, val := range n {
+				if moneyKeys[k] {
+					if _, ok := val.(string); !ok {
+						t.Fatalf("%s: %s must be a JSON string, got %T (%v)", name, path+"/"+k, val, val)
+					}
+					continue
+				}
+				walk(path+"/"+k, val)
+			}
+		case []any:
+			for i, val := range n {
+				walk(path+"/"+strconv.Itoa(i), val)
+			}
+		}
+	}
+	walk(name, v)
 }

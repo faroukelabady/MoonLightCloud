@@ -80,7 +80,36 @@ type NormalizedCategoryRow struct {
 type NormalizedDay struct {
 	Date            string `json:"date"`
 	Transactions    int64  `json:"transactions"`
+	Units           int64  `json:"units"`
 	NormalizedMinor string `json:"normalized_minor"`
+}
+
+// DailyDay is one unified daily row: normalized EGP in All mode, native
+// bucket amounts in EGP/USD modes. The contract metadata makes relabeling
+// impossible: display_currency + normalized travel with the data.
+type DailyDay struct {
+	Date         string `json:"date"`
+	Transactions int64  `json:"transactions"`
+	Units        int64  `json:"units"`
+	AmountMinor  string `json:"amount_minor"`
+}
+
+// DailyResponse wraps daily rows with explicit mode metadata.
+type DailyResponse struct {
+	Timezone        string            `json:"timezone"`
+	Period          report.PeriodMeta `json:"period"`
+	Mode            string            `json:"mode"`
+	DisplayCurrency string            `json:"display_currency"`
+	Normalized      bool              `json:"normalized"`
+	Days            []DailyDay        `json:"days"`
+}
+
+// ModeAverage is a server-computed average transaction value: truncating
+// integer division of the mode total by the mode transaction count
+// (documented, deterministic, identical rule in every mode).
+type ModeAverage struct {
+	Transactions int64  `json:"transactions"`
+	AverageMinor string `json:"average_minor"`
 }
 
 // ActivityItem is one Cloud-side event for the recent feed. Sources are
@@ -108,16 +137,53 @@ type LatestSale struct {
 	CashierName *string `json:"cashier_name,omitempty"`
 }
 
-// Overview is the dashboard landing response: frozen summary plus
-// presentation-normalized values. Native buckets come verbatim from
-// ReportingService; only the normalized_* fields are dashboard-added.
+// Overview is the dashboard landing response: frozen summary data mapped
+// into string-money DTOs plus presentation-normalized values. Native
+// totals flow through untouched (same numbers, decimal-string encoding).
 type Overview struct {
 	GeneratedAt time.Time         `json:"generated_at"`
 	Timezone    string            `json:"timezone"`
 	Period      report.PeriodMeta `json:"period"`
-	Summary     report.Summary    `json:"summary"`
+	Summary     SummaryDTO        `json:"summary"`
 	Normalized  NormalizedTotal   `json:"normalized"`
-	Fx          FxInfo            `json:"fx"`
+	// Averages carries per-mode server-computed average transaction values
+	// (truncating integer division; identical rule in every mode).
+	Averages OverviewAverages `json:"averages"`
+	Fx       FxInfo           `json:"fx"`
+}
+
+// OverviewAverages holds one average per currency mode. Absent currencies
+// report zero transactions with a zero average (never null, never mixed).
+type OverviewAverages struct {
+	All ModeAverage `json:"all"`
+	EGP ModeAverage `json:"egp"`
+	USD ModeAverage `json:"usd"`
+}
+
+// SummaryBucket is one currency bucket with exact decimal-string money.
+type SummaryBucket struct {
+	Currency        string `json:"currency"`
+	SubtotalMinor   string `json:"subtotal_minor"`
+	DiscountMinor   string `json:"discount_minor"`
+	TaxMinor        string `json:"tax_minor"`
+	SalesTotalMinor string `json:"sales_total_minor"`
+	LineCostMinor   string `json:"line_cost_minor"`
+}
+
+// SummaryPayment mirrors report.PaymentTotal with string money.
+type SummaryPayment struct {
+	Method      string `json:"method"`
+	Currency    string `json:"currency"`
+	AmountMinor string `json:"amount_minor"`
+	ChangeMinor string `json:"change_minor"`
+}
+
+// SummaryDTO mirrors report.Summary with string-backed money.
+type SummaryDTO struct {
+	TransactionCount int64            `json:"transaction_count"`
+	UnitsSold        int64            `json:"units_sold"`
+	CurrencyTotals   []SummaryBucket  `json:"currency_totals"`
+	PaymentTotals    []SummaryPayment `json:"payment_totals"`
 }
 
 // Repository is the dashboard storage boundary: the frozen reporting
@@ -146,7 +212,9 @@ type (
 	NormalizedDailyRow struct {
 		Date         string
 		Transactions int64
+		Units        int64
 		Normalized   int64
+		USDMissingFx int64
 	}
 	LatestFxRow struct {
 		Rate          *string
@@ -220,35 +288,132 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 	if err != nil {
 		return Overview{}, err
 	}
+	nativeRows, err := s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, "")
+	if err != nil {
+		return Overview{}, err
+	}
 	return Overview{
 		GeneratedAt: req.GeneratedAt(), Timezone: req.Period.Timezone,
 		Period:  sum.Period,
-		Summary: sum,
+		Summary: toSummaryDTO(sum),
 		Normalized: NormalizedTotal{
 			NormalizedTotalMinor: minorString(norm.Normalized),
 			Transactions:         norm.Transactions,
 			Units:                norm.Units,
 			USDSaleCount:         norm.USDSales,
 		},
-		Fx: fx,
+		Averages: overviewAverages(nativeRows, norm),
+		Fx:       fx,
 	}, nil
 }
 
-// DailyNormalized returns per-day normalized EGP values merged over the
-// frozen daily series shape (dates ascending, Cairo-grouped).
-func (s Service) DailyNormalized(ctx context.Context, req report.Request) ([]NormalizedDay, error) {
-	rows, err := s.repo.DashboardNormalizedDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
-	if err != nil {
-		return nil, err
+// overviewAverages computes per-mode averages server-side: All from the
+// normalized total, EGP/USD from native per-currency rows (own transaction
+// counts — never the all-currency count). Truncating integer division
+// throughout (documented); zero transactions average to zero.
+func overviewAverages(native []report.SummaryRow, norm NormalizedSummaryRow) OverviewAverages {
+	out := OverviewAverages{
+		All: ModeAverage{
+			Transactions: norm.Transactions,
+			AverageMinor: minorString(divTrunc(norm.Normalized, norm.Transactions)),
+		},
+		EGP: ModeAverage{AverageMinor: "0"},
+		USD: ModeAverage{AverageMinor: "0"},
 	}
-	out := make([]NormalizedDay, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, NormalizedDay{
-			Date: r.Date, Transactions: r.Transactions,
-			NormalizedMinor: minorString(r.Normalized),
+	for _, b := range native {
+		a := ModeAverage{Transactions: b.Transactions, AverageMinor: minorString(divTrunc(b.SalesTotal, b.Transactions))}
+		if b.Currency == "EGP" {
+			out.EGP = a
+		} else if b.Currency == "USD" {
+			out.USD = a
+		}
+	}
+	return out
+}
+
+func divTrunc(total, txns int64) int64 {
+	if txns <= 0 {
+		return 0
+	}
+	return total / txns
+}
+
+// toSummaryDTO maps the frozen summary to string-money DTOs (same numbers,
+// decimal-string encoding).
+func toSummaryDTO(sum report.Summary) SummaryDTO {
+	out := SummaryDTO{
+		TransactionCount: sum.TransactionCount,
+		UnitsSold:        sum.UnitsSold,
+		CurrencyTotals:   make([]SummaryBucket, 0, len(sum.CurrencyTotals)),
+		PaymentTotals:    make([]SummaryPayment, 0, len(sum.PaymentTotals)),
+	}
+	for _, b := range sum.CurrencyTotals {
+		out.CurrencyTotals = append(out.CurrencyTotals, SummaryBucket{
+			Currency: b.Currency, SubtotalMinor: minorString(b.SubtotalMinor),
+			DiscountMinor: minorString(b.DiscountMinor), TaxMinor: minorString(b.TaxMinor),
+			SalesTotalMinor: minorString(b.SalesTotalMinor), LineCostMinor: minorString(b.LineCostMinor),
+		})
+	}
+	for _, p := range sum.PaymentTotals {
+		out.PaymentTotals = append(out.PaymentTotals, SummaryPayment{
+			Method: p.Method, Currency: p.Currency,
+			AmountMinor: minorString(p.AmountMinor), ChangeMinor: minorString(p.ChangeMinor),
+		})
+	}
+	return out
+}
+
+// Daily returns the unified daily series for one currency mode:
+// all = normalized EGP per Cairo date; EGP/USD = native buckets only.
+// Native modes never convert; All mode fails loudly on missing FX.
+func (s Service) Daily(ctx context.Context, req report.Request, mode string) (DailyResponse, error) {
+	switch mode {
+	case "all", "EGP", "USD":
+	default:
+		return DailyResponse{}, apperr.New(apperr.InvalidInput, "unsupported daily mode: want all|EGP|USD")
+	}
+	if mode == "all" {
+		rows, err := s.repo.DashboardNormalizedDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+		if err != nil {
+			return DailyResponse{}, err
+		}
+		out := DailyResponse{Mode: "all", DisplayCurrency: "EGP", Normalized: true, Days: []DailyDay{},
+			Timezone: req.Period.Timezone, Period: periodMeta(req)}
+		for _, r := range rows {
+			if r.USDMissingFx > 0 {
+				return DailyResponse{}, apperr.New(apperr.Internal, "projection integrity: USD sale without FX snapshot")
+			}
+			out.Days = append(out.Days, DailyDay{
+				Date: r.Date, Transactions: r.Transactions, Units: r.Units,
+				AmountMinor: minorString(r.Normalized),
+			})
+		}
+		return out, nil
+	}
+	native, err := s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	if err != nil {
+		return DailyResponse{}, err
+	}
+	out := DailyResponse{Mode: mode, DisplayCurrency: mode, Normalized: false, Days: []DailyDay{},
+		Timezone: req.Period.Timezone, Period: periodMeta(req)}
+	for _, r := range native {
+		out.Days = append(out.Days, DailyDay{
+			Date: r.Date, Transactions: r.Transactions, Units: r.Units,
+			AmountMinor: minorString(r.SalesTotal),
 		})
 	}
 	return out, nil
+}
+
+// periodMeta renders period metadata (same shape as report.PeriodMeta).
+func periodMeta(req report.Request) report.PeriodMeta {
+	const layout = "2006-01-02T15:04:05.999999999Z07:00"
+	p := req.Period
+	return report.PeriodMeta{
+		Kind: p.Kind, Timezone: p.Timezone,
+		StartLocal: p.StartLocal.Format(layout), EndLocalExclusive: p.EndLocalExclusive.Format(layout),
+		StartUTC: p.StartUTC.Format(layout), EndUTC: p.EndUTC.Format(layout),
+	}
 }
 
 // ProductsNormalized ranks products by normalized EGP line value.
@@ -348,8 +513,13 @@ func (s Service) Branches(ctx context.Context, req report.Request) ([]BranchRow,
 // SyncHealthItem is the dashboard sync-health card model: frozen
 // freshness plus projector processing visibility. Wording stays honest:
 // complete means Cloud has no backlog, never that Retail is synced.
+// Diagnostics are allowlisted: only known error codes with mapped bilingual
+// operator labels cross into browser JSON. Raw stored messages (which may
+// contain connection strings, SQL, or payload fragments) stay server-side
+// in logs, diagnostic tables, and admin tooling.
 type SyncHealthItem struct {
 	Freshness        report.Freshness `json:"freshness"`
+	QueueCount       int64            `json:"queue_count"`
 	PendingCount     int64            `json:"pending_count"`
 	ProcessedCount   int64            `json:"processed_count"`
 	BlockedCount     int64            `json:"blocked_count"`
@@ -357,10 +527,13 @@ type SyncHealthItem struct {
 	OldestPendingAt  *string          `json:"oldest_pending_at,omitempty"`
 	LastErrorEvent   string           `json:"last_error_event,omitempty"`
 	LastErrorCode    string           `json:"last_error_code,omitempty"`
-	LastErrorMessage string           `json:"last_error_message,omitempty"`
+	LastErrorLabelAR string           `json:"last_error_label_ar,omitempty"`
+	LastErrorLabelEN string           `json:"last_error_label_en,omitempty"`
 }
 
 // SyncHealth assembles freshness plus processing-state counts.
+// QueueCount is pending + retry counted exactly once (single source:
+// the combined pending/retry count, never pending_count + retry_count).
 func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 	fresh, err := s.freshness(ctx)
 	if err != nil {
@@ -370,20 +543,46 @@ func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 	if err != nil {
 		return SyncHealthItem{}, err
 	}
+	ar, en := safeDiagnostic(stats.LastErrorCode)
 	out := SyncHealthItem{
 		Freshness:        fresh,
-		PendingCount:     stats.PendingCount,
+		QueueCount:       stats.PendingCount,
+		PendingCount:     stats.Counts[sale.ProcPending],
 		ProcessedCount:   stats.Counts[sale.ProcProcessed],
 		BlockedCount:     stats.Counts[sale.ProcBlocked],
 		RetryCount:       stats.Counts[sale.ProcRetry],
 		LastErrorEvent:   stats.LastErrorEvent,
 		LastErrorCode:    stats.LastErrorCode,
-		LastErrorMessage: stats.LastErrorMsg,
+		LastErrorLabelAR: ar,
+		LastErrorLabelEN: en,
 	}
 	if stats.OldestPending != nil {
 		out.OldestPendingAt = ptrStr(stats.OldestPending.Format(time.RFC3339))
 	}
 	return out, nil
+}
+
+// safeDiagnostic maps known processing error codes to safe bilingual
+// operator labels. Unknown codes get a generic message; the raw stored
+// message never crosses into browser JSON (it may contain connection
+// strings, SQL, or payload fragments).
+func safeDiagnostic(code string) (ar, en string) {
+	switch code {
+	case "":
+		return "", ""
+	case "SALE_ID_CONFLICT":
+		return "تعارض مبيعات: حدثان بنفس رقم البيع", "Sale conflict: two events share one sale ID"
+	case "OWNERSHIP_INTEGRITY":
+		return "خطأ سلامة الملكية", "Ownership integrity error"
+	case "VALIDATION_FAILED":
+		return "حدث غير صالح", "Invalid event data"
+	case "PROJECTION_FAILED":
+		return "فشل مؤقت في المعالجة", "Transient projection failure"
+	case "EVENT_MISSING":
+		return "حدث مفقود", "Missing source event"
+	default:
+		return "حدث خطأ أثناء المعالجة", "A processing error occurred"
+	}
 }
 func (s Service) RecentActivity(ctx context.Context, limit int) ([]ActivityItem, error) {
 	if limit < 1 || limit > 100 {

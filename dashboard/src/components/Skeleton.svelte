@@ -4,6 +4,6 @@
 
 <div aria-busy="true" aria-label="جارٍ التحميل / Loading">
 	{#each Array(lines) as _, i (i)}
-		<div class="skeleton" style="height: 14px; margin: 8px 0;"></div>
+		<div class="skeleton skel-line"></div>
 	{/each}
 </div>

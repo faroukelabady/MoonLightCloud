@@ -20,14 +20,17 @@ type DashboardHandlers struct {
 	sessionKey []byte
 	ttl        time.Duration
 	secure     bool
+	trusted    []net.IPNet
 	limiter    *dashboard.LoginLimiter
 	log        *slog.Logger
 }
 
 // NewDashboardHandlers wires BFF handlers. sessionKey must be 32 bytes.
-func NewDashboardHandlers(auth dashboard.Credentials, sessionKey []byte, ttl time.Duration, secure bool, log *slog.Logger) DashboardHandlers {
+// trustedProxies scopes X-Forwarded-For trust for login rate limiting
+// (empty trusts none; see dashboard.ClientIP).
+func NewDashboardHandlers(auth dashboard.Credentials, sessionKey []byte, ttl time.Duration, secure bool, trustedProxies []net.IPNet, log *slog.Logger) DashboardHandlers {
 	return DashboardHandlers{auth: auth, sessionKey: sessionKey, ttl: ttl,
-		secure: secure, limiter: dashboard.NewLoginLimiter(), log: log}
+		secure: secure, trusted: trustedProxies, limiter: dashboard.NewLoginLimiter(), log: log}
 }
 
 type ctxDashboardKey string
@@ -92,14 +95,6 @@ func sameOrigin(origin string, r *http.Request) bool {
 
 // clientIP extracts the direct peer IP (no proxy trust: no X-Forwarded-For
 // parsing, since deployments vary and spoofing would poison rate limits).
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -108,7 +103,7 @@ type loginRequest struct {
 // Login verifies the operator credential with generic failures and a
 // per-IP rate limit. Neither username nor password is ever logged.
 func (h DashboardHandlers) Login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := dashboard.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), h.trusted)
 	now := time.Now()
 	if h.limiter.Blocked(ip, now) {
 		w.Header().Set("Retry-After", "60")

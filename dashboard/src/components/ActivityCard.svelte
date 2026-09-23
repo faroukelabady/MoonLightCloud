@@ -2,10 +2,11 @@
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
+	import WidgetError from './WidgetError.svelte';
 	import { relativeTime } from '../lib/time.js';
 	import type { ActivityItem } from '../lib/api.js';
 
-	let { items, status }: { items: ActivityItem[]; status: 'loading' | 'loaded' | 'empty' | 'error' } = $props();
+	let { items, status, errStatus, onretry }: { items: ActivityItem[]; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } = $props();
 
 	function kindLabel(k: string): [string, string, string] {
 		if (k === 'blocked') return ['محظور', 'blocked', 'bad'];
@@ -18,7 +19,7 @@
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
-		<EmptyState ar="تعذر تحميل الأنشطة" en="Could not load activities" />
+		<WidgetError status={errStatus} {onretry} />
 	{:else if items.length === 0}
 		<EmptyState ar="لا توجد أنشطة بعد" en="No activities yet" />
 	{:else}

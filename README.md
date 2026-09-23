@@ -76,6 +76,11 @@ See `.env.example` (placeholders only, never commit secrets):
   reports need ALL of `ENVIRONMENT=development`,
   `ALLOW_UNAUTHENTICATED_REPORTING=true`, and no token — anything else
   (including a missing `ENVIRONMENT`) fails startup.
+- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD_HASH`: operator login (dev
+  defaults only with explicit `ENVIRONMENT=development`; omitted
+  environments fail closed).
+- `TRUSTED_PROXY_CIDRS`: peers whose `X-Forwarded-For` is trusted for login
+  rate limiting (empty trusts none).
 
 ## Docs
 
