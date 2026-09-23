@@ -1,0 +1,134 @@
+:root {
+	--color-primary: #1d4ed8;
+	--color-primary-dark: #1e40af;
+	--color-sidebar: #101c38;
+	--color-sidebar-active: #1d4ed8;
+	--color-success: #15803d;
+	--color-warning: #b45309;
+	--color-danger: #b91c1c;
+	--color-muted: #6b7280;
+	--surface: #ffffff;
+	--background: #f5f6f8;
+	--border: #e3e6eb;
+	--radius-card: 8px;
+	--shadow-card: 0 1px 2px rgba(16, 28, 56, 0.06);
+	--text: #111827;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+	background: var(--background);
+	color: var(--text);
+}
+
+button {
+	font: inherit;
+	cursor: pointer;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
+}
+
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-card);
+	padding: 16px;
+}
+
+.card h2 {
+	margin: 0;
+	font-size: 1.05rem;
+}
+
+.sub {
+	margin: 2px 0 0;
+	font-size: 0.8rem;
+	color: var(--color-muted);
+}
+
+.muted {
+	color: var(--color-muted);
+	font-size: 0.85rem;
+}
+
+.badge {
+	display: inline-block;
+	font-size: 0.75rem;
+	padding: 2px 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: #f3f4f6;
+}
+
+.badge.ok {
+	color: var(--color-success);
+	border-color: #bbf7d0;
+	background: #f0fdf4;
+}
+
+.badge.warn {
+	color: var(--color-warning);
+	border-color: #fde68a;
+	background: #fffbeb;
+}
+
+.badge.bad {
+	color: var(--color-danger);
+	border-color: #fecaca;
+	background: #fef2f2;
+}
+
+.skeleton {
+	border-radius: 6px;
+	background: linear-gradient(90deg, #eef0f3 25%, #e2e5ea 50%, #eef0f3 75%);
+	background-size: 200% 100%;
+	animation: shimmer 1.2s infinite;
+	min-height: 1em;
+}
+
+@keyframes shimmer {
+	to {
+		background-position: -200% 0;
+	}
+}
+
+table.data {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.9rem;
+}
+
+table.data th,
+table.data td {
+	text-align: start;
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+}
+
+table.data th {
+	color: var(--color-muted);
+	font-weight: 600;
+}
+
+.num {
+	direction: ltr;
+	unicode-bidi: embed;
+	font-variant-numeric: tabular-nums;
+}

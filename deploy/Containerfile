@@ -1,6 +1,14 @@
 # Build with: podman build -f deploy/Containerfile -t moonlight-cloud:dev .
 # Runnable with plain `docker build` as well.
-# Stage 1: build a static Go binary with reproducible metadata.
+# Stage 1: build the Svelte dashboard to static assets (no CDN at runtime).
+FROM docker.io/library/node:22.23.0-bookworm-slim AS frontend
+WORKDIR /dash
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY dashboard/ ./
+RUN npm run build
+
+# Stage 2: build a static Go binary with reproducible metadata.
 FROM docker.io/library/golang:1.27.1-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -14,9 +22,11 @@ RUN CGO_ENABLED=0 go build \
   -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
   -o /out/moonlight-cloud ./cmd/moonlight-cloud
 
-# Stage 2: minimal runtime, non-root, no toolchain, no source.
+# Stage 3: minimal runtime, non-root, no toolchain, no source, no Node.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/moonlight-cloud /usr/local/bin/moonlight-cloud
+COPY --from=frontend /dash/dist /usr/local/share/moonlight-dashboard
+ENV DASHBOARD_ASSETS_DIR=/usr/local/share/moonlight-dashboard
 # Distroless nonroot user is 65532:65532.
 USER 65532:65532
 EXPOSE 8080

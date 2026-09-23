@@ -48,6 +48,23 @@ else
   go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 fi
 
+echo "== frontend (typecheck, unit tests, build) =="
+if ! command -v npm >/dev/null 2>&1; then
+  echo "error: npm required for dashboard checks" >&2
+  exit 1
+fi
+npm --prefix dashboard ci --no-audit --no-fund
+npm --prefix dashboard run typecheck
+npm --prefix dashboard test
+npm --prefix dashboard run build
+test -f dashboard/dist/index.html || { echo "dashboard build missing index.html" >&2; exit 1; }
+# Strict CSP compatibility: no inline scripts in the built shell.
+if grep -qE '<script(\s[^>]*)?>[^[:space:]<]' dashboard/dist/index.html; then
+  echo "dashboard: inline script detected" >&2
+  exit 1
+fi
+echo "dashboard: no inline scripts"
+
 echo "== container build =="
 if command -v podman >/dev/null 2>&1; then
   podman build -f deploy/Containerfile -t moonlight-cloud:check .

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/app"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
@@ -79,6 +81,8 @@ func run(args []string) error {
 		return deviceCmd(args)
 	case "projection":
 		return projectionCmd(args)
+	case "dashboard":
+		return dashboardCmd(args)
 	case "probe":
 		return probe(args)
 	case "dbprobe":
@@ -87,7 +91,7 @@ func run(args []string) error {
 		fmt.Printf("moonlight-cloud version=%s commit=%s build_time=%s\n", version, commit, buildTime)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q: want serve|migrate|device|probe|version", cmd)
+		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|dashboard|probe|version", cmd)
 	}
 }
 
@@ -207,6 +211,37 @@ func migrateCmd(args []string) error {
 // status shows pending/retry/blocked/processed counts, oldest pending age,
 // and the last error; retry returns one blocked/retryable event to pending.
 // The immutable source event is never touched. No destructive fix exists.
+
+// dashboardCmd hosts operator helpers. hash-password reads a password from
+// stdin (never argv, never logs) and prints the Argon2id PHC string for
+// DASHBOARD_PASSWORD_HASH provisioning.
+func dashboardCmd(args []string) error {
+	if len(args) == 0 || args[0] != "hash-password" {
+		return fmt.Errorf("usage: moonlight-cloud dashboard hash-password < /dev/stdin")
+	}
+	var pw strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if n > 0 {
+			pw.Write(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	password := strings.TrimSpace(pw.String())
+	if password == "" {
+		return fmt.Errorf("empty password on stdin")
+	}
+	hash, err := dashboard.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	fmt.Println(hash)
+	return nil
+}
+
 func projectionCmd(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: moonlight-cloud projection status|retry <event-id>")

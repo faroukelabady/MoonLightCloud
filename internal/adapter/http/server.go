@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -45,6 +45,31 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		ReportAuth(reportingToken)(http.HandlerFunc(reports.SalesDaily)))
 	mux.Handle("GET /api/v1/reports/sales/breakdown",
 		ReportAuth(reportingToken)(http.HandlerFunc(reports.SalesBreakdown)))
+	// Dashboard operator BFF (session cookie; never the reporting token).
+	mux.HandleFunc("POST /api/v1/dashboard/auth/login", dashAuth.Login)
+	mux.Handle("POST /api/v1/dashboard/auth/logout",
+		dashAuth.RequireDashboardSession(RequireSameOrigin(http.HandlerFunc(dashAuth.Logout))))
+	mux.Handle("GET /api/v1/dashboard/auth/me",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashAuth.Me)))
+	mux.Handle("GET /api/v1/dashboard/overview",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Overview)))
+	mux.Handle("GET /api/v1/dashboard/daily",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Daily)))
+	mux.Handle("GET /api/v1/dashboard/products",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Products)))
+	mux.Handle("GET /api/v1/dashboard/categories",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Categories)))
+	mux.Handle("GET /api/v1/dashboard/branches",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Branches)))
+	mux.Handle("GET /api/v1/dashboard/sync-health",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.SyncHealth)))
+	mux.Handle("GET /api/v1/dashboard/activity",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Activity)))
+	mux.Handle("GET /api/v1/dashboard/sales/latest",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.LatestSales)))
+	// Dashboard SPA (static build; API routes above take precedence).
+	mux.Handle("/dashboard", DashboardAssets(assetsDir, log))
+	mux.Handle("/dashboard/", DashboardAssets(assetsDir, log))
 	mux.HandleFunc("/", NotFound)
 
 	var h http.Handler = mux

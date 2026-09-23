@@ -18,6 +18,14 @@ func setReportingToken(t *testing.T) {
 	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
 }
 
+// setDashboardAuth pins valid operator credentials so tests focus elsewhere.
+// Uses a non-placeholder hash so staging/production success paths pass.
+func setDashboardAuth(t *testing.T) {
+	t.Helper()
+	t.Setenv("DASHBOARD_USERNAME", "op")
+	t.Setenv("DASHBOARD_PASSWORD_HASH", "$argon2id$v=19$m=65536,t=3,p=2$FUDrA/wAq/7mONAYJerxEg$5GSTO+qp6PL1LIy8JoXcPBN6eKU5YLD53VMkJCdYw/U")
+}
+
 func TestLoadDevelopmentDefaults(t *testing.T) {
 	setReportingToken(t)
 	setenv(t, "ENVIRONMENT", "development")
@@ -73,6 +81,7 @@ func TestProductionValid(t *testing.T) {
 	setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 	setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
 	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+	setDashboardAuth(t)
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +125,7 @@ func TestStoreTimezoneMatrix(t *testing.T) {
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
 			os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+			setDashboardAuth(t)
 			if tc.tz == "" {
 				os.Unsetenv("STORE_TIMEZONE")
 			} else {
@@ -175,6 +185,7 @@ func TestReportingTokenMatrix(t *testing.T) {
 			}
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
+			setDashboardAuth(t)
 			if tc.token == "" {
 				os.Unsetenv("REPORTING_API_TOKEN")
 			} else {
@@ -231,6 +242,7 @@ func TestPepperMatrix(t *testing.T) {
 			// Pepper matrix predates reporting config; hold those constant.
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+			setDashboardAuth(t)
 			_, err := Load()
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("wantErr=%v got %v", tc.wantErr, err)
@@ -264,5 +276,68 @@ func TestPortOverride(t *testing.T) {
 	}
 	if c.HTTPAddr != ":1234" {
 		t.Fatalf("want :1234, got %s", c.HTTPAddr)
+	}
+}
+
+func TestDashboardAuthMatrix(t *testing.T) {
+	const url = "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
+	const devURL = "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	const goodHash = "$argon2id$v=19$m=65536,t=3,p=2$FUDrA/wAq/7mONAYJerxEg$5GSTO+qp6PL1LIy8JoXcPBN6eKU5YLD53VMkJCdYw/U"
+	cases := []struct {
+		name    string
+		env     string
+		user    string // "" means unset
+		hash    string // "" means unset
+		ttl     string // "" means unset
+		wantErr bool
+	}{
+		{"dev defaults accepted", "development", "", "", "", false},
+		{"dev explicit accepted", "development", "boss", goodHash, "1h", false},
+		{"dev bad ttl rejected", "development", "boss", goodHash, "forever", true},
+		{"dev short ttl rejected", "development", "boss", goodHash, "1m", true},
+		{"prod missing user rejected", "production", "", goodHash, "", true},
+		{"prod missing hash rejected", "production", "boss", "", "", true},
+		{"prod placeholder rejected", "production", "boss", DevDashboardPasswordHash, "", true},
+		{"prod valid accepted", "production", "boss", goodHash, "", false},
+		{"staging placeholder rejected", "staging", "boss", DevDashboardPasswordHash, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setenv(t, "ENVIRONMENT", tc.env)
+			if tc.env == "development" {
+				setenv(t, "DATABASE_URL", devURL)
+			} else {
+				setenv(t, "DATABASE_URL", url)
+			}
+			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
+			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
+			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+			os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+			if tc.user == "" {
+				os.Unsetenv("DASHBOARD_USERNAME")
+			} else {
+				setenv(t, "DASHBOARD_USERNAME", tc.user)
+			}
+			if tc.hash == "" {
+				os.Unsetenv("DASHBOARD_PASSWORD_HASH")
+			} else {
+				setenv(t, "DASHBOARD_PASSWORD_HASH", tc.hash)
+			}
+			if tc.ttl == "" {
+				os.Unsetenv("DASHBOARD_SESSION_TTL")
+			} else {
+				setenv(t, "DASHBOARD_SESSION_TTL", tc.ttl)
+			}
+			c, err := Load()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v got %v", tc.wantErr, err)
+			}
+			if err == nil && tc.env == "development" && tc.user == "" {
+				if c.DashboardUsername != DefaultDashboardUsername ||
+					c.DashboardPasswordHash != DevDashboardPasswordHash {
+					t.Fatal("dev defaults not applied")
+				}
+			}
+		})
 	}
 }

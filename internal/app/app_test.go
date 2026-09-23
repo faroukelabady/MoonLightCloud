@@ -26,6 +26,7 @@ func testConfig(url string) config.Config {
 		StoreLocation: loc,
 		// Explicit dev-open reporting (mirrors the dev compose default).
 		AllowUnauthenticatedReporting: true,
+		DashboardSessionTTL:           config.DefaultSessionTTL,
 		ShutdownAfter:                 config.DefaultShutdownTimeout,
 		DBMaxConns:                    4,
 		DBMinConns:                    1,

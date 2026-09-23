@@ -24,3 +24,4 @@ Concise, irreversible-or-important choices only.
 - [0020](0020-reporting-time-semantics.md) — sales reporting and store-timezone semantics
 - [0021](0021-reporting-audit-remediation.md) — sales reporting audit remediation (H1/H2/H3/H4/M1/L1)
 - [0022](0022-breakdown-dto-split.md) — final breakdown DTO split (M2) and category ordering (L2)
+- [0023](0023-cloud-dashboard.md) — cloud reporting dashboard architecture

@@ -17,6 +17,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
+	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
@@ -44,6 +45,7 @@ type App struct {
 	Devices   auth.Service
 	Sync      sync.Service
 	Reports   report.Service
+	Dashboard dashboard.Service
 	Projector *sale.Projector
 	SaleStore sale.Store
 	Handler   http.Handler
@@ -79,8 +81,20 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
+	a.Dashboard = dashboard.NewService(a.Reports, store, store, clock.System{})
+	sessionKey, err := dashboard.SessionKey(cfg.Pepper)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	secureCookies := cfg.Environment == config.EnvProduction
+	dashAuth := adapterhttp.NewDashboardHandlers(
+		dashboard.Credentials{Username: cfg.DashboardUsername, PasswordHash: cfg.DashboardPasswordHash},
+		sessionKey, cfg.DashboardSessionTTL, secureCookies, log)
+	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify,
-		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken)
+		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
+		dashAuth, dashData, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

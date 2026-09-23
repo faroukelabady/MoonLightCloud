@@ -16,6 +16,7 @@ const (
 	TooLarge
 	UnsupportedMedia
 	Unprocessable
+	TooManyRequests
 )
 
 // Error is a classified application error.
@@ -55,6 +56,8 @@ func (e *Error) Code() string {
 		return "UNSUPPORTED_MEDIA_TYPE"
 	case Unprocessable:
 		return "UNSUPPORTED_EVENT"
+	case TooManyRequests:
+		return "RATE_LIMITED"
 	default:
 		return "INTERNAL"
 	}

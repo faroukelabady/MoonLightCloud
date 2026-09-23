@@ -67,6 +67,26 @@ const (
 	MinReportingTokenLen = 16
 )
 
+// Dashboard operator credential rules. Human login uses a configured
+// username plus an Argon2id PHC hash — never a plaintext password, never
+// in source control. Development falls back to documented constants when
+// unset; staging/production require explicit values and reject the dev
+// placeholder hash.
+const (
+	// DefaultDashboardUsername is the development-only username.
+	DefaultDashboardUsername = "operator"
+	// DevDashboardPassword is the documented development-only password.
+	// The matching hash below is rejected outside development.
+	DevDashboardPassword = "moonlight-dev-operator"
+	// DevDashboardPasswordHash is Argon2id(DevDashboardPassword).
+	DevDashboardPasswordHash = "$argon2id$v=19$m=65536,t=3,p=2$bEVIeBswLFNCwT4AKrDjOg$3v4UQUa5CkzWw3Iy/i35r2bG3xXH7Rvp5tLT0MBJKy0"
+	// DefaultSessionTTL bounds operator sessions.
+	DefaultSessionTTL = 12 * time.Hour
+	// SessionTTL bounds for DASHBOARD_SESSION_TTL validation.
+	MinSessionTTL = 15 * time.Minute
+	MaxSessionTTL = 7 * 24 * time.Hour
+)
+
 var devDBMarkers = []string{
 	"moonlight:moonlight@",
 	"postgres:postgres@",
@@ -101,6 +121,17 @@ type Config struct {
 	// ENVIRONMENT=development and no reporting token; true anywhere else
 	// (or with a token configured) is a startup failure.
 	AllowUnauthenticatedReporting bool
+	// DashboardUsername is the operator login name.
+	DashboardUsername string
+	// DashboardPasswordHash is the Argon2id PHC verifier for login.
+	DashboardPasswordHash string
+	// DashboardSessionTTL bounds dashboard sessions.
+	DashboardSessionTTL time.Duration
+	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
+	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
+	// to the baked-in assets path. Absent assets yield dashboard 404s;
+	// the API is unaffected.
+	DashboardAssetsDir string
 	// envExplicit records whether ENVIRONMENT was set. Missing-environment
 	// defaults still apply for other settings, but never grant open access.
 	envExplicit   bool
@@ -117,16 +148,19 @@ type Config struct {
 // Load reads configuration from the environment.
 func Load() (Config, error) {
 	c := Config{
-		Environment:    envOr("ENVIRONMENT", EnvDevelopment),
-		HTTPAddr:       envOr("HTTP_ADDR", DefaultHTTPAddr),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		LogLevel:       strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
-		PepperRaw:      strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
-		PepperVersion:  CurrentPepperVersion,
-		StoreTimezone:  strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
-		ReportingToken: strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
-		ShutdownAfter:  DefaultShutdownTimeout,
-		envExplicit:    strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
+		Environment:           envOr("ENVIRONMENT", EnvDevelopment),
+		HTTPAddr:              envOr("HTTP_ADDR", DefaultHTTPAddr),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		LogLevel:              strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
+		PepperRaw:             strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
+		PepperVersion:         CurrentPepperVersion,
+		StoreTimezone:         strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
+		ReportingToken:        strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
+		ShutdownAfter:         DefaultShutdownTimeout,
+		DashboardUsername:     strings.TrimSpace(os.Getenv("DASHBOARD_USERNAME")),
+		DashboardPasswordHash: strings.TrimSpace(os.Getenv("DASHBOARD_PASSWORD_HASH")),
+		DashboardAssetsDir:    envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
+		envExplicit:           strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
 	}
 	allowOpen, err := parseBoolFlag("ALLOW_UNAUTHENTICATED_REPORTING")
 	if err != nil {
@@ -163,6 +197,15 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid DB_MAX_CONNS %q: %w", v, err)
 		}
 		c.DBMaxConns = int32(n)
+	}
+	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid DASHBOARD_SESSION_TTL %q: %w", v, err)
+		}
+		c.DashboardSessionTTL = d
+	} else {
+		c.DashboardSessionTTL = DefaultSessionTTL
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -218,6 +261,36 @@ func (c *Config) Validate() error {
 	}
 	if err := c.resolveReportingToken(); err != nil {
 		return err
+	}
+	if err := c.resolveDashboardAuth(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// resolveDashboardAuth validates the operator credential. Development
+// falls back to the documented constants when unset; every other
+// environment requires explicit values and rejects the dev placeholder.
+func (c *Config) resolveDashboardAuth() error {
+	if c.DashboardUsername == "" {
+		if c.Environment == EnvDevelopment {
+			c.DashboardUsername = DefaultDashboardUsername
+		} else {
+			return fmt.Errorf("DASHBOARD_USERNAME is required outside development")
+		}
+	}
+	if c.DashboardPasswordHash == "" {
+		if c.Environment == EnvDevelopment {
+			c.DashboardPasswordHash = DevDashboardPasswordHash
+		} else {
+			return fmt.Errorf("DASHBOARD_PASSWORD_HASH is required outside development")
+		}
+	}
+	if c.Environment != EnvDevelopment && c.DashboardPasswordHash == DevDashboardPasswordHash {
+		return fmt.Errorf("DASHBOARD_PASSWORD_HASH must not be the development placeholder outside development")
+	}
+	if c.DashboardSessionTTL < MinSessionTTL || c.DashboardSessionTTL > MaxSessionTTL {
+		return fmt.Errorf("DASHBOARD_SESSION_TTL must be within [15m, 168h]")
 	}
 	return nil
 }

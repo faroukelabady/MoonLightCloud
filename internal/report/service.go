@@ -282,6 +282,9 @@ type Request struct {
 	now      time.Time
 }
 
+// GeneratedAt returns the single captured request instant.
+func (r Request) GeneratedAt() time.Time { return r.now }
+
 // ParseRequest validates query parameters and resolves the period.
 func (s Service) ParseRequest(kind, fromDate, toDate, currency string) (Request, error) {
 	if currency != "" && !supportedCurrencies[currency] {

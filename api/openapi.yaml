@@ -161,7 +161,434 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
-          description: Transient unavailability. Retry with backoff.
+          description: Temporary reporting dependency unavailable (PostgreSQL unreachable/timeout). Generic UNAVAILABLE envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/auth/login:
+    post:
+      summary: Operator login (dashboard session)
+      operationId: dashboardLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: {type: string}
+                password: {type: string}
+      responses:
+        '200':
+          description: Authenticated; session cookie set (HttpOnly, Secure in production, SameSite=Lax).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSession'
+        '401':
+          description: Invalid operator credentials (generic, rate-limited).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: Too many login attempts; Retry-After set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/auth/logout:
+    post:
+      summary: Operator logout (clears session cookie)
+      operationId: dashboardLogout
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Logged out.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSession'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/auth/me:
+    get:
+      summary: Dashboard session state
+      operationId: dashboardMe
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Session state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSession'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/overview:
+    get:
+      summary: Dashboard overview (frozen summary + normalized EGP total + FX info)
+      operationId: dashboardOverview
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+      responses:
+        '200':
+          description: Overview with native buckets and normalized presentation values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverview'
+        '400':
+          description: Invalid period or dates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/daily:
+    get:
+      summary: Normalized daily EGP trend (Cairo dates, ascending)
+      operationId: dashboardDaily
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+      responses:
+        '200':
+          description: Per-day normalized totals (each day's own historical FX).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardDaily'
+        '400':
+          description: Invalid period or dates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/products:
+    get:
+      summary: Top products (native per-currency or All normalized)
+      operationId: dashboardProducts
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [all, native]
+          description: all = normalized EGP ranking (historical per-line FX); native = selected currency bucket.
+        - $ref: '#/components/parameters/ReportCurrency'
+      responses:
+        '200':
+          description: Unified rows {product_id, sku, product_name, units, amount_minor}.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardProductList'
+        '400':
+          description: Invalid period, dates, or currency.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/categories:
+    get:
+      summary: Category performance (native or All normalized, roots/subcategories)
+      operationId: dashboardCategories
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [root_category, subcategory]
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [all, native]
+      responses:
+        '200':
+          description: Facet semantics preserved (subcategory rows may overlap).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardCategoryList'
+        '400':
+          description: Invalid period, dates, or kind.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/branches:
+    get:
+      summary: Branch/store breakdown from real shop snapshots
+      operationId: dashboardBranches
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/ReportCurrency'
+      responses:
+        '200':
+          description: Rows grouped by full shop snapshot tuple + channel. No ONLINE fabrication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardBranchList'
+        '400':
+          description: Invalid period, dates, or currency.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/sync-health:
+    get:
+      summary: Cloud sync health (honest Cloud-side facts only)
+      operationId: dashboardSyncHealth
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Freshness plus projector counts. cloud_projection_complete never proves Retail sync.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSyncHealth'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/activity:
+    get:
+      summary: Recent Cloud-side activity (bounded, latest-first)
+      operationId: dashboardActivity
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Accepted/projected/blocked events from authoritative rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardActivityList'
+        '400':
+          description: Invalid limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/sales/latest:
+    get:
+      summary: Latest finalized sales (orders fallback; no lifecycle model)
+      operationId: dashboardLatestSales
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Newest finalized Sale headers. No fabricated order statuses.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardLatestSales'
+        '400':
+          description: Invalid limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
           content:
             application/json:
               schema:
@@ -333,6 +760,15 @@ components:
         16+ chars in staging/production; open reports need ALL of
         ENVIRONMENT=development, ALLOW_UNAUTHENTICATED_REPORTING=true, and no
         token. Anything else (including missing ENVIRONMENT) fails startup.
+    dashboardSession:
+      type: apiKey
+      in: cookie
+      name: mlc_dash_session
+      description: >-
+        Operator session cookie (HttpOnly, Secure in production, SameSite=Lax).
+        Minted by POST /api/v1/dashboard/auth/login after Argon2id credential
+        verification. REPORTING_API_TOKEN is never valid here and never
+        reaches the browser.
   parameters:
     ReportPeriod:
       name: period
@@ -822,3 +1258,170 @@ components:
           items: {$ref: '#/components/schemas/BreakdownRow'}
           description: Units descending, deterministic identity tie-break.
         freshness: {$ref: '#/components/schemas/Freshness'}
+    DashboardSession:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated: {type: boolean}
+        username: {type: string}
+    DashboardNormalized:
+      type: object
+      required: [normalized_total_minor, transactions, units, usd_sale_count]
+      properties:
+        normalized_total_minor:
+          type: string
+          description: Exact EGP minor units (string, never float). Native EGP plus each USD sale converted with its own historical FX microrate (PostgreSQL numeric rounding, documented).
+        transactions: {type: integer}
+        units: {type: integer}
+        usd_sale_count: {type: integer}
+    DashboardFx:
+      type: object
+      required: [has_usd, multiple_rates_used]
+      properties:
+        has_usd: {type: boolean}
+        latest_rate: {type: string, description: Exact decimal string of the latest historical USD sale rate. Never a live market rate.}
+        latest_rate_microrate: {type: string}
+        latest_occurred_at: {type: string, format: date-time}
+        min_rate_microrate: {type: string}
+        max_rate_microrate: {type: string}
+        multiple_rates_used: {type: boolean}
+    DashboardOverview:
+      type: object
+      required: [generated_at, timezone, period, summary, normalized, fx]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string, example: Africa/Cairo}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        summary: {$ref: '#/components/schemas/SalesSummary'}
+        normalized: {$ref: '#/components/schemas/DashboardNormalized'}
+        fx: {$ref: '#/components/schemas/DashboardFx'}
+    DashboardDaily:
+      type: object
+      required: [timezone, period, days]
+      properties:
+        timezone: {type: string}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, transactions, normalized_minor]
+            properties:
+              date: {type: string, description: Store-local calendar date.}
+              transactions: {type: integer}
+              normalized_minor: {type: string, description: Exact EGP minor units for that Cairo date.}
+    DashboardProductList:
+      type: object
+      required: [timezone, period, mode, unit, rows]
+      properties:
+        timezone: {type: string}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        mode: {type: string, enum: [all, native]}
+        unit: {type: string, description: EGP-normalized in All mode, else the native currency.}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [sku, product_name, units, amount_minor]
+            properties:
+              product_id: {type: string, format: uuid, nullable: true}
+              sku: {type: string}
+              product_name: {type: string}
+              units: {type: integer}
+              amount_minor: {type: string, description: Exact minor units (normalized EGP in All mode).}
+    DashboardCategoryList:
+      type: object
+      required: [timezone, period, mode, unit, kind, rows]
+      properties:
+        timezone: {type: string}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        mode: {type: string, enum: [all, native]}
+        unit: {type: string}
+        kind: {type: string, enum: [root_category, subcategory]}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [kind, classification_id, name_ar, name_en, units, amount_minor]
+            properties:
+              kind: {type: string}
+              classification_id: {type: string, format: uuid}
+              name_ar: {type: string}
+              name_en: {type: string}
+              units: {type: integer}
+              amount_minor: {type: string, description: Facet semantics preserved for subcategories.}
+    DashboardBranchList:
+      type: object
+      required: [timezone, period, rows]
+      properties:
+        timezone: {type: string}
+        period: {$ref: '#/components/schemas/PeriodMeta'}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [shop_name_ar, shop_name_en, channel, currency, transactions, units, subtotal_minor, sales_total_minor]
+            properties:
+              shop_name_ar: {type: string}
+              shop_name_en: {type: string}
+              shop_address_ar: {type: string}
+              shop_address_en: {type: string}
+              shop_phone: {type: string}
+              channel: {type: string}
+              currency: {type: string}
+              transactions: {type: integer}
+              units: {type: integer}
+              subtotal_minor: {type: string}
+              discount_minor: {type: string}
+              tax_minor: {type: string}
+              sales_total_minor: {type: string}
+          description: Grouped by full historical shop snapshot tuple + channel. Native buckets only. No ONLINE fabrication.
+    DashboardSyncHealth:
+      type: object
+      required: [freshness, pending_count, processed_count, blocked_count, retry_count]
+      properties:
+        freshness: {$ref: '#/components/schemas/Freshness'}
+        pending_count: {type: integer}
+        processed_count: {type: integer}
+        blocked_count: {type: integer}
+        retry_count: {type: integer}
+        oldest_pending_at: {type: string, format: date-time, nullable: true}
+        last_error_event: {type: string}
+        last_error_code: {type: string}
+        last_error_message: {type: string}
+      description: cloud_projection_complete never proves Retail sync completeness.
+    DashboardActivityList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [kind, event_id, event_type, timestamp]
+            properties:
+              kind: {type: string, enum: [accepted, projected, blocked]}
+              event_id: {type: string, format: uuid}
+              event_type: {type: string}
+              timestamp: {type: string, format: date-time}
+              device_name: {type: string, nullable: true}
+              detail: {type: string, nullable: true, description: Blocked error code, if any.}
+    DashboardLatestSales:
+      type: object
+      required: [sales]
+      properties:
+        sales:
+          type: array
+          items:
+            type: object
+            required: [sale_id, sale_number, channel, occurred_at, currency, total_minor]
+            properties:
+              sale_id: {type: string, format: uuid}
+              sale_number: {type: string}
+              channel: {type: string}
+              occurred_at: {type: string, format: date-time}
+              currency: {type: string}
+              total_minor: {type: string}
+              cashier_id: {type: string, nullable: true}
+              cashier_name: {type: string, nullable: true}
+          description: Latest finalized sales. No order lifecycle exists; no statuses fabricated.

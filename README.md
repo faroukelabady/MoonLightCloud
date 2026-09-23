@@ -48,6 +48,16 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 | Provision device (dev) | `./scripts/dev-provision-device.sh [name]` | — |
 | Device admin | `device list / rotate <id> / revoke <id>` via `go run ./cmd/moonlight-cloud` | — |
 | Projection ops | `projection status` / `projection retry <event-id>` (safe, auditable) | — |
+| Dashboard password hash | `dashboard hash-password` reads password from stdin, prints Argon2id PHC | — |
+
+## Dashboard (Phase 3B)
+
+Arabic-first RTL operator UI at `http://localhost:8080/dashboard`
+(login: dev defaults `operator` / `moonlight-dev-operator`, dev only).
+Frontend lives in `dashboard/` (Svelte 5 + TypeScript + Vite + ECharts);
+see `docs/architecture/dashboard.md` (development) and
+`docs/operations/dashboard.md` (deployment). The browser uses a session
+cookie only — `REPORTING_API_TOKEN` never reaches it.
 
 ## Layout
 
