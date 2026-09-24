@@ -10,7 +10,7 @@
 		$props();
 </script>
 
-<Card ar="حالة المزامنة مع المتجر" en="Sync health status">
+<Card ar="حالة المزامنة مع المتجر" en="Sync Health Status">
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -19,25 +19,33 @@
 		<EmptyState ar="لا توجد بيانات مزامنة" en="No sync data" />
 	{:else}
 		{@const f = health.freshness}
-		<div class="grid">
+		<div class="hero">
+			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
 			<div>
-				<div class="muted">آخر حدث مبيعات تم استلامه<br /><span class="sub-en">Latest Sale event received</span></div>
-				<div class="big num" dir="ltr">
-					{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, 'ar') : '—'}
-				</div>
-				<div class="muted">
-					{f.latest_sale_event_received_at ? relativeTime(f.latest_sale_event_received_at, 'ar') : ''}
-				</div>
+				<div class="headline">متصل وجميع البيانات محدثة</div>
+				<div class="muted sub">Connected and all data is up to date</div>
 			</div>
-			<div>
-				<div class="muted">في الانتظار / In queue</div>
-				<div class="big num">{health.queue_count}</div>
-				<div class="muted sub-en">pending {health.pending_count} · retrying {health.retry_count}</div>
+		</div>
+		<div class="rows">
+			<div class="r">
+				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
+				<span class="rl">آخر حدث مبيعات تم استلامه<br /><span class="muted sub-en">Latest Sale event received</span></span>
+				<span class="rv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, 'ar') : '—'}</span>
 			</div>
-			<div>
-				<div class="muted">محظورة / Blocked</div>
-				<div class="big num">{f.blocked_sale_event_count}</div>
+			<div class="r">
+				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
+				<span class="rl">في الانتظار / In queue</span>
+				<span class="rv num">{health.queue_count}</span>
 			</div>
+			<div class="r">
+				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
+				<span class="rl">محظورة / Blocked</span>
+				<span class="rv num">{f.blocked_sale_event_count}</span>
+			</div>
+		</div>
+		<div class="rel muted">
+			{f.latest_sale_event_received_at ? relativeTime(f.latest_sale_event_received_at, 'ar') : ''}
+			<span class="sub-en">pending {health.pending_count} · retrying {health.retry_count}</span>
 		</div>
 		<div class="status">
 			{#if f.blocked_sale_event_count > 0}
@@ -49,7 +57,7 @@
 			{/if}
 		</div>
 		{#if health.last_error_code}
-			<div class="muted">آخر خطأ: {health.last_error_label_ar ?? health.last_error_code}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span></div>
+			<div class="muted errmsg">آخر خطأ: {health.last_error_label_ar ?? health.last_error_code}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span></div>
 		{/if}
 		<div class="muted note">
 			الاكتمال السحابي لا يعني أن درج مكتب المتجر فارغ — السحابة لا ترى الأحداث التي لم تُرسل بعد.
@@ -60,29 +68,94 @@
 </Card>
 
 <style>
-	.grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-		gap: 12px;
-		margin-top: 8px;
+	.hero {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 8px;
 	}
-	.big {
-		font-size: 1.2rem;
+	.okic {
+		width: 44px;
+		height: 44px;
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+		background: var(--success);
+		color: #fff;
+	}
+	.headline {
 		font-weight: 700;
+		font-size: 0.95rem;
+	}
+	.sub {
+		font-size: 0.76rem;
+	}
+	.rows {
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		overflow: hidden;
+	}
+	.r {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 10px;
+		font-size: 0.82rem;
+	}
+	.r + .r {
+		border-top: 1px solid var(--border);
+	}
+	.ric {
+		width: 20px;
+		height: 20px;
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+	}
+	.ric.ok {
+		background: #dcfce7;
+		color: var(--success);
+	}
+	.rl {
+		flex: 1;
+		min-width: 0;
+	}
+	.rv {
+		font-weight: 700;
+		font-size: 0.85rem;
+	}
+	.rel {
+		margin-top: 6px;
+		font-size: 0.78rem;
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 	.status {
-		margin-top: 10px;
+		margin-top: 8px;
+	}
+	.errmsg {
+		margin-top: 6px;
+		font-size: 0.82rem;
 	}
 	.note {
 		margin-top: 8px;
-		font-size: 0.82rem;
+		font-size: 0.78rem;
 	}
 	.refresh {
 		margin-top: 10px;
-		background: var(--color-primary);
+		width: 100%;
+		background: var(--primary);
 		color: #fff;
 		border: 0;
-		border-radius: 6px;
-		padding: 7px 14px;
+		border-radius: var(--radius-control);
+		padding: 9px 14px;
+		font-weight: 600;
 	}
 </style>

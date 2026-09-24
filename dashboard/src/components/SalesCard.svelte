@@ -29,7 +29,7 @@
 		return null;
 	}
 
-	function average(): { transactions: number; average_minor: string } | null {
+	function average(): { transactions: number; units: number; average_minor: string } | null {
 		if (!data) return null;
 		if (mode === 'all') return data.averages.all;
 		if (mode === 'EGP') return data.averages.egp;
@@ -49,15 +49,17 @@
 </script>
 
 <Card ar="إجمالي المبيعات" en="Total sales">
-	<Segmented
-		options={[
-			{ value: 'all', ar: 'الكل' },
-			{ value: 'EGP', ar: 'EGP' },
-			{ value: 'USD', ar: 'USD' }
-		]}
-		value={mode}
-		onchange={(v) => onmode(v as 'all' | 'EGP' | 'USD')}
-	/>
+	{#snippet actions()}
+		<Segmented
+			options={[
+				{ value: 'all', ar: 'الكل' },
+				{ value: 'EGP', ar: 'EGP' },
+				{ value: 'USD', ar: 'USD' }
+			]}
+			value={mode}
+			onchange={(v) => onmode(v as 'all' | 'EGP' | 'USD')}
+		/>
+	{/snippet}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -74,21 +76,24 @@
 			{/if}
 		</div>
 		{#if mode === 'all'}
-			<div class="muted">بعد تحويل مبيعات USD باستخدام سعر الصرف التاريخي لكل عملية بيع</div>
-			<div class="muted sub-en">USD sales converted using each sale's historical FX rate</div>
+			<div class="muted helper">بعد تحويل مبيعات USD باستخدام سعر الصرف التاريخي لكل عملية بيع</div>
+			<div class="muted sub-en helper-en">USD sales converted using each sale's historical FX rate</div>
 		{/if}
 		<div class="kpis">
 			<div class="kpi">
+				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-3-3M20 17H7l3 3" /></svg></div>
 				<div class="kpi-label">عدد المعاملات<br /><span class="muted">Transactions</span></div>
 				<div class="kpi-value num">{txnDisplay}</div>
 			</div>
 			<div class="kpi">
+				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6" /></svg></div>
 				<div class="kpi-label">متوسط قيمة العملية<br /><span class="muted">Average transaction value</span></div>
 				<div class="kpi-value num">{avgDisplay}</div>
 			</div>
 			<div class="kpi">
+				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" /></svg></div>
 				<div class="kpi-label">الوحدات المباعة<br /><span class="muted">Units Sold</span></div>
-				<div class="kpi-value num">{formatInt(data.summary.units_sold)}</div>
+				<div class="kpi-value num">{formatInt(average()?.units ?? data.summary.units_sold)}</div>
 			</div>
 		</div>
 		{#if mode === 'all' && data.fx.has_usd}
@@ -103,28 +108,52 @@
 
 <style>
 	.total {
-		font-size: 1.8rem;
+		font-size: 1.9rem;
 		font-weight: 700;
-		margin: 10px 0 4px;
+		margin: 2px 0 4px;
 	}
-	.sub-en {
-		font-size: 0.75rem;
+	.helper {
+		font-size: 0.78rem;
+	}
+	.helper-en {
+		font-size: 0.72rem;
 	}
 	.kpis {
-		display: flex;
-		gap: 16px;
-		margin-top: 12px;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 8px;
+		margin-top: 10px;
+	}
+	.kpi {
+		background: var(--surface-muted);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		padding: 8px 10px;
+		min-width: 0;
+	}
+	.kpi-ic {
+		color: var(--primary);
 	}
 	.kpi-label {
-		font-size: 0.85rem;
+		font-size: 0.78rem;
+		margin-top: 2px;
 	}
 	.kpi-value {
-		font-size: 1.15rem;
-		font-weight: 600;
+		font-size: 1.05rem;
+		font-weight: 700;
+		margin-top: 2px;
 	}
 	.fx {
 		margin-top: 10px;
-		font-size: 0.85rem;
+		font-size: 0.82rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		align-items: center;
+	}
+	@media (max-width: 700px) {
+		.kpis {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

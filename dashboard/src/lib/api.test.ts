@@ -40,3 +40,36 @@ describe('dashboardApi', () => {
 		expect(fetchMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ signal: c.signal }));
 	});
 });
+
+describe('endpoint request contracts', () => {
+	async function lastUrl(fn: () => Promise<unknown>) {
+		const fetchMock = vi.fn(async () => jsonResponse(200, { rows: [], days: [] }));
+		vi.stubGlobal('fetch', fetchMock);
+		await fn().catch(() => {});
+		const calls = fetchMock.mock.calls as unknown[][];
+		if (calls.length === 0) throw new Error('fetch not called');
+		return String(calls[0][0]);
+	}
+
+	it('daily uses all|EGP|USD vocabulary, never native', async () => {
+		for (const m of ['all', 'EGP', 'USD'] as const) {
+			const url = await lastUrl(() => dashboardApi.daily({ period: 'today' }, m));
+			expect(url).toContain(`mode=${m}`);
+		}
+		const url = await lastUrl(() => dashboardApi.daily({ period: 'today' }, 'EGP'));
+		expect(url).not.toContain('mode=native');
+	});
+
+	it('categories sends the canonical root_category kind', async () => {
+		const url = await lastUrl(() =>
+			dashboardApi.categories({ period: 'today' }, 'root_category', 'all', '')
+		);
+		expect(url).toContain('kind=root_category');
+		expect(url).not.toContain('kind=root&');
+	});
+
+	it('products keeps the all|native vocabulary', async () => {
+		const url = await lastUrl(() => dashboardApi.products({ period: 'today' }, 'native', 'EGP'));
+		expect(url).toContain('mode=native');
+	});
+});

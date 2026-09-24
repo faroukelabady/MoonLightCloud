@@ -278,18 +278,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
-          description: Unexpected internal failure. Generic envelope, no internals.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '503':
-          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/daily:
     get:
       summary: Daily trend in one currency mode (Cairo dates, ascending)

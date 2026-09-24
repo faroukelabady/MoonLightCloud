@@ -26,3 +26,4 @@ Concise, irreversible-or-important choices only.
 - [0022](0022-breakdown-dto-split.md) — final breakdown DTO split (M2) and category ordering (L2)
 - [0023](0023-cloud-dashboard.md) — cloud reporting dashboard architecture
 - [0024](0024-dashboard-review-remediation.md) — dashboard review remediation (3B-R)
+- [0025](0025-dashboard-freeze-remediation.md) — dashboard freeze remediation (3B-R2)

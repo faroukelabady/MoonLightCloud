@@ -30,18 +30,25 @@
 	.segmented {
 		display: inline-flex;
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: var(--radius-control);
 		overflow: hidden;
-		background: #f8fafc;
+		background: var(--surface-muted);
+		padding: 2px;
+		gap: 2px;
+		max-width: 100%;
 	}
 	.segmented button {
 		border: 0;
 		background: transparent;
-		padding: 6px 14px;
-		color: var(--color-muted);
+		border-radius: 4px;
+		padding: 4px 12px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 	.segmented button.active {
-		background: var(--color-primary);
+		background: var(--primary);
 		color: #fff;
+		font-weight: 600;
 	}
 </style>

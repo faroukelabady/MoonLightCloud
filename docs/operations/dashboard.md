@@ -86,3 +86,29 @@ Overview carries per-mode averages (`all`, `egp`, `usd`): truncating
 integer division of the mode total by the mode transaction count, computed
 server-side and serialized as strings. Absent currencies report zero
 transactions with a zero average.
+
+## Daily trend modes
+
+`/api/v1/dashboard/daily?mode=` takes `all` (normalized EGP per Cairo
+date, each sale converted with its own historical FX), `EGP` (native
+only), or `USD` (native only). Responses carry `mode`,
+`display_currency`, and `normalized` so the UI cannot mislabel values.
+Products/categories use a separate `all|native` vocabulary; category
+kinds are `root_category`/`subcategory` on the wire.
+
+## KPI scope
+
+All Sales-card KPIs follow the active currency mode: transactions, units,
+and average come from the mode's server-computed bucket (truncating
+division, documented). There is no all-currency fallback while a native
+mode is selected.
+
+## History and custom ranges
+
+Applied filters (period, currency, valid custom ranges) push history
+entries. There is no history write on initial load or during popstate
+handling, so Back/Forward restores the full filter state without
+recursive writes. The custom-range form is
+draft/apply: selecting Custom reveals inputs but sends no request until
+Apply with two valid dates (from ≤ to); invalid drafts show inline
+errors and fire zero API calls.

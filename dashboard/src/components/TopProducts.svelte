@@ -49,22 +49,24 @@
 				{
 					type: 'bar',
 					data: rows.map((r) => toChartNumber(r.amount_minor)),
-					itemStyle: { color: '#1d4ed8' }
+					itemStyle: { color: '#1d5bd7' }
 				}
 			]
 		} satisfies EChartsCoreOption;
 	});
 </script>
 
-<Card ar="أعلى المنتجات مبيعًا" en="Top selling products">
-	<Segmented
-		options={[
-			{ value: 'table', ar: 'جدول' },
-			{ value: 'chart', ar: 'رسم بياني' }
-		]}
-		value={view}
-		onchange={(v) => (view = v as 'table' | 'chart')}
-	/>
+<Card ar="أعلى المنتجات مبيعًا" en="Top Selling Products">
+	{#snippet actions()}
+		<Segmented
+			options={[
+				{ value: 'table', ar: 'جدول' },
+				{ value: 'chart', ar: 'رسم بياني' }
+			]}
+			value={view}
+			onchange={(v) => (view = v as 'table' | 'chart')}
+		/>
+	{/snippet}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -73,11 +75,14 @@
 		<EmptyState ar="لا توجد منتجات في هذه الفترة" en="No products in this period" />
 	{:else if view === 'table'}
 		<table class="data">
-			<thead><tr><th>المنتج / Product</th><th>الوحدات / Units</th><th>المبيعات / Sales ({unit})</th></tr></thead>
+			<thead><tr><th>#</th><th>المنتج / Product</th><th>الكمية المباعة / Units Sold</th><th>قيمة المبيعات / Sales value ({unit})</th></tr></thead>
 			<tbody>
-				{#each rows as r}
+				{#each rows as r, i}
 					<tr>
-						<td>{r.name}<br /><span class="muted num">{r.sku}</span></td>
+						<td class="num rank">{i + 1}</td>
+						<td>
+							<span class="pname"><span class="thumb" aria-hidden="true">{r.name.slice(0, 1)}</span>{r.name}</span><br /><span class="muted num sku">{r.sku}</span>
+						</td>
 						<td class="num">{r.units}</td>
 						<td class="num">{formatMinor(r.amount_minor, money)}</td>
 					</tr>
@@ -96,8 +101,33 @@
 
 <style>
 	.chart {
-		height: 260px;
+		height: 250px;
 		direction: ltr;
 		margin-top: 8px;
+	}
+	.rank {
+		color: var(--text-muted);
+		width: 2ch;
+	}
+	.pname {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.thumb {
+		width: 26px;
+		height: 26px;
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 6px;
+		background: #f3ead3;
+		color: #8a6d2b;
+		font-weight: 700;
+		font-size: 0.8rem;
+	}
+	.sku {
+		font-size: 0.75rem;
 	}
 </style>

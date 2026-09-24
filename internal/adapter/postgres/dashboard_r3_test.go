@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
@@ -168,6 +169,17 @@ func TestM02ServerAverages(t *testing.T) {
 	if over.Averages.USD.Transactions != 2 || over.Averages.USD.AverageMinor != "1875" {
 		t.Fatalf("usd avg: %+v", over.Averages.USD)
 	}
+	// R08: per-mode units follow the active currency (EGP fixture carries
+	// 2 units, each USD fixture 1 unit): All 4, EGP 2, USD 2.
+	if over.Averages.All.Units != 4 {
+		t.Fatalf("all units: %+v", over.Averages.All)
+	}
+	if over.Averages.EGP.Units != 2 {
+		t.Fatalf("egp units: %+v", over.Averages.EGP)
+	}
+	if over.Averages.USD.Units != 2 {
+		t.Fatalf("usd units: %+v", over.Averages.USD)
+	}
 }
 
 func TestM06NoRawDiagnostics(t *testing.T) {
@@ -250,6 +262,51 @@ func TestL06ActivityDeterministic(t *testing.T) {
 		}
 	}
 	_ = first
+}
+
+func TestR05ActivityTopNPrefix(t *testing.T) {
+	env := openDashEnv(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	ids := []string{
+		"00000000-0000-4000-8000-000000000000",
+		"11111111-1111-4111-8111-111111111111",
+		"e1111111-1111-4111-8111-111111111111",
+		"ffffffff-ffff-4fff-bfff-ffffffffffff",
+	}
+	for _, id := range ids {
+		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ($1, $2, 'sale.finalized.v1', $3, $3, '{}', '\x00') ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := func(limit int) []dashboard.ActivityItem {
+		t.Helper()
+		items, err := env.dash.RecentActivity(ctx, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return items
+	}
+	one, two, four := at(1), at(2), at(4)
+	if len(one) != 1 || len(two) != 2 || len(four) != 4 {
+		t.Fatalf("lengths: %d %d %d", len(one), len(two), len(four))
+	}
+	for i := range one {
+		if one[i].EventID != four[i].EventID {
+			t.Fatalf("limit=1 not a prefix of limit=4: %v vs %v", one, four)
+		}
+	}
+	for i := range two {
+		if two[i].EventID != four[i].EventID {
+			t.Fatalf("limit=2 not a prefix of limit=4: %v vs %v", two, four)
+		}
+	}
+	// Deterministic by (ts, kind, event_id): accepted rows sort by event_id.
+	for i := 1; i < len(four); i++ {
+		if four[i-1].EventID >= four[i].EventID {
+			t.Fatalf("not ordered by event_id: %v", four)
+		}
+	}
 }
 
 func TestH04DailyMissingFxFails(t *testing.T) {

@@ -17,32 +17,34 @@
 		return formatMinor(r.sales_total_minor, r.currency === 'USD' ? 'USD' : 'EGP');
 	}
 
-	function numOf(r: BranchRow): number {
-		const v =
-			metric === 'transactions' ? r.transactions : metric === 'units' ? r.units : Number(r.sales_total_minor);
-		return Number.isSafeInteger(v) && v >= 0 ? v : 0;
+	// Exact bar ratios: amount and maximum stay BigInt so unsafe magnitudes
+	// (>2^53) never collapse to zero. Only the bounded 0..10000 basis-point
+	// result becomes a Number for the discrete width class. Maxima are
+	// per-currency (raw EGP minor units are never compared to USD ones;
+	// no FX conversion for bar width).
+	function amountOf(r: BranchRow): bigint {
+		if (metric === 'transactions') return BigInt(r.transactions);
+		if (metric === 'units') return BigInt(r.units);
+		return BigInt(r.sales_total_minor);
 	}
 
-	function maxValue(): number {
-		let m = 1;
+	function maxOf(currency: string): bigint {
+		let m = 1n;
 		for (const r of rows) {
-			const v = numOf(r);
+			if (r.currency !== currency) continue;
+			const v = amountOf(r);
 			if (v > m) m = v;
 		}
 		return m;
 	}
+
+	function bucketOf(r: BranchRow): number {
+		const bp = (amountOf(r) * 10000n) / maxOf(r.currency);
+		return Math.min(10, Math.round(Number(bp) / 1000));
+	}
 </script>
 
-<Card ar="مبيعات الفروع والمتجر الإلكتروني" en="Sales by branches and online store">
-	<Segmented
-		options={[
-			{ value: 'value', ar: 'قيمة المبيعات' },
-			{ value: 'transactions', ar: 'المعاملات' },
-			{ value: 'units', ar: 'الوحدات' }
-		]}
-		value={metric}
-		onchange={(v) => (metric = v as 'value' | 'transactions' | 'units')}
-	/>
+<Card ar="مبيعات الفروع والمتجر الإلكتروني" en="Sales by Branches and Online Store">
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -50,48 +52,75 @@
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد فروع في هذه الفترة" en="No branches in this period" />
 	{:else}
+		<div class="cols muted"><span>الفرع / القناة<br /><span class="sub-en">Branch / Channel</span></span><span class="num">قيمة المبيعات<br /><span class="sub-en">Sales Value</span></span></div>
 		<div class="bars">
 			{#each rows as r}
-				{@const bucket = Math.min(10, Math.round(numOf(r) / maxValue() * 10))}
+				{@const bucket = bucketOf(r)}
 				<div class="row">
 					<div class="label">
-						<div>{r.shop_name_ar}</div>
-						<div class="muted">{r.shop_name_en} · {r.channel}</div>
+						<div class="lname">{r.shop_name_ar}</div>
+						<div class="muted lsub">{r.shop_name_en} · {r.channel}</div>
 					</div>
-					<div class="track"><div class="fill w{bucket}"></div></div>
+					<div class="track" role="img" aria-label={`${r.shop_name_en}: ${valueOf(r)}`}><div class="fill w{bucket}"></div></div>
 					<div class="num val">{valueOf(r)}</div>
 				</div>
 			{/each}
 		</div>
+		<Segmented
+			options={[
+				{ value: 'value', ar: 'قيمة المبيعات' },
+				{ value: 'transactions', ar: 'المعاملات' },
+				{ value: 'units', ar: 'الوحدات' }
+			]}
+			value={metric}
+			onchange={(v) => (metric = v as 'value' | 'transactions' | 'units')}
+		/>
 	{/if}
 </Card>
 
 <style>
+	.cols {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.72rem;
+		margin-bottom: 2px;
+	}
+	.cols .num {
+		text-align: end;
+	}
 	.bars {
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
-		margin-top: 10px;
+		gap: 8px;
+		margin: 6px 0 10px;
 	}
 	.row {
 		display: grid;
-		grid-template-columns: minmax(140px, 220px) 1fr auto;
-		gap: 10px;
+		grid-template-columns: minmax(110px, 170px) 1fr auto;
+		gap: 8px;
 		align-items: center;
 	}
+	.lname {
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+	.lsub {
+		font-size: 0.7rem;
+	}
 	.track {
-		height: 10px;
+		height: 9px;
 		background: #eef1f5;
 		border-radius: 6px;
 		overflow: hidden;
 	}
 	.fill {
 		height: 100%;
-		background: var(--color-primary);
+		background: var(--primary);
 	}
 	.val {
-		min-width: 90px;
+		min-width: 80px;
 		text-align: end;
-		font-weight: 600;
+		font-weight: 700;
+		font-size: 0.82rem;
 	}
 </style>

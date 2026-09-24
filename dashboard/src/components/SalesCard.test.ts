@@ -6,9 +6,9 @@ const loaded = {
 	summary: { transaction_count: 2, units_sold: 3, currency_totals: [] },
 	normalized: { normalized_total_minor: '386250', transactions: 2, units: 3, usd_sale_count: 1 },
 	averages: {
-		all: { transactions: 2, average_minor: '193125' },
-		egp: { transactions: 1, average_minor: '200000' },
-		usd: { transactions: 1, average_minor: '1250' }
+		all: { transactions: 3, units: 7, average_minor: '128750' },
+		egp: { transactions: 1, units: 2, average_minor: '200000' },
+		usd: { transactions: 2, units: 5, average_minor: '1875' }
 	},
 	fx: { has_usd: true, latest_rate: '52.000000', multiple_rates_used: false }
 } as never;
@@ -43,5 +43,32 @@ describe('SalesCard', () => {
 		expect(q.getByText(/سعر الصرف التاريخي/)).toBeTruthy();
 		await fireEvent.click(q.getByText('EGP'));
 		expect(onmode).toHaveBeenCalledWith('EGP');
+	});
+});
+
+describe('SalesCard KPI scope (R08)', () => {
+	async function kpis(mode: 'all' | 'EGP' | 'USD') {
+		const { container, unmount } = render(SalesCard, {
+			props: { data: loaded, mode, onmode: () => {}, status: 'loaded', errStatus: null, onretry: () => {} }
+		});
+		const text = container.textContent ?? '';
+		unmount();
+		return text;
+	}
+
+	it('All shows all-currency transactions and units', async () => {
+		const text = await kpis('all');
+		expect(text).toContain('3');
+		expect(text).toContain('7');
+	});
+
+	it('EGP shows EGP-scoped transactions and units', async () => {
+		const { container } = render(SalesCard, {
+			props: { data: loaded, mode: 'EGP', onmode: () => {}, status: 'loaded', errStatus: null, onretry: () => {} }
+		});
+		const values = Array.from(container.querySelectorAll('.kpi-value')).map((e) => e.textContent);
+		// transactions KPI = 1, units KPI = 2 (never the all-currency 3/7).
+		expect(values[0]).toBe('1');
+		expect(values[2]).toBe('2');
 	});
 });

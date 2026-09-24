@@ -13,6 +13,12 @@
 		if (k === 'projected') return ['تمت المعالجة', 'projected', 'ok'];
 		return ['تم الاستلام', 'accepted', ''];
 	}
+
+	function iconOf(kind: string): string {
+		if (kind === 'blocked') return 'M12 8v5M12 16.5v.5M10.3 3.8L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z';
+		if (kind === 'projected') return 'M4 12.5l5 5L20 6.5';
+		return 'M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6';
+	}
 </script>
 
 <Card ar="الأنشطة الأخيرة" en="Recent activities">
@@ -25,13 +31,18 @@
 	{:else}
 		<ul class="feed">
 			{#each items as it}
-				{@const [ar, en, cls] = kindLabel(it.kind)}
+				{@const [ar, , cls] = kindLabel(it.kind)}
 				<li>
-					<span class="badge {cls}">{ar}</span>
-					<span class="what num">{it.event_type}</span>
-					{#if it.device_name}<span class="muted">{it.device_name}</span>{/if}
-					{#if it.detail}<span class="muted num">{it.detail}</span>{/if}
-					<span class="when muted">{relativeTime(it.timestamp, 'ar')}</span>
+					<span class="aic {cls}" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d={iconOf(it.kind)} /></svg></span>
+					<span class="tx">
+						<span class="what num">{it.event_type}</span>
+						{#if it.device_name}<span class="muted dev">{it.device_name}</span>{/if}
+						{#if it.detail}<span class="muted num det">{it.detail}</span>{/if}
+					</span>
+					<span class="side">
+						<span class="badge {cls}">{ar}</span>
+						<span class="when muted">{relativeTime(it.timestamp, 'ar')}</span>
+					</span>
 				</li>
 			{/each}
 		</ul>
@@ -41,21 +52,64 @@
 <style>
 	.feed {
 		list-style: none;
-		margin: 8px 0 0;
+		margin: 4px 0 0;
 		padding: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
 	}
 	.feed li {
 		display: flex;
 		gap: 8px;
-		align-items: baseline;
-		flex-wrap: wrap;
+		align-items: flex-start;
+		padding: 7px 0;
 		border-bottom: 1px solid var(--border);
-		padding-bottom: 8px;
+	}
+	.feed li:last-child {
+		border-bottom: 0;
+		padding-bottom: 0;
+	}
+	.aic {
+		width: 26px;
+		height: 26px;
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+		background: var(--primary-soft);
+		color: var(--primary);
+	}
+	.aic.ok {
+		background: #dcfce7;
+		color: var(--success);
+	}
+	.aic.bad {
+		background: #fee2e2;
+		color: var(--danger);
+	}
+	.tx {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		font-size: 0.82rem;
+	}
+	.what {
+		font-weight: 600;
+	}
+	.dev,
+	.det {
+		font-size: 0.74rem;
+	}
+	.side {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+		flex-shrink: 0;
 	}
 	.when {
-		margin-inline-start: auto;
+		font-size: 0.72rem;
+		white-space: nowrap;
 	}
 </style>

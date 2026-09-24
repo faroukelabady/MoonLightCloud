@@ -109,6 +109,7 @@ type DailyResponse struct {
 // (documented, deterministic, identical rule in every mode).
 type ModeAverage struct {
 	Transactions int64  `json:"transactions"`
+	Units        int64  `json:"units"`
 	AverageMinor string `json:"average_minor"`
 }
 
@@ -315,13 +316,14 @@ func overviewAverages(native []report.SummaryRow, norm NormalizedSummaryRow) Ove
 	out := OverviewAverages{
 		All: ModeAverage{
 			Transactions: norm.Transactions,
+			Units:        norm.Units,
 			AverageMinor: minorString(divTrunc(norm.Normalized, norm.Transactions)),
 		},
 		EGP: ModeAverage{AverageMinor: "0"},
 		USD: ModeAverage{AverageMinor: "0"},
 	}
 	for _, b := range native {
-		a := ModeAverage{Transactions: b.Transactions, AverageMinor: minorString(divTrunc(b.SalesTotal, b.Transactions))}
+		a := ModeAverage{Transactions: b.Transactions, Units: b.Units, AverageMinor: minorString(divTrunc(b.SalesTotal, b.Transactions))}
 		if b.Currency == "EGP" {
 			out.EGP = a
 		} else if b.Currency == "USD" {

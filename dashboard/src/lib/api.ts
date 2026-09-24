@@ -78,8 +78,17 @@ export interface DailyResponse {
 
 export interface ModeAverage {
 	transactions: number;
+	units: number;
 	average_minor: string;
 }
+
+// Endpoint-specific request contracts. Daily and breakdown endpoints use
+// different mode vocabularies; distinct types make cross-use a compile
+// error instead of a runtime 400.
+export type CurrencySelection = 'all' | 'EGP' | 'USD';
+export type DailyMode = CurrencySelection;
+export type BreakdownMode = 'all' | 'native';
+export type CategoryKind = 'root_category' | 'subcategory';
 
 export interface ProductRow {
 	product_id?: string | null;
@@ -188,11 +197,11 @@ export const dashboardApi = {
 		await fetch('/api/v1/dashboard/auth/logout', { method: 'POST', credentials: 'same-origin' });
 	},
 	overview: (p: PeriodParams, s?: AbortSignal) => get<OverviewResponse>(`/api/v1/dashboard/overview?${query(p)}`, s),
-	daily: (p: PeriodParams, mode: 'all' | 'EGP' | 'USD', s?: AbortSignal) =>
+	daily: (p: PeriodParams, mode: DailyMode, s?: AbortSignal) =>
 		get<DailyResponse>(`/api/v1/dashboard/daily?${query(p)}&mode=${mode}`, s),
-	products: (p: PeriodParams, mode: 'all' | 'native', currency: string, s?: AbortSignal) =>
+	products: (p: PeriodParams, mode: BreakdownMode, currency: string, s?: AbortSignal) =>
 		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}`, s),
-	categories: (p: PeriodParams, kind: string, mode: 'all' | 'native', currency: string, s?: AbortSignal) =>
+	categories: (p: PeriodParams, kind: CategoryKind, mode: BreakdownMode, currency: string, s?: AbortSignal) =>
 		get<{ rows: CategoryRow[] }>(`/api/v1/dashboard/categories?${query(p)}&kind=${kind}&mode=${mode}&currency=${currency}`, s),
 	branches: (p: PeriodParams, s?: AbortSignal) =>
 		get<{ rows: BranchRow[] }>(`/api/v1/dashboard/branches?${query(p)}`, s),

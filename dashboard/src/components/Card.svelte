@@ -1,17 +1,27 @@
 <script lang="ts">
 	import Bilingual from './Bilingual.svelte';
-	let { ar, en }: { ar: string; en?: string } = $props();
+	import type { Snippet } from 'svelte';
+	let { ar, en, actions, children }: { ar: string; en?: string; actions?: Snippet; children?: Snippet } = $props();
 </script>
 
 <div class="card">
-	<Bilingual {ar} {en} />
+	<div class="card-head">
+		<Bilingual {ar} {en} />
+		{#if actions}<div class="actions">{@render actions()}</div>{/if}
+	</div>
 	<div class="body">
-		<slot />
+		{#if children}{@render children()}{/if}
 	</div>
 </div>
 
 <style>
+	.card-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 8px;
+	}
 	.body {
-		margin-top: 12px;
+		margin-top: 10px;
 	}
 </style>

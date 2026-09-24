@@ -10,6 +10,9 @@ ensure_dev_reporting_env
 echo "== gofmt =="
 test -z "$(gofmt -l cmd/ internal/ db/)" || { echo "unformatted files above" >&2; exit 1; }
 
+echo "== openapi strict gate =="
+./scripts/check-openapi.sh
+
 echo "== sqlc freshness =="
 cp -r internal/adapter/postgres/sqlcgen /tmp/sqlcgen.before
 sqlc generate
@@ -55,6 +58,7 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 npm --prefix dashboard ci --no-audit --no-fund
 npm --prefix dashboard run typecheck
+npm --prefix dashboard run check
 npm --prefix dashboard test
 npm --prefix dashboard run build
 test -f dashboard/dist/index.html || { echo "dashboard build missing index.html" >&2; exit 1; }

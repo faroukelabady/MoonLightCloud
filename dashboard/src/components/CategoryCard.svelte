@@ -7,6 +7,7 @@
 	import { toChartNumber } from '../lib/money.js';
 	import { chart } from '../lib/chartAction.js';
 	import type { EChartsCoreOption } from 'echarts/core';
+	import type { CategoryKind } from '../lib/api.js';
 
 	export interface CategoryDisplayRow {
 		name: string;
@@ -17,15 +18,13 @@
 	let {
 		rows,
 		kind,
-		money,
 		unit,
 		status,
 		errStatus,
 		onretry
 	}: {
 		rows: CategoryDisplayRow[];
-		kind: 'root' | 'subcategory';
-		money: 'EGP' | 'USD';
+		kind: CategoryKind;
 		unit: string;
 		status: 'loading' | 'loaded' | 'empty' | 'error';
 		errStatus: number | null;
@@ -62,7 +61,7 @@
 				xAxis: { type: 'category', data: rows.map((r) => r.name), axisLabel: { fontSize: 10, rotate: 20 } },
 				yAxis: { type: 'value', name: unit },
 				tooltip: { trigger: 'axis' },
-				series: [{ type: 'bar', data: data.map((d) => d.value), itemStyle: { color: '#1d4ed8' } }]
+				series: [{ type: 'bar', data: data.map((d) => d.value), itemStyle: { color: '#1d5bd7' } }]
 			} satisfies EChartsCoreOption;
 		}
 		return {
@@ -80,19 +79,22 @@
 	});
 </script>
 
-<Card ar="أداء الفئات والفئات الفرعية" en="Category & subcategory performance">
-	{#if kind === 'root'}
-		<Segmented
-			options={[
-				{ value: 'donut', ar: 'دائري' },
-				{ value: 'pie', ar: 'دائرة' },
-				{ value: 'bar', ar: 'أعمدة' }
-			]}
-			value={shape}
-			onchange={(v) => (shape = v as 'donut' | 'pie' | 'bar')}
-		/>
-	{:else}
-		<div class="muted">
+<Card ar="أداء الفئات وقنوات البيع" en="Category & Sales Channel Performance">
+	{#snippet actions()}
+		{#if kind === 'root_category'}
+			<Segmented
+				options={[
+					{ value: 'bar', ar: 'أعمدة' },
+					{ value: 'pie', ar: 'دائرة' },
+					{ value: 'donut', ar: 'دائري' }
+				]}
+				value={shape}
+				onchange={(v) => (shape = v as 'donut' | 'pie' | 'bar')}
+			/>
+		{/if}
+	{/snippet}
+	{#if kind !== 'root_category'}
+		<div class="muted facet">
 			قد ينتمي المنتج إلى أكثر من فئة فرعية، لذلك لا تمثل الفئات الفرعية أجزاءً من إجمالي واحد — عرض بالأعمدة فقط.
 			<br /><span class="sub-en">Products can belong to multiple subcategories, so subcategories do not form parts of a single whole — bar view only.</span>
 		</div>
@@ -115,8 +117,12 @@
 
 <style>
 	.chart {
-		height: 260px;
+		height: 250px;
 		direction: ltr;
 		margin-top: 8px;
+	}
+	.facet {
+		font-size: 0.78rem;
+		margin-bottom: 8px;
 	}
 </style>

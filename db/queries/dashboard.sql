@@ -133,7 +133,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     FROM sync_events e
     LEFT JOIN devices d ON d.id = e.device_id
     WHERE e.event_type = 'sale.finalized.v1'
-    ORDER BY e.received_at DESC
+    ORDER BY e.received_at DESC, e.event_id ASC
     LIMIT @limit_n::int)
     UNION ALL
     (SELECT CASE WHEN p.status = 'blocked' THEN 'blocked'::text ELSE 'projected'::text END AS kind,
@@ -143,7 +143,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     JOIN sync_events e ON e.event_id = p.event_id
     LEFT JOIN devices d ON d.id = e.device_id
     WHERE p.processor = 'sale_projection.v1' AND p.status IN ('processed', 'blocked')
-    ORDER BY ts DESC
+    ORDER BY ts DESC, kind ASC, event_id ASC
     LIMIT @limit_n::int)
 ) feed
 ORDER BY ts DESC, kind ASC, event_id ASC

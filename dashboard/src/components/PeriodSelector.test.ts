@@ -43,10 +43,31 @@ describe('PeriodSelector URL sync (L01)', () => {
 		});
 		expect((screen.getByLabelText(/من/) as HTMLInputElement).value).toBe('2026-09-20');
 		// Simulate browser Back: params change -> inputs follow.
-		await rerender({
-			props: { params: { period: 'custom', from_date: '2026-09-22', to_date: '2026-09-23' }, timezone: 'Africa/Cairo', onchange }
-		});
+		await rerender({ params: { period: 'custom', from_date: '2026-09-22', to_date: '2026-09-23' }, timezone: 'Africa/Cairo', onchange });
 		expect((screen.getByLabelText(/من/) as HTMLInputElement).value).toBe('2026-09-22');
 		expect((screen.getByLabelText(/إلى/) as HTMLInputElement).value).toBe('2026-09-23');
+	});
+});
+
+describe('PeriodSelector draft/apply (R07)', () => {
+	it('clicking Custom reveals inputs without requesting', async () => {
+		const onchange = vi.fn();
+		render(PeriodSelector, {
+			props: { params: { period: 'today' }, timezone: 'Africa/Cairo', onchange }
+		});
+		await fireEvent.click(screen.getByText('نطاق مخصص'));
+		expect(screen.getByLabelText(/من/)).toBeTruthy();
+		expect(onchange).not.toHaveBeenCalled();
+	});
+
+	it('Apply without dates commits nothing and shows an error', async () => {
+		const onchange = vi.fn();
+		render(PeriodSelector, {
+			props: { params: { period: 'today' }, timezone: 'Africa/Cairo', onchange }
+		});
+		await fireEvent.click(screen.getByText('نطاق مخصص'));
+		await fireEvent.click(screen.getByText(/عرض/));
+		expect(onchange).not.toHaveBeenCalled();
+		expect(screen.getByRole('alert')).toBeTruthy();
 	});
 });
