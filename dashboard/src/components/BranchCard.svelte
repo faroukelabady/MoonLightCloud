@@ -95,10 +95,14 @@
 		margin: 6px 0 10px;
 	}
 	.row {
-		display: grid;
-		grid-template-columns: minmax(110px, 170px) 1fr auto;
-		gap: 8px;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px 8px;
 		align-items: center;
+	}
+	.label {
+		flex: 1 1 96px;
+		min-width: 0;
 	}
 	.lname {
 		font-size: 0.82rem;
@@ -108,6 +112,8 @@
 		font-size: 0.7rem;
 	}
 	.track {
+		flex: 2 1 48px;
+		min-width: 48px;
 		height: 9px;
 		background: #eef1f5;
 		border-radius: 6px;
@@ -118,9 +124,12 @@
 		background: var(--primary);
 	}
 	.val {
-		min-width: 80px;
+		flex: 1 1 64px;
+		min-width: 0;
+		max-width: 100%;
+		overflow-wrap: anywhere;
 		text-align: end;
 		font-weight: 700;
-		font-size: 0.82rem;
+		font-size: 0.8rem;
 	}
 </style>

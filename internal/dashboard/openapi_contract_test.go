@@ -31,7 +31,6 @@ func TestOpenAPIDashboardContract(t *testing.T) {
 		}
 	}
 	if strings.Contains(spec, "last_error_message:") {
-		// The raw-message field must be gone from dashboard sync health.
 		lines := strings.Split(spec, "\n")
 		inDashboard := false
 		for _, l := range lines {
@@ -41,6 +40,34 @@ func TestOpenAPIDashboardContract(t *testing.T) {
 			if inDashboard && strings.TrimSpace(l) == "last_error_message: {type: string}" {
 				t.Fatal("dashboard sync health must not expose last_error_message")
 			}
+		}
+	}
+	// DashboardModeAverage must document every field the runtime emits:
+	// ModeAverage carries transactions, units, and average_minor. An
+	// undocumented emitted field is a contract defect (C3B-01 follow-up).
+	lines := strings.Split(spec, "\n")
+	inModeAvg := false
+	seen := map[string]bool{}
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "DashboardModeAverage:") {
+			inModeAvg = true
+			continue
+		}
+		if inModeAvg {
+			if trimmed == "" || (!strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t")) {
+				break
+			}
+			for _, f := range []string{"transactions:", "units:", "average_minor:"} {
+				if strings.HasPrefix(trimmed, f) {
+					seen[f] = true
+				}
+			}
+		}
+	}
+	for _, f := range []string{"transactions:", "units:", "average_minor:"} {
+		if !seen[f] {
+			t.Fatalf("DashboardModeAverage must document %q (runtime ModeAverage emits it)", f)
 		}
 	}
 }

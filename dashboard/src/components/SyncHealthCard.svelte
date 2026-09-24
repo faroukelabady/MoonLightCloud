@@ -63,7 +63,7 @@
 			الاكتمال السحابي لا يعني أن درج مكتب المتجر فارغ — السحابة لا ترى الأحداث التي لم تُرسل بعد.
 			<br /><span class="sub-en">Cloud-complete does not prove the Retail outbox is empty.</span>
 		</div>
-		<button type="button" class="refresh" onclick={onrefresh}>تحديث الحالة / Refresh status</button>
+		<button type="button" class="refresh" aria-label="تحديث الحالة / Refresh status" onclick={onrefresh}><span class="rb-ar">تحديث الحالة</span><span class="rb-en">Refresh status</span></button>
 	{/if}
 </Card>
 
@@ -71,12 +71,12 @@
 	.hero {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		margin-bottom: 8px;
+		gap: 8px;
+		margin-bottom: 6px;
 	}
 	.okic {
-		width: 44px;
-		height: 44px;
+		width: 36px;
+		height: 36px;
 		flex-shrink: 0;
 		display: inline-flex;
 		align-items: center;
@@ -87,10 +87,10 @@
 	}
 	.headline {
 		font-weight: 700;
-		font-size: 0.95rem;
+		font-size: 0.88rem;
 	}
 	.sub {
-		font-size: 0.76rem;
+		font-size: 0.72rem;
 	}
 	.rows {
 		display: flex;
@@ -103,8 +103,8 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 7px 10px;
-		font-size: 0.82rem;
+		padding: 5px 8px;
+		font-size: 0.78rem;
 	}
 	.r + .r {
 		border-top: 1px solid var(--border);
@@ -145,17 +145,28 @@
 		font-size: 0.82rem;
 	}
 	.note {
-		margin-top: 8px;
-		font-size: 0.78rem;
+		margin-top: 6px;
+		font-size: 0.74rem;
 	}
 	.refresh {
-		margin-top: 10px;
+		margin-top: 8px;
 		width: 100%;
 		background: var(--primary);
 		color: #fff;
 		border: 0;
 		border-radius: var(--radius-control);
-		padding: 9px 14px;
+		padding: 7px 10px;
 		font-weight: 600;
+		line-height: 1.35;
+	}
+	.rb-ar {
+		display: block;
+		font-size: 0.86rem;
+	}
+	.rb-en {
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 400;
+		opacity: 0.9;
 	}
 </style>

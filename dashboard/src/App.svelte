@@ -324,25 +324,9 @@
 						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
 					</div>
 				{/if}
-				{#if route === 'overview'}
-					<div class="cell a-kindwide">
-						<div class="kindswitch" role="group" aria-label="نوع الفئات / Category kind">
-							<button type="button" class:active={catKind === 'root_category'} onclick={() => setCatKind('root_category')}>الفئات الرئيسية / Roots</button>
-							<button type="button" class:active={catKind === 'subcategory'} onclick={() => setCatKind('subcategory')}>الفئات الفرعية / Subcategories</button>
-						</div>
-					</div>
-				{/if}
 				{#if route === 'overview' || route === 'categories'}
-					{#if route !== 'overview'}
-						<div class="cell a-kind">
-							<div class="kindswitch" role="group" aria-label="نوع الفئات / Category kind">
-								<button type="button" class:active={catKind === 'root_category'} onclick={() => setCatKind('root_category')}>الفئات الرئيسية / Roots</button>
-								<button type="button" class:active={catKind === 'subcategory'} onclick={() => setCatKind('subcategory')}>الفئات الفرعية / Subcategories</button>
-							</div>
-						</div>
-					{/if}
 					<div class="cell a-cat">
-						<CategoryCard rows={categories} kind={catKind} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
+						<CategoryCard rows={categories} kind={catKind} onkind={setCatKind} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'products'}
@@ -495,32 +479,9 @@
 	.a-trend { grid-column: span 4; }
 	.a-products { grid-column: span 4; }
 	.a-cat { grid-column: span 4; }
-	.a-kindwide { grid-column: span 12; }
-	.a-kind { grid-column: span 12; }
 	.a-act { grid-column: span 3; }
 	.a-latest { grid-column: span 6; }
 	.a-branch { grid-column: span 3; }
-	.kindswitch {
-		display: inline-flex;
-		gap: 2px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		padding: 2px;
-	}
-	.kindswitch button {
-		background: transparent;
-		border: 0;
-		border-radius: 4px;
-		padding: 5px 12px;
-		font-size: 0.8rem;
-		color: var(--text-muted);
-	}
-	.kindswitch button.active {
-		background: var(--primary);
-		color: #fff;
-		font-weight: 600;
-	}
 	@media (max-width: 1280px) {
 		.a-sync { grid-column: span 4; }
 		.a-sales { grid-column: span 8; }

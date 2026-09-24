@@ -1301,9 +1301,10 @@ components:
         change_minor: {type: string}
     DashboardModeAverage:
       type: object
-      required: [transactions, average_minor]
+      required: [transactions, units, average_minor]
       properties:
         transactions: {type: integer, description: Transaction count for this mode only (never the all-currency count).}
+        units: {type: integer, description: Units sold for this mode only (never the all-currency count).}
         average_minor: {type: string, description: Server-computed truncating integer division of the mode total by the mode count.}
     DashboardOverview:
       type: object
@@ -1360,7 +1361,7 @@ components:
         timezone: {type: string}
         period: {$ref: '#/components/schemas/PeriodMeta'}
         mode: {type: string, enum: [all, native]}
-        unit: {type: string, description: EGP-normalized in All mode, else the native currency.}
+        unit: {type: string, description: "EGP-normalized in All mode, else the native currency."}
         rows:
           type: array
           items:
@@ -1450,7 +1451,7 @@ components:
               event_type: {type: string}
               timestamp: {type: string, format: date-time}
               device_name: {type: string, nullable: true}
-              detail: {type: string, nullable: true, description: Blocked error code, if any.}
+              detail: {type: string, nullable: true, description: "Blocked error code, if any."}
     DashboardLatestSales:
       type: object
       required: [sales]

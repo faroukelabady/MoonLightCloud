@@ -18,6 +18,7 @@
 	let {
 		rows,
 		kind,
+		onkind,
 		unit,
 		status,
 		errStatus,
@@ -25,6 +26,7 @@
 	}: {
 		rows: CategoryDisplayRow[];
 		kind: CategoryKind;
+		onkind: (k: CategoryKind) => void;
 		unit: string;
 		status: 'loading' | 'loaded' | 'empty' | 'error';
 		errStatus: number | null;
@@ -80,7 +82,15 @@
 </script>
 
 <Card ar="أداء الفئات وقنوات البيع" en="Category & Sales Channel Performance">
-	{#snippet actions()}
+	<div class="kindrow">
+		<Segmented
+			options={[
+				{ value: 'root_category', ar: 'الفئات الرئيسية / Roots' },
+				{ value: 'subcategory', ar: 'الفئات الفرعية / Subcategories' }
+			]}
+			value={kind}
+			onchange={(v) => onkind(v as CategoryKind)}
+		/>
 		{#if kind === 'root_category'}
 			<Segmented
 				options={[
@@ -92,7 +102,7 @@
 				onchange={(v) => (shape = v as 'donut' | 'pie' | 'bar')}
 			/>
 		{/if}
-	{/snippet}
+	</div>
 	{#if kind !== 'root_category'}
 		<div class="muted facet">
 			قد ينتمي المنتج إلى أكثر من فئة فرعية، لذلك لا تمثل الفئات الفرعية أجزاءً من إجمالي واحد — عرض بالأعمدة فقط.
@@ -124,5 +134,16 @@
 	.facet {
 		font-size: 0.78rem;
 		margin-bottom: 8px;
+	}
+	.kindrow {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		align-items: flex-start;
+		margin-bottom: 8px;
+	}
+	.kindrow :global(.segmented) {
+		flex-wrap: wrap;
+		row-gap: 2px;
 	}
 </style>
