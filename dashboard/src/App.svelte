@@ -309,7 +309,7 @@
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
-			<div class="dash">
+			<div class="dash" class:ov={route === 'overview'}>
 				{#if route === 'overview' || route === 'sales'}
 					<div class="cell a-kpis">
 						<MetricCard ar="عدد المعاملات" en="Transactions" value={metricTxn} context={scopeLabel} status={overviewState} icon="M4 7h13l-3-3M20 17H7l3 3" />
@@ -469,6 +469,14 @@
 		min-width: 0;
 	}
 	.a-sync { grid-column: span 3; }
+	/* Overview composition: the tall Sync Health card spans rows 1-2 in
+	its own track so it never defines sibling row heights (R3-01). Row 2
+	cards use 3-col spans to share the remaining 9 columns. Other routes
+	keep simple flow to avoid placement holes. */
+	.dash.ov .a-sync { grid-row: span 2; }
+	.dash.ov .a-trend { grid-column: span 3; }
+	.dash.ov .a-products { grid-column: span 3; }
+	.dash.ov .a-cat { grid-column: span 3; }
 	.a-sales { grid-column: span 6; }
 	.a-kpis {
 		grid-column: span 3;
@@ -483,7 +491,10 @@
 	.a-latest { grid-column: span 6; }
 	.a-branch { grid-column: span 3; }
 	@media (max-width: 1280px) {
-		.a-sync { grid-column: span 4; }
+		.a-sync { grid-column: span 4; grid-row: auto; }
+		.dash.ov .a-trend { grid-column: span 6; }
+		.dash.ov .a-products { grid-column: span 6; }
+		.dash.ov .a-cat { grid-column: span 12; }
 		.a-sales { grid-column: span 8; }
 		.a-kpis { grid-column: span 12; flex-direction: row; }
 		.a-kpis > :global(*) { flex: 1; }
@@ -509,6 +520,10 @@
 			order: 3;
 		}
 		.dash > .cell {
+			grid-column: span 12;
+			grid-row: auto;
+		}
+		.dash.ov > .cell {
 			grid-column: span 12;
 		}
 		.a-kpis {

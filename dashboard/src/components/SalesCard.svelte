@@ -108,44 +108,46 @@
 
 <style>
 	.total {
-		font-size: 1.9rem;
+		font-size: 1.7rem;
 		font-weight: 700;
-		margin: 2px 0 4px;
+		margin: 0 0 2px;
 	}
 	.helper {
-		font-size: 0.78rem;
+		font-size: 0.75rem;
+		line-height: 1.4;
 	}
 	.helper-en {
-		font-size: 0.72rem;
+		font-size: 0.7rem;
 	}
 	.kpis {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 8px;
-		margin-top: 10px;
+		gap: 6px;
+		margin-top: 8px;
 	}
 	.kpi {
 		background: var(--surface-muted);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
-		padding: 8px 10px;
+		padding: 4px 6px;
 		min-width: 0;
 	}
 	.kpi-ic {
 		color: var(--primary);
 	}
 	.kpi-label {
-		font-size: 0.78rem;
+		font-size: 0.74rem;
 		margin-top: 2px;
+		line-height: 1.35;
 	}
 	.kpi-value {
-		font-size: 1.05rem;
+		font-size: 1rem;
 		font-weight: 700;
 		margin-top: 2px;
 	}
 	.fx {
-		margin-top: 10px;
-		font-size: 0.82rem;
+		margin-top: 2px;
+		font-size: 0.74rem;
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;

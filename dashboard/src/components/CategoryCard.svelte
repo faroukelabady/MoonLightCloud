@@ -84,15 +84,17 @@
 <Card ar="أداء الفئات وقنوات البيع" en="Category & Sales Channel Performance">
 	<div class="kindrow">
 		<Segmented
+			size="sm"
 			options={[
-				{ value: 'root_category', ar: 'الفئات الرئيسية / Roots' },
-				{ value: 'subcategory', ar: 'الفئات الفرعية / Subcategories' }
+				{ value: 'root_category', ar: 'رئيسية', aria: 'الفئات الرئيسية / Roots' },
+				{ value: 'subcategory', ar: 'فرعية', aria: 'الفئات الفرعية / Subcategories' }
 			]}
 			value={kind}
 			onchange={(v) => onkind(v as CategoryKind)}
 		/>
 		{#if kind === 'root_category'}
 			<Segmented
+				size="sm"
 				options={[
 					{ value: 'bar', ar: 'أعمدة' },
 					{ value: 'pie', ar: 'دائرة' },
@@ -127,7 +129,7 @@
 
 <style>
 	.chart {
-		height: 250px;
+		height: 170px;
 		direction: ltr;
 		margin-top: 8px;
 	}
@@ -137,13 +139,9 @@
 	}
 	.kindrow {
 		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		align-items: flex-start;
-		margin-bottom: 8px;
-	}
-	.kindrow :global(.segmented) {
 		flex-wrap: wrap;
-		row-gap: 2px;
+		gap: 4px 6px;
+		align-items: center;
+		margin-bottom: 8px;
 	}
 </style>

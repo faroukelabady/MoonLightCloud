@@ -3,22 +3,25 @@
 		options,
 		value,
 		onchange,
-		label
+		label,
+		size
 	}: {
-		options: { value: string; ar: string; en?: string }[];
+		options: { value: string; ar: string; en?: string; aria?: string }[];
 		value: string;
 		onchange: (v: string) => void;
 		label?: string;
+		size?: 'md' | 'sm';
 	} = $props();
 </script>
 
 {#if label}<div class="muted label-gap">{label}</div>{/if}
-<div class="segmented" role="group">
+<div class="segmented" class:sm={size === 'sm'} role="group">
 	{#each options as o}
 		<button
 			type="button"
 			class:active={o.value === value}
 			aria-pressed={o.value === value}
+			aria-label={o.aria ?? o.ar}
 			onclick={() => onchange(o.value)}
 		>
 			{o.ar}
@@ -50,5 +53,9 @@
 		background: var(--primary);
 		color: #fff;
 		font-weight: 600;
+	}
+	.segmented.sm button {
+		padding: 3px 8px;
+		font-size: 0.72rem;
 	}
 </style>

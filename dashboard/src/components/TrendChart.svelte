@@ -60,10 +60,11 @@
 	});
 </script>
 
-<Card ar={titleAr} en={titleEn}>
+<Card ar={titleAr} en={`${titleEn} · ${unit}`}>
 	{#snippet actions()}
 		{#if mode && onmode}
 			<Segmented
+				size="sm"
 				options={[
 					{ value: 'all', ar: 'الكل' },
 					{ value: 'EGP', ar: 'EGP' },
@@ -93,7 +94,6 @@
 	{:else if values.length === 0}
 		<EmptyState ar="لا توجد بيانات في هذه الفترة" en="No data in this period" />
 	{:else}
-		<div class="muted unit-note">في وضع الكل تتم تسوية المبيعات إلى الجنيه المصري · In all mode, sales are normalized to EGP</div>
 		<div
 			data-testid="sales-trend-chart"
 			use:chart={option}
@@ -106,12 +106,8 @@
 
 <style>
 	.chart {
-		height: 250px;
+		height: 170px;
 		direction: ltr;
-	}
-	.unit-note {
-		font-size: 0.75rem;
-		margin-bottom: 4px;
 	}
 	.exact {
 		list-style: none;

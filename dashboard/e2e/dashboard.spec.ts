@@ -292,3 +292,30 @@ test('daily unsafe amount shows range error with exact fallback', async ({ page 
 	await page.unroute('**/api/v1/dashboard/daily*');
 	assertCleanGates(gates);
 });
+
+test('first-row density keeps rows near reference positions', async ({ page }) => {
+	// R3-01 regression gate: Sync Health must not balloon the first grid
+	// row and push row 2 / row 3 down. Generous thresholds (not pixels).
+	await page.setViewportSize({ width: 1536, height: 1024 });
+	await login(page);
+	await expect(page.getByText('إجمالي المبيعات')).toBeVisible({ timeout: 15000 });
+	const tops = await page.evaluate(() => {
+		const top = (sel: string) => {
+			const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
+			if (els.length === 0) return Infinity;
+			return Math.min(...els.map((e) => e.getBoundingClientRect().top));
+		};
+		const h = (sel: string) => {
+			const e = document.querySelector(sel) as HTMLElement | null;
+			return e ? e.getBoundingClientRect().height : Infinity;
+		};
+		return {
+			row2: top('.a-trend .card, .a-products .card, .a-cat .card'),
+			row3: top('.a-branch .card, .a-latest .card, .a-act .card'),
+			sync: h('.a-sync .card')
+		};
+	});
+	expect(tops.row2, 'row 2 starts near reference position').toBeLessThan(560);
+	expect(tops.row3, 'row 3 substantially visible').toBeLessThan(900);
+	expect(tops.sync, 'sync stays bounded').toBeLessThan(700);
+});

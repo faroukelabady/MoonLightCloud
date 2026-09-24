@@ -59,6 +59,7 @@
 <Card ar="أعلى المنتجات مبيعًا" en="Top Selling Products">
 	{#snippet actions()}
 		<Segmented
+			size="sm"
 			options={[
 				{ value: 'table', ar: 'جدول' },
 				{ value: 'chart', ar: 'رسم بياني' }
@@ -74,8 +75,9 @@
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد منتجات في هذه الفترة" en="No products in this period" />
 	{:else if view === 'table'}
+		<div class="tscroll">
 		<table class="data">
-			<thead><tr><th>#</th><th>المنتج / Product</th><th>الكمية المباعة / Units Sold</th><th>قيمة المبيعات / Sales value ({unit})</th></tr></thead>
+			<thead><tr><th>#</th><th>المنتج<br /><span class="th-en">Product</span></th><th>الكمية المباعة<br /><span class="th-en">Units Sold</span></th><th>قيمة المبيعات<br /><span class="th-en">Sales value ({unit})</span></th></tr></thead>
 			<tbody>
 				{#each rows as r, i}
 					<tr>
@@ -89,6 +91,7 @@
 				{/each}
 			</tbody>
 		</table>
+		</div>
 	{:else if chartError}
 		<EmptyState
 			ar="تعذر عرض الرسم البياني لهذا النطاق"
@@ -101,9 +104,45 @@
 
 <style>
 	.chart {
-		height: 250px;
+		height: 170px;
 		direction: ltr;
 		margin-top: 8px;
+	}
+	.tscroll {
+		overflow-x: auto;
+	}
+	.tscroll table.data {
+		min-width: 440px;
+		table-layout: fixed;
+	}
+	.tscroll table.data th:nth-child(1),
+	.tscroll table.data td:nth-child(1) {
+		width: 28px;
+	}
+	.tscroll table.data th:nth-child(3),
+	.tscroll table.data td:nth-child(3) {
+		width: 90px;
+	}
+	.tscroll table.data th:nth-child(4),
+	.tscroll table.data td:nth-child(4) {
+		width: 100px;
+	}
+	.tscroll table.data th,
+	.tscroll table.data td {
+		padding: 4px 6px;
+		font-size: 0.8rem;
+	}
+	.tscroll table.data th {
+		font-size: 0.7rem;
+		line-height: 1.25;
+	}
+	.tscroll .th-en {
+		font-size: 0.66rem;
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+	.tscroll table.data td.num {
+		white-space: nowrap;
 	}
 	.rank {
 		color: var(--text-muted);
@@ -112,11 +151,12 @@
 	.pname {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
+		font-size: 0.8rem;
 	}
 	.thumb {
-		width: 26px;
-		height: 26px;
+		width: 22px;
+		height: 22px;
 		flex-shrink: 0;
 		display: inline-flex;
 		align-items: center;
@@ -128,6 +168,6 @@
 		font-size: 0.8rem;
 	}
 	.sku {
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 	}
 </style>
