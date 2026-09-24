@@ -29,6 +29,11 @@ required=(
   internal/sale/sale_phase2d_test.go
   internal/sale/contract_parity_test.go
   internal/sale/openapi_test.go
+  internal/returnrefund/returnrefund.go
+  internal/returnrefund/returnrefund_test.go
+  internal/returnrefund/openapi_test.go
+  internal/returnrefund/testdata/return_partial.json
+  internal/returnrefund/testdata/return_full.json
   internal/sync/sync.go
   internal/sync/canonical.go
   internal/sync/canonical_test.go
@@ -40,9 +45,14 @@ required=(
   internal/adapter/postgres/projection_rebuild_test.go
   internal/adapter/postgres/sale_adversarial_test.go
   internal/adapter/postgres/sale_recovery_test.go
+  internal/adapter/postgres/returnrefund_test.go
+  internal/app/app.go
   docs/decisions/0017-canonical-hash-compat.md
   docs/decisions/0018-durable-sale-ownership.md
   docs/decisions/0019-fail-closed-legacy-hash.md
+  docs/decisions/0026-return-refund-sync.md
+  docs/sync/protocol.md
+  docs/sync/returns.md
   docs/operations/migrations.md
   docs/operations/baseline-freeze.md
   api/openapi.yaml

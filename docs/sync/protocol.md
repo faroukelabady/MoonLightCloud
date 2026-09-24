@@ -1,9 +1,11 @@
-# Sync Protocol Contract (Phase 1B transport + Phase 2B business events)
+# Sync Protocol Contract (Phase 1B transport + Phase 2B/4A business events)
 
 This is the contract MoonLightRetail's transactional outbox implements
-against: generic envelope and ingestion semantics plus the first business
-event `sale.finalized.v1` — validated before ACK, projected asynchronously
-(see docs/operations/projection.md and ADR-0016).
+against: generic envelope and ingestion semantics plus the business events
+`sale.finalized.v1` — validated before ACK, projected asynchronously
+(see docs/operations/projection.md and ADR-0016) — and
+`sale.return_refund.finalized.v1` — validated before ACK, durably accepted
+without projection until Phase 4B (see docs/sync/returns.md and ADR-0026).
 
 ## Authentication
 
@@ -50,6 +52,9 @@ Field rules:
 - `event_type`: `name.version` (`sale.finalized.v1` shape), immutable once
   released. The suffix carries payload semantics; no separate global protocol
   integer (`/api/v1` = envelope semantics, suffix = payload semantics).
+  Supported business events: `sale.finalized.v1`,
+  `sale.return_refund.finalized.v1` (one immutable event per finalized
+  Retail return/refund transaction; see `docs/sync/returns.md`).
 - `occurred_at`: RFC3339 business timestamp. Recorded, never authority for
   auth/dedup/ordering. Bounds: not before 2020-01-01, not more than 24h in
   the future, else `422`. Desktop clocks are untrusted.

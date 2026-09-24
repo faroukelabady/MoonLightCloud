@@ -595,7 +595,7 @@ paths:
       security:
         - reportAuth: []
       description: >-
-        Gross finalized sales (refunds not yet synchronized). Money in
+        Gross finalized sales (returns synchronized to inbox, not yet netted in reporting). Money in
         integer minor units, EGP and USD in separate buckets, never summed.
         Business days are STORE_TIMEZONE calendar days; timestamps are the
         sale occurred_at instants. Includes Cloud projection-freshness
@@ -845,7 +845,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -875,11 +875,13 @@ components:
     SyncEvent:
       oneOf:
         - $ref: '#/components/schemas/SaleFinalizedV1Event'
+        - $ref: '#/components/schemas/ReturnRefundFinalizedV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type
         mapping:
           sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
+          sale.return_refund.finalized.v1: '#/components/schemas/ReturnRefundFinalizedV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -920,6 +922,17 @@ components:
             payload:
               type: object
               description: Diagnostic ping object, max 256 KiB.
+    ReturnRefundFinalizedV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [sale.return_refund.finalized.v1]
+            payload:
+              $ref: '#/components/schemas/ReturnRefundFinalizedV1'
     BatchResult:
       type: object
       required: [events]
@@ -1077,9 +1090,85 @@ components:
           minItems: 1
           items: {$ref: '#/components/schemas/EventPayment'}
       description: >-
-        sale.finalized.v1 — the only business event in this phase. No v2
+        sale.finalized.v1 — the first business event. No v2
         fields exist. Integer money throughout; subtotal = Σ lines;
         total = max(0, subtotal + tax − discount).
+    ReturnActorSnapshot:
+      type: object
+      properties:
+        user_id: {type: string, format: uuid, nullable: true}
+        user_name: {type: string, nullable: true}
+      description: Handling-user snapshot; local operational identity only.
+    ReturnRefundTotals:
+      type: object
+      required: [gross, discount, tax, refund_total]
+      properties:
+        gross: {$ref: '#/components/schemas/Money'}
+        discount: {$ref: '#/components/schemas/Money'}
+        tax: {$ref: '#/components/schemas/Money'}
+        refund_total: {$ref: '#/components/schemas/Money'}
+      description: >-
+        Header breakdowns are exact sums of the per-line values;
+        refund_total is the authoritative refund amount.
+    ReturnRefundLine:
+      type: object
+      required: [original_sale_line_id, quantity, restocked, gross, discount, tax, refund]
+      properties:
+        original_sale_line_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        quantity: {type: integer, minimum: 1}
+        restocked: {type: boolean}
+        gross: {$ref: '#/components/schemas/Money'}
+        discount: {$ref: '#/components/schemas/Money'}
+        tax: {$ref: '#/components/schemas/Money'}
+        refund: {$ref: '#/components/schemas/Money'}
+        cost: {$ref: '#/components/schemas/Money'}
+      description: >-
+        One returned line linked to its original sale line. ProductID is a
+        join hint, not a catalog read.
+    ReturnRefundPayment:
+      type: object
+      required: [method, amount]
+      properties:
+        method: {type: string, enum: [cash, card, other]}
+        amount: {$ref: '#/components/schemas/Money'}
+        transaction_ref: {type: string, nullable: true}
+      description: Refunds pay out exactly; payments sum to refund_total with no tolerance.
+    ReturnRefundFinalizedV1:
+      type: object
+      required: [return_refund_id, return_number, kind, reason, sale_id, sale_number, channel, occurred_at, shop, actor, currency, totals, lines, refunds]
+      properties:
+        return_refund_id: {type: string, format: uuid}
+        return_number: {type: string}
+        kind: {type: string, enum: [return, void]}
+        reason:
+          type: string
+          enum: [customer_changed_mind, damaged_item, wrong_item, cashier_mistake, duplicate_sale, wrong_products, wrong_payment, other]
+        note: {type: string, nullable: true}
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string}
+        sale_event_id: {type: string, format: uuid, nullable: true}
+        channel: {type: string, enum: [STORE]}
+        occurred_at: {type: string, format: date-time}
+        shop: {$ref: '#/components/schemas/ShopSnapshot'}
+        actor: {$ref: '#/components/schemas/ReturnActorSnapshot'}
+        currency: {type: string, enum: [EGP, USD]}
+        fx:
+          $ref: '#/components/schemas/FxSnapshot'
+        totals: {$ref: '#/components/schemas/ReturnRefundTotals'}
+        lines:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/ReturnRefundLine'}
+        refunds:
+          type: array
+          items: {$ref: '#/components/schemas/ReturnRefundPayment'}
+      description: >-
+        sale.return_refund.finalized.v1 — one immutable event per finalized
+        Retail return/refund transaction. Original Sale and Sale-line linkage
+        is authoritative for Phase 4B joins; historical product/category/cost
+        context comes from the original Sale projection, not this event.
+        Integer money throughout; no v2 fields exist.
     CurrencyTotal:
       type: object
       required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor]
@@ -1091,7 +1180,7 @@ components:
         sales_total_minor:
           type: integer
           example: 109000
-          description: Gross finalized sales (refunds not yet synchronized).
+          description: Gross finalized sales (returns synchronized to inbox, not yet netted in reporting).
         line_cost_minor:
           type: integer
           description: Historical line cost snapshot sum; not a profit basis.
@@ -1187,7 +1276,7 @@ components:
         tax_minor: {type: integer}
         sales_total_minor:
           type: integer
-          description: Gross finalized sales (refunds not yet synchronized).
+          description: Gross finalized sales (returns synchronized to inbox, not yet netted in reporting).
       description: >-
         Sale-header currency bucket for cashier/channel rows. No cost field
         by design: header dimensions do not compute historical cost.
@@ -1288,7 +1377,7 @@ components:
         subtotal_minor: {type: string}
         discount_minor: {type: string}
         tax_minor: {type: string}
-        sales_total_minor: {type: string, description: Gross finalized sales (refunds not yet synchronized).}
+        sales_total_minor: {type: string, description: "Gross finalized sales (returns in inbox, not netted in reporting)."}
         line_cost_minor: {type: string, description: Extended historical cost (unit cost × quantity).}
       description: String-backed money (never JSON numbers). Same numbers as Phase 3A, decimal-string encoding.
     DashboardSummaryPayment:

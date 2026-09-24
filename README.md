@@ -3,7 +3,8 @@
 Always-online integration and analytics layer for MoonLightRetail
 (Go + Wails + Svelte desktop, SQLite, offline-first — separate repository,
 never modified here). Durable sync inbox plus the first Sale-sync vertical
-slice: versioned ingestion (`sale.finalized.v1` validated before ACK),
+slice: versioned ingestion (`sale.finalized.v1` and
+`sale.return_refund.finalized.v1` validated before ACK),
 async PostgreSQL projection with durable processing state, modular Go
 monolith, OCI-portable.
 

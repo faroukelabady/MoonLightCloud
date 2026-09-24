@@ -23,6 +23,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
+	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -73,6 +74,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	)
 	a.Sync = sync.NewService(store, clock.System{})
 	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
+	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
@@ -111,6 +113,19 @@ func ValidateSalePayload(raw json.RawMessage) error {
 		return err
 	}
 	_, err = sale.Validate(p)
+	return err
+}
+
+// ValidateReturnRefundPayload is the ingestion-time
+// sale.return_refund.finalized.v1 gate: event-local validation only, before
+// durable ACK. No projection exists in Phase 4A; cumulative business
+// validation belongs to Phase 4B.
+func ValidateReturnRefundPayload(raw json.RawMessage) error {
+	p, err := returnrefund.Decode(raw)
+	if err != nil {
+		return err
+	}
+	_, err = returnrefund.Validate(p)
 	return err
 }
 

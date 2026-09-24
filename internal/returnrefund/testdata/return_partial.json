@@ -1,0 +1,46 @@
+{
+  "return_refund_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "return_number": "RET-20260921-bbbbbbbb",
+  "kind": "return",
+  "reason": "customer_changed_mind",
+  "sale_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "sale_number": "MLR-20260920-aaaaaaaa",
+  "sale_event_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "channel": "STORE",
+  "occurred_at": "2026-09-21T12:00:00Z",
+  "shop": {
+    "name_ar": "مكتبة البردي",
+    "name_en": "Papyrus Shop",
+    "address_ar": "القاهرة",
+    "address_en": "Cairo",
+    "phone": "+201000000000",
+    "receipt_footer_ar": "شكرا",
+    "receipt_footer_en": "Thanks"
+  },
+  "actor": {"user_id": "11111111-1111-4111-8111-111111111111", "user_name": "Amal"},
+  "currency": "USD",
+  "fx": {"base": "USD", "quote": "EGP", "rate": "52.000000", "rate_microrate": 52000000},
+  "totals": {
+    "gross": {"amount_minor": 1300, "currency": "USD"},
+    "discount": {"amount_minor": 100, "currency": "USD"},
+    "tax": {"amount_minor": 50, "currency": "USD"},
+    "refund_total": {"amount_minor": 1250, "currency": "USD"}
+  },
+  "lines": [
+    {
+      "original_sale_line_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "product_id": "22222222-2222-4222-8222-222222222222",
+      "quantity": 1,
+      "restocked": true,
+      "gross": {"amount_minor": 1300, "currency": "USD"},
+      "discount": {"amount_minor": 100, "currency": "USD"},
+      "tax": {"amount_minor": 50, "currency": "USD"},
+      "refund": {"amount_minor": 1250, "currency": "USD"},
+      "cost": {"amount_minor": 800, "currency": "USD"}
+    }
+  ],
+  "refunds": [
+    {"method": "cash", "amount": {"amount_minor": 1000, "currency": "USD"}},
+    {"method": "card", "amount": {"amount_minor": 250, "currency": "USD"}}
+  ]
+}

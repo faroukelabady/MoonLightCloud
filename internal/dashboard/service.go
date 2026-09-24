@@ -115,7 +115,9 @@ type ModeAverage struct {
 
 // ActivityItem is one Cloud-side event for the recent feed. Sources are
 // authoritative inbox/processing rows only — never invented business
-// events (no inventory/order/refund activity exists in Phase 3B).
+// events. The feed stays finalized-sale-only by design in Phase 4A:
+// accepted return/refund inbox events exist but are not surfaced until
+// Phase 4B projection (no inventory/order activity exists at all).
 type ActivityItem struct {
 	Kind       string  `json:"kind"`
 	EventID    string  `json:"event_id"`

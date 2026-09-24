@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	isync "github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +25,14 @@ func TestMain(m *testing.M) {
 			return err
 		}
 		_, err = sale.Validate(p)
+		return err
+	})
+	isync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, func(raw json.RawMessage) error {
+		p, err := returnrefund.Decode(raw)
+		if err != nil {
+			return err
+		}
+		_, err = returnrefund.Validate(p)
 		return err
 	})
 	os.Exit(m.Run())
