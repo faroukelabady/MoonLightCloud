@@ -34,6 +34,7 @@ required=(
   internal/returnrefund/openapi_test.go
   internal/returnrefund/testdata/return_partial.json
   internal/returnrefund/testdata/return_full.json
+  internal/sync/shop.go
   internal/sync/sync.go
   internal/sync/canonical.go
   internal/sync/canonical_test.go

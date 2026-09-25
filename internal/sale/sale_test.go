@@ -223,3 +223,20 @@ func TestBackoff(t *testing.T) {
 		t.Fatalf("attempt 2: %v", Backoff(2))
 	}
 }
+
+func TestMinimalArabicOnlyShopAccepted(t *testing.T) {
+	// R60: the Retail-valid minimal shop (Arabic name only, blank English
+	// name and phone) validates for sales. Shared CheckShopSnapshot keeps
+	// sale/return parity; the mechanical OpenAPI gate covers the schema.
+	raw := mutate(t, loadFixture(t, "sale_egp.json"), func(m map[string]any) {
+		m["shop"] = map[string]any{"name_ar": "متجر", "name_en": "", "address_ar": "",
+			"address_en": "", "phone": "", "receipt_footer_ar": "", "receipt_footer_en": ""}
+	})
+	p, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, err := Validate(p); err != nil {
+		t.Fatalf("minimal shop must validate: %v", err)
+	}
+}

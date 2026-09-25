@@ -40,7 +40,9 @@ reversal emitted as the same event shape with `kind: "void"`.
   per-line breakdowns; `refund_total` is authoritative.
 - `lines[]`: `original_sale_line_id` (stable join key), `product_id` join
   hint, `quantity` > 0, `restocked`, `gross`/`discount`/`tax`/`refund`
-  breakdowns, historical `cost`.
+  breakdowns, historical `cost` — where `cost` is the extended historical
+  cost for the returned quantity (historical unit cost × returned
+  quantity). Consumers must NOT multiply it by quantity again.
 - `refunds[]`: `cash` | `card` | `other` payments summing exactly to
   `refund_total` (no tolerance); empty only for a zero refund total.
 
@@ -104,9 +106,11 @@ desktop parks them `blocked` with a diagnostic.
 ## Out-of-order behavior
 
 A return event is accepted even when the original Sale event or its
-projection is not yet present. It remains pending for Phase 4B dependency
-resolution. Transport validates identifier format only, never projection
-state.
+projection is not yet present. It is durably accepted in `sync_events` and
+not yet projected; no return processing row exists in Phase 4A. Phase 4B
+will enumerate accepted return events from `sync_events` by `event_type`
+and introduce projection/processing state retroactively. Transport
+validates identifier format only, never projection state.
 
 ## Payload limit
 

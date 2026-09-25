@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
 // EventReturnRefundFinalizedV1 is the registered event type.
@@ -345,14 +346,7 @@ func Validate(p Payload) (Validated, error) {
 }
 
 func checkShop(s ShopSnapshot) error {
-	for name, v := range map[string]string{
-		"name_ar": s.NameAR, "name_en": s.NameEN, "phone": s.Phone,
-	} {
-		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("shop.%s is required", name)
-		}
-	}
-	return nil
+	return sync.CheckShopSnapshot(s.NameAR, s.NameEN, s.AddressAR, s.AddressEN, s.Phone, s.ReceiptFooterAR, s.ReceiptFooterEN)
 }
 
 func checkActor(a ActorSnapshot) error {

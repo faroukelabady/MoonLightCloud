@@ -22,8 +22,8 @@
 		<div class="hero">
 			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
 			<div>
-				<div class="headline">متصل وجميع البيانات محدثة</div>
-				<div class="muted sub">Connected and all data is up to date</div>
+				<div class="headline">متصل وإسقاط المبيعات محدّث</div>
+				<div class="muted sub">Connected · sale projection up to date</div>
 			</div>
 		</div>
 		<div class="rows">
@@ -51,7 +51,7 @@
 			{#if f.blocked_sale_event_count > 0}
 				<span class="badge warn">توجد عناصر محظورة تحتاج مراجعة / Blocked items need review</span>
 			{:else if f.cloud_projection_complete}
-				<span class="badge ok">المعالجة السحابية مكتملة / Cloud processing complete</span>
+				<span class="badge ok">اكتمال إسقاط المبيعات السحابي / Cloud sale projection complete</span>
 			{:else}
 				<span class="badge">جارٍ اللحاق / Catching up</span>
 			{/if}
@@ -62,6 +62,8 @@
 		<div class="muted note">
 			الاكتمال السحابي لا يعني أن درج مكتب المتجر فارغ — السحابة لا ترى الأحداث التي لم تُرسل بعد.
 			<br /><span class="sub-en">Cloud-complete does not prove the Retail outbox is empty.</span>
+			<br />قد تُقبل المرتجعات سحابيًا دون أن تدخل التقارير حتى المرحلة 4B.
+			<br /><span class="sub-en">Returns may be accepted by Cloud but are excluded from reporting until Phase 4B.</span>
 		</div>
 		<button type="button" class="refresh" aria-label="تحديث الحالة / Refresh status" onclick={onrefresh}><span class="rb-ar">تحديث الحالة</span><span class="rb-en">Refresh status</span></button>
 	{/if}

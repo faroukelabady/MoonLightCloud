@@ -248,3 +248,40 @@ func TestMicrorate(t *testing.T) {
 		}
 	}
 }
+
+func TestMinimalArabicOnlyShopAccepted(t *testing.T) {
+	// R60: the Retail-valid minimal shop (Arabic name only) validates for
+	// returns. The mechanical OpenAPI gate covers the schema side.
+	raw := mutate(t, loadFixture(t, "return_full.json"), func(m map[string]any) {
+		m["shop"] = map[string]any{"name_ar": "متجر", "name_en": "", "address_ar": "",
+			"address_en": "", "phone": "", "receipt_footer_ar": "", "receipt_footer_en": ""}
+	})
+	p, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, err := Validate(p); err != nil {
+		t.Fatalf("minimal shop must validate: %v", err)
+	}
+}
+
+func TestExtendedHistoricalCostSemantics(t *testing.T) {
+	// R05: cost is extended historical cost (unit 123 × qty 3 = 369).
+	cost := map[string]any{"amount_minor": 369, "currency": "USD"}
+	raw := mutate(t, loadFixture(t, "return_partial.json"), func(m map[string]any) {
+		line := m["lines"].([]any)[0].(map[string]any)
+		line["quantity"] = 3
+		line["cost"] = cost
+	})
+	p, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	v, err := Validate(p)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if v.Lines[0].Cost == nil || v.Lines[0].Cost.AmountMinor != 369 {
+		t.Fatalf("extended cost must survive as 369: %+v", v.Lines[0].Cost)
+	}
+}

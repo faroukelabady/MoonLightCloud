@@ -28,8 +28,11 @@ catalog state.
 4. The original historical FX snapshot (`USD→EGP`, exact microrate) is
    carried verbatim so Phase 4B reverses historical USD sales at the sale
    rate, never a live rate.
-5. Projection and reporting are deferred to Phase 4B: accepted returns stay
-   pending, dashboards and reports remain finalized-sale-only (gross).
+5. Projection and reporting are deferred to Phase 4B: accepted returns are
+   durably stored in `sync_events` and not yet projected (no return
+   processing rows exist in Phase 4A); dashboards and reports remain
+   finalized-sale-only (gross). Phase 4B enumerates accepted returns by
+   `event_type` and introduces projection state retroactively.
 
 ## Alternatives rejected
 
@@ -48,3 +51,5 @@ catalog state.
 Phase 4B can implement gross/refund/net sales, returned units, product and
 category refund breakdowns, branch reporting, cost reversal, and FX
 reversal purely from inbox events plus the original Sale projection.
+Return line `cost` arrives as extended historical cost (unit × returned
+quantity) and is consumed directly, never re-multiplied.

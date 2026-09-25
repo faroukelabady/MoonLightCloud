@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
 // EventSaleFinalizedV1 is the registered event type.
@@ -359,12 +360,8 @@ func checkPaymentAggregate(payments []EventPayment, total int64) error {
 }
 
 func checkShop(s ShopSnapshot) error {
-	for name, v := range map[string]string{
-		"name_ar": s.NameAR, "name_en": s.NameEN, "phone": s.Phone,
-	} {
-		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("shop.%s is required", name)
-		}
+	if err := sync.CheckShopSnapshot(s.NameAR, s.NameEN, s.AddressAR, s.AddressEN, s.Phone, s.ReceiptFooterAR, s.ReceiptFooterEN); err != nil {
+		return err
 	}
 	return nil
 }

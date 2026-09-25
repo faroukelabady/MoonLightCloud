@@ -13,6 +13,9 @@ test -z "$(gofmt -l cmd/ internal/ db/)" || { echo "unformatted files above" >&2
 echo "== openapi strict gate =="
 ./scripts/check-openapi.sh
 
+echo "== openapi fixture parity gate =="
+./scripts/check-openapi-fixtures.sh
+
 echo "== sqlc freshness =="
 cp -r internal/adapter/postgres/sqlcgen /tmp/sqlcgen.before
 sqlc generate
