@@ -202,3 +202,99 @@ func (d Devices) DashboardLatestSales(ctx context.Context, limit int) ([]dashboa
 	}
 	return out, nil
 }
+
+func (d Devices) DashboardNormalizedRefundsSummary(ctx context.Context, startUTC, endUTC time.Time) (dashboard.NormalizedRefundSummaryRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	r, err := sqlcgen.New(d.pool).DashboardNormalizedRefundsSummary(ctx, sqlcgen.DashboardNormalizedRefundsSummaryParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC),
+	})
+	if err != nil {
+		return dashboard.NormalizedRefundSummaryRow{}, reportErr("normalized refunds summary", err)
+	}
+	return dashboard.NormalizedRefundSummaryRow{
+		Transactions: r.Transactions, Units: r.Units, Normalized: r.NormalizedRefund,
+		USDReturns: r.UsdReturns, USDMissingFx: r.UsdMissingFx,
+	}, nil
+}
+
+func (d Devices) DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedRefundDailyRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).DashboardNormalizedRefundsDaily(ctx, sqlcgen.DashboardNormalizedRefundsDailyParams{
+		Timezone: timezone, StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC),
+	})
+	if err != nil {
+		return nil, reportErr("normalized refunds daily", err)
+	}
+	out := make([]dashboard.NormalizedRefundDailyRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.NormalizedRefundDailyRow{
+			Date: r.Day, Transactions: r.Transactions, Units: r.Units,
+			Normalized: r.NormalizedRefund, USDMissingFx: r.UsdMissingFx,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.NormalizedRefundProductRowRaw, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).DashboardProductsNormalizedRefunds(ctx, sqlcgen.DashboardProductsNormalizedRefundsParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC),
+	})
+	if err != nil {
+		return nil, reportErr("normalized product refunds", err)
+	}
+	out := make([]dashboard.NormalizedRefundProductRowRaw, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.NormalizedRefundProductRowRaw{
+			ProductID: uuidPtr(r.ProductID), SKU: r.Sku, ProductName: r.ProductName,
+			Units: r.Units, Normalized: r.NormalizedRefund, MissingFx: r.MissingFx,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedRefundCategoryRowRaw, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).DashboardCategoriesNormalizedRefunds(ctx, sqlcgen.DashboardCategoriesNormalizedRefundsParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind,
+	})
+	if err != nil {
+		return nil, reportErr("normalized category refunds", err)
+	}
+	out := make([]dashboard.NormalizedRefundCategoryRowRaw, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.NormalizedRefundCategoryRowRaw{
+			Kind: r.Kind, ID: uuidString(r.ID), NameAR: r.NameAr, NameEN: r.NameEn,
+			Units: r.Units, Normalized: r.NormalizedRefund, MissingFx: r.MissingFx,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]dashboard.ReturnBranchRowRaw, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).DashboardReturnBranches(ctx, sqlcgen.DashboardReturnBranchesParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("return branches", err)
+	}
+	out := make([]dashboard.ReturnBranchRowRaw, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.ReturnBranchRowRaw{
+			Channel:    r.Channel,
+			ShopNameAR: r.ShopNameAr, ShopNameEN: r.ShopNameEn,
+			ShopAddressAR: r.ShopAddressAr, ShopAddressEN: r.ShopAddressEn,
+			ShopPhone:           r.ShopPhone,
+			ShopReceiptFooterAR: r.ShopReceiptFooterAr, ShopReceiptFooterEN: r.ShopReceiptFooterEn,
+			Currency: r.Currency, Transactions: r.Transactions, Units: r.Units,
+			RefundTotal: r.RefundTotal, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}

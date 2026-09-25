@@ -102,7 +102,9 @@ func (h DashboardDataHandlers) Products(w http.ResponseWriter, r *http.Request) 
 		for _, row := range rows {
 			out = append(out, map[string]any{
 				"product_id": row.ProductID, "sku": row.SKU, "product_name": row.ProductName,
-				"units": row.Units, "amount_minor": row.NormalizedMinor,
+				"units": row.Units, "units_returned": row.UnitsReturned,
+				"amount_minor": row.NormalizedMinor,
+				"refund_minor": row.RefundNormalizedMinor, "net_minor": row.NetNormalizedMinor,
 			})
 		}
 		h.observe(r, "dashboard_products_normalized", req, start)
@@ -123,16 +125,23 @@ func (h DashboardDataHandlers) Products(w http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]map[string]any, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		var amount string
+		var amount, refund string
 		for _, b := range row.LineSales {
 			if b.Currency == currency {
 				amount = minorString(b.LineSalesMinor)
+				refund = minorString(b.LineRefundMinor)
 			}
+		}
+		net, err := netMinor(amount, refund)
+		if err != nil {
+			WriteError(w, r, err)
+			return
 		}
 		out = append(out, map[string]any{
 			"product_id": row.ProductID, "sku": strOrEmpty(row.SKU),
 			"product_name": strOrEmpty(row.ProductName),
-			"units":        row.Units, "amount_minor": amount,
+			"units":        row.Units, "units_returned": row.UnitsReturned,
+			"amount_minor": amount, "refund_minor": refund, "net_minor": net,
 		})
 	}
 	h.observe(r, "dashboard_products_native", req, start)
@@ -168,7 +177,9 @@ func (h DashboardDataHandlers) Categories(w http.ResponseWriter, r *http.Request
 			out = append(out, map[string]any{
 				"kind": row.Kind, "classification_id": row.ID,
 				"name_ar": row.NameAR, "name_en": row.NameEN,
-				"units": row.Units, "amount_minor": row.NormalizedMinor,
+				"units": row.Units, "units_returned": row.UnitsReturned,
+				"amount_minor": row.NormalizedMinor,
+				"refund_minor": row.RefundNormalizedMinor, "net_minor": row.NetNormalizedMinor,
 			})
 		}
 		h.observe(r, "dashboard_categories_normalized", req, start)
@@ -189,16 +200,23 @@ func (h DashboardDataHandlers) Categories(w http.ResponseWriter, r *http.Request
 	}
 	out := make([]map[string]any, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		var amount string
+		var amount, refund string
 		for _, b := range row.LineSales {
 			if b.Currency == currency {
 				amount = minorString(b.LineSalesMinor)
+				refund = minorString(b.LineRefundMinor)
 			}
+		}
+		net, err := netMinor(amount, refund)
+		if err != nil {
+			WriteError(w, r, err)
+			return
 		}
 		out = append(out, map[string]any{
 			"kind": row.Dimension, "classification_id": strOrEmpty(row.ClassificationID),
 			"name_ar": strOrEmpty(row.NameAR), "name_en": strOrEmpty(row.NameEN),
-			"units": row.Units, "amount_minor": amount,
+			"units": row.Units, "units_returned": row.UnitsReturned,
+			"amount_minor": amount, "refund_minor": refund, "net_minor": net,
 		})
 	}
 	h.observe(r, "dashboard_categories_native", req, start)
@@ -311,6 +329,35 @@ func strOrEmpty(s *string) string {
 // minorString renders exact minor units for BFF string-money fields.
 func minorString(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+// netMinor subtracts exact minor-unit strings with overflow failure (net
+// may be negative, but must never wrap). Empty means zero.
+func netMinor(gross, refund string) (string, error) {
+	parse := func(s string) (int64, error) {
+		if s == "" {
+			return 0, nil
+		}
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return 0, apperr.New(apperr.Internal, "net arithmetic overflow")
+		}
+		return v, nil
+	}
+	g, err := parse(gross)
+	if err != nil {
+		return "", err
+	}
+	r, err := parse(refund)
+	if err != nil {
+		return "", err
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	const minInt64 = -maxInt64 - 1
+	if (r > 0 && g < minInt64+r) || (r < 0 && g > maxInt64+r) {
+		return "", apperr.New(apperr.Internal, "net arithmetic overflow")
+	}
+	return strconv.FormatInt(g-r, 10), nil
 }
 
 // periodMetaJSON renders period metadata for bespoke dashboard responses

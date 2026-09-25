@@ -125,5 +125,43 @@ check("whitespace-name_ar return", "ReturnRefundFinalizedV1", ws_return, expect_
 ws_sale = load_fixture("internal/sale/testdata/sale_egp.json")
 ws_sale["shop"] = dict(ws_return["shop"])
 check("whitespace-name_ar sale", "SaleFinalizedV1", ws_sale, expect_valid=False)
+
+# Phase 4B: return-aware report responses validate against the additive
+# reporting schemas. The negative-net case is the load-bearing proof that
+# net fields are signed (never the nonnegative intake Money schema).
+period = {"kind": "custom", "timezone": "Africa/Cairo",
+          "start_local": "2026-09-20T00:00:00+03:00",
+          "end_local_exclusive": "2026-09-21T00:00:00+03:00",
+          "start_utc": "2026-09-19T21:00:00Z", "end_utc": "2026-09-20T21:00:00Z"}
+fresh = {"projection_backlog_count": 0, "blocked_sale_event_count": 0,
+         "cloud_projection_complete": True, "return_backlog_count": 0,
+         "return_blocked_count": 0, "return_projection_complete": True}
+check("summary negative-net", "SalesSummary", {
+    "generated_at": "2026-09-20T21:00:00Z", "timezone": "Africa/Cairo",
+    "period": period, "transaction_count": 0, "units_sold": 0,
+    "return_transaction_count": 1, "units_returned": 2,
+    "currency_totals": [{"currency": "EGP", "subtotal_minor": 0,
+                         "discount_minor": 0, "tax_minor": 0,
+                         "sales_total_minor": 0, "line_cost_minor": 0,
+                         "refund_total_minor": 200000, "net_sales_minor": -200000,
+                         "returned_units": 2, "returned_cost_minor": 800,
+                         "net_cost_minor": -800}],
+    "payment_totals": [], "freshness": fresh})
+check("daily row with returns", "DailyRow", {
+    "date": "2026-09-20", "transactions": 3, "units": 5,
+    "return_transactions": 4, "units_returned": 4,
+    "currency_totals": [{"currency": "EGP", "subtotal_minor": 400000,
+                         "discount_minor": 0, "tax_minor": 0,
+                         "sales_total_minor": 400000, "line_cost_minor": 0,
+                         "refund_total_minor": 300000, "net_sales_minor": 100000,
+                         "returned_units": 3, "returned_cost_minor": 1200,
+                         "net_cost_minor": -1200}]})
+check("line breakdown with refund", "LineSaleTotal", {
+    "currency": "EGP", "line_sales_minor": 400000, "line_cost_minor": 0,
+    "line_refund_minor": 300000, "line_returned_cost_minor": 1200})
+check("header breakdown with net", "SaleCurrencyTotal", {
+    "currency": "EGP", "subtotal_minor": 400000, "discount_minor": 0,
+    "tax_minor": 0, "sales_total_minor": 400000,
+    "refund_total_minor": 300000, "net_sales_minor": 100000})
 print("openapi fixture parity: PASS")
 PYEOF

@@ -1,4 +1,4 @@
-# Sale Projection Operations
+# Sale & Return Projection Operations
 
 Derived state from the immutable `sync_events` inbox. Never delete or edit
 inbox rows to fix projection; remediation is auditable and preserves both
@@ -10,14 +10,18 @@ source events.
 moonlight-cloud projection status
 ```
 
-Shows per-status counts for `sale_projection.v1`, oldest pending age, and
-the latest error (code + bounded safe message). No dashboard required.
+Shows per-status counts for `sale_projection.v1` and
+`return_refund_projection.v1`, oldest pending age, and the latest error
+(code + bounded safe message) per processor. No dashboard required.
 
 ## Retry one event
 
 ```bash
-moonlight-cloud projection retry <event-id>
+moonlight-cloud projection retry <event-id> [processor]
 ```
+
+Processor defaults to `sale_projection.v1`; pass
+`return_refund_projection.v1` for returns.
 
 Returns a `retry`/`blocked` event to `pending` with `next_attempt_at = NULL`
 (immediately discoverable on the next scan). The source event is untouched.
@@ -34,9 +38,28 @@ on its next wake/scan (no cross-process wake channel).
   commits in a separate durable transaction, so restarts preserve the
   schedule and attempts never spin before due time.
 - `blocked` — deterministic failure (`SALE_ID_CONFLICT`,
-  `VALIDATION_FAILED`, `OWNERSHIP_INTEGRITY`); never retried automatically,
-  never deleted, never returned by discovery scans.
+  `VALIDATION_FAILED`, `OWNERSHIP_INTEGRITY`, plus return codes
+  `RETURN_REFUND_ID_CONFLICT`, `RETURN_LINE_UNKNOWN`,
+  `RETURN_CURRENCY_MISMATCH`, `RETURN_FX_MISMATCH`,
+  `CUMULATIVE_OVER_RETURN`, `CUMULATIVE_REFUND_EXCEEDED`); never retried
+  automatically, never deleted, never returned by discovery scans.
+- `retry` with code `SALE_DEPENDENCY_WAIT` means the return is valid but
+  its original sale projection is not yet present (out-of-order arrival):
+  it projects automatically once the sale appears. This is a dependency
+  wait, not a failure — distinct from terminal `blocked`.
 - `processed` — complete projection committed. Never rediscovered.
+
+## Return projection
+
+`return_refund_projection.v1` reuses the same mechanism with an independent
+processor name. Accepted return events with no processing row are
+discoverable (Phase 4A history backfills with no resend). Returns serialize
+per sale on a parent-row lock so cumulative guards
+(Σ returned qty ≤ sold qty; Σ refunds ≤ sale total) cannot write-skew.
+Return line cost is the extended historical cost — never re-multiplied.
+Exactly one event owns a `return_refund_id` in `return_refund_ownership`
+(many returns per sale stay valid); rebuilds clear return projections but
+never ownership. Return reporting date is the return `occurred_at`.
 
 ## Ownership
 
@@ -99,7 +122,9 @@ Three tiers — never confuse them:
 - Durable logical ownership: `sale_event_ownership` (one permanent winner
   per `sale_id`; never deleted on rebuild).
 - Rebuildable state: `sales_projection`, lines, payments, classifications,
-  and `sync_event_processing` rows (may be cleared/reset, then reprocessed).
+  `return_refund_projection` (+ lines, + payments), and
+  `sync_event_processing` rows (may be cleared/reset, then reprocessed).
+  Return rebuilds additionally retain `return_refund_ownership`.
 
 A rebuild that deletes ownership can elect a different winner and rewrite
 financial history. The procedure below never does.

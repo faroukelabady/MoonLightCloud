@@ -106,20 +106,23 @@ desktop parks them `blocked` with a diagnostic.
 ## Out-of-order behavior
 
 A return event is accepted even when the original Sale event or its
-projection is not yet present. It is durably accepted in `sync_events` and
-not yet projected; no return processing row exists in Phase 4A. Phase 4B
-will enumerate accepted return events from `sync_events` by `event_type`
-and introduce projection/processing state retroactively. Transport
-validates identifier format only, never projection state.
+projection is not yet present. It is durably accepted in `sync_events`;
+`return_refund_projection.v1` discovers accepted events from `sync_events`
+by `event_type` (missing processing row counts as discoverable, so Phase 4A
+history backfills with no resend), waits retryably on a missing sale
+projection (`SALE_DEPENDENCY_WAIT`), and projects atomically once the sale
+appears. Transport validates identifier format only, never projection state.
 
 ## Payload limit
 
 256 KiB per event, 8 MiB per body — same envelope as sales. Return events
 are normally far smaller than sales.
 
-## Phase 4B deferred behavior
+## Phase 4B projection behavior
 
-Accepted return events remain unprojected: dashboard and all reports stay
-finalized-sale-only (gross). Gross/net/refund reporting, category and
-product refund breakdowns, cost reversal, and FX-normalized net sales are
-Phase 4B. This is intentional, not a bug.
+Accepted return events are projected by `return_refund_projection.v1` into
+`return_refund_projection` (+ lines, + refund payments) with durable
+business arbitration in `return_refund_ownership`. Reports expose
+gross/refund/net, returned units, and cost gross/returned/net with
+return `occurred_at` dating; the dashboard renders Net Sales primary with
+Gross and Refunds visible. See ADR-0027 and docs/operations/reporting.md.

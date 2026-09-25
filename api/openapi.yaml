@@ -595,7 +595,9 @@ paths:
       security:
         - reportAuth: []
       description: >-
-        Gross finalized sales (returns synchronized to inbox, not yet netted in reporting). Money in
+        Finalized sales with additive return/refund integration: gross stays
+        immutable, refunds reverse authoritatively projected returns, net is
+        derived (signed, never clamped). Money in
         integer minor units, EGP and USD in separate buckets, never summed.
         Business days are STORE_TIMEZONE calendar days; timestamps are the
         sale occurred_at instants. Includes Cloud projection-freshness
@@ -1190,7 +1192,7 @@ components:
         Integer money throughout; no v2 fields exist.
     CurrencyTotal:
       type: object
-      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor]
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor, refund_total_minor, net_sales_minor, returned_units, returned_cost_minor, net_cost_minor]
       properties:
         currency: {type: string, example: EGP}
         subtotal_minor: {type: integer, example: 100000}
@@ -1199,11 +1201,26 @@ components:
         sales_total_minor:
           type: integer
           example: 109000
-          description: Gross finalized sales (returns synchronized to inbox, not yet netted in reporting).
+          description: Gross finalized sales. Never reduced by returns; net is a separate field.
         line_cost_minor:
           type: integer
           description: Historical line cost snapshot sum; not a profit basis.
-      description: One currency bucket. EGP and USD are never summed.
+        refund_total_minor:
+          type: integer
+          description: Authoritative return reversals in period (nonnegative).
+        net_sales_minor:
+          type: integer
+          description: Gross minus refunds. Signed — negative when refunds exceed sales; never clamped.
+        returned_units:
+          type: integer
+          description: Returned unit count in period (nonnegative).
+        returned_cost_minor:
+          type: integer
+          description: Extended historical return-line cost sum (nonnegative).
+        net_cost_minor:
+          type: integer
+          description: Gross cost minus returned cost. Signed; never clamped.
+      description: One currency bucket. EGP and USD are never summed. Signed net fields never reuse the nonnegative intake Money schema.
     PaymentTotal:
       type: object
       required: [method, currency, amount_minor, change_minor]
@@ -1225,7 +1242,7 @@ components:
         end_utc: {type: string, example: '2026-09-21T21:00:00Z'}
     Freshness:
       type: object
-      required: [projection_backlog_count, blocked_sale_event_count, cloud_projection_complete]
+      required: [projection_backlog_count, blocked_sale_event_count, cloud_projection_complete, return_backlog_count, return_blocked_count, return_projection_complete]
       properties:
         latest_sale_event_received_at: {type: string, format: date-time, nullable: true}
         latest_projected_sale_occurred_at: {type: string, format: date-time, nullable: true}
@@ -1233,16 +1250,25 @@ components:
         blocked_sale_event_count: {type: integer}
         cloud_projection_complete:
           type: boolean
-          description: All accepted sale events terminal (processed/blocked), no backlog. Does NOT mean Retail is fully synchronized.
+          description: All accepted sale events terminal (processed/blocked), no backlog. Sale-scoped only; does NOT mean Retail is fully synchronized.
+        latest_return_event_received_at: {type: string, format: date-time, nullable: true}
+        latest_projected_return_occurred_at: {type: string, format: date-time, nullable: true}
+        return_backlog_count: {type: integer}
+        return_blocked_count: {type: integer}
+        return_projection_complete:
+          type: boolean
+          description: All accepted return events terminal (processed/blocked), no backlog.
     SalesSummary:
       type: object
-      required: [generated_at, timezone, period, transaction_count, units_sold, currency_totals, payment_totals, freshness]
+      required: [generated_at, timezone, period, transaction_count, units_sold, return_transaction_count, units_returned, currency_totals, payment_totals, freshness]
       properties:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
-        transaction_count: {type: integer}
+        transaction_count: {type: integer, description: Finalized sale transactions only; returns counted separately.}
         units_sold: {type: integer}
+        return_transaction_count: {type: integer, description: Return/refund transactions in period.}
+        units_returned: {type: integer, description: Returned units in period.}
         currency_totals:
           type: array
           items: {$ref: '#/components/schemas/CurrencyTotal'}
@@ -1252,11 +1278,13 @@ components:
         freshness: {$ref: '#/components/schemas/Freshness'}
     DailyRow:
       type: object
-      required: [date, transactions, units, currency_totals]
+      required: [date, transactions, units, return_transactions, units_returned, currency_totals]
       properties:
         date: {type: string, example: '2026-09-22', description: Store-local calendar date.}
-        transactions: {type: integer}
+        transactions: {type: integer, description: Finalized sale transactions; returns counted separately.}
         units: {type: integer}
+        return_transactions: {type: integer}
+        units_returned: {type: integer}
         currency_totals:
           type: array
           items: {$ref: '#/components/schemas/CurrencyTotal'}
@@ -1275,7 +1303,7 @@ components:
     LineSaleTotal:
       type: object
       additionalProperties: false
-      required: [currency, line_sales_minor, line_cost_minor]
+      required: [currency, line_sales_minor, line_cost_minor, line_refund_minor, line_returned_cost_minor]
       properties:
         currency: {type: string}
         line_sales_minor:
@@ -1284,10 +1312,16 @@ components:
         line_cost_minor:
           type: integer
           description: Extended historical cost (unit cost × quantity); snapshot sum, not a profit basis.
+        line_refund_minor:
+          type: integer
+          description: Reversed line amount for the same attribution; net is derivable. Signed, never clamped.
+        line_returned_cost_minor:
+          type: integer
+          description: Extended historical return-line cost (already unit × returned quantity); never re-multiplied.
     SaleCurrencyTotal:
       type: object
       additionalProperties: false
-      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor]
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, refund_total_minor, net_sales_minor]
       properties:
         currency: {type: string}
         subtotal_minor: {type: integer}
@@ -1295,19 +1329,25 @@ components:
         tax_minor: {type: integer}
         sales_total_minor:
           type: integer
-          description: Gross finalized sales (returns synchronized to inbox, not yet netted in reporting).
+          description: Gross finalized sales. Never reduced by returns; net is a separate field.
+        refund_total_minor:
+          type: integer
+          description: Return reversals attributed to this header row (original sale cashier/channel).
+        net_sales_minor:
+          type: integer
+          description: Gross minus refunds. Signed; never clamped.
       description: >-
         Sale-header currency bucket for cashier/channel rows. No cost field
         by design: header dimensions do not compute historical cost.
     LineBreakdownRow:
       type: object
       additionalProperties: false
-      required: [dimension, units, line_sales]
+      required: [dimension, units, units_returned, line_sales]
       description: >-
         Line-level dimension row (product, root_category, subcategory).
-        line_sales carries pre-adjustment historical line amounts;
-        Sale-level discount/tax are never allocated. Never carries
-        currency_totals.
+        line_sales carries pre-adjustment historical line amounts plus
+        reversal amounts; Sale-level discount/tax are never allocated.
+        Never carries currency_totals.
       properties:
         dimension: {type: string, enum: [product, root_category, subcategory]}
         product_id: {type: string, format: uuid, nullable: true}
@@ -1318,6 +1358,7 @@ components:
         name_ar: {type: string}
         name_en: {type: string}
         units: {type: integer}
+        units_returned: {type: integer}
         line_sales:
           type: array
           items: {$ref: '#/components/schemas/LineSaleTotal'}
@@ -1325,18 +1366,21 @@ components:
     HeaderBreakdownRow:
       type: object
       additionalProperties: false
-      required: [dimension, transactions, units, currency_totals]
+      required: [dimension, transactions, return_transactions, units, units_returned, currency_totals]
       description: >-
         Sale-header dimension row (cashier, channel). currency_totals
-        carries exact header subtotal/discount/tax/sales_total. Never
-        carries line_sales or any cost field.
+        carries exact header subtotal/discount/tax/sales_total plus
+        refund/net fields. transactions stays sale-only; returns ride in
+        return_transactions. Never carries line_sales or any cost field.
       properties:
         dimension: {type: string, enum: [cashier, channel]}
         cashier_id: {type: string, nullable: true, description: Null means unattributed bucket.}
         cashier_name: {type: string, nullable: true}
         channel: {type: string}
-        transactions: {type: integer}
+        transactions: {type: integer, description: Finalized sale transactions; returns counted separately.}
+        return_transactions: {type: integer}
         units: {type: integer}
+        units_returned: {type: integer}
         currency_totals:
           type: array
           items: {$ref: '#/components/schemas/SaleCurrencyTotal'}
@@ -1369,13 +1413,21 @@ components:
         username: {type: string}
     DashboardNormalized:
       type: object
-      required: [normalized_total_minor, transactions, units, usd_sale_count]
+      required: [normalized_total_minor, normalized_refund_minor, normalized_net_minor, transactions, units, return_transactions, units_returned, usd_sale_count]
       properties:
         normalized_total_minor:
           type: string
           description: Exact EGP minor units (string, never float). Native EGP plus each USD sale converted with its own historical FX microrate (PostgreSQL numeric rounding, documented).
-        transactions: {type: integer}
+        normalized_refund_minor:
+          type: string
+          description: Normalized return reversals, each with its own historical FX. Nonnegative.
+        normalized_net_minor:
+          type: string
+          description: Gross minus refunds. Signed string; negative when refunds exceed sales; never clamped.
+        transactions: {type: integer, description: Finalized sale transactions; returns counted separately.}
         units: {type: integer}
+        return_transactions: {type: integer}
+        units_returned: {type: integer}
         usd_sale_count: {type: integer}
     DashboardFx:
       type: object
@@ -1390,14 +1442,19 @@ components:
         multiple_rates_used: {type: boolean}
     DashboardSummaryBucket:
       type: object
-      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor]
+      required: [currency, subtotal_minor, discount_minor, tax_minor, sales_total_minor, line_cost_minor, refund_total_minor, net_sales_minor, returned_units, returned_cost_minor, net_cost_minor]
       properties:
         currency: {type: string}
         subtotal_minor: {type: string}
         discount_minor: {type: string}
         tax_minor: {type: string}
-        sales_total_minor: {type: string, description: "Gross finalized sales (returns in inbox, not netted in reporting)."}
+        sales_total_minor: {type: string, description: "Gross finalized sales. Never reduced by returns; net is separate."}
         line_cost_minor: {type: string, description: Extended historical cost (unit cost × quantity).}
+        refund_total_minor: {type: string, description: Return reversals. Nonnegative string.}
+        net_sales_minor: {type: string, description: Gross minus refunds. Signed string; never clamped.}
+        returned_units: {type: integer}
+        returned_cost_minor: {type: string, description: Extended historical return-line cost. Nonnegative string.}
+        net_cost_minor: {type: string, description: Gross cost minus returned cost. Signed string; never clamped.}
       description: String-backed money (never JSON numbers). Same numbers as Phase 3A, decimal-string encoding.
     DashboardSummaryPayment:
       type: object
@@ -1423,10 +1480,12 @@ components:
         period: {$ref: '#/components/schemas/PeriodMeta'}
         summary:
           type: object
-          required: [transaction_count, units_sold, currency_totals, payment_totals]
+          required: [transaction_count, units_sold, return_transaction_count, units_returned, currency_totals, payment_totals]
           properties:
-            transaction_count: {type: integer}
+            transaction_count: {type: integer, description: Finalized sale transactions; returns counted separately.}
             units_sold: {type: integer}
+            return_transaction_count: {type: integer}
+            units_returned: {type: integer}
             currency_totals:
               type: array
               items: {$ref: '#/components/schemas/DashboardSummaryBucket'}
@@ -1456,12 +1515,15 @@ components:
           type: array
           items:
             type: object
-            required: [date, transactions, units, amount_minor]
+            required: [date, transactions, units, return_transactions, units_returned, amount_minor, refund_minor]
             properties:
               date: {type: string, description: Store-local calendar date.}
-              transactions: {type: integer}
+              transactions: {type: integer, description: Finalized sale transactions; returns counted separately.}
               units: {type: integer}
+              return_transactions: {type: integer}
+              units_returned: {type: integer}
               amount_minor: {type: string, description: Exact minor units in display_currency (normalized EGP in All mode).}
+              refund_minor: {type: string, description: Exact refund minor units in display_currency. Nonnegative.}
     DashboardProductList:
       type: object
       required: [timezone, period, mode, unit, rows]
@@ -1474,13 +1536,16 @@ components:
           type: array
           items:
             type: object
-            required: [sku, product_name, units, amount_minor]
+            required: [sku, product_name, units, units_returned, amount_minor, refund_minor, net_minor]
             properties:
               product_id: {type: string, format: uuid, nullable: true}
               sku: {type: string}
               product_name: {type: string}
               units: {type: integer}
-              amount_minor: {type: string, description: Exact minor units (normalized EGP in All mode).}
+              units_returned: {type: integer}
+              amount_minor: {type: string, description: Exact gross minor units (normalized EGP in All mode).}
+              refund_minor: {type: string, description: Exact refund minor units. Nonnegative.}
+              net_minor: {type: string, description: Gross minus refunds. Signed; ranking uses net with an explicit label.}
     DashboardCategoryList:
       type: object
       required: [timezone, period, mode, unit, kind, rows]
@@ -1494,14 +1559,17 @@ components:
           type: array
           items:
             type: object
-            required: [kind, classification_id, name_ar, name_en, units, amount_minor]
+            required: [kind, classification_id, name_ar, name_en, units, units_returned, amount_minor, refund_minor, net_minor]
             properties:
               kind: {type: string}
               classification_id: {type: string, format: uuid}
               name_ar: {type: string}
               name_en: {type: string}
               units: {type: integer}
+              units_returned: {type: integer}
               amount_minor: {type: string, description: Facet semantics preserved for subcategories.}
+              refund_minor: {type: string, description: Exact refund minor units. Nonnegative.}
+              net_minor: {type: string, description: Gross minus refunds. Signed; ranking uses net with an explicit label.}
     DashboardBranchList:
       type: object
       required: [timezone, period, rows]
@@ -1512,7 +1580,7 @@ components:
           type: array
           items:
             type: object
-            required: [shop_name_ar, shop_name_en, channel, currency, transactions, units, subtotal_minor, sales_total_minor]
+            required: [shop_name_ar, shop_name_en, channel, currency, transactions, units, return_transactions, units_returned, subtotal_minor, sales_total_minor, refund_total_minor]
             properties:
               shop_name_ar: {type: string}
               shop_name_en: {type: string}
@@ -1521,16 +1589,20 @@ components:
               shop_phone: {type: string}
               channel: {type: string}
               currency: {type: string}
-              transactions: {type: integer}
+              transactions: {type: integer, description: Finalized sale transactions; returns counted separately.}
               units: {type: integer}
+              return_transactions: {type: integer}
+              units_returned: {type: integer}
               subtotal_minor: {type: string}
               discount_minor: {type: string}
               tax_minor: {type: string}
               sales_total_minor: {type: string}
+              refund_total_minor: {type: string, description: Exact refund minor units. Nonnegative.}
+              returned_cost_minor: {type: string, description: Extended historical return-line cost. Nonnegative.}
           description: Grouped by full historical shop snapshot tuple + channel. Native buckets only. No ONLINE fabrication.
     DashboardSyncHealth:
       type: object
-      required: [freshness, queue_count, pending_count, processed_count, blocked_count, retry_count]
+      required: [freshness, queue_count, pending_count, processed_count, blocked_count, retry_count, return_pending_count, return_processed_count, return_blocked_count, return_retry_count]
       properties:
         freshness: {$ref: '#/components/schemas/Freshness'}
         queue_count: {type: integer, description: In-queue events (pending + retry counted exactly once).}
@@ -1538,6 +1610,14 @@ components:
         processed_count: {type: integer}
         blocked_count: {type: integer}
         retry_count: {type: integer}
+        return_pending_count: {type: integer}
+        return_processed_count: {type: integer}
+        return_blocked_count: {type: integer}
+        return_retry_count: {type: integer}
+        return_last_error_event: {type: string}
+        return_last_error_code: {type: string, description: Safe error code only; raw stored messages never cross into browser JSON.}
+        return_last_error_label_ar: {type: string}
+        return_last_error_label_en: {type: string}
         oldest_pending_at: {type: string, format: date-time, nullable: true}
         last_error_event: {type: string}
         last_error_code: {type: string, description: Safe error code only; raw stored messages never cross into browser JSON.}
@@ -1554,7 +1634,7 @@ components:
             type: object
             required: [kind, event_id, event_type, timestamp]
             properties:
-              kind: {type: string, enum: [accepted, projected, blocked]}
+              kind: {type: string, enum: [accepted, projected, blocked, return_accepted, return_projected, return_blocked]}
               event_id: {type: string, format: uuid}
               event_type: {type: string}
               timestamp: {type: string, format: date-time}

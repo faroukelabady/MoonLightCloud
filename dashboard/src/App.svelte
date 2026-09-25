@@ -16,7 +16,7 @@
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind } from './lib/api.js';
-	import { toChartNumber, formatInt } from './lib/money.js';
+	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -99,8 +99,11 @@
 	let overview: OverviewResponse | null = $state(null);
 	let overviewState: WidgetState = $state('loading');
 	let trend: { labels: string[]; values: number[] } = $state({ labels: [], values: [] });
+	let trendRefund: { labels: string[]; values: number[] } = $state({ labels: [], values: [] });
+	let trendNet: { labels: string[]; values: number[] } = $state({ labels: [], values: [] });
 	let trendRangeError = $state(false);
 	let trendExact: { date: string; amount_minor: string }[] = $state([]);
+	let trendRefundExact: { date: string; refund_minor: string }[] = $state([]);
 	let dailyMeta: { display_currency: string; normalized: boolean } = $state({ display_currency: 'EGP', normalized: true });
 	let dailyState: WidgetState = $state('loading');
 	let products: ProductDisplayRow[] = $state([]);
@@ -159,21 +162,32 @@
 		await Promise.all([
 			done(dashboardApi.overview(params, signal), (v) => {
 				overview = v;
-				overviewState = v.summary.transaction_count === 0 ? 'empty' : 'loaded';
+				overviewState = v.summary.transaction_count === 0 && v.summary.return_transaction_count === 0 ? 'empty' : 'loaded';
 			}, (s) => (overviewState = s), (n) => (overviewErr = n)),
 			done(dashboardApi.daily(params, dailyMode, signal), (v) => {
 				dailyMeta = { display_currency: v.display_currency, normalized: v.normalized };
 				trendExact = v.days.map((d) => ({ date: d.date, amount_minor: d.amount_minor }));
+				trendRefundExact = v.days.map((d) => ({ date: d.date, refund_minor: d.refund_minor }));
 				try {
 					trend = {
 						labels: v.days.map((d) => d.date),
 						values: v.days.map((d) => toChartNumber(d.amount_minor))
+					};
+					trendRefund = {
+						labels: v.days.map((d) => d.date),
+						values: v.days.map((d) => toChartNumber(d.refund_minor))
+					};
+					trendNet = {
+						labels: v.days.map((d) => d.date),
+						values: v.days.map((d) => toChartNumber(subMinor(d.amount_minor, d.refund_minor)))
 					};
 					trendRangeError = false;
 				} catch {
 					// Unsafe chart magnitude: exact daily data stays
 					// available below; only visualization is limited.
 					trend = { labels: [], values: [] };
+					trendRefund = { labels: [], values: [] };
+					trendNet = { labels: [], values: [] };
 					trendRangeError = true;
 				}
 				dailyState = emptyOf(v.days);
@@ -183,7 +197,10 @@
 					name: r.product_name,
 					sku: r.sku,
 					units: r.units,
-					amount_minor: r.amount_minor
+					units_returned: r.units_returned,
+					amount_minor: r.amount_minor,
+					refund_minor: r.refund_minor,
+					net_minor: r.net_minor
 				}));
 				productsState = emptyOf(products);
 			}, (s) => (productsState = s), (n) => (productsErr = n)),
@@ -191,7 +208,10 @@
 				categories = v.rows.map((r) => ({
 					name: r.name_en ? `${r.name_ar} / ${r.name_en}` : r.name_ar,
 					units: r.units,
-					amount_minor: r.amount_minor
+					units_returned: r.units_returned,
+					amount_minor: r.amount_minor,
+					refund_minor: r.refund_minor,
+					net_minor: r.net_minor
 				}));
 				categoriesState = emptyOf(categories);
 			}, (s) => (categoriesState = s), (n) => (categoriesErr = n)),
@@ -238,17 +258,26 @@
 	// KPI cards follow the same active-currency scoping as the reporting
 	// service: All uses the whole-period summary, EGP/USD use their own
 	// per-mode averages (own transaction counts — never mixed).
+	// Transaction counts never conflate sales with returns.
 	let metricTxn = $derived.by(() => {
 		if (!overview) return '—';
 		if (currency === 'all') return formatInt(overview.summary.transaction_count);
 		const avg = currency === 'EGP' ? overview.averages.egp : overview.averages.usd;
 		return formatInt(avg.transactions);
 	});
+	let metricRetTxn = $derived.by(() => {
+		if (!overview) return '—';
+		return formatInt(overview.summary.return_transaction_count);
+	});
 	let metricUnits = $derived.by(() => {
 		if (!overview) return '—';
 		if (currency === 'all') return formatInt(overview.summary.units_sold);
 		const avg = currency === 'EGP' ? overview.averages.egp : overview.averages.usd;
 		return formatInt(avg.units);
+	});
+	let metricRetUnits = $derived.by(() => {
+		if (!overview) return '—';
+		return formatInt(overview.summary.units_returned);
 	});
 	let scopeLabel = $derived(currency === 'all' ? 'النطاق: الكل' : `النطاق: ${currency}`);
 
@@ -312,8 +341,10 @@
 			<div class="dash" class:ov={route === 'overview'}>
 				{#if route === 'overview' || route === 'sales'}
 					<div class="cell a-kpis">
-						<MetricCard ar="عدد المعاملات" en="Transactions" value={metricTxn} context={scopeLabel} status={overviewState} icon="M4 7h13l-3-3M20 17H7l3 3" />
+						<MetricCard ar="معاملات البيع" en="Sale Transactions" value={metricTxn} context={scopeLabel} status={overviewState} icon="M4 7h13l-3-3M20 17H7l3 3" />
+						<MetricCard ar="معاملات المرتجعات" en="Return Transactions" value={metricRetTxn} context={scopeLabel} status={overviewState} icon="M4 9h13l-3-3M20 15H7l3 3" />
 						<MetricCard ar="الوحدات المباعة" en="Units Sold" value={metricUnits} context={scopeLabel} status={overviewState} icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" />
+						<MetricCard ar="الوحدات المرتجعة" en="Units Returned" value={metricRetUnits} context={scopeLabel} status={overviewState} icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" />
 					</div>
 					<div class="cell a-sales">
 						<SalesCard data={overview} mode={currency} onmode={setMode} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
@@ -337,11 +368,14 @@
 				{#if route === 'overview' || route === 'sales' || route === 'daily'}
 					<div class="cell a-trend">
 						<TrendChart
-							titleAr="الاتجاه اليومي للمبيعات"
-							titleEn="Sales over time"
+							titleAr="الاتجاه اليومي (إجمالي / مرتجعات / صافي)"
+							titleEn="Gross / refunds / net over time"
 							labels={trend.labels}
 							values={trend.values}
+							refundValues={trendRefund.values}
+							netValues={trendNet.values}
 							exact={trendExact}
+							refundExact={trendRefundExact}
 							rangeError={trendRangeError}
 							unit={trendUnit()}
 							status={dailyState}

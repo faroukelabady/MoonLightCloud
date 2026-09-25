@@ -48,6 +48,30 @@ func (s stubReportRepo) SalesByChannel(context.Context, time.Time, time.Time, st
 func (s stubReportRepo) SalesProjectionFreshness(context.Context) (report.FreshnessRow, error) {
 	return report.FreshnessRow{}, nil
 }
+func (s stubReportRepo) RefundsSummary(context.Context, time.Time, time.Time, string) ([]report.RefundSummaryRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsDaily(context.Context, time.Time, time.Time, string, string) ([]report.RefundDailyRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsByProduct(context.Context, time.Time, time.Time, string) ([]report.RefundProductRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsByRootCategory(context.Context, time.Time, time.Time, string) ([]report.RefundCategoryRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsBySubcategory(context.Context, time.Time, time.Time, string) ([]report.RefundCategoryRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsByCashier(context.Context, time.Time, time.Time, string) ([]report.RefundCashierRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsByChannel(context.Context, time.Time, time.Time, string) ([]report.RefundChannelRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) ReturnProjectionFreshness(context.Context) (report.ReturnFreshnessRow, error) {
+	return report.ReturnFreshnessRow{}, nil
+}
 
 func reportTestMux() http.Handler {
 	loc, _ := time.LoadLocation("Africa/Cairo")
@@ -241,14 +265,16 @@ func TestBreakdownNegativeRowContract(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/reports/sales/breakdown", ReportAuth("test-token-0123456789")(http.HandlerFunc(h.SalesBreakdown)))
 
-	lineKeys := map[string]bool{"dimension": true, "units": true, "line_sales": true,
+	lineKeys := map[string]bool{"dimension": true, "units": true, "units_returned": true, "line_sales": true,
 		"product_id": true, "sku": true, "product_name": true,
 		"classification_kind": true, "classification_id": true, "name_ar": true, "name_en": true}
-	headerKeys := map[string]bool{"dimension": true, "units": true, "transactions": true,
-		"currency_totals": true, "cashier_id": true, "cashier_name": true, "channel": true}
-	lineBucketKeys := map[string]bool{"currency": true, "line_sales_minor": true, "line_cost_minor": true}
+	headerKeys := map[string]bool{"dimension": true, "units": true, "units_returned": true, "transactions": true,
+		"return_transactions": true,
+		"currency_totals":     true, "cashier_id": true, "cashier_name": true, "channel": true}
+	lineBucketKeys := map[string]bool{"currency": true, "line_sales_minor": true, "line_cost_minor": true,
+		"line_refund_minor": true, "line_returned_cost_minor": true}
 	headerBucketKeys := map[string]bool{"currency": true, "subtotal_minor": true, "discount_minor": true,
-		"tax_minor": true, "sales_total_minor": true}
+		"tax_minor": true, "sales_total_minor": true, "refund_total_minor": true, "net_sales_minor": true}
 
 	check := func(dim string, isLine bool) {
 		rec := getReport(t, mux,

@@ -14,7 +14,15 @@
 	function valueOf(r: BranchRow): string {
 		if (metric === 'transactions') return formatInt(r.transactions);
 		if (metric === 'units') return formatInt(r.units);
-		return formatMinor(r.sales_total_minor, r.currency === 'USD' ? 'USD' : 'EGP');
+		return formatMinor(r.sales_total_minor, currencyOf(r));
+	}
+
+	function currencyOf(r: BranchRow): 'EGP' | 'USD' {
+		return r.currency === 'USD' ? 'USD' : 'EGP';
+	}
+
+	function refundOf(r: BranchRow): string {
+		return formatMinor(r.refund_total_minor, currencyOf(r));
 	}
 
 	// Exact bar ratios: amount and maximum stay BigInt so unsafe magnitudes
@@ -62,7 +70,7 @@
 						<div class="muted lsub">{r.shop_name_en} · {r.channel}</div>
 					</div>
 					<div class="track" role="img" aria-label={`${r.shop_name_en}: ${valueOf(r)}`}><div class="fill w{bucket}"></div></div>
-					<div class="num val">{valueOf(r)}</div>
+					<div class="num val">{valueOf(r)}<br /><span class="muted refund">مرتجعات {refundOf(r)}</span></div>
 				</div>
 			{/each}
 		</div>
@@ -131,5 +139,9 @@
 		text-align: end;
 		font-weight: 700;
 		font-size: 0.8rem;
+	}
+	.refund {
+		font-weight: 400;
+		font-size: 0.7rem;
 	}
 </style>

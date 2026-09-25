@@ -145,6 +145,24 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     WHERE p.processor = 'sale_projection.v1' AND p.status IN ('processed', 'blocked')
     ORDER BY ts DESC, kind ASC, event_id ASC
     LIMIT @limit_n::int)
+    UNION ALL
+    (SELECT 'return_accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,
+        d.name AS device_name, NULL::text AS detail
+    FROM sync_events e
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.event_type = 'sale.return_refund.finalized.v1'
+    ORDER BY e.received_at DESC, e.event_id ASC
+    LIMIT @limit_n::int)
+    UNION ALL
+    (SELECT CASE WHEN p.status = 'blocked' THEN 'return_blocked'::text ELSE 'return_projected'::text END AS kind,
+        p.event_id, e.event_type, COALESCE(p.processed_at, p.updated_at) AS ts,
+        d.name AS device_name, p.last_error_code AS detail
+    FROM sync_event_processing p
+    JOIN sync_events e ON e.event_id = p.event_id
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE p.processor = 'return_refund_projection.v1' AND p.status IN ('processed', 'blocked')
+    ORDER BY ts DESC, kind ASC, event_id ASC
+    LIMIT @limit_n::int)
 ) feed
 ORDER BY ts DESC, kind ASC, event_id ASC
 LIMIT @limit_n::int;
@@ -155,3 +173,102 @@ SELECT sale_id, sale_number, channel, occurred_at, currency, total_minor,
 FROM sales_projection
 ORDER BY occurred_at DESC, sale_id DESC
 LIMIT @limit_n::int;
+
+-- Phase 4B return/refund aggregates. Same conventions as the frozen sale
+-- queries: half-open [start, end) on the RETURN occurred_at, atomic
+-- per-event historical FX normalization (round once with round(numeric),
+-- half away from zero, BEFORE aggregation), exact integer math with bigint
+-- overflow failure, no dynamic SQL. Refunds attribute to the historical
+-- sale snapshots (product, category, shop, channel, cashier); the return
+-- event contributes business identity, quantities, and reversal economics.
+
+-- name: DashboardNormalizedRefundsSummary :one
+SELECT
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE r.currency = 'USD')::bigint AS usd_returns,
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS usd_missing_fx
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc;
+
+-- name: DashboardNormalizedRefundsDaily :many
+SELECT day.day AS day,
+    COUNT(*)::bigint AS transactions,
+    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_refund,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COUNT(*) FILTER (WHERE day.usd_missing_fx)::bigint AS usd_missing_fx
+FROM (
+    SELECT r.return_refund_id,
+        ((r.occurred_at AT TIME ZONE @timezone::text)::date)::text AS day,
+        round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END) AS normalized,
+        (r.currency = 'USD' AND r.fx_rate_microrate IS NULL) AS usd_missing_fx
+    FROM return_refund_projection r
+    WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+) day
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = day.return_refund_id
+GROUP BY day.day
+ORDER BY day.day;
+
+-- name: DashboardProductsNormalizedRefunds :many
+SELECT sl.product_id, sl.sku, sl.product_name,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+GROUP BY sl.product_id, sl.sku, sl.product_name;
+
+-- name: DashboardCategoriesNormalizedRefunds :many
+SELECT c.classification_kind AS kind, c.classification_id AS id,
+    c.name_ar, c.name_en,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM sale_line_classifications_projection c
+JOIN return_refund_lines_projection l
+  ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND c.classification_kind = @kind::text
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en;
+
+-- name: DashboardReturnBranches :many
+SELECT s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND (@currency::text = '' OR r.currency = @currency::text)
+GROUP BY s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency;

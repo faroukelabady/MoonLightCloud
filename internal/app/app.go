@@ -40,18 +40,20 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg       config.Config
-	Log       *slog.Logger
-	Pool      *pgxpool.Pool
-	Devices   auth.Service
-	Sync      sync.Service
-	Reports   report.Service
-	Dashboard dashboard.Service
-	Projector *sale.Projector
-	SaleStore sale.Store
-	Handler   http.Handler
-	Health    adapterhttp.Health
-	Version   adapterhttp.Version
+	Cfg             config.Config
+	Log             *slog.Logger
+	Pool            *pgxpool.Pool
+	Devices         auth.Service
+	Sync            sync.Service
+	Reports         report.Service
+	Dashboard       dashboard.Service
+	Projector       *sale.Projector
+	SaleStore       sale.Store
+	ReturnProjector *returnrefund.Projector
+	ReturnStore     returnrefund.Store
+	Handler         http.Handler
+	Health          adapterhttp.Health
+	Version         adapterhttp.Version
 }
 
 // New builds the app in startup order.
@@ -77,6 +79,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
+	a.ReturnStore = store
+	a.ReturnProjector = returnrefund.NewProjector(store, clock.System{}, log)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
@@ -94,7 +98,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		dashboard.Credentials{Username: cfg.DashboardUsername, PasswordHash: cfg.DashboardPasswordHash},
 		sessionKey, cfg.DashboardSessionTTL, secureCookies, cfg.TrustedProxyCIDRs, log)
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
-	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.Projector.Notify,
+	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
 		dashAuth, dashData, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
@@ -141,6 +145,28 @@ func (a *App) ProjectOne(ctx context.Context, eventID string) (sale.ProjectResul
 		return sale.ProjectResult{}, fmt.Errorf("event %s not found", eventID)
 	}
 	return a.SaleStore.ProjectSale(ctx, rec, clock.System{}.Now())
+}
+
+// notifyProjectors wakes both projectors after a durable ingestion. Scan
+// work is authoritative per processor, so one wake each is sufficient and
+// neither projector starves the other.
+func (a *App) notifyProjectors() {
+	a.Projector.Notify()
+	a.ReturnProjector.Notify()
+}
+
+// ProjectReturnOne loads one return inbox event and runs a single atomic
+// projection attempt. Used by tests and operator tooling; serve-path
+// projection goes through the background ReturnProjector.
+func (a *App) ProjectReturnOne(ctx context.Context, eventID string) (returnrefund.ProjectResult, error) {
+	rec, ok, err := a.ReturnStore.LoadReturnEvent(ctx, eventID)
+	if err != nil {
+		return returnrefund.ProjectResult{}, err
+	}
+	if !ok {
+		return returnrefund.ProjectResult{}, fmt.Errorf("event %s not found", eventID)
+	}
+	return a.ReturnStore.ProjectReturn(ctx, rec, clock.System{}.Now())
 }
 
 // VerifySchema fails startup when the database is not at TargetVersion.

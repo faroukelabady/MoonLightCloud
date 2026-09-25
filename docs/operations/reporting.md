@@ -55,8 +55,12 @@ curl -H "Authorization: $AUTH" "$base/breakdown?period=today&dimension=subcatego
   Cloud has nothing left to project — it does NOT mean Retail has no
   unsent outbox events. Cloud cannot observe the Desktop outbox.
 
-Terminology is gross finalized sales: returns are synchronized to the
-inbox but not yet netted in reporting (Phase 4B introduces net reporting).
+Terminology is gross finalized sales plus authoritative return
+reversals: `refund_total_minor` sums projected returns in the window,
+`net_sales_minor` is gross minus refunds (signed — negative when refunds
+exceed sales, never clamped), `transaction_count`/`units_sold` stay
+sale-only with return activity in `return_transaction_count`/`units_returned`.
+Reporting date is the return `occurred_at` (never the original sale date).
 Subcategory rows are facet-style and may sum above line totals;
 root-category rows are additive.
 

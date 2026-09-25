@@ -12,7 +12,10 @@
 	export interface CategoryDisplayRow {
 		name: string;
 		units: number;
+		units_returned: number;
 		amount_minor: string;
+		refund_minor: string;
+		net_minor: string;
 	}
 
 	let {
@@ -43,10 +46,11 @@
 	});
 
 	// M04: validate chart inputs during preparation, never render.
+	// Net-ranked with gross and refund visible; facet semantics preserved.
 	let chartError = $derived.by(() => {
 		if (status !== 'loaded') return false;
 		try {
-			rows.forEach((r) => toChartNumber(r.amount_minor));
+			rows.forEach((r) => toChartNumber(r.net_minor));
 			return false;
 		} catch {
 			return true;
@@ -55,7 +59,7 @@
 
 	let option: EChartsCoreOption | null = $derived.by(() => {
 		if (status !== 'loaded' || chartError || rows.length === 0) return null;
-		const data = rows.map((r) => ({ name: r.name, value: toChartNumber(r.amount_minor) }));
+		const data = rows.map((r) => ({ name: r.name, value: toChartNumber(r.net_minor) }));
 		if (shape === 'bar') {
 			return {
 				animation: false,
@@ -81,7 +85,7 @@
 	});
 </script>
 
-<Card ar="أداء الفئات وقنوات البيع" en="Category & Sales Channel Performance">
+<Card ar="أداء الفئات (صافي المبيعات)" en="Category Performance (net)">
 	<div class="kindrow">
 		<Segmented
 			size="sm"

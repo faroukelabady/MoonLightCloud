@@ -12,7 +12,10 @@
 		name: string;
 		sku: string;
 		units: number;
+		units_returned: number;
 		amount_minor: string;
+		refund_minor: string;
+		net_minor: string;
 	}
 
 	let { rows, money, unit, status, errStatus, onretry }: { rows: ProductDisplayRow[]; money: 'EGP' | 'USD'; unit: string; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } =
@@ -22,11 +25,12 @@
 
 	// M04: chart inputs are validated during data preparation (not render).
 	// Unsafe magnitudes yield a stable widget error; exact table values
-	// stay visible and the page never crashes.
+	// stay visible and the page never crashes. Ranking uses NET (explicit
+	// label); the chart plots net values.
 	let chartError = $derived.by(() => {
 		if (status !== 'loaded' || view !== 'chart') return false;
 		try {
-			rows.forEach((r) => toChartNumber(r.amount_minor));
+			rows.forEach((r) => toChartNumber(r.net_minor));
 			return false;
 		} catch {
 			return true;
@@ -48,7 +52,7 @@
 			series: [
 				{
 					type: 'bar',
-					data: rows.map((r) => toChartNumber(r.amount_minor)),
+					data: rows.map((r) => toChartNumber(r.net_minor)),
 					itemStyle: { color: '#1d5bd7' }
 				}
 			]
@@ -56,7 +60,7 @@
 	});
 </script>
 
-<Card ar="أعلى المنتجات مبيعًا" en="Top Selling Products">
+<Card ar="أعلى المنتجات (صافي المبيعات)" en="Top Products by Net Sales">
 	{#snippet actions()}
 		<Segmented
 			size="sm"
@@ -77,7 +81,7 @@
 	{:else if view === 'table'}
 		<div class="tscroll">
 		<table class="data">
-			<thead><tr><th>#</th><th>المنتج<br /><span class="th-en">Product</span></th><th>الكمية المباعة<br /><span class="th-en">Units Sold</span></th><th>قيمة المبيعات<br /><span class="th-en">Sales value ({unit})</span></th></tr></thead>
+			<thead><tr><th>#</th><th>المنتج<br /><span class="th-en">Product</span></th><th>المباعة / المرتجعة<br /><span class="th-en">Sold / Returned</span></th><th>صافي المبيعات<br /><span class="th-en">Net sales ({unit})</span></th></tr></thead>
 			<tbody>
 				{#each rows as r, i}
 					<tr>
@@ -85,8 +89,8 @@
 						<td>
 							<span class="pname"><span class="thumb" aria-hidden="true">{r.name.slice(0, 1)}</span>{r.name}</span><br /><span class="muted num sku">{r.sku}</span>
 						</td>
-						<td class="num">{r.units}</td>
-						<td class="num">{formatMinor(r.amount_minor, money)}</td>
+						<td class="num">{r.units} / {r.units_returned}</td>
+						<td class="num">{formatMinor(r.net_minor, money)}</td>
 					</tr>
 				{/each}
 			</tbody>

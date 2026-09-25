@@ -4,8 +4,9 @@ This is the contract MoonLightRetail's transactional outbox implements
 against: generic envelope and ingestion semantics plus the business events
 `sale.finalized.v1` — validated before ACK, projected asynchronously
 (see docs/operations/projection.md and ADR-0016) — and
-`sale.return_refund.finalized.v1` — validated before ACK, durably accepted
-without projection until Phase 4B (see docs/sync/returns.md and ADR-0026).
+`sale.return_refund.finalized.v1` — validated before ACK, durably accepted,
+then projected by `return_refund_projection.v1` (see docs/sync/returns.md,
+ADR-0026, and ADR-0027).
 
 ## Authentication
 

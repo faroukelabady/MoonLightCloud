@@ -28,6 +28,11 @@ export interface CurrencyBucket {
 	tax_minor: string;
 	sales_total_minor: string;
 	line_cost_minor: string;
+	refund_total_minor: string;
+	net_sales_minor: string;
+	returned_units: number;
+	returned_cost_minor: string;
+	net_cost_minor: string;
 }
 
 export interface Freshness {
@@ -36,6 +41,11 @@ export interface Freshness {
 	projection_backlog_count: number;
 	blocked_sale_event_count: number;
 	cloud_projection_complete: boolean;
+	latest_return_event_received_at: string | null;
+	latest_projected_return_occurred_at: string | null;
+	return_backlog_count: number;
+	return_blocked_count: number;
+	return_projection_complete: boolean;
 }
 
 export interface OverviewResponse {
@@ -45,9 +55,20 @@ export interface OverviewResponse {
 	summary: {
 		transaction_count: number;
 		units_sold: number;
+		return_transaction_count: number;
+		units_returned: number;
 		currency_totals: CurrencyBucket[];
 	};
-	normalized: { normalized_total_minor: string; transactions: number; units: number; usd_sale_count: number };
+	normalized: {
+		normalized_total_minor: string;
+		normalized_refund_minor: string;
+		normalized_net_minor: string;
+		transactions: number;
+		units: number;
+		return_transactions: number;
+		units_returned: number;
+		usd_sale_count: number;
+	};
 	averages: { all: ModeAverage; egp: ModeAverage; usd: ModeAverage };
 	fx: {
 		has_usd: boolean;
@@ -64,7 +85,10 @@ export interface DailyRow {
 	date: string;
 	transactions: number;
 	units: number;
+	return_transactions: number;
+	units_returned: number;
 	amount_minor: string;
+	refund_minor: string;
 }
 
 export interface DailyResponse {
@@ -95,7 +119,10 @@ export interface ProductRow {
 	sku: string;
 	product_name: string;
 	units: number;
+	units_returned: number;
 	amount_minor: string;
+	refund_minor: string;
+	net_minor: string;
 }
 
 export interface CategoryRow {
@@ -104,7 +131,10 @@ export interface CategoryRow {
 	name_ar: string;
 	name_en: string;
 	units: number;
+	units_returned: number;
 	amount_minor: string;
+	refund_minor: string;
+	net_minor: string;
 }
 
 export interface BranchRow {
@@ -115,8 +145,12 @@ export interface BranchRow {
 	currency: string;
 	transactions: number;
 	units: number;
+	return_transactions: number;
+	units_returned: number;
 	subtotal_minor: string;
 	sales_total_minor: string;
+	refund_total_minor: string;
+	returned_cost_minor: string;
 }
 
 export interface ActivityItem {
@@ -145,6 +179,14 @@ export interface SyncHealth {
 	processed_count: number;
 	blocked_count: number;
 	retry_count: number;
+	return_pending_count: number;
+	return_processed_count: number;
+	return_blocked_count: number;
+	return_retry_count: number;
+	return_last_error_event?: string;
+	return_last_error_code?: string;
+	return_last_error_label_ar?: string;
+	return_last_error_label_en?: string;
 	oldest_pending_at?: string | null;
 	last_error_event?: string;
 	last_error_code?: string;

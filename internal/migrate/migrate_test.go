@@ -198,10 +198,32 @@ func TestDownOwnershipPolicy(t *testing.T) {
 	if err := migrate.DownTo(ctx, conn, 6); err == nil {
 		t.Fatal("ownership downgrade with decisions must fail")
 	}
+	// Down-8 (return tables, no return decisions here) applies, then down-7
+	// refuses on the sale decision: version rests at 7 with sale history
+	// intact.
+	if v := version(t, conn, ctx); v != 7 {
+		t.Fatalf("version must stay 7, got %d", v)
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM sale_event_ownership`); err != nil {
+		t.Fatal(err)
+	}
+	// Return ownership carries the same durable-decision policy: a present
+	// return decision refuses down-8 and the version stays at 8.
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO return_refund_ownership (return_refund_id, winning_event_id, winning_device_id)
+		 VALUES ('33333333-3333-7333-8333-333333333333',$1,$2)`, e1, dev); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.DownTo(ctx, conn, 7); err == nil {
+		t.Fatal("return ownership downgrade with decisions must fail")
+	}
 	if v := version(t, conn, ctx); v != migrate.TargetVersion {
 		t.Fatalf("version must stay %d, got %d", migrate.TargetVersion, v)
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM sale_event_ownership`); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM return_refund_ownership`); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate.DownTo(ctx, conn, 6); err != nil {

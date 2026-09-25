@@ -3,8 +3,8 @@ import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import SalesCard from './SalesCard.svelte';
 
 const loaded = {
-	summary: { transaction_count: 2, units_sold: 3, currency_totals: [] },
-	normalized: { normalized_total_minor: '386250', transactions: 2, units: 3, usd_sale_count: 1 },
+	summary: { transaction_count: 2, units_sold: 3, return_transaction_count: 1, units_returned: 2, currency_totals: [] },
+	normalized: { normalized_total_minor: '386250', normalized_refund_minor: '86250', normalized_net_minor: '300000', transactions: 2, units: 3, return_transactions: 1, units_returned: 2, usd_sale_count: 1 },
 	averages: {
 		all: { transactions: 3, units: 7, average_minor: '128750' },
 		egp: { transactions: 1, units: 2, average_minor: '200000' },
@@ -33,13 +33,16 @@ describe('SalesCard', () => {
 		expect(onretry).toHaveBeenCalled();
 	});
 
-	it('renders normalized All total with helper text and switches modes', async () => {
+	it('renders net All total with gross/refund context and switches modes', async () => {
 		const onmode = vi.fn();
 		const { container } = render(SalesCard, {
 			props: { data: loaded, mode: 'all', onmode, status: 'loaded', errStatus: null, onretry: () => {} }
 		});
 		const q = within(container as HTMLElement);
+		// Primary KPI is net (386250 − 86250 = 300000), gross/refunds visible.
+		expect(container.textContent).toContain('3,000');
 		expect(container.textContent).toContain('3,862.50');
+		expect(container.textContent).toContain('862.50');
 		expect(q.getByText(/سعر الصرف التاريخي/)).toBeTruthy();
 		await fireEvent.click(q.getByText('EGP'));
 		expect(onmode).toHaveBeenCalledWith('EGP');
@@ -70,5 +73,32 @@ describe('SalesCard KPI scope (R08)', () => {
 		// transactions KPI = 1, units KPI = 2 (never the all-currency 3/7).
 		expect(values[0]).toBe('1');
 		expect(values[2]).toBe('2');
+	});
+
+	it('renders negative net with a real minus sign, never clamped', () => {
+		const neg = {
+			summary: { transaction_count: 0, units_sold: 0, return_transaction_count: 1, units_returned: 2, currency_totals: [] },
+			normalized: { normalized_total_minor: '1000', normalized_refund_minor: '2500', normalized_net_minor: '-1500', transactions: 0, units: 0, return_transactions: 1, units_returned: 2, usd_sale_count: 0 },
+			averages: (loaded as { averages: unknown }).averages,
+			fx: { has_usd: false, multiple_rates_used: false }
+		} as never;
+		const { container } = render(SalesCard, {
+			props: { data: neg, mode: 'all', onmode: () => {}, status: 'loaded', errStatus: null, onretry: () => {} }
+		});
+		expect(container.textContent).toContain('-15');
+		expect(container.textContent).not.toContain('0 ج.م\n');
+	});
+
+	it('shows empty Refunds as zero with net equal to gross', () => {
+		const none = {
+			summary: { transaction_count: 1, units_sold: 2, return_transaction_count: 0, units_returned: 0, currency_totals: [] },
+			normalized: { normalized_total_minor: '200000', normalized_refund_minor: '0', normalized_net_minor: '200000', transactions: 1, units: 2, return_transactions: 0, units_returned: 0, usd_sale_count: 0 },
+			averages: (loaded as { averages: unknown }).averages,
+			fx: { has_usd: false, multiple_rates_used: false }
+		} as never;
+		const { container } = render(SalesCard, {
+			props: { data: none, mode: 'all', onmode: () => {}, status: 'loaded', errStatus: null, onretry: () => {} }
+		});
+		expect(container.textContent).toContain('2,000');
 	});
 });

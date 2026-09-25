@@ -26,6 +26,12 @@ export function formatInt(n: number | string): string {
 	return groupDigits(String(n));
 }
 
+// subMinor subtracts exact minor-unit strings with BigInt (net may be
+// negative; BigInt never overflows, so no silent wrap is possible).
+export function subMinor(gross: string, refund: string): string {
+	return (BigInt(gross || '0') - BigInt(refund || '0')).toString();
+}
+
 // toChartNumber converts an exact minor-unit string for chart coordinates.
 // Throws (→ error state) instead of silently losing precision.
 export function toChartNumber(minor: string): number {

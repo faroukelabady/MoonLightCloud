@@ -11,12 +11,15 @@
 	function kindLabel(k: string): [string, string, string] {
 		if (k === 'blocked') return ['محظور', 'blocked', 'bad'];
 		if (k === 'projected') return ['تمت المعالجة', 'projected', 'ok'];
+		if (k === 'return_blocked') return ['مرتجع محظور', 'return blocked', 'bad'];
+		if (k === 'return_projected') return ['تمت معالجة مرتجع', 'return projected', 'ok'];
+		if (k === 'return_accepted') return ['تم استلام مرتجع', 'return accepted', ''];
 		return ['تم الاستلام', 'accepted', ''];
 	}
 
 	function iconOf(kind: string): string {
-		if (kind === 'blocked') return 'M12 8v5M12 16.5v.5M10.3 3.8L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z';
-		if (kind === 'projected') return 'M4 12.5l5 5L20 6.5';
+		if (kind === 'blocked' || kind === 'return_blocked') return 'M12 8v5M12 16.5v.5M10.3 3.8L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z';
+		if (kind === 'projected' || kind === 'return_projected') return 'M4 12.5l5 5L20 6.5';
 		return 'M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6';
 	}
 </script>

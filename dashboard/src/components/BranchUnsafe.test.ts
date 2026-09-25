@@ -6,8 +6,8 @@ import BranchCard from './BranchCard.svelte';
 // bar; ordering within a currency scope follows values.
 describe('BranchCard unsafe values', () => {
 	const rows = [
-		{ shop_name_ar: 'ضخم', shop_name_en: 'Huge', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, subtotal_minor: '9007199254740993', sales_total_minor: '9007199254740993' },
-		{ shop_name_ar: 'صغير', shop_name_en: 'Tiny', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, subtotal_minor: '100', sales_total_minor: '100' }
+		{ shop_name_ar: 'ضخم', shop_name_en: 'Huge', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, return_transactions: 0, units_returned: 0, subtotal_minor: '9007199254740993', sales_total_minor: '9007199254740993', refund_total_minor: '0', returned_cost_minor: '0' },
+		{ shop_name_ar: 'صغير', shop_name_en: 'Tiny', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, return_transactions: 0, units_returned: 0, subtotal_minor: '100', sales_total_minor: '100', refund_total_minor: '0', returned_cost_minor: '0' }
 	];
 
 	it('keeps exact text and a full bar for >2^53 amounts', () => {

@@ -29,6 +29,26 @@
 		return null;
 	}
 
+	// Net is the primary business KPI; gross and refunds stay visible so
+	// the distinction is never hidden. All money stays string-exact.
+	function grossMinor(): string | null {
+		if (!data) return null;
+		if (mode === 'all') return data.normalized.normalized_total_minor;
+		return bucket()?.sales_total_minor ?? null;
+	}
+
+	function refundMinor(): string | null {
+		if (!data) return null;
+		if (mode === 'all') return data.normalized.normalized_refund_minor;
+		return bucket()?.refund_total_minor ?? null;
+	}
+
+	function unitsReturned(): number {
+		if (!data) return 0;
+		if (mode === 'all') return data.normalized.units_returned;
+		return bucket()?.returned_units ?? 0;
+	}
+
 	function average(): { transactions: number; units: number; average_minor: string } | null {
 		if (!data) return null;
 		if (mode === 'all') return data.averages.all;
@@ -48,7 +68,7 @@
 	});
 </script>
 
-<Card ar="إجمالي المبيعات" en="Total sales">
+<Card ar="صافي المبيعات" en="Net sales">
 	{#snippet actions()}
 		<Segmented
 			options={[
@@ -64,16 +84,20 @@
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
-	{:else if !data || data.summary.transaction_count === 0}
+	{:else if !data || (data.summary.transaction_count === 0 && data.summary.return_transaction_count === 0)}
 		<EmptyState ar="لا توجد مبيعات في هذه الفترة" en="No sales in this period" />
 	{:else}
 		<div class="total num">
 			{#if mode === 'all'}
-				{formatMinor(data.normalized.normalized_total_minor, 'EGP')}
+				{formatMinor(data.normalized.normalized_net_minor, 'EGP')}
 			{:else}
 				{@const b = bucket()}
-				{b ? formatMinor(b.sales_total_minor, mode) : '—'}
+				{b ? formatMinor(b.net_sales_minor, mode) : '—'}
 			{/if}
+		</div>
+		<div class="split num">
+			<span>إجمالي المبيعات / Gross: {formatMinor(grossMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
+			<span class="refund">المرتجعات / Refunds: {formatMinor(refundMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
 		</div>
 		{#if mode === 'all'}
 			<div class="muted helper">بعد تحويل مبيعات USD باستخدام سعر الصرف التاريخي لكل عملية بيع</div>
@@ -95,6 +119,10 @@
 				<div class="kpi-label">الوحدات المباعة<br /><span class="muted">Units Sold</span></div>
 				<div class="kpi-value num">{formatInt(average()?.units ?? data.summary.units_sold)}</div>
 			</div>
+			<div class="kpi">
+				<div class="kpi-label">الوحدات المرتجعة<br /><span class="muted">Units Returned</span></div>
+				<div class="kpi-value num">{formatInt(unitsReturned())}</div>
+			</div>
 		</div>
 		{#if mode === 'all' && data.fx.has_usd}
 			<div class="fx muted">
@@ -111,6 +139,17 @@
 		font-size: 1.7rem;
 		font-weight: 700;
 		margin: 0 0 2px;
+	}
+	.split {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 12px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		margin-bottom: 2px;
+	}
+	.split .refund {
+		color: var(--danger, #b42318);
 	}
 	.helper {
 		font-size: 0.75rem;

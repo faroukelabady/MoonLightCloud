@@ -8,7 +8,7 @@ describe('TopProducts unsafe chart values', () => {
 	it('renders chart error state, not a crash', () => {
 		const { container } = render(TopProducts, {
 			props: {
-				rows: [{ name: 'Huge', sku: 'HUGE-1', units: 1, amount_minor: '9007199254740993' }],
+				rows: [{ name: 'Huge', sku: 'HUGE-1', units: 1, units_returned: 0, amount_minor: '9007199254740993', refund_minor: '0', net_minor: '9007199254740993' }],
 				money: 'EGP',
 				unit: 'EGP',
 				status: 'loaded',

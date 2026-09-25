@@ -9,6 +9,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
+	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 )
 
@@ -17,14 +18,34 @@ import (
 // via SafeChartNumber, which refuses unsafe integers instead of rounding.
 func minorString(v int64) string { return strconv.FormatInt(v, 10) }
 
+// subCheckedI64 subtracts with overflow failure (net may be negative, but
+// must never wrap).
+func subCheckedI64(a, b int64) (int64, error) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	const minInt64 = -maxInt64 - 1
+	if b > 0 && a < minInt64+b {
+		return 0, apperr.New(apperr.Internal, "net arithmetic overflow")
+	}
+	if b < 0 && a > maxInt64+b {
+		return 0, apperr.New(apperr.Internal, "net arithmetic overflow")
+	}
+	return a - b, nil
+}
+
 // NormalizedTotal is the All-mode EGP total: native EGP plus each USD sale
 // converted with its own historical FX snapshot. Truncation-free exactness
 // comes from SQL numeric math; this DTO only transports the result.
+// Refund/net companions reverse with each return's own historical FX the
+// same way; net may be negative and is never clamped.
 type NormalizedTotal struct {
-	NormalizedTotalMinor string `json:"normalized_total_minor"`
-	Transactions         int64  `json:"transactions"`
-	Units                int64  `json:"units"`
-	USDSaleCount         int64  `json:"usd_sale_count"`
+	NormalizedTotalMinor  string `json:"normalized_total_minor"`
+	NormalizedRefundMinor string `json:"normalized_refund_minor"`
+	NormalizedNetMinor    string `json:"normalized_net_minor"`
+	Transactions          int64  `json:"transactions"`
+	Units                 int64  `json:"units"`
+	ReturnTransactions    int64  `json:"return_transactions"`
+	UnitsReturned         int64  `json:"units_returned"`
+	USDSaleCount          int64  `json:"usd_sale_count"`
 }
 
 // FxInfo is truthful historical FX presentation (never a live rate).
@@ -41,39 +62,52 @@ type FxInfo struct {
 // BranchRow groups by the full historical shop snapshot tuple + channel.
 // No Cloud shop catalog exists; identity is the snapshot itself.
 type BranchRow struct {
-	ShopNameAR      string `json:"shop_name_ar"`
-	ShopNameEN      string `json:"shop_name_en"`
-	ShopAddressAR   string `json:"shop_address_ar"`
-	ShopAddressEN   string `json:"shop_address_en"`
-	ShopPhone       string `json:"shop_phone"`
-	Channel         string `json:"channel"`
-	Currency        string `json:"currency"`
-	Transactions    int64  `json:"transactions"`
-	Units           int64  `json:"units"`
-	SubtotalMinor   string `json:"subtotal_minor"`
-	DiscountMinor   string `json:"discount_minor"`
-	TaxMinor        string `json:"tax_minor"`
-	SalesTotalMinor string `json:"sales_total_minor"`
+	ShopNameAR         string `json:"shop_name_ar"`
+	ShopNameEN         string `json:"shop_name_en"`
+	ShopAddressAR      string `json:"shop_address_ar"`
+	ShopAddressEN      string `json:"shop_address_en"`
+	ShopPhone          string `json:"shop_phone"`
+	Channel            string `json:"channel"`
+	Currency           string `json:"currency"`
+	Transactions       int64  `json:"transactions"`
+	Units              int64  `json:"units"`
+	ReturnTransactions int64  `json:"return_transactions"`
+	UnitsReturned      int64  `json:"units_returned"`
+	SubtotalMinor      string `json:"subtotal_minor"`
+	DiscountMinor      string `json:"discount_minor"`
+	TaxMinor           string `json:"tax_minor"`
+	SalesTotalMinor    string `json:"sales_total_minor"`
+	RefundTotalMinor   string `json:"refund_total_minor"`
+	ReturnedCostMinor  string `json:"returned_cost_minor"`
 }
 
-// NormalizedProductRow is one product ranked by normalized EGP line value.
+// NormalizedProductRow is one product ranked by normalized EGP NET line
+// value (gross minus refunds, each normalized with its own historical FX).
+// The net ranking is explicit in the label contract; gross-only consumers
+// must not reuse this row as a gross ranking.
 type NormalizedProductRow struct {
-	ProductID       *string `json:"product_id,omitempty"`
-	SKU             string  `json:"sku"`
-	ProductName     string  `json:"product_name"`
-	Units           int64   `json:"units"`
-	NormalizedMinor string  `json:"normalized_minor"`
+	ProductID             *string `json:"product_id,omitempty"`
+	SKU                   string  `json:"sku"`
+	ProductName           string  `json:"product_name"`
+	Units                 int64   `json:"units"`
+	UnitsReturned         int64   `json:"units_returned"`
+	NormalizedMinor       string  `json:"normalized_minor"`
+	RefundNormalizedMinor string  `json:"refund_normalized_minor"`
+	NetNormalizedMinor    string  `json:"net_normalized_minor"`
 }
 
 // NormalizedCategoryRow mirrors products for category facets (facet
 // semantics preserved: subcategory rows may overlap).
 type NormalizedCategoryRow struct {
-	Kind            string `json:"kind"`
-	ID              string `json:"classification_id"`
-	NameAR          string `json:"name_ar"`
-	NameEN          string `json:"name_en"`
-	Units           int64  `json:"units"`
-	NormalizedMinor string `json:"normalized_minor"`
+	Kind                  string `json:"kind"`
+	ID                    string `json:"classification_id"`
+	NameAR                string `json:"name_ar"`
+	NameEN                string `json:"name_en"`
+	Units                 int64  `json:"units"`
+	UnitsReturned         int64  `json:"units_returned"`
+	NormalizedMinor       string `json:"normalized_minor"`
+	RefundNormalizedMinor string `json:"refund_normalized_minor"`
+	NetNormalizedMinor    string `json:"net_normalized_minor"`
 }
 
 // NormalizedDay is one Cairo date with its normalized EGP total.
@@ -87,11 +121,16 @@ type NormalizedDay struct {
 // DailyDay is one unified daily row: normalized EGP in All mode, native
 // bucket amounts in EGP/USD modes. The contract metadata makes relabeling
 // impossible: display_currency + normalized travel with the data.
+// Transactions/Units/Amount stay sale-scoped; return activity rides in the
+// return-specific fields (net is derivable, never stored ambiguously).
 type DailyDay struct {
-	Date         string `json:"date"`
-	Transactions int64  `json:"transactions"`
-	Units        int64  `json:"units"`
-	AmountMinor  string `json:"amount_minor"`
+	Date               string `json:"date"`
+	Transactions       int64  `json:"transactions"`
+	Units              int64  `json:"units"`
+	AmountMinor        string `json:"amount_minor"`
+	RefundMinor        string `json:"refund_minor"`
+	ReturnTransactions int64  `json:"return_transactions"`
+	UnitsReturned      int64  `json:"units_returned"`
 }
 
 // DailyResponse wraps daily rows with explicit mode metadata.
@@ -165,12 +204,17 @@ type OverviewAverages struct {
 
 // SummaryBucket is one currency bucket with exact decimal-string money.
 type SummaryBucket struct {
-	Currency        string `json:"currency"`
-	SubtotalMinor   string `json:"subtotal_minor"`
-	DiscountMinor   string `json:"discount_minor"`
-	TaxMinor        string `json:"tax_minor"`
-	SalesTotalMinor string `json:"sales_total_minor"`
-	LineCostMinor   string `json:"line_cost_minor"`
+	Currency          string `json:"currency"`
+	SubtotalMinor     string `json:"subtotal_minor"`
+	DiscountMinor     string `json:"discount_minor"`
+	TaxMinor          string `json:"tax_minor"`
+	SalesTotalMinor   string `json:"sales_total_minor"`
+	LineCostMinor     string `json:"line_cost_minor"`
+	RefundTotalMinor  string `json:"refund_total_minor"`
+	NetSalesMinor     string `json:"net_sales_minor"`
+	ReturnedUnits     int64  `json:"returned_units"`
+	ReturnedCostMinor string `json:"returned_cost_minor"`
+	NetCostMinor      string `json:"net_cost_minor"`
 }
 
 // SummaryPayment mirrors report.PaymentTotal with string money.
@@ -182,11 +226,15 @@ type SummaryPayment struct {
 }
 
 // SummaryDTO mirrors report.Summary with string-backed money.
+// TransactionCount/UnitsSold stay sale-only; return activity rides in
+// ReturnTransactionCount/UnitsReturned (never conflated).
 type SummaryDTO struct {
-	TransactionCount int64            `json:"transaction_count"`
-	UnitsSold        int64            `json:"units_sold"`
-	CurrencyTotals   []SummaryBucket  `json:"currency_totals"`
-	PaymentTotals    []SummaryPayment `json:"payment_totals"`
+	TransactionCount       int64            `json:"transaction_count"`
+	UnitsSold              int64            `json:"units_sold"`
+	ReturnTransactionCount int64            `json:"return_transaction_count"`
+	UnitsReturned          int64            `json:"units_returned"`
+	CurrencyTotals         []SummaryBucket  `json:"currency_totals"`
+	PaymentTotals          []SummaryPayment `json:"payment_totals"`
 }
 
 // Repository is the dashboard storage boundary: the frozen reporting
@@ -202,6 +250,11 @@ type Repository interface {
 	DashboardCategoriesNormalized(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedCategoryRowRaw, error)
 	DashboardRecentActivity(ctx context.Context, limit int) ([]ActivityItem, error)
 	DashboardLatestSales(ctx context.Context, limit int) ([]LatestSale, error)
+	DashboardNormalizedRefundsSummary(ctx context.Context, startUTC, endUTC time.Time) (NormalizedRefundSummaryRow, error)
+	DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]NormalizedRefundDailyRow, error)
+	DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
+	DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
+	DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
 }
 
 type (
@@ -255,6 +308,47 @@ type (
 		Normalized     int64
 		MissingFx      int64
 	}
+	NormalizedRefundSummaryRow struct {
+		Transactions int64
+		Units        int64
+		Normalized   int64
+		USDReturns   int64
+		USDMissingFx int64
+	}
+	NormalizedRefundDailyRow struct {
+		Date         string
+		Transactions int64
+		Units        int64
+		Normalized   int64
+		USDMissingFx int64
+	}
+	NormalizedRefundProductRowRaw struct {
+		ProductID   *string
+		SKU         string
+		ProductName string
+		Units       int64
+		Normalized  int64
+		MissingFx   int64
+	}
+	NormalizedRefundCategoryRowRaw struct {
+		Kind           string
+		ID             string
+		NameAR, NameEN string
+		Units          int64
+		Normalized     int64
+		MissingFx      int64
+	}
+	ReturnBranchRowRaw struct {
+		Channel                      string
+		ShopNameAR, ShopNameEN       string
+		ShopAddressAR, ShopAddressEN string
+		ShopPhone                    string
+		ShopReceiptFooterAR          string
+		ShopReceiptFooterEN          string
+		Currency                     string
+		Transactions, Units          int64
+		RefundTotal, ReturnedCost    int64
+	}
 )
 
 // Service composes frozen ReportingService data with dashboard-only
@@ -287,6 +381,17 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 	if norm.USDMissingFx > 0 {
 		return Overview{}, apperr.New(apperr.Internal, "projection integrity: USD sale without FX snapshot")
 	}
+	refundNorm, err := s.repo.DashboardNormalizedRefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	if err != nil {
+		return Overview{}, err
+	}
+	if refundNorm.USDMissingFx > 0 {
+		return Overview{}, apperr.New(apperr.Internal, "projection integrity: USD return without FX snapshot")
+	}
+	netNorm, err := subCheckedI64(norm.Normalized, refundNorm.Normalized)
+	if err != nil {
+		return Overview{}, err
+	}
 	fx, err := s.fxInfo(ctx, req)
 	if err != nil {
 		return Overview{}, err
@@ -300,10 +405,14 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 		Period:  sum.Period,
 		Summary: toSummaryDTO(sum),
 		Normalized: NormalizedTotal{
-			NormalizedTotalMinor: minorString(norm.Normalized),
-			Transactions:         norm.Transactions,
-			Units:                norm.Units,
-			USDSaleCount:         norm.USDSales,
+			NormalizedTotalMinor:  minorString(norm.Normalized),
+			NormalizedRefundMinor: minorString(refundNorm.Normalized),
+			NormalizedNetMinor:    minorString(netNorm),
+			Transactions:          norm.Transactions,
+			Units:                 norm.Units,
+			ReturnTransactions:    refundNorm.Transactions,
+			UnitsReturned:         refundNorm.Units,
+			USDSaleCount:          norm.USDSales,
 		},
 		Averages: overviewAverages(nativeRows, norm),
 		Fx:       fx,
@@ -342,20 +451,25 @@ func divTrunc(total, txns int64) int64 {
 	return total / txns
 }
 
-// toSummaryDTO maps the frozen summary to string-money DTOs (same numbers,
-// decimal-string encoding).
+// toSummaryDTO maps the summary to string-money DTOs (same numbers,
+// decimal-string encoding), including the additive refund/net fields.
 func toSummaryDTO(sum report.Summary) SummaryDTO {
 	out := SummaryDTO{
-		TransactionCount: sum.TransactionCount,
-		UnitsSold:        sum.UnitsSold,
-		CurrencyTotals:   make([]SummaryBucket, 0, len(sum.CurrencyTotals)),
-		PaymentTotals:    make([]SummaryPayment, 0, len(sum.PaymentTotals)),
+		TransactionCount:       sum.TransactionCount,
+		UnitsSold:              sum.UnitsSold,
+		ReturnTransactionCount: sum.ReturnTransactionCount,
+		UnitsReturned:          sum.UnitsReturned,
+		CurrencyTotals:         make([]SummaryBucket, 0, len(sum.CurrencyTotals)),
+		PaymentTotals:          make([]SummaryPayment, 0, len(sum.PaymentTotals)),
 	}
 	for _, b := range sum.CurrencyTotals {
 		out.CurrencyTotals = append(out.CurrencyTotals, SummaryBucket{
 			Currency: b.Currency, SubtotalMinor: minorString(b.SubtotalMinor),
 			DiscountMinor: minorString(b.DiscountMinor), TaxMinor: minorString(b.TaxMinor),
 			SalesTotalMinor: minorString(b.SalesTotalMinor), LineCostMinor: minorString(b.LineCostMinor),
+			RefundTotalMinor: minorString(b.RefundTotalMinor), NetSalesMinor: minorString(b.NetSalesMinor),
+			ReturnedUnits:     b.ReturnedUnits,
+			ReturnedCostMinor: minorString(b.ReturnedCostMinor), NetCostMinor: minorString(b.NetCostMinor),
 		})
 	}
 	for _, p := range sum.PaymentTotals {
@@ -381,16 +495,44 @@ func (s Service) Daily(ctx context.Context, req report.Request, mode string) (Da
 		if err != nil {
 			return DailyResponse{}, err
 		}
-		out := DailyResponse{Mode: "all", DisplayCurrency: "EGP", Normalized: true, Days: []DailyDay{},
-			Timezone: req.Period.Timezone, Period: periodMeta(req)}
+		refundRows, err := s.repo.DashboardNormalizedRefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+		if err != nil {
+			return DailyResponse{}, err
+		}
+		byDay := map[string]*DailyDay{}
+		order := []string{}
+		dayOf := func(date string) *DailyDay {
+			day, ok := byDay[date]
+			if !ok {
+				day = &DailyDay{Date: date, AmountMinor: "0", RefundMinor: "0"}
+				byDay[date] = day
+				order = append(order, date)
+			}
+			return day
+		}
 		for _, r := range rows {
 			if r.USDMissingFx > 0 {
 				return DailyResponse{}, apperr.New(apperr.Internal, "projection integrity: USD sale without FX snapshot")
 			}
-			out.Days = append(out.Days, DailyDay{
-				Date: r.Date, Transactions: r.Transactions, Units: r.Units,
-				AmountMinor: minorString(r.Normalized),
-			})
+			day := dayOf(r.Date)
+			day.Transactions = r.Transactions
+			day.Units = r.Units
+			day.AmountMinor = minorString(r.Normalized)
+		}
+		for _, r := range refundRows {
+			if r.USDMissingFx > 0 {
+				return DailyResponse{}, apperr.New(apperr.Internal, "projection integrity: USD return without FX snapshot")
+			}
+			day := dayOf(r.Date)
+			day.ReturnTransactions = r.Transactions
+			day.UnitsReturned = r.Units
+			day.RefundMinor = minorString(r.Normalized)
+		}
+		sort.Strings(order)
+		out := DailyResponse{Mode: "all", DisplayCurrency: "EGP", Normalized: true, Days: []DailyDay{},
+			Timezone: req.Period.Timezone, Period: periodMeta(req)}
+		for _, d := range order {
+			out.Days = append(out.Days, *byDay[d])
 		}
 		return out, nil
 	}
@@ -398,13 +540,38 @@ func (s Service) Daily(ctx context.Context, req report.Request, mode string) (Da
 	if err != nil {
 		return DailyResponse{}, err
 	}
+	refundNative, err := s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	if err != nil {
+		return DailyResponse{}, err
+	}
+	byDay := map[string]*DailyDay{}
+	order := []string{}
+	dayOf := func(date string) *DailyDay {
+		day, ok := byDay[date]
+		if !ok {
+			day = &DailyDay{Date: date, AmountMinor: "0", RefundMinor: "0"}
+			byDay[date] = day
+			order = append(order, date)
+		}
+		return day
+	}
+	for _, r := range native {
+		day := dayOf(r.Date)
+		day.Transactions = r.Transactions
+		day.Units = r.Units
+		day.AmountMinor = minorString(r.SalesTotal)
+	}
+	for _, r := range refundNative {
+		day := dayOf(r.Date)
+		day.ReturnTransactions = r.Transactions
+		day.UnitsReturned = r.Units
+		day.RefundMinor = minorString(r.RefundTotal)
+	}
+	sort.Strings(order)
 	out := DailyResponse{Mode: mode, DisplayCurrency: mode, Normalized: false, Days: []DailyDay{},
 		Timezone: req.Period.Timezone, Period: periodMeta(req)}
-	for _, r := range native {
-		out.Days = append(out.Days, DailyDay{
-			Date: r.Date, Transactions: r.Transactions, Units: r.Units,
-			AmountMinor: minorString(r.SalesTotal),
-		})
+	for _, d := range order {
+		out.Days = append(out.Days, *byDay[d])
 	}
 	return out, nil
 }
@@ -420,26 +587,64 @@ func periodMeta(req report.Request) report.PeriodMeta {
 	}
 }
 
-// ProductsNormalized ranks products by normalized EGP line value.
+// ProductsNormalized ranks products by normalized EGP NET line value
+// (gross minus refunds, each normalized with its own historical FX). The
+// net ranking is explicit: gross-only consumers must not reuse it.
 func (s Service) ProductsNormalized(ctx context.Context, req report.Request) ([]NormalizedProductRow, error) {
 	rows, err := s.repo.DashboardProductsNormalized(ctx, req.Period.StartUTC, req.Period.EndUTC)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]NormalizedProductRow, 0, len(rows))
+	refundRows, err := s.repo.DashboardProductsNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]*NormalizedProductRow{}
+	order := []string{}
+	getRow := func(key string, fill func(*NormalizedProductRow)) *NormalizedProductRow {
+		row, ok := byKey[key]
+		if !ok {
+			row = &NormalizedProductRow{NormalizedMinor: "0", RefundNormalizedMinor: "0", NetNormalizedMinor: "0"}
+			fill(row)
+			byKey[key] = row
+			order = append(order, key)
+		}
+		return row
+	}
 	for _, r := range rows {
 		if r.MissingFx > 0 {
 			return nil, apperr.New(apperr.Internal, "projection integrity: USD line without FX snapshot")
 		}
-		out = append(out, NormalizedProductRow{
-			ProductID: r.ProductID, SKU: r.SKU, ProductName: r.ProductName,
-			Units: r.Units, NormalizedMinor: minorString(r.Normalized),
+		row := getRow(productKey(r.ProductID, r.SKU, r.ProductName), func(row *NormalizedProductRow) {
+			row.ProductID, row.SKU, row.ProductName = r.ProductID, r.SKU, r.ProductName
 		})
+		row.Units = r.Units
+		row.NormalizedMinor = minorString(r.Normalized)
+	}
+	for _, r := range refundRows {
+		if r.MissingFx > 0 {
+			return nil, apperr.New(apperr.Internal, "projection integrity: USD return line without FX snapshot")
+		}
+		row := getRow(productKey(r.ProductID, r.SKU, r.ProductName), func(row *NormalizedProductRow) {
+			row.ProductID, row.SKU, row.ProductName = r.ProductID, r.SKU, r.ProductName
+		})
+		row.UnitsReturned = r.Units
+		row.RefundNormalizedMinor = minorString(r.Normalized)
+	}
+	out := make([]NormalizedProductRow, 0, len(byKey))
+	for _, k := range order {
+		row := byKey[k]
+		net, err := subCheckedI64(minorInt(row.NormalizedMinor), minorInt(row.RefundNormalizedMinor))
+		if err != nil {
+			return nil, err
+		}
+		row.NetNormalizedMinor = minorString(net)
+		out = append(out, *row)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		// Numeric compare on exact values (lexicographic string compare
-		// would misorder magnitudes); then units, then identity.
-		if vi, vj := minorInt(out[i].NormalizedMinor), minorInt(out[j].NormalizedMinor); vi != vj {
+		// Numeric compare on exact NET values (lexicographic string
+		// compare would misorder magnitudes); then units, then identity.
+		if vi, vj := minorInt(out[i].NetNormalizedMinor), minorInt(out[j].NetNormalizedMinor); vi != vj {
 			return vi > vj
 		}
 		if out[i].Units != out[j].Units {
@@ -450,7 +655,17 @@ func (s Service) ProductsNormalized(ctx context.Context, req report.Request) ([]
 	return out, nil
 }
 
-// CategoriesNormalized mirrors products for root/subcategory facets.
+func productKey(productID *string, sku, name string) string {
+	id := ""
+	if productID != nil {
+		id = *productID
+	}
+	return id + "\x00" + sku + "\x00" + name
+}
+
+// CategoriesNormalized mirrors products for root/subcategory facets,
+// net-ranked with gross and refund visible. Facet semantics preserved:
+// subcategory rows may overlap (never an additive partition).
 func (s Service) CategoriesNormalized(ctx context.Context, req report.Request, kind string) ([]NormalizedCategoryRow, error) {
 	if kind != report.DimensionRootCategory && kind != report.DimensionSubcategory {
 		return nil, apperr.New(apperr.InvalidInput, "unsupported normalized category dimension")
@@ -459,23 +674,63 @@ func (s Service) CategoriesNormalized(ctx context.Context, req report.Request, k
 	if err != nil {
 		return nil, err
 	}
-	out := make([]NormalizedCategoryRow, 0, len(rows))
+	refundRows, err := s.repo.DashboardCategoriesNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC, kindName(kind))
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]*NormalizedCategoryRow{}
+	order := []string{}
+	getRow := func(key string, fill func(*NormalizedCategoryRow)) *NormalizedCategoryRow {
+		row, ok := byKey[key]
+		if !ok {
+			row = &NormalizedCategoryRow{NormalizedMinor: "0", RefundNormalizedMinor: "0", NetNormalizedMinor: "0"}
+			fill(row)
+			byKey[key] = row
+			order = append(order, key)
+		}
+		return row
+	}
 	for _, r := range rows {
 		if r.MissingFx > 0 {
 			return nil, apperr.New(apperr.Internal, "projection integrity: USD line without FX snapshot")
 		}
-		out = append(out, NormalizedCategoryRow{
-			Kind: r.Kind, ID: r.ID, NameAR: r.NameAR, NameEN: r.NameEN,
-			Units: r.Units, NormalizedMinor: minorString(r.Normalized),
+		row := getRow(categoryKey(r.Kind, r.ID, r.NameAR, r.NameEN), func(row *NormalizedCategoryRow) {
+			row.Kind, row.ID, row.NameAR, row.NameEN = r.Kind, r.ID, r.NameAR, r.NameEN
 		})
+		row.Units = r.Units
+		row.NormalizedMinor = minorString(r.Normalized)
+	}
+	for _, r := range refundRows {
+		if r.MissingFx > 0 {
+			return nil, apperr.New(apperr.Internal, "projection integrity: USD return line without FX snapshot")
+		}
+		row := getRow(categoryKey(r.Kind, r.ID, r.NameAR, r.NameEN), func(row *NormalizedCategoryRow) {
+			row.Kind, row.ID, row.NameAR, row.NameEN = r.Kind, r.ID, r.NameAR, r.NameEN
+		})
+		row.UnitsReturned = r.Units
+		row.RefundNormalizedMinor = minorString(r.Normalized)
+	}
+	out := make([]NormalizedCategoryRow, 0, len(byKey))
+	for _, k := range order {
+		row := byKey[k]
+		net, err := subCheckedI64(minorInt(row.NormalizedMinor), minorInt(row.RefundNormalizedMinor))
+		if err != nil {
+			return nil, err
+		}
+		row.NetNormalizedMinor = minorString(net)
+		out = append(out, *row)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if vi, vj := minorInt(out[i].NormalizedMinor), minorInt(out[j].NormalizedMinor); vi != vj {
+		if vi, vj := minorInt(out[i].NetNormalizedMinor), minorInt(out[j].NetNormalizedMinor); vi != vj {
 			return vi > vj
 		}
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func categoryKey(kind, id, ar, en string) string {
+	return kind + "\x00" + id + "\x00" + ar + "\x00" + en
 }
 
 func kindName(dimension string) string {
@@ -486,21 +741,60 @@ func kindName(dimension string) string {
 }
 
 // Branches groups by full shop snapshot tuple + channel (native buckets).
+// Refunds attribute to the historical SALE shop tuple (Phase 4A lineage
+// guarantee); current shop settings are never consulted.
 func (s Service) Branches(ctx context.Context, req report.Request) ([]BranchRow, error) {
 	rows, err := s.repo.DashboardBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]BranchRow, 0, len(rows))
+	refundRows, err := s.repo.DashboardReturnBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]*BranchRow{}
+	order := []string{}
+	keyOf := func(shopAR, shopEN, addrAR, addrEN, phone, footAR, footEN, channel, currency string) string {
+		return shopAR + "\x00" + shopEN + "\x00" + addrAR + "\x00" + addrEN + "\x00" + phone +
+			"\x00" + footAR + "\x00" + footEN + "\x00" + channel + "\x00" + currency
+	}
 	for _, r := range rows {
-		out = append(out, BranchRow{
+		key := keyOf(r.ShopNameAR, r.ShopNameEN, r.ShopAddressAR, r.ShopAddressEN, r.ShopPhone,
+			r.ShopReceiptFooterAR, r.ShopReceiptFooterEN, r.Channel, r.Currency)
+		byKey[key] = &BranchRow{
 			ShopNameAR: r.ShopNameAR, ShopNameEN: r.ShopNameEN,
 			ShopAddressAR: r.ShopAddressAR, ShopAddressEN: r.ShopAddressEN,
 			ShopPhone: r.ShopPhone, Channel: r.Channel, Currency: r.Currency,
 			Transactions: r.Transactions, Units: r.Units,
 			SubtotalMinor: minorString(r.Subtotal), DiscountMinor: minorString(r.Discount),
 			TaxMinor: minorString(r.Tax), SalesTotalMinor: minorString(r.Total),
-		})
+			RefundTotalMinor: "0", ReturnedCostMinor: "0",
+		}
+		order = append(order, key)
+	}
+	for _, r := range refundRows {
+		key := keyOf(r.ShopNameAR, r.ShopNameEN, r.ShopAddressAR, r.ShopAddressEN, r.ShopPhone,
+			r.ShopReceiptFooterAR, r.ShopReceiptFooterEN, r.Channel, r.Currency)
+		row, ok := byKey[key]
+		if !ok {
+			row = &BranchRow{
+				ShopNameAR: r.ShopNameAR, ShopNameEN: r.ShopNameEN,
+				ShopAddressAR: r.ShopAddressAR, ShopAddressEN: r.ShopAddressEN,
+				ShopPhone: r.ShopPhone, Channel: r.Channel, Currency: r.Currency,
+				SubtotalMinor: "0", DiscountMinor: "0", TaxMinor: "0", SalesTotalMinor: "0",
+				RefundTotalMinor: "0", ReturnedCostMinor: "0",
+			}
+			byKey[key] = row
+			order = append(order, key)
+		}
+		row.ReturnTransactions = r.Transactions
+		row.UnitsReturned = r.Units
+		row.RefundTotalMinor = minorString(r.RefundTotal)
+		row.ReturnedCostMinor = minorString(r.ReturnedCost)
+	}
+	out := make([]BranchRow, 0, len(byKey))
+	for _, k := range order {
+		out = append(out, *byKey[k])
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ShopNameEN != out[j].ShopNameEN {
@@ -522,20 +816,26 @@ func (s Service) Branches(ctx context.Context, req report.Request) ([]BranchRow,
 // contain connection strings, SQL, or payload fragments) stay server-side
 // in logs, diagnostic tables, and admin tooling.
 type SyncHealthItem struct {
-	Freshness        report.Freshness `json:"freshness"`
-	QueueCount       int64            `json:"queue_count"`
-	PendingCount     int64            `json:"pending_count"`
-	ProcessedCount   int64            `json:"processed_count"`
-	BlockedCount     int64            `json:"blocked_count"`
-	RetryCount       int64            `json:"retry_count"`
-	OldestPendingAt  *string          `json:"oldest_pending_at,omitempty"`
-	LastErrorEvent   string           `json:"last_error_event,omitempty"`
-	LastErrorCode    string           `json:"last_error_code,omitempty"`
-	LastErrorLabelAR string           `json:"last_error_label_ar,omitempty"`
-	LastErrorLabelEN string           `json:"last_error_label_en,omitempty"`
+	Freshness            report.Freshness `json:"freshness"`
+	QueueCount           int64            `json:"queue_count"`
+	PendingCount         int64            `json:"pending_count"`
+	ProcessedCount       int64            `json:"processed_count"`
+	BlockedCount         int64            `json:"blocked_count"`
+	RetryCount           int64            `json:"retry_count"`
+	ReturnPendingCount   int64            `json:"return_pending_count"`
+	ReturnProcessedCount int64            `json:"return_processed_count"`
+	ReturnBlockedCount   int64            `json:"return_blocked_count"`
+	ReturnRetryCount     int64            `json:"return_retry_count"`
+	OldestPendingAt      *string          `json:"oldest_pending_at,omitempty"`
+	LastErrorEvent       string           `json:"last_error_event,omitempty"`
+	LastErrorCode        string           `json:"last_error_code,omitempty"`
+	LastErrorLabelAR     string           `json:"last_error_label_ar,omitempty"`
+	LastErrorLabelEN     string           `json:"last_error_label_en,omitempty"`
 }
 
-// SyncHealth assembles freshness plus processing-state counts.
+// SyncHealth assembles freshness plus processing-state counts for both
+// processors. Sale and return completeness stay separate metrics: sale
+// fields keep their frozen meaning, return fields are additive.
 // QueueCount is pending + retry counted exactly once (single source:
 // the combined pending/retry count, never pending_count + retry_count).
 func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
@@ -547,18 +847,33 @@ func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 	if err != nil {
 		return SyncHealthItem{}, err
 	}
+	retStats, err := s.saleStore.ProcessingStats(ctx, returnrefund.ProcessorReturnProjectionV1)
+	if err != nil {
+		return SyncHealthItem{}, err
+	}
 	ar, en := safeDiagnostic(stats.LastErrorCode)
+	retAR, retEN := safeDiagnostic(retStats.LastErrorCode)
 	out := SyncHealthItem{
-		Freshness:        fresh,
-		QueueCount:       stats.PendingCount,
-		PendingCount:     stats.Counts[sale.ProcPending],
-		ProcessedCount:   stats.Counts[sale.ProcProcessed],
-		BlockedCount:     stats.Counts[sale.ProcBlocked],
-		RetryCount:       stats.Counts[sale.ProcRetry],
-		LastErrorEvent:   stats.LastErrorEvent,
-		LastErrorCode:    stats.LastErrorCode,
-		LastErrorLabelAR: ar,
-		LastErrorLabelEN: en,
+		Freshness:            fresh,
+		QueueCount:           stats.PendingCount,
+		PendingCount:         stats.Counts[sale.ProcPending],
+		ProcessedCount:       stats.Counts[sale.ProcProcessed],
+		BlockedCount:         stats.Counts[sale.ProcBlocked],
+		RetryCount:           stats.Counts[sale.ProcRetry],
+		LastErrorEvent:       stats.LastErrorEvent,
+		LastErrorCode:        stats.LastErrorCode,
+		LastErrorLabelAR:     ar,
+		LastErrorLabelEN:     en,
+		ReturnPendingCount:   retStats.Counts[returnrefund.ProcPending],
+		ReturnProcessedCount: retStats.Counts[returnrefund.ProcProcessed],
+		ReturnBlockedCount:   retStats.Counts[returnrefund.ProcBlocked],
+		ReturnRetryCount:     retStats.Counts[returnrefund.ProcRetry],
+	}
+	if retStats.LastErrorCode != "" {
+		out.LastErrorEvent = retStats.LastErrorEvent
+		out.LastErrorCode = retStats.LastErrorCode
+		out.LastErrorLabelAR = retAR
+		out.LastErrorLabelEN = retEN
 	}
 	if stats.OldestPending != nil {
 		out.OldestPendingAt = ptrStr(stats.OldestPending.Format(time.RFC3339))
@@ -584,6 +899,20 @@ func safeDiagnostic(code string) (ar, en string) {
 		return "فشل مؤقت في المعالجة", "Transient projection failure"
 	case "EVENT_MISSING":
 		return "حدث مفقود", "Missing source event"
+	case "RETURN_REFUND_ID_CONFLICT":
+		return "تعارض مرتجعات: حدثان بنفس رقم الإرجاع", "Return conflict: two events share one return ID"
+	case "SALE_DEPENDENCY_WAIT":
+		return "بانتظار البيع الأصلي", "Waiting for the original sale"
+	case "RETURN_LINE_UNKNOWN":
+		return "بند إرجاع غير معروف", "Return references an unknown sale line"
+	case "RETURN_CURRENCY_MISMATCH":
+		return "عملة الإرجاع مختلفة", "Return currency differs from sale"
+	case "RETURN_FX_MISMATCH":
+		return "سعر صرف الإرجاع مختلف", "Return FX differs from sale FX"
+	case "CUMULATIVE_OVER_RETURN":
+		return "تجاوز كمية الإرجاع", "Returns exceed the sold quantity"
+	case "CUMULATIVE_REFUND_EXCEEDED":
+		return "تجاوز مبلغ الاسترداد", "Refunds exceed the sale total"
 	default:
 		return "حدث خطأ أثناء المعالجة", "A processing error occurred"
 	}
@@ -632,12 +961,21 @@ func (s Service) freshness(ctx context.Context) (report.Freshness, error) {
 	if err != nil {
 		return report.Freshness{}, err
 	}
+	ret, err := s.repo.ReturnProjectionFreshness(ctx)
+	if err != nil {
+		return report.Freshness{}, err
+	}
 	return report.Freshness{
-		LatestSaleEventReceivedAt:     row.LatestReceivedAt,
-		LatestProjectedSaleOccurredAt: row.LatestOccurredAt,
-		ProjectionBacklogCount:        row.Backlog,
-		BlockedSaleEventCount:         row.Blocked,
-		CloudProjectionComplete:       row.Backlog == 0,
+		LatestSaleEventReceivedAt:       row.LatestReceivedAt,
+		LatestProjectedSaleOccurredAt:   row.LatestOccurredAt,
+		ProjectionBacklogCount:          row.Backlog,
+		BlockedSaleEventCount:           row.Blocked,
+		CloudProjectionComplete:         row.Backlog == 0,
+		LatestReturnEventReceivedAt:     ret.LatestReceivedAt,
+		LatestProjectedReturnOccurredAt: ret.LatestOccurredAt,
+		ReturnBacklogCount:              ret.Backlog,
+		ReturnBlockedCount:              ret.Blocked,
+		ReturnProjectionComplete:        ret.Backlog == 0,
 	}, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // reportErr classifies reporting storage failures: connection-level and
@@ -194,6 +195,170 @@ func (d Devices) SalesProjectionFreshness(ctx context.Context) (report.Freshness
 		return report.FreshnessRow{}, reportErr("projection freshness", err)
 	}
 	out := report.FreshnessRow{Backlog: r.Backlog, Blocked: r.Blocked}
+	if r.LatestReceived.Valid {
+		t := r.LatestReceived.Time
+		out.LatestReceivedAt = &t
+	}
+	if r.LatestOccurred.Valid {
+		t := r.LatestOccurred.Time
+		out.LatestOccurredAt = &t
+	}
+	return out, nil
+}
+
+func uuidPtr(u pgtype.UUID) *string {
+	if !u.Valid {
+		return nil
+	}
+	s := uuidString(u)
+	return &s
+}
+
+func textPtr(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.String
+	return &s
+}
+
+// Refunds reporting implements the additive reversal side of
+// report.Repository. Windows run on return occurred_at; native EGP/USD
+// buckets stay separate; overflow fails via the numeric casts.
+func (d Devices) RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundSummaryRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsSummary(ctx, sqlcgen.ReportRefundsSummaryParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds summary", err)
+	}
+	out := make([]report.RefundSummaryRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundSummaryRow{
+			Currency: r.Currency, Transactions: r.Transactions, Units: r.Units,
+			GrossRefunded: r.GrossRefunded, DiscountRefunded: r.DiscountRefunded,
+			TaxRefunded: r.TaxRefunded, RefundTotal: r.RefundTotal, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsDaily(ctx, sqlcgen.ReportRefundsDailyParams{
+		Timezone: timezone, StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds daily", err)
+	}
+	out := make([]report.RefundDailyRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundDailyRow{
+			Date: r.Day, Currency: r.Currency, Transactions: r.Transactions, Units: r.Units,
+			RefundTotal: r.RefundTotal, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByProduct(ctx, sqlcgen.ReportRefundsByProductParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by product", err)
+	}
+	out := make([]report.RefundProductRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundProductRow{
+			ProductID: uuidPtr(r.ProductID), SKU: r.Sku, ProductName: r.ProductName,
+			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func refundCategoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByCategory(ctx, sqlcgen.ReportRefundsByCategoryParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind, Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by category", err)
+	}
+	out := make([]report.RefundCategoryRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundCategoryRow{
+			Kind: r.Kind, ID: uuidString(r.ID), NameAR: r.NameAr, NameEN: r.NameEn,
+			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	return refundCategoryRows("root", ctx, d, startUTC, endUTC, currency)
+}
+
+func (d Devices) RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	return refundCategoryRows("subcategory", ctx, d, startUTC, endUTC, currency)
+}
+
+func (d Devices) RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByCashier(ctx, sqlcgen.ReportRefundsByCashierParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by cashier", err)
+	}
+	out := make([]report.RefundCashierRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundCashierRow{
+			CashierID: textPtr(r.CashierID), CashierName: textPtr(r.CashierName),
+			Transactions: r.Transactions, Units: r.Units,
+			Currency: r.Currency, RefundTotal: r.RefundTotal,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByChannel(ctx, sqlcgen.ReportRefundsByChannelParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by channel", err)
+	}
+	out := make([]report.RefundChannelRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundChannelRow{
+			Channel: r.Channel, Transactions: r.Transactions, Units: r.Units,
+			Currency: r.Currency, RefundTotal: r.RefundTotal,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) ReturnProjectionFreshness(ctx context.Context) (report.ReturnFreshnessRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	r, err := sqlcgen.New(d.pool).ReportReturnFreshness(ctx)
+	if err != nil {
+		return report.ReturnFreshnessRow{}, reportErr("return projection freshness", err)
+	}
+	out := report.ReturnFreshnessRow{Backlog: r.Backlog, Blocked: r.Blocked}
 	if r.LatestReceived.Valid {
 		t := r.LatestReceived.Time
 		out.LatestReceivedAt = &t

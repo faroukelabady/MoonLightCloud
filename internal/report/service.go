@@ -26,6 +26,8 @@ var supportedCurrencies = map[string]bool{"EGP": true, "USD": true}
 // where extended historical line cost is computed and therefore truthful.
 // Breakdown rows never use this type (see LineSaleTotal/SaleCurrencyTotal).
 // EGP and USD are never summed: no FX conversion rule exists for reporting.
+// Signed fields (net, never clamped): a refund-heavy period reports
+// negative net — never use the nonnegative intake Money schema here.
 type CurrencyTotal struct {
 	Currency        string `json:"currency"`
 	SubtotalMinor   int64  `json:"subtotal_minor"`
@@ -35,6 +37,16 @@ type CurrencyTotal struct {
 	// LineCostMinor sums historical line cost snapshots where present.
 	// It is a cost snapshot total, not a profit/margin basis.
 	LineCostMinor int64 `json:"line_cost_minor"`
+	// RefundTotalMinor sums authoritative return reversals in period.
+	RefundTotalMinor int64 `json:"refund_total_minor"`
+	// NetSalesMinor is SalesTotalMinor minus RefundTotalMinor (signed).
+	NetSalesMinor int64 `json:"net_sales_minor"`
+	// ReturnedUnits counts returned units in period.
+	ReturnedUnits int64 `json:"returned_units"`
+	// ReturnedCostMinor sums extended historical return-line costs.
+	ReturnedCostMinor int64 `json:"returned_cost_minor"`
+	// NetCostMinor is LineCostMinor minus ReturnedCostMinor (signed).
+	NetCostMinor int64 `json:"net_cost_minor"`
 }
 
 // SaleCurrencyTotal is one currency bucket for Sale-header breakdown rows
@@ -48,6 +60,12 @@ type SaleCurrencyTotal struct {
 	DiscountMinor   int64  `json:"discount_minor"`
 	TaxMinor        int64  `json:"tax_minor"`
 	SalesTotalMinor int64  `json:"sales_total_minor"`
+	// RefundTotalMinor sums return reversals attributed to this header
+	// row (original sale's cashier/channel); net is derivable.
+	// Signed: never clamped.
+	RefundTotalMinor int64 `json:"refund_total_minor"`
+	// NetSalesMinor is SalesTotalMinor minus RefundTotalMinor (signed).
+	NetSalesMinor int64 `json:"net_sales_minor"`
 }
 
 // PaymentTotal is tender by method. Secondary to finalized Sale totals:
@@ -80,28 +98,48 @@ type Freshness struct {
 	BlockedSaleEventCount         int64      `json:"blocked_sale_event_count"`
 	// CloudProjectionComplete is narrowly true when every accepted sale
 	// event reached terminal processed/blocked state with no backlog.
-	// It does NOT mean Retail is fully synchronized.
+	// It does NOT mean Retail is fully synchronized, and it says nothing
+	// about returns: see ReturnProjectionComplete.
 	CloudProjectionComplete bool `json:"cloud_projection_complete"`
+	// LatestReturnEventReceivedAt is the newest accepted return event.
+	LatestReturnEventReceivedAt *time.Time `json:"latest_return_event_received_at"`
+	// LatestProjectedReturnOccurredAt is the newest projected return time.
+	LatestProjectedReturnOccurredAt *time.Time `json:"latest_projected_return_occurred_at"`
+	// ReturnBacklogCount is accepted returns without terminal state.
+	ReturnBacklogCount int64 `json:"return_backlog_count"`
+	// ReturnBlockedCount is terminally blocked returns.
+	ReturnBlockedCount int64 `json:"return_blocked_count"`
+	// ReturnProjectionComplete is true when every accepted return event
+	// reached terminal processed/blocked state with no backlog.
+	ReturnProjectionComplete bool `json:"return_projection_complete"`
 }
 
-// Summary is the sales summary response.
+// Summary is the sales summary response. TransactionCount and UnitsSold
+// stay finalized-sale-only; return activity rides in the return-specific
+// counters and per-currency buckets (never conflated).
 type Summary struct {
-	GeneratedAt      time.Time       `json:"generated_at"`
-	Timezone         string          `json:"timezone"`
-	Period           PeriodMeta      `json:"period"`
-	TransactionCount int64           `json:"transaction_count"`
-	UnitsSold        int64           `json:"units_sold"`
-	CurrencyTotals   []CurrencyTotal `json:"currency_totals"`
-	PaymentTotals    []PaymentTotal  `json:"payment_totals"`
-	Freshness        Freshness       `json:"freshness"`
+	GeneratedAt            time.Time       `json:"generated_at"`
+	Timezone               string          `json:"timezone"`
+	Period                 PeriodMeta      `json:"period"`
+	TransactionCount       int64           `json:"transaction_count"`
+	UnitsSold              int64           `json:"units_sold"`
+	ReturnTransactionCount int64           `json:"return_transaction_count"`
+	UnitsReturned          int64           `json:"units_returned"`
+	CurrencyTotals         []CurrencyTotal `json:"currency_totals"`
+	PaymentTotals          []PaymentTotal  `json:"payment_totals"`
+	Freshness              Freshness       `json:"freshness"`
 }
 
 // DailyRow is one store-local calendar date (ascending in Daily).
+// Day-level transaction/unit counts stay sale-scoped; return activity
+// rides in the return-specific counters and per-currency buckets.
 type DailyRow struct {
-	Date           string          `json:"date"`
-	Transactions   int64           `json:"transactions"`
-	Units          int64           `json:"units"`
-	CurrencyTotals []CurrencyTotal `json:"currency_totals"`
+	Date               string          `json:"date"`
+	Transactions       int64           `json:"transactions"`
+	Units              int64           `json:"units"`
+	ReturnTransactions int64           `json:"return_transactions"`
+	UnitsReturned      int64           `json:"units_returned"`
+	CurrencyTotals     []CurrencyTotal `json:"currency_totals"`
 }
 
 // Daily is the daily series response.
@@ -140,9 +178,13 @@ type BreakdownRow struct {
 	// Channel field.
 	Channel *string `json:"channel,omitempty"`
 	// Transactions is populated for header-additive dimensions
-	// (cashier, channel) only.
+	// (cashier, channel) only, counting finalized sales — never returns.
 	Transactions int64 `json:"transactions,omitempty"`
-	Units        int64 `json:"units"`
+	// ReturnTransactions counts return transactions for header-additive
+	// dimensions; Units counts sold units, UnitsReturned returned units.
+	ReturnTransactions int64 `json:"return_transactions,omitempty"`
+	Units              int64 `json:"units"`
+	UnitsReturned      int64 `json:"units_returned,omitempty"`
 	// LineSales holds per-currency line snapshot totals (line-level
 	// dimensions only; omitted otherwise).
 	LineSales []LineSaleTotal `json:"line_sales,omitempty"`
@@ -152,11 +194,15 @@ type BreakdownRow struct {
 	CurrencyTotals []SaleCurrencyTotal `json:"currency_totals,omitempty"`
 }
 
-// LineSaleTotal is one currency bucket of line snapshot money.
+// LineSaleTotal is one currency bucket of line snapshot money. Refund
+// fields reverse the same attribution (net is derivable); signed, never
+// clamped.
 type LineSaleTotal struct {
-	Currency       string `json:"currency"`
-	LineSalesMinor int64  `json:"line_sales_minor"`
-	LineCostMinor  int64  `json:"line_cost_minor"`
+	Currency              string `json:"currency"`
+	LineSalesMinor        int64  `json:"line_sales_minor"`
+	LineCostMinor         int64  `json:"line_cost_minor"`
+	LineRefundMinor       int64  `json:"line_refund_minor"`
+	LineReturnedCostMinor int64  `json:"line_returned_cost_minor"`
 }
 
 // Breakdown is the dimension response.
@@ -246,6 +292,70 @@ type (
 		Backlog          int64
 		Blocked          int64
 	}
+	// Refund reporting rows mirror the sale shapes over the return
+	// projection (windowed on return occurred_at). Money is reversal
+	// economics; counts are return activity, never sale activity.
+	RefundSummaryRow struct {
+		Currency         string
+		Transactions     int64
+		Units            int64
+		GrossRefunded    int64
+		DiscountRefunded int64
+		TaxRefunded      int64
+		RefundTotal      int64
+		ReturnedCost     int64
+	}
+	RefundDailyRow struct {
+		Date         string
+		Currency     string
+		Transactions int64
+		Units        int64
+		RefundTotal  int64
+		ReturnedCost int64
+	}
+	RefundProductRow struct {
+		ProductID    *string
+		SKU          string
+		ProductName  string
+		Units        int64
+		Currency     string
+		Refund       int64
+		ReturnedCost int64
+	}
+	RefundCategoryRow struct {
+		Kind         string
+		ID           string
+		NameAR       string
+		NameEN       string
+		Units        int64
+		Currency     string
+		Refund       int64
+		ReturnedCost int64
+	}
+	RefundCashierRow struct {
+		// Cashier attribution follows the ORIGINAL sale (net performance);
+		// the return-processing actor appears in activity surfaces only.
+		CashierID    *string
+		CashierName  *string
+		Transactions int64
+		Units        int64
+		Currency     string
+		RefundTotal  int64
+	}
+	RefundChannelRow struct {
+		// Channel attribution follows the original sale channel.
+		Channel      string
+		Transactions int64
+		Units        int64
+		Currency     string
+		RefundTotal  int64
+	}
+	ReturnFreshnessRow struct {
+		LatestReceivedAt *time.Time
+		LatestOccurredAt *time.Time
+		Backlog          int64
+		Blocked          int64
+	}
 )
 
 // Repository is the reporting storage boundary, implemented by the
@@ -261,6 +371,14 @@ type Repository interface {
 	SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CashierRow, error)
 	SalesByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ChannelRow, error)
 	SalesProjectionFreshness(ctx context.Context) (FreshnessRow, error)
+	RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
+	RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]RefundDailyRow, error)
+	RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
+	RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
+	RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
+	RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCashierRow, error)
+	RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundChannelRow, error)
+	ReturnProjectionFreshness(ctx context.Context) (ReturnFreshnessRow, error)
 }
 
 // Service is the reusable reporting authority for dashboards and jobs.
@@ -311,6 +429,32 @@ func ParseDimension(d string) (string, error) {
 	}
 }
 
+// subChecked/subtracts with overflow failure (net may be negative, but
+// must never wrap).
+func subChecked(a, b int64) (int64, error) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	const minInt64 = -maxInt64 - 1
+	if b > 0 && a < minInt64+b {
+		return 0, fmt.Errorf("overflow")
+	}
+	if b < 0 && a > maxInt64+b {
+		return 0, fmt.Errorf("overflow")
+	}
+	return a - b, nil
+}
+
+func addChecked(a, b int64) (int64, error) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	const minInt64 = -maxInt64 - 1
+	if b > 0 && a > maxInt64-b {
+		return 0, fmt.Errorf("overflow")
+	}
+	if b < 0 && a < minInt64-b {
+		return 0, fmt.Errorf("overflow")
+	}
+	return a + b, nil
+}
+
 func metaOf(p Period, loc *time.Location) PeriodMeta {
 	const layout = "2006-01-02T15:04:05.999999999Z07:00"
 	return PeriodMeta{
@@ -321,12 +465,20 @@ func metaOf(p Period, loc *time.Location) PeriodMeta {
 }
 
 // Summary assembles the sales summary with currency buckets + freshness.
+// Gross sale semantics are frozen; refund/net fields merge additively from
+// the return projection (checked arithmetic, never clamped, net may be
+// negative). TransactionCount/UnitsSold stay sale-only; return activity
+// rides in ReturnTransactionCount/UnitsReturned.
 func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 	rows, err := s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return Summary{}, err
 	}
 	pays, err := s.repo.SalesPayments(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	if err != nil {
+		return Summary{}, err
+	}
+	refunds, err := s.repo.RefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -339,6 +491,7 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 		Period: metaOf(req.Period, s.loc), Freshness: fresh,
 		CurrencyTotals: []CurrencyTotal{}, PaymentTotals: []PaymentTotal{},
 	}
+	byCurrency := map[string]int{}
 	for _, r := range rows {
 		out.TransactionCount += r.Transactions
 		out.UnitsSold += r.Units
@@ -346,6 +499,34 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 			Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
 			TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal, LineCostMinor: r.LineCost,
 		})
+		byCurrency[r.Currency] = len(out.CurrencyTotals) - 1
+	}
+	for _, r := range refunds {
+		out.ReturnTransactionCount += r.Transactions
+		out.UnitsReturned += r.Units
+		i, ok := byCurrency[r.Currency]
+		if !ok {
+			out.CurrencyTotals = append(out.CurrencyTotals, CurrencyTotal{Currency: r.Currency})
+			i = len(out.CurrencyTotals) - 1
+			byCurrency[r.Currency] = i
+		}
+		bucket := &out.CurrencyTotals[i]
+		bucket.RefundTotalMinor = r.RefundTotal
+		bucket.ReturnedUnits = r.Units
+		bucket.ReturnedCostMinor = r.ReturnedCost
+	}
+	for i := range out.CurrencyTotals {
+		bucket := &out.CurrencyTotals[i]
+		net, err := subChecked(bucket.SalesTotalMinor, bucket.RefundTotalMinor)
+		if err != nil {
+			return Summary{}, err
+		}
+		bucket.NetSalesMinor = net
+		netCost, err := subChecked(bucket.LineCostMinor, bucket.ReturnedCostMinor)
+		if err != nil {
+			return Summary{}, err
+		}
+		bucket.NetCostMinor = netCost
 	}
 	for _, p := range pays {
 		out.PaymentTotals = append(out.PaymentTotals, PaymentTotal{
@@ -356,9 +537,15 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 	return out, nil
 }
 
-// Daily assembles the per-day series in ascending date order.
+// Daily assembles the per-day series in ascending date order. Refund-only
+// days create their own rows (a day with refunds but no sales is real
+// activity); net may be negative and is never clamped.
 func (s Service) Daily(ctx context.Context, req Request) (Daily, error) {
 	rows, err := s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
+	if err != nil {
+		return Daily{}, err
+	}
+	refundRows, err := s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
 	if err != nil {
 		return Daily{}, err
 	}
@@ -366,32 +553,78 @@ func (s Service) Daily(ctx context.Context, req Request) (Daily, error) {
 	if err != nil {
 		return Daily{}, err
 	}
-	byDay := map[string]*DailyRow{}
-	order := []string{}
-	for _, r := range rows {
-		day, ok := byDay[r.Date]
-		if !ok {
-			day = &DailyRow{Date: r.Date, CurrencyTotals: []CurrencyTotal{}}
-			byDay[r.Date] = day
-			order = append(order, r.Date)
-		}
-		day.Transactions += r.Transactions
-		day.Units += r.Units
-		day.CurrencyTotals = append(day.CurrencyTotals, CurrencyTotal{
-			Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
-			TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal, LineCostMinor: r.LineCost,
-		})
-	}
-	sort.Strings(order)
 	out := Daily{
 		GeneratedAt: req.now, Timezone: req.Period.Timezone,
 		Period: metaOf(req.Period, s.loc), Freshness: fresh, Days: []DailyRow{},
 	}
-	for _, d := range order {
-		sortCurrencyTotals(byDay[d].CurrencyTotals)
-		out.Days = append(out.Days, *byDay[d])
+	byDay := map[string]int{}
+	byBucket := map[string]map[string]int{}
+	order := []string{}
+	dayOf := func(date string) int {
+		i, ok := byDay[date]
+		if !ok {
+			out.Days = append(out.Days, DailyRow{Date: date, CurrencyTotals: []CurrencyTotal{}})
+			i = len(out.Days) - 1
+			byDay[date] = i
+			order = append(order, date)
+			byBucket[date] = map[string]int{}
+		}
+		return i
 	}
-	return out, nil
+	bucketOf := func(date, currency string) *CurrencyTotal {
+		di := dayOf(date)
+		if bi, ok := byBucket[date][currency]; ok {
+			return &out.Days[di].CurrencyTotals[bi]
+		}
+		out.Days[di].CurrencyTotals = append(out.Days[di].CurrencyTotals, CurrencyTotal{Currency: currency})
+		bi := len(out.Days[di].CurrencyTotals) - 1
+		byBucket[date][currency] = bi
+		return &out.Days[di].CurrencyTotals[bi]
+	}
+	for _, r := range rows {
+		di := dayOf(r.Date)
+		out.Days[di].Transactions += r.Transactions
+		out.Days[di].Units += r.Units
+		bucket := bucketOf(r.Date, r.Currency)
+		bucket.SubtotalMinor = r.Subtotal
+		bucket.DiscountMinor = r.Discount
+		bucket.TaxMinor = r.Tax
+		bucket.SalesTotalMinor = r.SalesTotal
+		bucket.LineCostMinor = r.LineCost
+	}
+	for _, r := range refundRows {
+		di := dayOf(r.Date)
+		out.Days[di].ReturnTransactions += r.Transactions
+		out.Days[di].UnitsReturned += r.Units
+		bucket := bucketOf(r.Date, r.Currency)
+		bucket.RefundTotalMinor = r.RefundTotal
+		bucket.ReturnedUnits = r.Units
+		bucket.ReturnedCostMinor = r.ReturnedCost
+	}
+	sort.Strings(order)
+	ordered := Daily{
+		GeneratedAt: req.now, Timezone: req.Period.Timezone,
+		Period: metaOf(req.Period, s.loc), Freshness: fresh, Days: []DailyRow{},
+	}
+	for _, d := range order {
+		day := out.Days[byDay[d]]
+		for i := range day.CurrencyTotals {
+			bucket := &day.CurrencyTotals[i]
+			net, err := subChecked(bucket.SalesTotalMinor, bucket.RefundTotalMinor)
+			if err != nil {
+				return Daily{}, err
+			}
+			bucket.NetSalesMinor = net
+			netCost, err := subChecked(bucket.LineCostMinor, bucket.ReturnedCostMinor)
+			if err != nil {
+				return Daily{}, err
+			}
+			bucket.NetCostMinor = netCost
+		}
+		sortCurrencyTotals(day.CurrencyTotals)
+		ordered.Days = append(ordered.Days, day)
+	}
+	return ordered, nil
 }
 
 // Breakdown assembles one fixed dimension via its static query.
@@ -411,51 +644,127 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		if err != nil {
 			return Breakdown{}, err
 		}
+		refundRows, err := s.repo.RefundsByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		// Rows are heap-allocated (pointers stay valid); per-currency
+		// entry indexes avoid dangling across LineSales appends.
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
-		for _, r := range rows {
-			key := ptrStr(r.ProductID) + "\x00" + r.SKU + "\x00" + r.ProductName
+		lineEntry := map[string]map[string]int{}
+		getRow := func(key string, fill func(*BreakdownRow)) *BreakdownRow {
 			row, ok := byKey[key]
 			if !ok {
-				row = &BreakdownRow{Dimension: dimension, ProductID: r.ProductID,
-					SKU: strPtr(r.SKU), ProductName: strPtr(r.ProductName), LineSales: []LineSaleTotal{}}
+				row = &BreakdownRow{Dimension: dimension, LineSales: []LineSaleTotal{}}
+				fill(row)
 				byKey[key] = row
 				order = append(order, key)
+				lineEntry[key] = map[string]int{}
 			}
+			return row
+		}
+		entryOf := func(key, currency string) *LineSaleTotal {
+			row := byKey[key]
+			if ei, ok := lineEntry[key][currency]; ok {
+				return &row.LineSales[ei]
+			}
+			row.LineSales = append(row.LineSales, LineSaleTotal{Currency: currency})
+			ei := len(row.LineSales) - 1
+			lineEntry[key][currency] = ei
+			return &row.LineSales[ei]
+		}
+		for _, r := range rows {
+			key := ptrStr(r.ProductID) + "\x00" + r.SKU + "\x00" + r.ProductName
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ProductID, row.SKU, row.ProductName = r.ProductID, strPtr(r.SKU), strPtr(r.ProductName)
+			})
 			row.Units += r.Units
-			row.LineSales = append(row.LineSales, LineSaleTotal{
-				Currency: r.Currency, LineSalesMinor: r.LineSales, LineCostMinor: r.LineCost})
+			entry := entryOf(key, r.Currency)
+			entry.LineSalesMinor = r.LineSales
+			entry.LineCostMinor = r.LineCost
+		}
+		for _, r := range refundRows {
+			key := ptrStr(r.ProductID) + "\x00" + r.SKU + "\x00" + r.ProductName
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ProductID, row.SKU, row.ProductName = r.ProductID, strPtr(r.SKU), strPtr(r.ProductName)
+			})
+			row.UnitsReturned += r.Units
+			entry := entryOf(key, r.Currency)
+			entry.LineRefundMinor = r.Refund
+			entry.LineReturnedCostMinor = r.ReturnedCost
+		}
+		for _, row := range byKey {
+			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
 		out.Rows = sortProductRows(byKey, order)
 	case DimensionRootCategory, DimensionSubcategory:
 		var rows []CategoryRow
+		var refundRows []RefundCategoryRow
 		if dimension == DimensionRootCategory {
 			rows, err = s.repo.SalesByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+			if err != nil {
+				return Breakdown{}, err
+			}
+			refundRows, err = s.repo.RefundsByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		} else {
 			rows, err = s.repo.SalesBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+			if err != nil {
+				return Breakdown{}, err
+			}
+			refundRows, err = s.repo.RefundsBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		}
 		if err != nil {
 			return Breakdown{}, err
 		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
+		lineEntry := map[string]map[string]int{}
+		getRow := func(key string, fill func(*BreakdownRow)) *BreakdownRow {
+			row, ok := byKey[key]
+			if !ok {
+				row = &BreakdownRow{Dimension: dimension, LineSales: []LineSaleTotal{}}
+				fill(row)
+				byKey[key] = row
+				order = append(order, key)
+				lineEntry[key] = map[string]int{}
+			}
+			return row
+		}
 		for _, r := range rows {
 			// Snapshot identity: kind + id + both historical names.
 			// Renamed snapshots of one category stay separate rows;
 			// buckets merge only within exact snapshot identity.
 			key := r.Kind + "\x00" + r.ID + "\x00" + r.NameAR + "\x00" + r.NameEN
-			row, ok := byKey[key]
-			if !ok {
-				kind, id, ar, en := r.Kind, r.ID, r.NameAR, r.NameEN
-				row = &BreakdownRow{Dimension: dimension,
-					ClassificationKind: &kind, ClassificationID: &id,
-					NameAR: &ar, NameEN: &en, LineSales: []LineSaleTotal{}}
-				byKey[key] = row
-				order = append(order, key)
-			}
+			kind, id, ar, en := r.Kind, r.ID, r.NameAR, r.NameEN
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ClassificationKind, row.ClassificationID = &kind, &id
+				row.NameAR, row.NameEN = &ar, &en
+			})
 			row.Units += r.Units
 			row.LineSales = append(row.LineSales, LineSaleTotal{
 				Currency: r.Currency, LineSalesMinor: r.Sales, LineCostMinor: r.Cost})
+			lineEntry[key][r.Currency] = len(row.LineSales) - 1
+		}
+		for _, r := range refundRows {
+			key := r.Kind + "\x00" + r.ID + "\x00" + r.NameAR + "\x00" + r.NameEN
+			kind, id, ar, en := r.Kind, r.ID, r.NameAR, r.NameEN
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ClassificationKind, row.ClassificationID = &kind, &id
+				row.NameAR, row.NameEN = &ar, &en
+			})
+			row.UnitsReturned += r.Units
+			ei, ok := lineEntry[key][r.Currency]
+			if !ok {
+				row.LineSales = append(row.LineSales, LineSaleTotal{Currency: r.Currency})
+				ei = len(row.LineSales) - 1
+				lineEntry[key][r.Currency] = ei
+			}
+			row.LineSales[ei].LineRefundMinor = r.Refund
+			row.LineSales[ei].LineReturnedCostMinor = r.ReturnedCost
+		}
+		for _, row := range byKey {
+			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
 		out.Rows = sortCategoryRows(byKey, order)
 	case DimensionCashier:
@@ -463,25 +772,63 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		if err != nil {
 			return Breakdown{}, err
 		}
+		refundRows, err := s.repo.RefundsByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if err != nil {
+			return Breakdown{}, err
+		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
-		for _, r := range rows {
-			// Explicit null bucket: unattributed sales group under "".
-			key := ptrStr(r.CashierID) + "\x00" + ptrStr(r.CashierName)
+		bucketOf := map[string]map[string]int{}
+		getRow := func(key string, fill func(*BreakdownRow)) *BreakdownRow {
 			row, ok := byKey[key]
 			if !ok {
-				row = &BreakdownRow{Dimension: dimension,
-					CashierID: r.CashierID, CashierName: r.CashierName}
+				row = &BreakdownRow{Dimension: dimension}
+				fill(row)
 				byKey[key] = row
 				order = append(order, key)
+				bucketOf[key] = map[string]int{}
 			}
+			return row
+		}
+		for _, r := range rows {
+			// Explicit null bucket: unattributed sales group under "".
+			// Refunds attribute to the ORIGINAL sale cashier (net
+			// performance); the return-processing actor is surfaced in
+			// activity feeds, never subtracted from another cashier.
+			key := ptrStr(r.CashierID) + "\x00" + ptrStr(r.CashierName)
+			row := getRow(key, func(row *BreakdownRow) {
+				row.CashierID, row.CashierName = r.CashierID, r.CashierName
+			})
 			row.Units += r.Units
 			row.Transactions += r.Transactions
 			row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{
 				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
 				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
+			bucketOf[key][r.Currency] = len(row.CurrencyTotals) - 1
+		}
+		for _, r := range refundRows {
+			key := ptrStr(r.CashierID) + "\x00" + ptrStr(r.CashierName)
+			row := getRow(key, func(row *BreakdownRow) {
+				row.CashierID, row.CashierName = r.CashierID, r.CashierName
+			})
+			row.UnitsReturned += r.Units
+			row.ReturnTransactions += r.Transactions
+			ei, ok := bucketOf[key][r.Currency]
+			if !ok {
+				row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{Currency: r.Currency})
+				ei = len(row.CurrencyTotals) - 1
+				bucketOf[key][r.Currency] = ei
+			}
+			row.CurrencyTotals[ei].RefundTotalMinor = r.RefundTotal
 		}
 		for _, row := range byKey {
+			for i := range row.CurrencyTotals {
+				net, err := subChecked(row.CurrencyTotals[i].SalesTotalMinor, row.CurrencyTotals[i].RefundTotalMinor)
+				if err != nil {
+					return Breakdown{}, err
+				}
+				row.CurrencyTotals[i].NetSalesMinor = net
+			}
 			sortSaleCurrencyTotals(row.CurrencyTotals)
 		}
 		out.Rows = sortCashierRows(byKey, order)
@@ -492,6 +839,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
+		refundRows, err := s.repo.RefundsByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		bucketOf := map[string]map[string]int{}
 		for _, r := range rows {
 			row, ok := byKey[r.Channel]
 			if !ok {
@@ -499,14 +851,43 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 				row = &BreakdownRow{Dimension: dimension, Channel: &ch}
 				byKey[r.Channel] = row
 				order = append(order, r.Channel)
+				bucketOf[r.Channel] = map[string]int{}
 			}
 			row.Units += r.Units
 			row.Transactions += r.Transactions
 			row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{
 				Currency: r.Currency, SubtotalMinor: r.Subtotal, DiscountMinor: r.Discount,
 				TaxMinor: r.Tax, SalesTotalMinor: r.SalesTotal})
+			bucketOf[r.Channel][r.Currency] = len(row.CurrencyTotals) - 1
+		}
+		for _, r := range refundRows {
+			// Channel attribution follows the original sale channel.
+			row, ok := byKey[r.Channel]
+			if !ok {
+				ch := r.Channel
+				row = &BreakdownRow{Dimension: dimension, Channel: &ch}
+				byKey[r.Channel] = row
+				order = append(order, r.Channel)
+				bucketOf[r.Channel] = map[string]int{}
+			}
+			row.UnitsReturned += r.Units
+			row.ReturnTransactions += r.Transactions
+			ei, ok := bucketOf[r.Channel][r.Currency]
+			if !ok {
+				row.CurrencyTotals = append(row.CurrencyTotals, SaleCurrencyTotal{Currency: r.Currency})
+				ei = len(row.CurrencyTotals) - 1
+				bucketOf[r.Channel][r.Currency] = ei
+			}
+			row.CurrencyTotals[ei].RefundTotalMinor = r.RefundTotal
 		}
 		for _, row := range byKey {
+			for i := range row.CurrencyTotals {
+				net, err := subChecked(row.CurrencyTotals[i].SalesTotalMinor, row.CurrencyTotals[i].RefundTotalMinor)
+				if err != nil {
+					return Breakdown{}, err
+				}
+				row.CurrencyTotals[i].NetSalesMinor = net
+			}
 			sortSaleCurrencyTotals(row.CurrencyTotals)
 		}
 		for _, k := range order {
@@ -527,12 +908,21 @@ func (s Service) freshness(ctx context.Context) (Freshness, error) {
 	if err != nil {
 		return Freshness{}, err
 	}
+	ret, err := s.repo.ReturnProjectionFreshness(ctx)
+	if err != nil {
+		return Freshness{}, err
+	}
 	return Freshness{
-		LatestSaleEventReceivedAt:     row.LatestReceivedAt,
-		LatestProjectedSaleOccurredAt: row.LatestOccurredAt,
-		ProjectionBacklogCount:        row.Backlog,
-		BlockedSaleEventCount:         row.Blocked,
-		CloudProjectionComplete:       row.Backlog == 0,
+		LatestSaleEventReceivedAt:       row.LatestReceivedAt,
+		LatestProjectedSaleOccurredAt:   row.LatestOccurredAt,
+		ProjectionBacklogCount:          row.Backlog,
+		BlockedSaleEventCount:           row.Blocked,
+		CloudProjectionComplete:         row.Backlog == 0,
+		LatestReturnEventReceivedAt:     ret.LatestReceivedAt,
+		LatestProjectedReturnOccurredAt: ret.LatestOccurredAt,
+		ReturnBacklogCount:              ret.Backlog,
+		ReturnBlockedCount:              ret.Blocked,
+		ReturnProjectionComplete:        ret.Backlog == 0,
 	}, nil
 }
 

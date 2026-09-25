@@ -42,6 +42,410 @@ func (q *Queries) ReportFreshness(ctx context.Context, processor string) (Report
 	return i, err
 }
 
+const reportRefundsByCashier = `-- name: ReportRefundsByCashier :many
+SELECT s.cashier_id, s.cashier_name, r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY s.cashier_id, s.cashier_name, r.currency
+`
+
+type ReportRefundsByCashierParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByCashierRow struct {
+	CashierID    pgtype.Text `json:"cashier_id"`
+	CashierName  pgtype.Text `json:"cashier_name"`
+	Currency     string      `json:"currency"`
+	Transactions int64       `json:"transactions"`
+	Units        int64       `json:"units"`
+	RefundTotal  int64       `json:"refund_total"`
+}
+
+func (q *Queries) ReportRefundsByCashier(ctx context.Context, arg ReportRefundsByCashierParams) ([]ReportRefundsByCashierRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByCashier, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByCashierRow{}
+	for rows.Next() {
+		var i ReportRefundsByCashierRow
+		if err := rows.Scan(
+			&i.CashierID,
+			&i.CashierName,
+			&i.Currency,
+			&i.Transactions,
+			&i.Units,
+			&i.RefundTotal,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsByCategory = `-- name: ReportRefundsByCategory :many
+SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,
+ l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM sale_line_classifications_projection c
+JOIN return_refund_lines_projection l
+  ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND c.classification_kind = $3::text
+ AND ($4::text = '' OR l.refund_currency = $4::text)
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.refund_currency
+`
+
+type ReportRefundsByCategoryParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Kind     string             `json:"kind"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByCategoryRow struct {
+	Kind         string      `json:"kind"`
+	ID           pgtype.UUID `json:"id"`
+	NameAr       string      `json:"name_ar"`
+	NameEn       string      `json:"name_en"`
+	Currency     string      `json:"currency"`
+	Units        int64       `json:"units"`
+	Refund       int64       `json:"refund"`
+	ReturnedCost int64       `json:"returned_cost"`
+}
+
+func (q *Queries) ReportRefundsByCategory(ctx context.Context, arg ReportRefundsByCategoryParams) ([]ReportRefundsByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByCategory,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.Kind,
+		arg.Currency,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByCategoryRow{}
+	for rows.Next() {
+		var i ReportRefundsByCategoryRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.ID,
+			&i.NameAr,
+			&i.NameEn,
+			&i.Currency,
+			&i.Units,
+			&i.Refund,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsByChannel = `-- name: ReportRefundsByChannel :many
+SELECT s.channel, r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY s.channel, r.currency
+`
+
+type ReportRefundsByChannelParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByChannelRow struct {
+	Channel      string `json:"channel"`
+	Currency     string `json:"currency"`
+	Transactions int64  `json:"transactions"`
+	Units        int64  `json:"units"`
+	RefundTotal  int64  `json:"refund_total"`
+}
+
+func (q *Queries) ReportRefundsByChannel(ctx context.Context, arg ReportRefundsByChannelParams) ([]ReportRefundsByChannelRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByChannel, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByChannelRow{}
+	for rows.Next() {
+		var i ReportRefundsByChannelRow
+		if err := rows.Scan(
+			&i.Channel,
+			&i.Currency,
+			&i.Transactions,
+			&i.Units,
+			&i.RefundTotal,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsByProduct = `-- name: ReportRefundsByProduct :many
+SELECT sl.product_id, sl.sku, sl.product_name, l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR l.refund_currency = $3::text)
+GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency
+`
+
+type ReportRefundsByProductParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByProductRow struct {
+	ProductID    pgtype.UUID `json:"product_id"`
+	Sku          string      `json:"sku"`
+	ProductName  string      `json:"product_name"`
+	Currency     string      `json:"currency"`
+	Units        int64       `json:"units"`
+	Refund       int64       `json:"refund"`
+	ReturnedCost int64       `json:"returned_cost"`
+}
+
+func (q *Queries) ReportRefundsByProduct(ctx context.Context, arg ReportRefundsByProductParams) ([]ReportRefundsByProductRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByProduct, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByProductRow{}
+	for rows.Next() {
+		var i ReportRefundsByProductRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.Sku,
+			&i.ProductName,
+			&i.Currency,
+			&i.Units,
+			&i.Refund,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsDaily = `-- name: ReportRefundsDaily :many
+SELECT ((r.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
+ r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+ COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $2 AND r.occurred_at < $3
+ AND ($4::text = '' OR r.currency = $4::text)
+GROUP BY 1, r.currency ORDER BY 1, r.currency
+`
+
+type ReportRefundsDailyParams struct {
+	Timezone string             `json:"timezone"`
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsDailyRow struct {
+	Day          string `json:"day"`
+	Currency     string `json:"currency"`
+	Transactions int64  `json:"transactions"`
+	Units        int64  `json:"units"`
+	RefundTotal  int64  `json:"refund_total"`
+	ReturnedCost int64  `json:"returned_cost"`
+}
+
+func (q *Queries) ReportRefundsDaily(ctx context.Context, arg ReportRefundsDailyParams) ([]ReportRefundsDailyRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsDaily,
+		arg.Timezone,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.Currency,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsDailyRow{}
+	for rows.Next() {
+		var i ReportRefundsDailyRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Currency,
+			&i.Transactions,
+			&i.Units,
+			&i.RefundTotal,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsSummary = `-- name: ReportRefundsSummary :many
+
+SELECT r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.gross_refunded_minor), 0)::bigint AS gross_refunded,
+ COALESCE(SUM(r.discount_refunded_minor), 0)::bigint AS discount_refunded,
+ COALESCE(SUM(r.tax_refunded_minor), 0)::bigint AS tax_refunded,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+ COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY r.currency ORDER BY r.currency
+`
+
+type ReportRefundsSummaryParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsSummaryRow struct {
+	Currency         string `json:"currency"`
+	Transactions     int64  `json:"transactions"`
+	Units            int64  `json:"units"`
+	GrossRefunded    int64  `json:"gross_refunded"`
+	DiscountRefunded int64  `json:"discount_refunded"`
+	TaxRefunded      int64  `json:"tax_refunded"`
+	RefundTotal      int64  `json:"refund_total"`
+	ReturnedCost     int64  `json:"returned_cost"`
+}
+
+// Phase 4B return/refund aggregates. Same conventions as the frozen sale
+// queries: half-open [start, end) on the RETURN occurred_at (business
+// time, never transport), numeric SUM with bigint overflow failure, no
+// dynamic SQL, currency ” means all (rows stay bucketed, never summed).
+// Refunds expose reversal economics; net is derived by merging with the
+// frozen gross queries in Go (checked integer arithmetic, never clamped).
+func (q *Queries) ReportRefundsSummary(ctx context.Context, arg ReportRefundsSummaryParams) ([]ReportRefundsSummaryRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsSummary, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsSummaryRow{}
+	for rows.Next() {
+		var i ReportRefundsSummaryRow
+		if err := rows.Scan(
+			&i.Currency,
+			&i.Transactions,
+			&i.Units,
+			&i.GrossRefunded,
+			&i.DiscountRefunded,
+			&i.TaxRefunded,
+			&i.RefundTotal,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportReturnFreshness = `-- name: ReportReturnFreshness :one
+SELECT (SELECT max(received_at)::timestamptz FROM sync_events WHERE event_type = 'sale.return_refund.finalized.v1') AS latest_received,
+ (SELECT max(occurred_at)::timestamptz FROM return_refund_projection) AS latest_occurred,
+ (SELECT count(*) FROM sync_events e WHERE e.event_type = 'sale.return_refund.finalized.v1' AND NOT EXISTS (SELECT 1 FROM sync_event_processing p WHERE p.event_id = e.event_id AND p.processor = 'return_refund_projection.v1' AND p.status IN ('processed', 'blocked'))) AS backlog,
+ (SELECT count(*) FROM sync_event_processing WHERE processor = 'return_refund_projection.v1' AND status = 'blocked') AS blocked
+`
+
+type ReportReturnFreshnessRow struct {
+	LatestReceived pgtype.Timestamptz `json:"latest_received"`
+	LatestOccurred pgtype.Timestamptz `json:"latest_occurred"`
+	Backlog        int64              `json:"backlog"`
+	Blocked        int64              `json:"blocked"`
+}
+
+func (q *Queries) ReportReturnFreshness(ctx context.Context) (ReportReturnFreshnessRow, error) {
+	row := q.db.QueryRow(ctx, reportReturnFreshness)
+	var i ReportReturnFreshnessRow
+	err := row.Scan(
+		&i.LatestReceived,
+		&i.LatestOccurred,
+		&i.Backlog,
+		&i.Blocked,
+	)
+	return i, err
+}
+
 const reportSalesByCashier = `-- name: ReportSalesByCashier :many
 SELECT s.cashier_id, s.cashier_name, s.currency,
     count(*)::bigint AS transactions,

@@ -16,8 +16,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TargetVersion is the schema version Phase 2E code requires.
-const TargetVersion int64 = 7
+// TargetVersion is the schema version Phase 4B code requires.
+const TargetVersion int64 = 8
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())

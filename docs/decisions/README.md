@@ -28,3 +28,4 @@ Concise, irreversible-or-important choices only.
 - [0024](0024-dashboard-review-remediation.md) — dashboard review remediation (3B-R)
 - [0025](0025-dashboard-freeze-remediation.md) — dashboard freeze remediation (3B-R2)
 - [0026](0026-return-refund-sync.md) — returns & refunds sync contract (4A)
+- [0027](0027-return-projection-reporting.md) — returns/refunds projection & reporting integration (4B)

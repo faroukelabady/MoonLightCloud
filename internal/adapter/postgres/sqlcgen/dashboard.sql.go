@@ -156,6 +156,66 @@ func (q *Queries) DashboardCategoriesNormalized(ctx context.Context, arg Dashboa
 	return items, nil
 }
 
+const dashboardCategoriesNormalizedRefunds = `-- name: DashboardCategoriesNormalizedRefunds :many
+SELECT c.classification_kind AS kind, c.classification_id AS id,
+    c.name_ar, c.name_en,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM sale_line_classifications_projection c
+JOIN return_refund_lines_projection l
+  ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+  AND c.classification_kind = $3::text
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en
+`
+
+type DashboardCategoriesNormalizedRefundsParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Kind     string             `json:"kind"`
+}
+
+type DashboardCategoriesNormalizedRefundsRow struct {
+	Kind             string      `json:"kind"`
+	ID               pgtype.UUID `json:"id"`
+	NameAr           string      `json:"name_ar"`
+	NameEn           string      `json:"name_en"`
+	Units            int64       `json:"units"`
+	NormalizedRefund int64       `json:"normalized_refund"`
+	MissingFx        int64       `json:"missing_fx"`
+}
+
+func (q *Queries) DashboardCategoriesNormalizedRefunds(ctx context.Context, arg DashboardCategoriesNormalizedRefundsParams) ([]DashboardCategoriesNormalizedRefundsRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCategoriesNormalizedRefunds, arg.StartUtc, arg.EndUtc, arg.Kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardCategoriesNormalizedRefundsRow{}
+	for rows.Next() {
+		var i DashboardCategoriesNormalizedRefundsRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.ID,
+			&i.NameAr,
+			&i.NameEn,
+			&i.Units,
+			&i.NormalizedRefund,
+			&i.MissingFx,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardLatestFx = `-- name: DashboardLatestFx :one
 SELECT
     (SELECT s.fx_rate FROM sales_projection s
@@ -326,6 +386,121 @@ func (q *Queries) DashboardNormalizedDaily(ctx context.Context, arg DashboardNor
 	return items, nil
 }
 
+const dashboardNormalizedRefundsDaily = `-- name: DashboardNormalizedRefundsDaily :many
+SELECT day.day AS day,
+    COUNT(*)::bigint AS transactions,
+    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_refund,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COUNT(*) FILTER (WHERE day.usd_missing_fx)::bigint AS usd_missing_fx
+FROM (
+    SELECT r.return_refund_id,
+        ((r.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
+        round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END) AS normalized,
+        (r.currency = 'USD' AND r.fx_rate_microrate IS NULL) AS usd_missing_fx
+    FROM return_refund_projection r
+    WHERE r.occurred_at >= $2 AND r.occurred_at < $3
+) day
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = day.return_refund_id
+GROUP BY day.day
+ORDER BY day.day
+`
+
+type DashboardNormalizedRefundsDailyParams struct {
+	Timezone string             `json:"timezone"`
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+}
+
+type DashboardNormalizedRefundsDailyRow struct {
+	Day              string `json:"day"`
+	Transactions     int64  `json:"transactions"`
+	NormalizedRefund int64  `json:"normalized_refund"`
+	Units            int64  `json:"units"`
+	UsdMissingFx     int64  `json:"usd_missing_fx"`
+}
+
+func (q *Queries) DashboardNormalizedRefundsDaily(ctx context.Context, arg DashboardNormalizedRefundsDailyParams) ([]DashboardNormalizedRefundsDailyRow, error) {
+	rows, err := q.db.Query(ctx, dashboardNormalizedRefundsDaily, arg.Timezone, arg.StartUtc, arg.EndUtc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardNormalizedRefundsDailyRow{}
+	for rows.Next() {
+		var i DashboardNormalizedRefundsDailyRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Transactions,
+			&i.NormalizedRefund,
+			&i.Units,
+			&i.UsdMissingFx,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const dashboardNormalizedRefundsSummary = `-- name: DashboardNormalizedRefundsSummary :one
+
+SELECT
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE r.currency = 'USD')::bigint AS usd_returns,
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS usd_missing_fx
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+`
+
+type DashboardNormalizedRefundsSummaryParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+}
+
+type DashboardNormalizedRefundsSummaryRow struct {
+	Transactions     int64 `json:"transactions"`
+	Units            int64 `json:"units"`
+	NormalizedRefund int64 `json:"normalized_refund"`
+	UsdReturns       int64 `json:"usd_returns"`
+	UsdMissingFx     int64 `json:"usd_missing_fx"`
+}
+
+// Phase 4B return/refund aggregates. Same conventions as the frozen sale
+// queries: half-open [start, end) on the RETURN occurred_at, atomic
+// per-event historical FX normalization (round once with round(numeric),
+// half away from zero, BEFORE aggregation), exact integer math with bigint
+// overflow failure, no dynamic SQL. Refunds attribute to the historical
+// sale snapshots (product, category, shop, channel, cashier); the return
+// event contributes business identity, quantities, and reversal economics.
+func (q *Queries) DashboardNormalizedRefundsSummary(ctx context.Context, arg DashboardNormalizedRefundsSummaryParams) (DashboardNormalizedRefundsSummaryRow, error) {
+	row := q.db.QueryRow(ctx, dashboardNormalizedRefundsSummary, arg.StartUtc, arg.EndUtc)
+	var i DashboardNormalizedRefundsSummaryRow
+	err := row.Scan(
+		&i.Transactions,
+		&i.Units,
+		&i.NormalizedRefund,
+		&i.UsdReturns,
+		&i.UsdMissingFx,
+	)
+	return i, err
+}
+
 const dashboardNormalizedSummary = `-- name: DashboardNormalizedSummary :one
 
 SELECT
@@ -434,6 +609,61 @@ func (q *Queries) DashboardProductsNormalized(ctx context.Context, arg Dashboard
 	return items, nil
 }
 
+const dashboardProductsNormalizedRefunds = `-- name: DashboardProductsNormalizedRefunds :many
+SELECT sl.product_id, sl.sku, sl.product_name,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+GROUP BY sl.product_id, sl.sku, sl.product_name
+`
+
+type DashboardProductsNormalizedRefundsParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+}
+
+type DashboardProductsNormalizedRefundsRow struct {
+	ProductID        pgtype.UUID `json:"product_id"`
+	Sku              string      `json:"sku"`
+	ProductName      string      `json:"product_name"`
+	Units            int64       `json:"units"`
+	NormalizedRefund int64       `json:"normalized_refund"`
+	MissingFx        int64       `json:"missing_fx"`
+}
+
+func (q *Queries) DashboardProductsNormalizedRefunds(ctx context.Context, arg DashboardProductsNormalizedRefundsParams) ([]DashboardProductsNormalizedRefundsRow, error) {
+	rows, err := q.db.Query(ctx, dashboardProductsNormalizedRefunds, arg.StartUtc, arg.EndUtc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardProductsNormalizedRefundsRow{}
+	for rows.Next() {
+		var i DashboardProductsNormalizedRefundsRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.Sku,
+			&i.ProductName,
+			&i.Units,
+			&i.NormalizedRefund,
+			&i.MissingFx,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardRecentActivity = `-- name: DashboardRecentActivity :many
 SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     (SELECT 'accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,
@@ -451,6 +681,24 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     JOIN sync_events e ON e.event_id = p.event_id
     LEFT JOIN devices d ON d.id = e.device_id
     WHERE p.processor = 'sale_projection.v1' AND p.status IN ('processed', 'blocked')
+    ORDER BY ts DESC, kind ASC, event_id ASC
+    LIMIT $1::int)
+    UNION ALL
+    (SELECT 'return_accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,
+        d.name AS device_name, NULL::text AS detail
+    FROM sync_events e
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.event_type = 'sale.return_refund.finalized.v1'
+    ORDER BY e.received_at DESC, e.event_id ASC
+    LIMIT $1::int)
+    UNION ALL
+    (SELECT CASE WHEN p.status = 'blocked' THEN 'return_blocked'::text ELSE 'return_projected'::text END AS kind,
+        p.event_id, e.event_type, COALESCE(p.processed_at, p.updated_at) AS ts,
+        d.name AS device_name, p.last_error_code AS detail
+    FROM sync_event_processing p
+    JOIN sync_events e ON e.event_id = p.event_id
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE p.processor = 'return_refund_projection.v1' AND p.status IN ('processed', 'blocked')
     ORDER BY ts DESC, kind ASC, event_id ASC
     LIMIT $1::int)
 ) feed
@@ -483,6 +731,87 @@ func (q *Queries) DashboardRecentActivity(ctx context.Context, limitN int32) ([]
 			&i.Ts,
 			&i.DeviceName,
 			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const dashboardReturnBranches = `-- name: DashboardReturnBranches :many
+SELECT s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+  AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency
+`
+
+type DashboardReturnBranchesParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type DashboardReturnBranchesRow struct {
+	Channel             string `json:"channel"`
+	ShopNameAr          string `json:"shop_name_ar"`
+	ShopNameEn          string `json:"shop_name_en"`
+	ShopAddressAr       string `json:"shop_address_ar"`
+	ShopAddressEn       string `json:"shop_address_en"`
+	ShopPhone           string `json:"shop_phone"`
+	ShopReceiptFooterAr string `json:"shop_receipt_footer_ar"`
+	ShopReceiptFooterEn string `json:"shop_receipt_footer_en"`
+	Currency            string `json:"currency"`
+	Transactions        int64  `json:"transactions"`
+	Units               int64  `json:"units"`
+	RefundTotal         int64  `json:"refund_total"`
+	ReturnedCost        int64  `json:"returned_cost"`
+}
+
+func (q *Queries) DashboardReturnBranches(ctx context.Context, arg DashboardReturnBranchesParams) ([]DashboardReturnBranchesRow, error) {
+	rows, err := q.db.Query(ctx, dashboardReturnBranches, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardReturnBranchesRow{}
+	for rows.Next() {
+		var i DashboardReturnBranchesRow
+		if err := rows.Scan(
+			&i.Channel,
+			&i.ShopNameAr,
+			&i.ShopNameEn,
+			&i.ShopAddressAr,
+			&i.ShopAddressEn,
+			&i.ShopPhone,
+			&i.ShopReceiptFooterAr,
+			&i.ShopReceiptFooterEn,
+			&i.Currency,
+			&i.Transactions,
+			&i.Units,
+			&i.RefundTotal,
+			&i.ReturnedCost,
 		); err != nil {
 			return nil, err
 		}

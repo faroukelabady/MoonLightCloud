@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMinor, formatInt, toChartNumber } from './money.js';
+import { formatMinor, formatInt, toChartNumber, subMinor } from './money.js';
 
 describe('formatMinor', () => {
 	it('formats EGP without decimals when exact', () => {
@@ -52,5 +52,19 @@ describe('toChartNumber', () => {
 	});
 	it('refuses unsafe integers loudly instead of rounding', () => {
 		expect(() => toChartNumber('9007199254740993')).toThrow();
+	});
+});
+
+describe('subMinor', () => {
+	it('subtracts exact minor units (net never clamps)', () => {
+		expect(subMinor('100000', '25000')).toBe('75000');
+		expect(subMinor('0', '0')).toBe('0');
+	});
+	it('yields negative net for refund-heavy periods', () => {
+		expect(subMinor('1000', '2500')).toBe('-1500');
+		expect(formatMinor(subMinor('1000', '2500'), 'EGP')).toBe('-15 ج.م');
+	});
+	it('stays exact beyond float precision', () => {
+		expect(subMinor('9007199254740993', '1')).toBe('9007199254740992');
 	});
 });

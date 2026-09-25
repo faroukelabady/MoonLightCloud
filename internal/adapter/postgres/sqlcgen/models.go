@@ -32,6 +32,77 @@ type DeviceCredential struct {
 	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type ReturnRefundLinesProjection struct {
+	ReturnRefundID     pgtype.UUID `json:"return_refund_id"`
+	SaleID             pgtype.UUID `json:"sale_id"`
+	OriginalSaleLineID pgtype.UUID `json:"original_sale_line_id"`
+	Position           int32       `json:"position"`
+	ProductID          pgtype.UUID `json:"product_id"`
+	Quantity           int32       `json:"quantity"`
+	Restocked          bool        `json:"restocked"`
+	GrossMinor         int64       `json:"gross_minor"`
+	GrossCurrency      string      `json:"gross_currency"`
+	DiscountMinor      int64       `json:"discount_minor"`
+	DiscountCurrency   string      `json:"discount_currency"`
+	TaxMinor           int64       `json:"tax_minor"`
+	TaxCurrency        string      `json:"tax_currency"`
+	RefundMinor        int64       `json:"refund_minor"`
+	RefundCurrency     string      `json:"refund_currency"`
+	CostMinor          pgtype.Int8 `json:"cost_minor"`
+	CostCurrency       pgtype.Text `json:"cost_currency"`
+}
+
+type ReturnRefundOwnership struct {
+	ReturnRefundID  pgtype.UUID        `json:"return_refund_id"`
+	WinningEventID  pgtype.UUID        `json:"winning_event_id"`
+	WinningDeviceID pgtype.UUID        `json:"winning_device_id"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
+type ReturnRefundPaymentsProjection struct {
+	ReturnRefundID pgtype.UUID `json:"return_refund_id"`
+	Position       int32       `json:"position"`
+	Method         string      `json:"method"`
+	AmountMinor    int64       `json:"amount_minor"`
+	AmountCurrency string      `json:"amount_currency"`
+	TransactionRef pgtype.Text `json:"transaction_ref"`
+}
+
+type ReturnRefundProjection struct {
+	ReturnRefundID        pgtype.UUID        `json:"return_refund_id"`
+	SourceEventID         pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
+	ReturnNumber          string             `json:"return_number"`
+	Kind                  string             `json:"kind"`
+	Reason                string             `json:"reason"`
+	Note                  pgtype.Text        `json:"note"`
+	SaleID                pgtype.UUID        `json:"sale_id"`
+	SaleNumber            string             `json:"sale_number"`
+	SaleEventID           pgtype.UUID        `json:"sale_event_id"`
+	Channel               string             `json:"channel"`
+	OccurredAt            pgtype.Timestamptz `json:"occurred_at"`
+	Currency              string             `json:"currency"`
+	GrossRefundedMinor    int64              `json:"gross_refunded_minor"`
+	DiscountRefundedMinor int64              `json:"discount_refunded_minor"`
+	TaxRefundedMinor      int64              `json:"tax_refunded_minor"`
+	RefundTotalMinor      int64              `json:"refund_total_minor"`
+	FxBase                pgtype.Text        `json:"fx_base"`
+	FxQuote               pgtype.Text        `json:"fx_quote"`
+	FxRate                pgtype.Text        `json:"fx_rate"`
+	FxRateMicrorate       pgtype.Int8        `json:"fx_rate_microrate"`
+	ShopNameAr            string             `json:"shop_name_ar"`
+	ShopNameEn            string             `json:"shop_name_en"`
+	ShopAddressAr         string             `json:"shop_address_ar"`
+	ShopAddressEn         string             `json:"shop_address_en"`
+	ShopPhone             string             `json:"shop_phone"`
+	ShopReceiptFooterAr   string             `json:"shop_receipt_footer_ar"`
+	ShopReceiptFooterEn   string             `json:"shop_receipt_footer_en"`
+	ActorUserID           pgtype.UUID        `json:"actor_user_id"`
+	ActorUserName         pgtype.Text        `json:"actor_user_name"`
+	ReceivedAt            pgtype.Timestamptz `json:"received_at"`
+	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+}
+
 type SaleEventOwnership struct {
 	SaleID          pgtype.UUID        `json:"sale_id"`
 	WinningEventID  pgtype.UUID        `json:"winning_event_id"`
