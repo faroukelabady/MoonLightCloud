@@ -418,3 +418,126 @@ func TestReportRenameStaysSeparate(t *testing.T) {
 		t.Fatalf("renamed snapshots stay separate rows: %+v", prod.Rows)
 	}
 }
+
+// TestReportNativeNetRanking proves native-scope product/category rows rank
+// by net (gross − refund), not units: a fully-returned high seller sorts
+// below an untouched seller, and negative nets sort naturally unclamped.
+func TestReportNativeNetRanking(t *testing.T) {
+	env := openSaleEnv(t)
+	var base map[string]any
+	if err := json.Unmarshal([]byte(fixture(t, "sale_egp.json")), &base); err != nil {
+		t.Fatal(err)
+	}
+	shop := base["shop"].(map[string]any)
+	lineID := base["lines"].([]any)[0].(map[string]any)["sale_item_id"].(string)
+
+	withProduct := func(pid, sku, name, rootID, rootEN string) func(map[string]any) {
+		return func(m map[string]any) {
+			line := m["lines"].([]any)[0].(map[string]any)
+			line["product_id"], line["sku"], line["product_name"] = pid, sku, name
+			line["classifications"] = map[string]any{"roots": []any{map[string]any{
+				"category_id": rootID, "name_ar": "ف", "name_en": rootEN}}, "subcategories": []any{}}
+		}
+	}
+	// Sale A: fully returned (net 0). Sale B: untouched (net 200000).
+	// IDs chosen so frozen units-tie order would rank A first.
+	projectSale(t, env, "aaaaaaaa-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z",
+		withProduct("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "RANK-A", "Rank A", "00000000-0000-0000-0000-0000000000a1", "Root A"))
+	projectSale(t, env, "bbbbbbbb-2222-4222-8222-222222222222", "2026-09-20T11:00:00Z",
+		withProduct("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "RANK-B", "Rank B", "00000000-0000-0000-0000-0000000000b2", "Root B"))
+	projectReturnSync(t, env,
+		"aaaaaaaa-1111-4111-8111-111111111111", "MLR-A", "EGP", nil, shop,
+		lineID, strPtrOf("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), 2,
+		200000, 0, 0, 200000, int64Ptr(800),
+		"2026-09-20T12:00:00Z", "return", "other", "RANKA")
+
+	prod := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "EGP", "product")
+	if len(prod.Rows) != 2 {
+		t.Fatalf("two product rows: %+v", prod.Rows)
+	}
+	if *prod.Rows[0].SKU != "RANK-B" || *prod.Rows[1].SKU != "RANK-A" {
+		t.Fatalf("net order RANK-B then RANK-A: %+v", prod.Rows)
+	}
+	roots := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "EGP", "root_category")
+	if len(roots.Rows) != 2 {
+		t.Fatalf("two root rows: %+v", roots.Rows)
+	}
+	if *roots.Rows[0].NameEN != "Root B" || *roots.Rows[1].NameEN != "Root A" {
+		t.Fatalf("net order Root B then Root A: %+v", roots.Rows)
+	}
+
+	// Negative net window: only A's return lands on 09-21... returns are on
+	// 09-20, so use a fresh env: sale 09-18, return 09-20, query 09-20.
+	env2 := openSaleEnv(t)
+	projectSale(t, env2, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "2026-09-18T10:00:00Z",
+		withProduct("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "RANK-A", "Rank A", "00000000-0000-0000-0000-0000000000a1", "Root A"))
+	projectSale(t, env2, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "2026-09-20T10:00:00Z",
+		withProduct("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "RANK-B", "Rank B", "00000000-0000-0000-0000-0000000000b2", "Root B"))
+	projectReturnSync(t, env2,
+		"cccccccc-cccc-4ccc-8ccc-cccccccccccc", "MLR-A", "EGP", nil, shop,
+		lineID, strPtrOf("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), 2,
+		200000, 0, 0, 200000, int64Ptr(800),
+		"2026-09-20T12:00:00Z", "return", "other", "RANKANEG")
+	neg := reportBreakdown(t, env2, "custom", "2026-09-20", "2026-09-20", "EGP", "product")
+	if len(neg.Rows) != 2 {
+		t.Fatalf("two product rows: %+v", neg.Rows)
+	}
+	if *neg.Rows[0].SKU != "RANK-B" || *neg.Rows[1].SKU != "RANK-A" {
+		t.Fatalf("positive net before negative net: %+v", neg.Rows)
+	}
+	for _, b := range neg.Rows[1].LineSales {
+		if b.Currency == "EGP" && (b.LineSalesMinor-b.LineRefundMinor) != -200000 {
+			t.Fatalf("negative net unclamped: %+v", b)
+		}
+	}
+}
+
+// TestReportUSDNetRanking proves the USD native scope ranks by net through
+// the same currency-parameterized path (per-event historical FX preserved).
+func TestReportUSDNetRanking(t *testing.T) {
+	env := openSaleEnv(t)
+	ingestUSD := func(saleID, pid, sku, name string) {
+		t.Helper()
+		var m map[string]any
+		if err := json.Unmarshal([]byte(fixture(t, "sale_usd.json")), &m); err != nil {
+			t.Fatal(err)
+		}
+		m["sale_id"] = saleID
+		line := m["lines"].([]any)[0].(map[string]any)
+		line["product_id"], line["sku"], line["product_name"] = pid, sku, name
+		payload, _ := json.Marshal(m)
+		saleEventSeq++
+		eventID := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
+		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+			eventID, payload)
+		if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
+			t.Fatalf("ingest usd: %v", err)
+		}
+		store := NewDevices(env.pool, 5*time.Second)
+		rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+		if err != nil || !ok {
+			t.Fatalf("load usd: %v %v", ok, err)
+		}
+		if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+			t.Fatalf("project usd: %v", err)
+		}
+	}
+	fx := map[string]any{"base": "USD", "quote": "EGP", "rate": "52.000000", "rate_microrate": 52000000}
+	shopUSD := map[string]any{"name_ar": "م", "name_en": "S", "address_ar": "A", "address_en": "A", "phone": "P", "receipt_footer_ar": "F", "receipt_footer_en": "F"}
+	ingestUSD("aaaaaaaa-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "URANK-A", "URank A")
+	ingestUSD("bbbbbbbb-2222-4222-8222-222222222222", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "URANK-B", "URank B")
+	// Fixture USD line: id 33333333-..., refundable 1250. Fully return A.
+	projectReturnSync(t, env,
+		"aaaaaaaa-1111-4111-8111-111111111111", "MLR-UA", "USD", fx, shopUSD,
+		"33333333-3333-4333-8333-333333333333", strPtrOf("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), 1,
+		1300, 100, 50, 1250, int64Ptr(400),
+		"2026-09-20T12:00:00Z", "return", "other", "URANKA")
+
+	prod := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "USD", "product")
+	if len(prod.Rows) != 2 {
+		t.Fatalf("two product rows: %+v", prod.Rows)
+	}
+	if *prod.Rows[0].SKU != "URANK-B" || *prod.Rows[1].SKU != "URANK-A" {
+		t.Fatalf("USD net order URANK-B then URANK-A: %+v", prod.Rows)
+	}
+}

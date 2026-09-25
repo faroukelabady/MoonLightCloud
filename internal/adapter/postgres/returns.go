@@ -260,7 +260,16 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 			_ = tx.Rollback(ctx)
 			return d.persistReturnRetry(ctx, euid, now, ErrProjection, "cumulative lookup failed")
 		}
-		if already+int64(line.Quantity) > int64(sold.Quantity) {
+		// Checked cumulative quantity: an unchecked wrap could bypass the
+		// sold-quantity ceiling, so overflow is terminal (committed history
+		// is immutable — no retry can change the verdict).
+		cumulativeQty, err := addInt64(already, int64(line.Quantity))
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.markReturnBlocked(ctx, euid, now, ErrCumulativeOverRet,
+				"cumulative return accounting overflow")
+		}
+		if cumulativeQty > int64(sold.Quantity) {
 			_ = tx.Rollback(ctx)
 			return d.markReturnBlocked(ctx, euid, now, ErrCumulativeOverRet,
 				"returned quantity would exceed the sold quantity")
@@ -269,7 +278,8 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 		newRefund, err2 = addInt64(newRefund, line.Refund.AmountMinor)
 		if err2 != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistReturnRetry(ctx, euid, now, ErrProjection, "refund accounting overflow")
+			return d.markReturnBlocked(ctx, euid, now, ErrCumulativeRefundEx,
+				"cumulative refund accounting overflow")
 		}
 	}
 	committed, err := q.CumulativeRefundedForSale(ctx, saleUID)
@@ -277,7 +287,10 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 		_ = tx.Rollback(ctx)
 		return d.persistReturnRetry(ctx, euid, now, ErrProjection, "cumulative lookup failed")
 	}
-	if committed+newRefund > saleProj.TotalMinor {
+	// Checked cumulative refund: checked(committed + candidate) must not
+	// exceed the original Sale total. Overflow itself is terminal — the
+	// projection must not proceed on wrapped arithmetic.
+	if !cumulativeWithinCeiling(committed, newRefund, saleProj.TotalMinor) {
 		_ = tx.Rollback(ctx)
 		return d.markReturnBlocked(ctx, euid, now, ErrCumulativeRefundEx,
 			"cumulative refunds would exceed the sale total")
@@ -623,4 +636,15 @@ func addInt64(a, b int64) (int64, error) {
 		return 0, errors.New("overflow")
 	}
 	return a + b, nil
+}
+
+// cumulativeWithinCeiling reports whether checked(committed + candidate)
+// fits int64 and does not exceed the ceiling. Overflow fails closed:
+// a wrapped sum must never bypass the Sale ceiling.
+func cumulativeWithinCeiling(committed, candidate, ceiling int64) bool {
+	sum, err := addInt64(committed, candidate)
+	if err != nil {
+		return false
+	}
+	return sum <= ceiling
 }

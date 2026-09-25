@@ -154,9 +154,11 @@ type ModeAverage struct {
 
 // ActivityItem is one Cloud-side event for the recent feed. Sources are
 // authoritative inbox/processing rows only — never invented business
-// events. The feed stays finalized-sale-only by design in Phase 4A:
-// accepted return/refund inbox events exist but are not surfaced until
-// Phase 4B projection (no inventory/order activity exists at all).
+// events. The feed carries sale kinds (accepted/projected/blocked) and
+// return kinds (return_accepted/return_projected/return_blocked) from
+// durable data. The return-processing actor snapshot is retained for
+// audit but not exposed here; only safe fields (kind, event type, device
+// name, error code) cross into browser JSON — never arbitrary notes.
 type ActivityItem struct {
 	Kind       string  `json:"kind"`
 	EventID    string  `json:"event_id"`
@@ -816,21 +818,25 @@ func (s Service) Branches(ctx context.Context, req report.Request) ([]BranchRow,
 // contain connection strings, SQL, or payload fragments) stay server-side
 // in logs, diagnostic tables, and admin tooling.
 type SyncHealthItem struct {
-	Freshness            report.Freshness `json:"freshness"`
-	QueueCount           int64            `json:"queue_count"`
-	PendingCount         int64            `json:"pending_count"`
-	ProcessedCount       int64            `json:"processed_count"`
-	BlockedCount         int64            `json:"blocked_count"`
-	RetryCount           int64            `json:"retry_count"`
-	ReturnPendingCount   int64            `json:"return_pending_count"`
-	ReturnProcessedCount int64            `json:"return_processed_count"`
-	ReturnBlockedCount   int64            `json:"return_blocked_count"`
-	ReturnRetryCount     int64            `json:"return_retry_count"`
-	OldestPendingAt      *string          `json:"oldest_pending_at,omitempty"`
-	LastErrorEvent       string           `json:"last_error_event,omitempty"`
-	LastErrorCode        string           `json:"last_error_code,omitempty"`
-	LastErrorLabelAR     string           `json:"last_error_label_ar,omitempty"`
-	LastErrorLabelEN     string           `json:"last_error_label_en,omitempty"`
+	Freshness              report.Freshness `json:"freshness"`
+	QueueCount             int64            `json:"queue_count"`
+	PendingCount           int64            `json:"pending_count"`
+	ProcessedCount         int64            `json:"processed_count"`
+	BlockedCount           int64            `json:"blocked_count"`
+	RetryCount             int64            `json:"retry_count"`
+	ReturnPendingCount     int64            `json:"return_pending_count"`
+	ReturnProcessedCount   int64            `json:"return_processed_count"`
+	ReturnBlockedCount     int64            `json:"return_blocked_count"`
+	ReturnRetryCount       int64            `json:"return_retry_count"`
+	ReturnLastErrorEvent   string           `json:"return_last_error_event,omitempty"`
+	ReturnLastErrorCode    string           `json:"return_last_error_code,omitempty"`
+	ReturnLastErrorLabelAR string           `json:"return_last_error_label_ar,omitempty"`
+	ReturnLastErrorLabelEN string           `json:"return_last_error_label_en,omitempty"`
+	OldestPendingAt        *string          `json:"oldest_pending_at,omitempty"`
+	LastErrorEvent         string           `json:"last_error_event,omitempty"`
+	LastErrorCode          string           `json:"last_error_code,omitempty"`
+	LastErrorLabelAR       string           `json:"last_error_label_ar,omitempty"`
+	LastErrorLabelEN       string           `json:"last_error_label_en,omitempty"`
 }
 
 // SyncHealth assembles freshness plus processing-state counts for both
@@ -868,12 +874,12 @@ func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 		ReturnProcessedCount: retStats.Counts[returnrefund.ProcProcessed],
 		ReturnBlockedCount:   retStats.Counts[returnrefund.ProcBlocked],
 		ReturnRetryCount:     retStats.Counts[returnrefund.ProcRetry],
-	}
-	if retStats.LastErrorCode != "" {
-		out.LastErrorEvent = retStats.LastErrorEvent
-		out.LastErrorCode = retStats.LastErrorCode
-		out.LastErrorLabelAR = retAR
-		out.LastErrorLabelEN = retEN
+		// Return diagnostics ride their own channel: a Return error must
+		// never overwrite a concurrent Sale error (or vice versa).
+		ReturnLastErrorEvent:   retStats.LastErrorEvent,
+		ReturnLastErrorCode:    retStats.LastErrorCode,
+		ReturnLastErrorLabelAR: retAR,
+		ReturnLastErrorLabelEN: retEN,
 	}
 	if stats.OldestPending != nil {
 		out.OldestPendingAt = ptrStr(stats.OldestPending.Format(time.RFC3339))

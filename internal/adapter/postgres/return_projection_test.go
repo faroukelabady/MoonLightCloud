@@ -1108,3 +1108,238 @@ func TestReturnFxMismatchBlocked(t *testing.T) {
 		t.Fatalf("zero headers, got %d", n)
 	}
 }
+
+// TestReturnExactCeilingPasses proves a refund exactly equal to the sale
+// total projects (boundary inclusive).
+func TestReturnExactCeilingPasses(t *testing.T) {
+	env := returnEnv(t)
+	salePayload := fixture(t, "sale_egp.json")
+	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
+	env.drain(t)
+	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
+
+	// Fixture sale total is 200000; qty-2 full return refunds exactly that.
+	retPayload := alignedReturnPayload(t, salePayload,
+		"33333333-3333-7333-8333-333333333333", "RET-CEIL", 2)
+	retEvent := "44444444-4444-7444-8444-444444444444"
+	ingestReturnRaw(t, env, retEvent, retPayload)
+	drainReturns(t, env)
+	if status, code := returnStatus(t, env, retEvent); status != "processed" || code != "" {
+		t.Fatalf("exact ceiling must process: %q/%q", status, code)
+	}
+}
+
+// TestReturnOneMinorOverCeilingBlocks proves ceiling+1 blocks terminally
+// with zero projection rows. The event itself is internally consistent
+// (totals equal line sums), so ingestion accepts it and the projector —
+// not transport — enforces the ceiling.
+func TestReturnOneMinorOverCeilingBlocks(t *testing.T) {
+	env := returnEnv(t)
+	salePayload := fixture(t, "sale_egp.json")
+	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
+	env.drain(t)
+	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
+
+	payload := alignedReturnPayload(t, salePayload,
+		"33333333-3333-7333-8333-333333333333", "RET-OVER1", 2)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(payload), &m); err != nil {
+		t.Fatal(err)
+	}
+	// Inflate every refund-bearing amount by 1 minor, keeping the event
+	// internally consistent (line sums == totals).
+	bump := func(obj map[string]any, key string) {
+		obj[key].(map[string]any)["amount_minor"] = float64(obj[key].(map[string]any)["amount_minor"].(float64) + 1)
+	}
+	line := m["lines"].([]any)[0].(map[string]any)
+	bump(line, "gross")
+	bump(line, "refund")
+	totals := m["totals"].(map[string]any)
+	bump(totals, "gross")
+	bump(totals, "refund_total")
+	bump(m["refunds"].([]any)[0].(map[string]any), "amount")
+	raw, _ := json.Marshal(m)
+	retEvent := "44444444-4444-7444-8444-444444444444"
+	ingestReturnRaw(t, env, retEvent, string(raw))
+	drainReturns(t, env)
+	if status, code := returnStatus(t, env, retEvent); status != "blocked" || code != ErrCumulativeRefundEx {
+		t.Fatalf("ceiling+1 must block: %q/%q", status, code)
+	}
+	for _, table := range []string{"return_refund_projection", "return_refund_lines_projection", "return_refund_payments_projection"} {
+		if n := saleCount(t, env.pool, table); n != 0 {
+			t.Fatalf("%s must be empty, got %d", table, n)
+		}
+	}
+}
+
+// dumpSales renders derived sale rows deterministically (ordered,
+// excluding nondeterministic projected_at) for rebuild comparison.
+func dumpSales(t *testing.T, env *saleEnv) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var b strings.Builder
+	dump := func(query string) {
+		rows, err := env.pool.Query(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			vals, err := rows.Values()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(&b, "%v\n", vals)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dump(`SELECT sale_id::text, source_event_id::text, sale_number, channel, occurred_at::text, currency,
+		subtotal_minor, discount_minor, tax_minor, total_minor
+		FROM sales_projection ORDER BY sale_id::text`)
+	dump(`SELECT sale_id::text, sale_item_id::text, product_id::text, sku, quantity, line_total_minor
+		FROM sale_lines_projection ORDER BY sale_id::text, sale_item_id::text`)
+	return b.String()
+}
+
+// TestSaleReturnCombinedRebuild executes the documented operator rebuild
+// procedure literally (both derived states cleared, BOTH processor
+// identities reset, ownership retained) and proves byte-identical sale +
+// return state, identical financial totals, and a stable rival winner.
+func TestSaleReturnCombinedRebuild(t *testing.T) {
+	env := returnEnv(t)
+	salePayload := fixture(t, "sale_egp.json")
+	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
+	env.drain(t)
+	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
+
+	base := alignedReturnPayload(t, salePayload,
+		"33333333-3333-7333-8333-333333333333", "RET-LIVE", 1)
+	e1, e2 := "44444444-4444-7444-8444-444444444444", "55555555-5555-7555-8555-555555555555"
+	ingestReturnRaw(t, env, e1, base)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(base), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["return_number"] = "RET-RIVAL"
+	rival, _ := json.Marshal(m)
+	ingestReturnRaw(t, env, e2, string(rival))
+	drainReturns(t, env)
+
+	beforeSales, beforeReturns := dumpSales(t, env), dumpReturns(t, env)
+	beforeSum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
+	var winnerBefore string
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT winning_event_id::text FROM return_refund_ownership`).Scan(&winnerBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	// Documented procedure, verbatim: clear derived state (returns first,
+	// then sales — matching the FK cascade direction), retain sync_events
+	// and both ownership tables, reset BOTH processor identities.
+	ctx := context.Background()
+	if _, err := env.pool.Exec(ctx, `DELETE FROM return_refund_projection`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `DELETE FROM sales_projection`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
+		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
+		 WHERE processor IN ('sale_projection.v1', 'return_refund_projection.v1')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replay sale processor first, then the dependent return processor.
+	env.drain(t)
+	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale reprojection")
+	drainReturns(t, env)
+
+	if after := dumpSales(t, env); after != beforeSales {
+		t.Fatalf("sale rebuild mismatch:\nbefore: %s\nafter:  %s", beforeSales, after)
+	}
+	if after := dumpReturns(t, env); after != beforeReturns {
+		t.Fatalf("return rebuild mismatch:\nbefore: %s\nafter:  %s", beforeReturns, after)
+	}
+	afterSum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
+	if fmt.Sprintf("%+v", afterSum.CurrencyTotals) != fmt.Sprintf("%+v", beforeSum.CurrencyTotals) ||
+		afterSum.TransactionCount != beforeSum.TransactionCount ||
+		afterSum.ReturnTransactionCount != beforeSum.ReturnTransactionCount {
+		t.Fatalf("financial drift:\nbefore: %+v\nafter:  %+v", beforeSum, afterSum)
+	}
+	var winnerAfter string
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT winning_event_id::text FROM return_refund_ownership`).Scan(&winnerAfter); err != nil {
+		t.Fatal(err)
+	}
+	if winnerAfter != winnerBefore {
+		t.Fatalf("rival winner changed: %s -> %s", winnerBefore, winnerAfter)
+	}
+	if status, code := returnStatus(t, env, e2); status != "blocked" || code != ErrReturnIDConflict {
+		t.Fatalf("rival stays conflict-blocked: %q/%q", status, code)
+	}
+}
+
+// TestReturnBackfillLiveRace proves a new return arriving while a
+// historical backfill is still in flight converges exactly once. The first
+// backlog row projects directly (backfill underway, rows still
+// undiscovered), the live return arrives mid-backfill, then the worker
+// drain converges everything: every header exactly once — no duplicates,
+// no losses — regardless of arrival order.
+func TestReturnBackfillLiveRace(t *testing.T) {
+	env := returnEnv(t)
+	salePayload := fixture(t, "sale_egp.json")
+	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
+	var m2 map[string]any
+	if err := json.Unmarshal([]byte(salePayload), &m2); err != nil {
+		t.Fatal(err)
+	}
+	m2["sale_id"] = "66666666-6666-7666-8666-666666666666"
+	raw2, _ := json.Marshal(m2)
+	env.ingest(t, "88888888-8888-7888-8888-888888888888", string(raw2))
+	env.drain(t)
+	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 2 }, "both sales projected")
+
+	// Backlog: one qty-1 return per sale, accepted but undiscovered.
+	backlog := []struct{ event, rr, num string }{
+		{"44000001-4444-7444-8444-444444444444", "43000001-3333-7333-8333-333333333333", "RET-BF1"},
+		{"44000002-4444-7444-8444-444444444444", "43000002-3333-7333-8333-333333333333", "RET-BF2"},
+	}
+	ingestReturnRaw(t, env, backlog[0].event,
+		alignedReturnPayload(t, salePayload, backlog[0].rr, backlog[0].num, 1))
+	ingestReturnRaw(t, env, backlog[1].event,
+		alignedReturnPayload(t, string(raw2), backlog[1].rr, backlog[1].num, 1))
+
+	// Backfill starts: project the first backlog row directly while the
+	// second row is still undiscovered.
+	store := NewDevices(env.pool, 5*time.Second)
+	rec, ok, err := store.LoadReturnEvent(context.Background(), backlog[0].event)
+	if err != nil || !ok {
+		t.Fatal("backlog event must load")
+	}
+	if _, err := store.ProjectReturn(context.Background(), rec, time.Now()); err != nil {
+		t.Fatalf("backfill project: %v", err)
+	}
+
+	// Live arrival mid-backfill on the first sale (second unit: exactly
+	// exhausts the fixture qty-2 line, so all three must succeed).
+	liveEvent := "44000003-4444-7444-8444-444444444444"
+	ingestReturnRaw(t, env, liveEvent,
+		alignedReturnPayload(t, salePayload, "43000003-3333-7333-8333-333333333333", "RET-LIVE", 1))
+	drainReturns(t, env)
+
+	for _, e := range []string{backlog[0].event, backlog[1].event, liveEvent} {
+		if status, code := returnStatus(t, env, e); status != "processed" || code != "" {
+			t.Fatalf("return %s: %q/%q", e, status, code)
+		}
+	}
+	if n := saleCount(t, env.pool, "return_refund_projection"); n != 3 {
+		t.Fatalf("three headers exactly once, got %d", n)
+	}
+	if n := saleCount(t, env.pool, "return_refund_lines_projection"); n != 3 {
+		t.Fatalf("three lines exactly once, got %d", n)
+	}
+}

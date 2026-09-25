@@ -118,13 +118,17 @@ Blocked projections are operational conditions: `/health/live` and
 
 Three tiers — never confuse them:
 
-- Durable source history: `sync_events` (immutable, never deleted).
+- Durable source history: `sync_events` (immutable accepted event history;
+  never deleted).
 - Durable logical ownership: `sale_event_ownership` (one permanent winner
-  per `sale_id`; never deleted on rebuild).
-- Rebuildable state: `sales_projection`, lines, payments, classifications,
-  `return_refund_projection` (+ lines, + payments), and
-  `sync_event_processing` rows (may be cleared/reset, then reprocessed).
-  Return rebuilds additionally retain `return_refund_ownership`.
+  per `sale_id`) and `return_refund_ownership` (one permanent winner per
+  `return_refund_id`; multiple distinct returns per sale stay valid).
+  Both are durable authoritative arbitration history — never deleted on
+  rebuild.
+- Rebuildable state: `sales_projection` (+ lines, + payments, +
+  classifications), `return_refund_projection` (+ lines, + payments), and
+  `sync_event_processing` rows for BOTH processors (may be cleared/reset,
+  then reprocessed).
 
 A rebuild that deletes ownership can elect a different winner and rewrite
 financial history. The procedure below never does.
@@ -138,6 +142,10 @@ SELECT s.sale_id, s.source_event_id AS projected_source, o.winning_event_id
 FROM sales_projection s
 JOIN sale_event_ownership o USING (sale_id)
 WHERE s.source_event_id <> o.winning_event_id;
+SELECT r.return_refund_id, r.source_event_id AS projected_source, o.winning_event_id
+FROM return_refund_projection r
+JOIN return_refund_ownership o USING (return_refund_id)
+WHERE r.source_event_id <> o.winning_event_id;
 ```
 
 Resetting a losing conflict event during rebuild deterministically returns
@@ -171,16 +179,37 @@ authoritative and reprocessing reproduces identical rows (tested by
    ```
    Simpler robust check: any `sale_id` whose lines/payments/classifications
    do not exactly match a re-projection of its `source_event_id` payload.
-3. Clear derived tables only (never `sync_events`, never
-   `sale_event_ownership`):
+3. Clear derived tables only (never `sync_events`, never either ownership
+   table). Deleting `sales_projection` cascades — by the FK graph — into
+   sale lines, payments, classifications AND `return_refund_projection`
+   (+ return lines, + return payments), because return lines reference
+   their sale lines. Either delete sale projections first (returns follow
+   via cascade) or clear both explicitly:
    ```sql
-   DELETE FROM sales_projection; -- cascades to lines/payments/classifications
+   DELETE FROM return_refund_projection; -- return lines + payments
+   DELETE FROM sales_projection; -- sale lines/payments/classifications
+   ```
+4. Reset BOTH processing identities (resetting only `sale_projection.v1`
+   leaves Return events marked `processed` while their projection rows are
+   gone — reports would silently lose refunds):
+   ```sql
    UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
      attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-     WHERE processor='sale_projection.v1';
+     WHERE processor IN ('sale_projection.v1', 'return_refund_projection.v1');
    ```
-4. Reprocess from the durable inbox (restart projector / wait for scan).
-5. Verify: `projection status` shows all `processed`, counts match inbox,
-   and a row-level dump matches the pre-rebuild snapshot for unaffected
-   sales. Never delete accepted source events. No automated rebuild CLI in
-   this phase; the documented procedure plus the rebuild test suffice.
+5. Replay the Sale processor first (restart projector / wait for scan),
+   then allow the dependent Return processor to replay. Returns whose
+   sale is not yet projected wait with `SALE_DEPENDENCY_WAIT` and
+   converge automatically — do not force-block them; wait for
+   retry/dependency convergence.
+6. Verify: `projection status` shows both processors with zero backlog
+   (processed + blocked == accepted per event type), `blocked`/`retry`
+   counts match pre-rebuild expectations (rivals stay blocked with the
+   same winner; dependency waits resolve), the ownership integrity
+   queries above return zero rows, and a row-level dump matches the
+   pre-rebuild snapshot. Financial check: summary gross/refund/net and
+   gross/returned/net cost totals must be semantically identical before
+   and after. Never delete accepted source events. No automated rebuild
+   CLI in this phase; the documented procedure plus the rebuild tests
+   (`TestReturnRebuildStable`, `TestReturnRivalRebuildStable`,
+   `TestReturnOutOfOrderRebuildStable`) suffice.

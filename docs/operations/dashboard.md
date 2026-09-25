@@ -112,3 +112,30 @@ recursive writes. The custom-range form is
 draft/apply: selecting Custom reveals inputs but sends no request until
 Apply with two valid dates (from ≤ to); invalid drafts show inline
 errors and fire zero API calls.
+
+## Browser E2E test environment
+
+`dashboard/e2e/dashboard.spec.ts` runs against the local dev stack
+(`./scripts/dev-up.sh`, Go API on `:8080` serving the built dashboard):
+
+```bash
+cd dashboard
+npx playwright test                                   # default viewport
+E2E_VIEWPORT=1536x1024 npx playwright test            # responsive matrix:
+E2E_VIEWPORT=1366x768 | 1440x900 | 1536x1024 | 1920x1080
+E2E_BASE_URL=http://127.0.0.1:8080/dashboard/ npx playwright test
+```
+
+Credentials default to the dev operator
+(`operator` / `moonlight-dev-operator`, overridable via
+`E2E_DASHBOARD_USER` / `E2E_DASHBOARD_PASSWORD`).
+
+The suite is self-contained: all dashboard APIs are route-mocked with
+Phase 4B contract-valid fixtures (net-primary overview, gross/refund/net
+daily, net-ranked products/categories, branch rows with refund fields,
+sync-health with both error channels). No test depends on developer
+database rows, fixed calendar dates, or yesterday/today data — period and
+custom-range flows assert URL/report/input agreement against the mocks,
+deterministic in `Africa/Cairo` at any wall-clock time. Tests that need
+failure states (503, unsafe >2^53 money, blocked returns) install their
+own one-shot routes on top of the base mocks.

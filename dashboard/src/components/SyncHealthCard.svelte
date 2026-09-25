@@ -3,7 +3,7 @@
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
-	import { relativeTime, absoluteTime } from '../lib/time.js';
+	import { absoluteTime } from '../lib/time.js';
 	import type { SyncHealth } from '../lib/api.js';
 
 	let { health, status, errStatus, onretry, onrefresh }: { health: SyncHealth | null; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void; onrefresh: () => void } =
@@ -20,61 +20,44 @@
 	{:else}
 		{@const f = health.freshness}
 		<div class="hero">
-			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
+			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
 			<div>
-				<div class="headline">متصل وإسقاط المبيعات محدّث</div>
-				<div class="muted sub">Connected · sale projection up to date</div>
+				<div class="headline">متصل · المبيعات والمرتجعات محدّثة</div>
+				<div class="muted sub">Connected · sales & returns up to date</div>
 			</div>
 		</div>
-		<div class="rows">
-			<div class="r">
-				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
-				<span class="rl">آخر حدث مبيعات تم استلامه<br /><span class="muted sub-en">Latest Sale event received</span></span>
-				<span class="rv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, 'ar') : '—'}</span>
+		<div class="grid">
+			<div class="ghead" aria-hidden="true"></div>
+			<div class="ghead">مبيعات<br /><span class="sub-en">Sales</span></div>
+			<div class="ghead">مرتجعات<br /><span class="sub-en">Returns</span></div>
+			<div class="gl">آخر حدث<br /><span class="muted sub-en">Latest event</span></div>
+			<div class="gv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, 'ar') : '—'}</div>
+			<div class="gv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, 'ar') : '—'}</div>
+			<div class="gl">متأخر<br /><span class="muted sub-en">Backlog</span></div>
+			<div class="gv num">{f.projection_backlog_count}<span class="muted det"> · {health.pending_count} pending · {health.retry_count} retry</span></div>
+			<div class="gv num">{f.return_backlog_count}<span class="muted det"> · {health.return_pending_count} pending · {health.return_retry_count} retry</span></div>
+			<div class="gl">محظور<br /><span class="muted sub-en">Blocked</span></div>
+			<div class="gv num">{f.blocked_sale_event_count}</div>
+			<div class="gv num">{f.return_blocked_count}</div>
+			<div class="gl">الحالة<br /><span class="muted sub-en">Status</span></div>
+			<div class="gv">
+				{#if f.blocked_sale_event_count > 0}
+					<span class="badge warn">محظورة / Blocked</span>
+				{:else if f.cloud_projection_complete}
+					<span class="badge ok">مكتمل / Complete</span>
+				{:else}
+					<span class="badge">يلحق / Catching up</span>
+				{/if}
 			</div>
-			<div class="r">
-				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
-				<span class="rl">في الانتظار / In queue</span>
-				<span class="rv num">{health.queue_count}</span>
+			<div class="gv">
+				{#if f.return_blocked_count > 0}
+					<span class="badge warn">محظورة / Blocked</span>
+				{:else if f.return_projection_complete}
+					<span class="badge ok">مكتمل / Complete</span>
+				{:else}
+					<span class="badge">يلحق / Catching up</span>
+				{/if}
 			</div>
-			<div class="r">
-				<span class="ric ok" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
-				<span class="rl">محظورة / Blocked</span>
-				<span class="rv num">{f.blocked_sale_event_count}</span>
-			</div>
-			<div class="r">
-				<span class="ric ret" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13l-3-3M20 15H7l3 3" /></svg></span>
-				<span class="rl">آخر حدث مرتجع تم استلامه<br /><span class="muted sub-en">Latest Return event received</span></span>
-				<span class="rv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, 'ar') : '—'}</span>
-			</div>
-			<div class="r">
-				<span class="ric ret" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13l-3-3M20 15H7l3 3" /></svg></span>
-				<span class="rl">مرتجعات مسقطة / Returns projected</span>
-				<span class="rv num">{health.return_processed_count}</span>
-			</div>
-			<div class="r">
-				<span class="ric ret" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13l-3-3M20 15H7l3 3" /></svg></span>
-				<span class="rl">مرتجعات محظورة / Returns blocked</span>
-				<span class="rv num">{health.return_blocked_count}</span>
-			</div>
-		</div>
-		<div class="rel muted">
-			{f.latest_sale_event_received_at ? relativeTime(f.latest_sale_event_received_at, 'ar') : ''}
-			<span class="sub-en">pending {health.pending_count} · retrying {health.retry_count} · returns pending {health.return_pending_count} · retrying {health.return_retry_count}</span>
-		</div>
-		<div class="status">
-			{#if f.blocked_sale_event_count > 0}
-				<span class="badge warn">توجد عناصر محظورة تحتاج مراجعة / Blocked items need review</span>
-			{:else if f.cloud_projection_complete}
-				<span class="badge ok">اكتمال إسقاط المبيعات السحابي / Cloud sale projection complete</span>
-			{:else}
-				<span class="badge">جارٍ اللحاق / Catching up</span>
-			{/if}
-			{#if f.return_blocked_count > 0}
-				<span class="badge warn">توجد مرتجعات محظورة تحتاج مراجعة / Blocked returns need review</span>
-			{:else if f.return_projection_complete}
-				<span class="badge ok">اكتمال إسقاط المرتجعات السحابي / Cloud return projection complete</span>
-			{/if}
 		</div>
 		{#if health.last_error_code}
 			<div class="muted errmsg">آخر خطأ: {health.last_error_label_ar ?? health.last_error_code}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span></div>
@@ -83,10 +66,8 @@
 			<div class="muted errmsg">آخر خطأ مرتجعات: {health.return_last_error_label_ar ?? health.return_last_error_code}<br /><span class="sub-en">{health.return_last_error_label_en ?? ''}</span></div>
 		{/if}
 		<div class="muted note">
-			الاكتمال السحابي لا يعني أن درج مكتب المتجر فارغ — السحابة لا ترى الأحداث التي لم تُرسل بعد.
-			<br /><span class="sub-en">Cloud-complete does not prove the Retail outbox is empty.</span>
-			<br />التقارير تشمل المرتجعات المسقطة سحابيًا؛ المرتجعات المعلقة أو المحظورة تظهر أعلاه.
-			<br /><span class="sub-en">Reports include Cloud-projected returns; pending or blocked returns appear above.</span>
+			التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.
+			<br /><span class="sub-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>
 		</div>
 		<button type="button" class="refresh" aria-label="تحديث الحالة / Refresh status" onclick={onrefresh}><span class="rb-ar">تحديث الحالة</span><span class="rb-en">Refresh status</span></button>
 	{/if}
@@ -97,11 +78,11 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		margin-bottom: 6px;
+		margin-bottom: 4px;
 	}
 	.okic {
-		width: 36px;
-		height: 36px;
+		width: 30px;
+		height: 30px;
 		flex-shrink: 0;
 		display: inline-flex;
 		align-items: center;
@@ -112,62 +93,40 @@
 	}
 	.headline {
 		font-weight: 700;
-		font-size: 0.88rem;
-	}
-	.sub {
-		font-size: 0.72rem;
-	}
-	.rows {
-		display: flex;
-		flex-direction: column;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		overflow: hidden;
-	}
-	.r {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 5px 8px;
-		font-size: 0.78rem;
-	}
-	.r + .r {
-		border-top: 1px solid var(--border);
-	}
-	.ric {
-		width: 20px;
-		height: 20px;
-		flex-shrink: 0;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 50%;
-	}
-	.ric.ok {
-		background: #dcfce7;
-		color: var(--success);
-	}
-	.ric.ret {
-		background: #fef3e2;
-		color: #b45309;
-	}
-	.rl {
-		flex: 1;
-		min-width: 0;
-	}
-	.rv {
-		font-weight: 700;
 		font-size: 0.85rem;
 	}
-	.rel {
-		margin-top: 6px;
-		font-size: 0.78rem;
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
+	.sub {
+		font-size: 0.7rem;
 	}
-	.status {
-		margin-top: 8px;
+	.grid {
+		display: grid;
+		grid-template-columns: auto 1fr 1fr;
+		gap: 2px 8px;
+		align-items: center;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		padding: 4px 8px;
+		font-size: 0.76rem;
+	}
+	.ghead {
+		font-weight: 700;
+		font-size: 0.72rem;
+		text-align: center;
+	}
+	.gl {
+		font-size: 0.74rem;
+		line-height: 1.25;
+	}
+	.gv {
+		font-weight: 700;
+		font-size: 0.8rem;
+		text-align: center;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.det {
+		font-weight: 400;
+		font-size: 0.68rem;
 	}
 	.errmsg {
 		margin-top: 6px;

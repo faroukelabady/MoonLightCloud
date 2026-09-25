@@ -53,8 +53,10 @@ Sale economics, identity, or transport.
    historical FX (round-once-then-sum, same as sales).
 6. **Cashier semantics.** Cashier-dimension refunds attribute to the
    original sale's cashier (net performance); return-actor identity
-   appears in activity/problem surfaces, not subtracted from another
-   cashier's sales. Documented, not guessed.
+   is retained in the projection for audit/future surfaces but is NOT
+   subtracted from another cashier's sales and is NOT currently exposed
+   in dashboard activity (which carries kind, event type, device name,
+   and error code only). Documented, not guessed.
 7. **Dashboard truthfulness.** Net Sales becomes the primary KPI with
    Gross and Refunds visible; units/transactions split sale vs return;
    Sync Health shows sale and return completeness separately and drops

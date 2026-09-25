@@ -1,11 +1,12 @@
-# Returns & Refunds Sync Contract (Phase 4A)
+# Returns & Refunds Sync Contract (Phase 4A transport; Phase 4B projection ACTIVE)
 
 This document defines the `sale.return_refund.finalized.v1` transport
 contract: one immutable event per finalized MoonLightRetail return/refund
 transaction (`sale_corrections` row of kind `return` or `void`), durably
-delivered to the Cloud inbox. Phase 4A covers transport only — no return
-projection, no reporting changes. Phase 4B will project these events into
-net-sales reporting.
+delivered to the Cloud inbox. Phase 4A covers transport only. Phase 4B
+projection + reporting is ACTIVE: `return_refund_projection.v1` projects
+these events into return/refund projections and net-sales reporting
+(see ADR-0027).
 
 ## Business meaning
 

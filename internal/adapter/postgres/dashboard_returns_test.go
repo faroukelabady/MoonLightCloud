@@ -39,6 +39,31 @@ func projectDashReturn(t *testing.T, env *dashEnv, eventID, occurred, payload st
 	}
 }
 
+// projectDashReturnOutcome is projectDashReturn without the outcome gate:
+// callers asserting blocked/conflict paths use the returned outcome.
+func projectDashReturnOutcome(t *testing.T, env *dashEnv, eventID, occurred, payload string) returnrefund.ProjectResult {
+	t.Helper()
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.return_refund.finalized.v1","occurred_at":%q,"payload":%s}]}`,
+		eventID, occurred, payload)
+	res, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
+	if err != nil {
+		t.Fatalf("ingest return: %v", err)
+	}
+	if res.Events[0].Status != "accepted" {
+		t.Fatalf("want accepted, got %+v", res)
+	}
+	store := NewDevices(env.pool, 5*time.Second)
+	rec, ok, err := store.LoadReturnEvent(context.Background(), eventID)
+	if err != nil || !ok {
+		t.Fatalf("load return: %v %v", ok, err)
+	}
+	pres, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	if err != nil {
+		t.Fatalf("project return: %v", err)
+	}
+	return pres
+}
+
 // dashReturnPayload builds a valid EGP return for the given sale payload
 // (full-line return at unit economics, zero discount allocation).
 func dashReturnPayload(t *testing.T, salePayload, rrID, number, occurred string, qty int) string {
@@ -258,5 +283,99 @@ func TestDashboardActivityReturnKinds(t *testing.T) {
 		if !kinds[want] {
 			t.Fatalf("activity kinds %v missing %q", kinds, want)
 		}
+	}
+}
+
+// TestDashboardAllNetRanking proves All-mode products/categories rank by
+// normalized net: a fully-returned high seller sorts below an untouched
+// seller even when it sold more units.
+func TestDashboardAllNetRanking(t *testing.T) {
+	env := openDashEnv(t)
+	withProduct := func(payload, saleID, pid, sku, name string) string {
+		t.Helper()
+		var m map[string]any
+		if err := json.Unmarshal([]byte(payload), &m); err != nil {
+			t.Fatal(err)
+		}
+		m["sale_id"] = saleID
+		line := m["lines"].([]any)[0].(map[string]any)
+		line["product_id"], line["sku"], line["product_name"] = pid, sku, name
+		raw, _ := json.Marshal(m)
+		return string(raw)
+	}
+	base := fixture(t, "sale_egp.json")
+	saleA := withProduct(base, "aaaaaaaa-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "NRANK-A", "NRank A")
+	saleB := withProduct(base, "bbbbbbbb-2222-4222-8222-222222222222", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "NRANK-B", "NRank B")
+	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", "2026-09-20T10:00:00Z", saleA)
+	projectDashSale(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T11:00:00Z", saleB)
+	// Fully return A (qty 2 of fixture line).
+	projectDashReturn(t, env, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "2026-09-20T12:00:00Z",
+		dashReturnPayload(t, saleA, "dddddddd-dddd-7ddd-8ddd-dddddddddddd", "RET-NR", "2026-09-20T12:00:00Z", 2))
+
+	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
+	products, err := env.dash.ProductsNormalized(context.Background(), req)
+	if err != nil {
+		t.Fatalf("products: %v", err)
+	}
+	if len(products) != 2 {
+		t.Fatalf("two products: %+v", products)
+	}
+	if products[0].SKU != "NRANK-B" || products[1].SKU != "NRANK-A" {
+		t.Fatalf("All net order NRANK-B then NRANK-A: %+v", products)
+	}
+	if products[1].NetNormalizedMinor != "0" {
+		t.Fatalf("fully returned net is zero: %+v", products[1])
+	}
+	cats, err := env.dash.CategoriesNormalized(context.Background(), req, "root_category")
+	if err != nil {
+		t.Fatalf("categories: %v", err)
+	}
+	if len(cats) < 1 {
+		t.Fatalf("category rows: %+v", cats)
+	}
+	// Both sales share the fixture root; single row nets 200000.
+	if cats[0].NetNormalizedMinor != "200000" {
+		t.Fatalf("root net = 400000 gross − 200000 refund: %+v", cats[0])
+	}
+}
+
+// TestDashboardDualErrorChannels proves a blocked Sale error and a blocked
+// Return error coexist on independent diagnostic channels: neither
+// overwrites the other, and both carry allowlisted codes + labels.
+func TestDashboardDualErrorChannels(t *testing.T) {
+	env := openDashEnv(t)
+	salePayload := fixture(t, "sale_egp.json")
+	// Same sale_id twice: second sale blocks with SALE_ID_CONFLICT.
+	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", "2026-09-20T10:00:00Z", salePayload)
+	projectDashSale(t, env, "dddddddd-dddd-7ddd-8ddd-dddddddddddd", "2026-09-20T11:00:00Z", salePayload)
+	// Rival returns: loser blocks with RETURN_REFUND_ID_CONFLICT.
+	base := dashReturnPayload(t, salePayload, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "RET-LIVE", "2026-09-20T12:00:00Z", 1)
+	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T12:00:00Z", base)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(base), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["return_number"] = "RET-RIVAL"
+	rival, _ := json.Marshal(m)
+	rout := projectDashReturnOutcome(t, env, "eeeeeeee-eeee-7eee-8eee-eeeeeeeeeeee", "2026-09-20T13:00:00Z", string(rival))
+	if rout.Outcome != returnrefund.OutcomeBlocked || rout.ErrorCode != "RETURN_REFUND_ID_CONFLICT" {
+		t.Fatalf("rival outcome: %+v", rout)
+	}
+
+	health, err := env.dash.SyncHealth(context.Background())
+	if err != nil {
+		t.Fatalf("sync health: %v", err)
+	}
+	if health.LastErrorCode != "SALE_ID_CONFLICT" {
+		t.Fatalf("sale channel preserved: %+v", health)
+	}
+	if health.ReturnLastErrorCode != "RETURN_REFUND_ID_CONFLICT" {
+		t.Fatalf("return channel populated: %+v", health)
+	}
+	if health.LastErrorLabelAR == "" || health.ReturnLastErrorLabelAR == "" {
+		t.Fatalf("bilingual labels required: %+v", health)
+	}
+	if health.BlockedCount != 1 || health.ReturnBlockedCount != 1 {
+		t.Fatalf("blocked split: %+v", health)
 	}
 }

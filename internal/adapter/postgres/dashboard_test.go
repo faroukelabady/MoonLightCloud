@@ -224,7 +224,7 @@ func TestDashboardMissingFxFailsLoudly(t *testing.T) {
 	ctx := context.Background()
 	if _, err := env.pool.Exec(ctx, `
 		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ('22222222-2222-7222-8222-222222222222', $1, 'sale.finalized.v1', now(), now(), '{}', '\x00')`,
+		VALUES ('22222222-2222-7222-8222-222222222222', $1, 'sale.finalized.v1', '2026-09-22T10:00:00Z', now(), '{}', '\x00')`,
 		env.devID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestDashboardMissingFxFailsLoudly(t *testing.T) {
 			 currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at)
 		VALUES ('11111111-1111-4111-8111-111111111111',
 			'22222222-2222-7222-8222-222222222222', $1,
-			'MLR-X', 'STORE', now(), now(), 'a','b','c','d','e','f','g',
+			'MLR-X', 'STORE', '2026-09-22T10:00:00Z', '2026-09-22T10:05:00Z', 'a','b','c','d','e','f','g',
 			'USD', 1000, 0, 0, 1000, now())`, env.devID); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

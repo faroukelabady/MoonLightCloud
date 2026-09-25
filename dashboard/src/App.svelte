@@ -514,9 +514,10 @@
 	.a-sales { grid-column: span 6; }
 	.a-kpis {
 		grid-column: span 3;
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
 		gap: 12px;
+		align-content: start;
 	}
 	.a-trend { grid-column: span 4; }
 	.a-products { grid-column: span 4; }
@@ -530,8 +531,7 @@
 		.dash.ov .a-products { grid-column: span 6; }
 		.dash.ov .a-cat { grid-column: span 12; }
 		.a-sales { grid-column: span 8; }
-		.a-kpis { grid-column: span 12; flex-direction: row; }
-		.a-kpis > :global(*) { flex: 1; }
+		.a-kpis { grid-column: span 12; grid-template-columns: repeat(4, 1fr); }
 		.a-trend { grid-column: span 6; }
 		.a-products { grid-column: span 6; }
 		.a-cat { grid-column: span 12; }
@@ -561,7 +561,7 @@
 			grid-column: span 12;
 		}
 		.a-kpis {
-			flex-direction: column;
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

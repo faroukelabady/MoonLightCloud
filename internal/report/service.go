@@ -697,7 +697,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
-		out.Rows = sortProductRows(byKey, order)
+		out.Rows = sortProductRows(byKey, order, req.Currency)
 	case DimensionRootCategory, DimensionSubcategory:
 		var rows []CategoryRow
 		var refundRows []RefundCategoryRow
@@ -766,7 +766,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
-		out.Rows = sortCategoryRows(byKey, order)
+		out.Rows = sortCategoryRows(byKey, order, req.Currency)
 	case DimensionCashier:
 		rows, err := s.repo.SalesByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
@@ -943,12 +943,23 @@ func sortLineSales(t []LineSaleTotal) {
 
 // Deterministic ordering: units descending, then identity tie-breakers.
 // Channel rows arrive one per (channel, currency) and sort by channel code.
-func sortProductRows(byKey map[string]*BreakdownRow, order []string) []BreakdownRow {
+func sortProductRows(byKey map[string]*BreakdownRow, order []string, currencyScope string) []BreakdownRow {
 	out := rowsInOrder(byKey, order)
 	for i := range out {
 		sortLineSales(out[i].LineSales)
 	}
+	// Net-desc ranking in a native currency scope (net = gross − refund for
+	// that bucket; negatives sort naturally, never clamped). In the
+	// all-currency scope cross-currency net is undefined (EGP and USD are
+	// never summed), so the frozen units-desc order is preserved; dashboard
+	// All mode ranks by normalized net instead.
 	sort.SliceStable(out, func(i, j int) bool {
+		if currencyScope != "" {
+			ni, nj := bucketNet(out[i].LineSales, currencyScope), bucketNet(out[j].LineSales, currencyScope)
+			if ni != nj {
+				return ni > nj
+			}
+		}
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units
 		}
@@ -963,12 +974,18 @@ func sortProductRows(byKey map[string]*BreakdownRow, order []string) []Breakdown
 	return out
 }
 
-func sortCategoryRows(byKey map[string]*BreakdownRow, order []string) []BreakdownRow {
+func sortCategoryRows(byKey map[string]*BreakdownRow, order []string, currencyScope string) []BreakdownRow {
 	out := rowsInOrder(byKey, order)
 	for i := range out {
 		sortLineSales(out[i].LineSales)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if currencyScope != "" {
+			ni, nj := bucketNet(out[i].LineSales, currencyScope), bucketNet(out[j].LineSales, currencyScope)
+			if ni != nj {
+				return ni > nj
+			}
+		}
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units
 		}
@@ -1011,6 +1028,18 @@ func rowsInOrder(byKey map[string]*BreakdownRow, order []string) []BreakdownRow 
 		out = append(out, *byKey[k])
 	}
 	return out
+}
+
+// bucketNet returns gross − refund for one currency bucket (missing bucket
+// counts as zero). Both operands are nonnegative by schema, so the
+// difference cannot overflow int64; negatives are valid and preserved.
+func bucketNet(buckets []LineSaleTotal, currency string) int64 {
+	for _, b := range buckets {
+		if b.Currency == currency {
+			return b.LineSalesMinor - b.LineRefundMinor
+		}
+	}
+	return 0
 }
 
 func ptrStr(s *string) string {

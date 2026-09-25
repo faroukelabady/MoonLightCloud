@@ -163,5 +163,26 @@ check("header breakdown with net", "SaleCurrencyTotal", {
     "currency": "EGP", "subtotal_minor": 400000, "discount_minor": 0,
     "tax_minor": 0, "sales_total_minor": 400000,
     "refund_total_minor": 300000, "net_sales_minor": 100000})
+
+# Phase 4B-R1: Sync Health carries independent Sale and Return diagnostic
+# channels; both errors present simultaneously must validate, proving the
+# contract exposes them without one overwriting the other.
+fresh4b = dict(fresh)
+fresh4b.update({"latest_return_event_received_at": "2026-09-20T12:00:00Z",
+                "latest_projected_return_occurred_at": "2026-09-20T12:00:00Z",
+                "return_backlog_count": 0, "return_blocked_count": 1,
+                "return_projection_complete": False})
+check("sync health dual errors", "DashboardSyncHealth", {
+    "freshness": fresh4b, "queue_count": 0, "pending_count": 0,
+    "processed_count": 5, "blocked_count": 1, "retry_count": 0,
+    "return_pending_count": 0, "return_processed_count": 5,
+    "return_blocked_count": 1, "return_retry_count": 0,
+    "last_error_event": "22222222-2222-7222-8222-222222222222",
+    "last_error_code": "SALE_ID_CONFLICT",
+    "last_error_label_ar": "تعارض", "last_error_label_en": "sale conflict",
+    "return_last_error_event": "44444444-4444-7444-8444-444444444444",
+    "return_last_error_code": "RETURN_REFUND_ID_CONFLICT",
+    "return_last_error_label_ar": "تعارض مرتجعات",
+    "return_last_error_label_en": "return conflict"})
 print("openapi fixture parity: PASS")
 PYEOF
