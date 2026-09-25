@@ -1002,7 +1002,7 @@ components:
       type: object
       required: [name_ar]
       properties:
-        name_ar: {type: string, minLength: 1, maxLength: 120}
+        name_ar: {type: string, minLength: 1, maxLength: 120, pattern: '^.*\S.*$'}
         name_en: {type: string, maxLength: 120}
         address_ar: {type: string, maxLength: 300}
         address_en: {type: string, maxLength: 300}
@@ -1012,7 +1012,8 @@ components:
       description: >-
         Historical shop identity. Only name_ar is required (Arabic-first
         shops may leave English name and phone empty); rune caps mirror the
-        Retail shop-profile contract.
+        Retail shop-profile contract. name_ar must contain at least one
+        non-whitespace character, matching runtime TrimSpace semantics.
     ActorSnapshot:
       type: object
       properties:

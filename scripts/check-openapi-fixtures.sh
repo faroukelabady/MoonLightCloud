@@ -96,5 +96,34 @@ check("empty-lines sale", "SaleFinalizedV1", bad_sale, expect_valid=False)
 bad_shop = load_fixture("internal/returnrefund/testdata/return_partial.json")
 bad_shop["shop"]["name_ar"] = ""
 check("blank-name_ar return", "ReturnRefundFinalizedV1", bad_shop, expect_valid=False)
+
+# C01: note asymmetry uses ASCII runs so Go runes, Python code points, and
+# JSON Schema maxLength agree deterministically (no leading/trailing space).
+note_base = load_fixture("internal/returnrefund/testdata/return_partial.json")
+note_ok = dict(note_base)
+note_ok["note"] = "x" * 500
+check("note-500 return", "ReturnRefundFinalizedV1", note_ok)
+note_bad = dict(note_base)
+note_bad["note"] = "x" * 501
+check("note-501 return", "ReturnRefundFinalizedV1", note_bad, expect_valid=False)
+
+# C01: quantity boundaries (runtime: 1 <= q <= 2147483647).
+qty_base = load_fixture("internal/returnrefund/testdata/return_partial.json")
+qty_zero = copy.deepcopy(qty_base)
+qty_zero["lines"][0]["quantity"] = 0
+check("quantity-0 return", "ReturnRefundFinalizedV1", qty_zero, expect_valid=False)
+qty_huge = copy.deepcopy(qty_base)
+qty_huge["lines"][0]["quantity"] = 2147483648
+check("quantity-2147483648 return", "ReturnRefundFinalizedV1", qty_huge, expect_valid=False)
+
+# C02: whitespace-only name_ar is invalid; normal Arabic is valid. Optional
+# fields stay blank-valid (R14 regression).
+ws_return = copy.deepcopy(note_base)
+ws_return["shop"] = {"name_ar": "   ", "name_en": "", "address_ar": "", "address_en": "",
+                     "phone": "", "receipt_footer_ar": "", "receipt_footer_en": ""}
+check("whitespace-name_ar return", "ReturnRefundFinalizedV1", ws_return, expect_valid=False)
+ws_sale = load_fixture("internal/sale/testdata/sale_egp.json")
+ws_sale["shop"] = dict(ws_return["shop"])
+check("whitespace-name_ar sale", "SaleFinalizedV1", ws_sale, expect_valid=False)
 print("openapi fixture parity: PASS")
 PYEOF
