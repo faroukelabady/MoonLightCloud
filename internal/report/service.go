@@ -334,7 +334,9 @@ type (
 	}
 	RefundCashierRow struct {
 		// Cashier attribution follows the ORIGINAL sale (net performance);
-		// the return-processing actor appears in activity surfaces only.
+		// the Return-processing actor is retained historically for
+		// audit/future use but is not currently exposed in dashboard
+		// activity.
 		CashierID    *string
 		CashierName  *string
 		Transactions int64
@@ -793,8 +795,9 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, r := range rows {
 			// Explicit null bucket: unattributed sales group under "".
 			// Refunds attribute to the ORIGINAL sale cashier (net
-			// performance); the return-processing actor is surfaced in
-			// activity feeds, never subtracted from another cashier.
+			// performance), never subtracted from another cashier; the
+			// Return actor is retained in projection for audit/future
+			// surfaces and is not currently exposed in dashboard activity.
 			key := ptrStr(r.CashierID) + "\x00" + ptrStr(r.CashierName)
 			row := getRow(key, func(row *BreakdownRow) {
 				row.CashierID, row.CashierName = r.CashierID, r.CashierName
