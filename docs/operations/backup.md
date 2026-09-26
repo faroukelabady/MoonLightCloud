@@ -13,6 +13,15 @@ Development volumes are not backups.
    that runs migrations verification + `/health/ready` before sign-off.
    An untested backup is not a backup.
 
+## Non-rebuildable state
+
+Most Cloud tables are derived projections rebuildable from the durable
+`sync_events` inbox (catalog, policy, inventory, sale/return
+projections). `commerce_product_mappings` (Phase 6A) is the exception:
+provider↔MoonLight external identities cannot be reconstructed from
+MoonLight events and must survive every projection rebuild. Backup and
+restore verification must cover this table explicitly.
+
 ## Local development
 
 Named volume `moonlightcloud_pgdata` persists across `dev-down`/`dev-up`.

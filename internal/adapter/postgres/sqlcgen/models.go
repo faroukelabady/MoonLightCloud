@@ -107,6 +107,14 @@ type CatalogTag struct {
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 }
 
+type CommerceProductMapping struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Device struct {
 	ID         pgtype.UUID        `json:"id"`
 	Name       string             `json:"name"`

@@ -30,3 +30,6 @@ Concise, irreversible-or-important choices only.
 - [0026](0026-return-refund-sync.md) — returns & refunds sync contract (4A)
 - [0027](0027-return-projection-reporting.md) — returns/refunds projection & reporting integration (4B)
 - [0028](0028-catalog-sync-projection.md) — product catalog sync projection (5A)
+- [0029](0029-sales-policy-projection.md) — product sales-policy projection (5B)
+- [0030](0030-inventory-availability-projection.md) — product inventory projection and availability (5C)
+- [0031](0031-commerce-provider-abstraction.md) — commerce provider abstraction (6A)

@@ -259,3 +259,30 @@ func TestV10ToLatest(t *testing.T) {
 		t.Fatalf("inventory table missing (%v)", err)
 	}
 }
+
+// TestV11ToLatest proves the frozen Phase 5C schema upgrades to the
+// commerce mapping table cleanly: 00012 only adds durable integration
+// state, and existing projection data is untouched.
+func TestV11ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 11); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 11 {
+		t.Fatalf("want 11, got %d", v)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var exists bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='commerce_product_mappings')`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("mapping table missing (%v)", err)
+	}
+	var count int
+	if err := conn.QueryRow(`SELECT count(*) FROM commerce_product_mappings`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("mapping table created empty (%v)", err)
+	}
+}

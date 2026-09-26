@@ -1,0 +1,70 @@
+package commerce
+
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"hash"
+	"math"
+)
+
+// ProductOperationKey derives the deterministic retry identity for one
+// desired product state: provider key, product ID, catalog revision,
+// policy revision, and publication state. Same desired state retried
+// after a temporary failure yields the same key; any state change yields
+// a new key. No timestamps, random IDs, or attempt counters.
+func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool) string {
+	return operationKey("product",
+		string(providerKey), productID,
+		revisionBytes(catalogRevision), revisionBytes(policyRevision),
+		boolBytes(published),
+	)
+}
+
+// InventoryOperationKey derives the deterministic retry identity for one
+// desired inventory state: product ID, the revisions behind the computed
+// availability (catalog lifecycle, sales policy, inventory), the derived
+// quantity, and publication state.
+func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, published bool) string {
+	return operationKey("inventory",
+		string(providerKey), productID,
+		revisionBytes(catalogRevision), revisionBytes(policyRevision), revisionBytes(inventoryRevision),
+		revisionBytes(quantity), boolBytes(published),
+	)
+}
+
+// operationKey hashes canonical length-prefixed fields: domain separation
+// plus explicit lengths, so no concatenation ambiguity and no unordered
+// JSON anywhere near retry identity.
+func operationKey(domain string, fields ...string) string {
+	h := sha256.New()
+	writeField(h, domain)
+	for _, field := range fields {
+		writeField(h, field)
+	}
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum)
+}
+
+func writeField(h hash.Hash, field string) {
+	var length [8]byte
+	if len(field) > math.MaxUint32 {
+		panic("commerce: operation key field too long")
+	}
+	binary.BigEndian.PutUint64(length[:], uint64(len(field)))
+	_, _ = h.Write(length[:])
+	_, _ = h.Write([]byte(field))
+}
+
+func revisionBytes(revision int64) string {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(revision))
+	return string(encoded[:])
+}
+
+func boolBytes(value bool) string {
+	if value {
+		return "\x01"
+	}
+	return "\x00"
+}
