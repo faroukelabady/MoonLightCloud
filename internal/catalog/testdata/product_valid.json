@@ -1,0 +1,37 @@
+{
+  "product_id": "55555555-5555-4555-8555-555555555555",
+  "sku": "PAP-001",
+  "name": "توت عنخ آمون",
+  "translations": [
+    {
+      "locale": "ar",
+      "name": "توت عنخ آمون"
+    },
+    {
+      "locale": "en",
+      "name": "Tutankhamun"
+    }
+  ],
+  "prices": [
+    {
+      "currency": "EGP",
+      "price_cents": 65000,
+      "cost_cents": 40000
+    },
+    {
+      "currency": "USD",
+      "price_cents": 1300
+    }
+  ],
+  "top_category_id": "11111111-1111-4111-8111-111111111111",
+  "subcategory_ids": [
+    "33333333-3333-4333-8333-333333333333"
+  ],
+  "tag_ids": [
+    "44444444-4444-4333-8444-444444444444"
+  ],
+  "width_cm": 70,
+  "height_cm": 100,
+  "is_active": true,
+  "catalog_revision": 1
+}

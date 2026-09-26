@@ -1,0 +1,16 @@
+{
+  "tag_id": "44444444-4444-4333-8444-444444444444",
+  "slug": "gold",
+  "is_active": true,
+  "names": [
+    {
+      "locale": "en",
+      "name": "Gold"
+    },
+    {
+      "locale": "ar",
+      "name": "ذهبي"
+    }
+  ],
+  "catalog_revision": 1
+}

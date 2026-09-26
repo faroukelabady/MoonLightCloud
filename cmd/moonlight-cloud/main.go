@@ -40,6 +40,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/app"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
@@ -134,6 +135,9 @@ func serve(args []string) error {
 	defer projCancel()
 	go a.Projector.Run(projCtx)
 	go a.ReturnProjector.Run(projCtx)
+	go a.CategoryProjector.Run(projCtx)
+	go a.TagProjector.Run(projCtx)
+	go a.ProductProjector.Run(projCtx)
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err
 	}
@@ -261,7 +265,7 @@ func projectionCmd(args []string) error {
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	switch args[0] {
 	case "status":
-		for _, processor := range []string{sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1} {
+		for _, processor := range []string{sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1, catalog.ProcessorCategoryProjectionV1, catalog.ProcessorTagProjectionV1, catalog.ProcessorProductProjectionV1} {
 			stats, err := store.ProcessingStats(ctx, processor)
 			if err != nil {
 				return err
@@ -292,8 +296,13 @@ func projectionCmd(args []string) error {
 		if len(args) >= 3 {
 			processor = args[2]
 		}
-		if processor != sale.ProcessorSaleProjectionV1 && processor != returnrefund.ProcessorReturnProjectionV1 {
-			return fmt.Errorf("unknown processor %q: want %s or %s", processor, sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1)
+		validProcessors := map[string]bool{
+			sale.ProcessorSaleProjectionV1: true, returnrefund.ProcessorReturnProjectionV1: true,
+			catalog.ProcessorCategoryProjectionV1: true, catalog.ProcessorTagProjectionV1: true,
+			catalog.ProcessorProductProjectionV1: true,
+		}
+		if !validProcessors[processor] {
+			return fmt.Errorf("unknown processor %q", processor)
 		}
 		return store.ResetProcessing(ctx, processor, args[1])
 	default:

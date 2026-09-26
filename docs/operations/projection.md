@@ -213,3 +213,56 @@ authoritative and reprocessing reproduces identical rows (tested by
    CLI in this phase; the documented procedure plus the rebuild tests
    (`TestReturnRebuildStable`, `TestReturnRivalRebuildStable`,
    `TestReturnOutOfOrderRebuildStable`) suffice.
+
+## Catalog processors
+
+Three additional processors share this runbook's machinery:
+
+```text
+catalog_category_projection.v1
+catalog_tag_projection.v1
+catalog_product_projection.v1
+```
+
+`projection status` lists all five processors; `projection retry <id>
+[catalog_*_projection.v1]` resets one catalog event. Catalog-specific
+retry code `CATALOG_DEPENDENCY_WAIT` means a referenced entity has not
+projected yet — it converges automatically, never terminally. Terminal
+catalog codes (`CATALOG_REVISION_CONFLICT`, `CATALOG_CATEGORY_CYCLE`,
+`CATALOG_INVALID_RELATION`) need operator review like sale/return blocks.
+
+## Catalog rebuild
+
+Catalog projections rebuild from accepted `catalog.*.snapshot.v1` inbox
+events with one difference from sale/return rebuilds: revisions supersede,
+so the replay must deterministically converge on the highest valid
+revision per entity regardless of processing order (stale revisions no-op,
+equal-revision conflicts stay blocked, dependency waits resolve). There is
+no catalog ownership table to retain — revision metadata in the projection
+rows is the arbitration. Procedure:
+
+```sql
+DELETE FROM catalog_product_tags;
+DELETE FROM catalog_product_subcategories;
+DELETE FROM catalog_product_translations;
+DELETE FROM catalog_product_prices;
+DELETE FROM catalog_products;
+DELETE FROM catalog_category_edges;
+DELETE FROM catalog_tags;
+DELETE FROM catalog_categories;
+UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
+  attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
+  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1');
+```
+
+Then reprocess categories, tags, and products (any order converges; the
+documented order minimizes dependency waits) and verify current revisions
+plus a row-level dump against the pre-rebuild snapshot.
+
+## Observing catalog sync
+
+Pending catalog work is visible per processor in `projection status`
+(pending/retry counts, oldest pending age, last error code). Current
+revisions per entity are readable from the projection rows
+(`source_revision`, `source_event_id`). No dashboard surface exists in
+Phase 5A by design.

@@ -11,6 +11,7 @@ sql:
       - "db/migrations/00006_sync_event_hash_version.sql"
       - "db/migrations/00007_sale_event_ownership.sql"
       - "db/migrations/00008_return_refund_projection.sql"
+      - "db/migrations/00009_catalog_projection.sql"
     gen:
       go:
         package: "sqlcgen"

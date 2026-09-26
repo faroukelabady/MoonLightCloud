@@ -8,6 +8,81 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CatalogCategory struct {
+	CategoryID        pgtype.UUID        `json:"category_id"`
+	Status            string             `json:"status"`
+	NameAr            string             `json:"name_ar"`
+	NameEn            pgtype.Text        `json:"name_en"`
+	SourceRevision    int64              `json:"source_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+}
+
+type CatalogCategoryEdge struct {
+	ParentID pgtype.UUID `json:"parent_id"`
+	ChildID  pgtype.UUID `json:"child_id"`
+	Position int32       `json:"position"`
+}
+
+type CatalogProduct struct {
+	ProductID         pgtype.UUID        `json:"product_id"`
+	Sku               string             `json:"sku"`
+	Name              string             `json:"name"`
+	Description       pgtype.Text        `json:"description"`
+	TopCategoryID     pgtype.UUID        `json:"top_category_id"`
+	WidthCm           pgtype.Int4        `json:"width_cm"`
+	HeightCm          pgtype.Int4        `json:"height_cm"`
+	IsActive          bool               `json:"is_active"`
+	SourceRevision    int64              `json:"source_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+}
+
+type CatalogProductPrice struct {
+	ProductID  pgtype.UUID `json:"product_id"`
+	Currency   string      `json:"currency"`
+	PriceMinor int64       `json:"price_minor"`
+	CostMinor  pgtype.Int8 `json:"cost_minor"`
+}
+
+type CatalogProductSubcategory struct {
+	ProductID  pgtype.UUID `json:"product_id"`
+	CategoryID pgtype.UUID `json:"category_id"`
+	Position   int32       `json:"position"`
+}
+
+type CatalogProductTag struct {
+	ProductID pgtype.UUID `json:"product_id"`
+	TagID     pgtype.UUID `json:"tag_id"`
+}
+
+type CatalogProductTranslation struct {
+	ProductID   pgtype.UUID `json:"product_id"`
+	Locale      string      `json:"locale"`
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+}
+
+type CatalogTag struct {
+	TagID             pgtype.UUID        `json:"tag_id"`
+	Slug              string             `json:"slug"`
+	IsActive          bool               `json:"is_active"`
+	NameAr            pgtype.Text        `json:"name_ar"`
+	NameEn            pgtype.Text        `json:"name_en"`
+	SourceRevision    int64              `json:"source_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+}
+
 type Device struct {
 	ID         pgtype.UUID        `json:"id"`
 	Name       string             `json:"name"`

@@ -847,7 +847,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -878,12 +878,18 @@ components:
       oneOf:
         - $ref: '#/components/schemas/SaleFinalizedV1Event'
         - $ref: '#/components/schemas/ReturnRefundFinalizedV1Event'
+        - $ref: '#/components/schemas/CatalogCategorySnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogTagSnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogProductSnapshotV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type
         mapping:
           sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
           sale.return_refund.finalized.v1: '#/components/schemas/ReturnRefundFinalizedV1Event'
+          catalog.category.snapshot.v1: '#/components/schemas/CatalogCategorySnapshotV1Event'
+          catalog.tag.snapshot.v1: '#/components/schemas/CatalogTagSnapshotV1Event'
+          catalog.product.snapshot.v1: '#/components/schemas/CatalogProductSnapshotV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -935,6 +941,123 @@ components:
               enum: [sale.return_refund.finalized.v1]
             payload:
               $ref: '#/components/schemas/ReturnRefundFinalizedV1'
+    CatalogCategorySnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.category.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogCategorySnapshotV1'
+    CatalogTagSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.tag.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogTagSnapshotV1'
+    CatalogProductSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.product.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogProductSnapshotV1'
+    CatalogName:
+      type: object
+      additionalProperties: false
+      required: [locale, name]
+      properties:
+        locale: {type: string, enum: [ar, en]}
+        name: {type: string, minLength: 1, maxLength: 200}
+      description: One locale/name pair. Category names carry no description.
+    CatalogProductTranslation:
+      type: object
+      additionalProperties: false
+      required: [locale, name]
+      properties:
+        locale: {type: string, enum: [ar, en]}
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, nullable: true}
+    CatalogPrice:
+      type: object
+      additionalProperties: false
+      required: [currency, price_cents]
+      properties:
+        currency: {type: string, enum: [EGP, USD]}
+        price_cents: {type: integer, minimum: 0}
+        cost_cents: {type: integer, minimum: 0, nullable: true}
+      description: Integer minor units, never float. Cost is optional.
+    CatalogCategorySnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [category_id, status, names, parent_ids, catalog_revision]
+      properties:
+        category_id: {type: string, format: uuid}
+        status: {type: string, enum: [active, hidden, archived]}
+        names:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/CatalogName'}
+        parent_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: Complete ordered parent set (snapshot, never delta).
+        catalog_revision: {type: integer, minimum: 1}
+      description: Authoritative category state at a monotonic revision.
+    CatalogTagSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [tag_id, slug, is_active, names, catalog_revision]
+      properties:
+        tag_id: {type: string, format: uuid}
+        slug: {type: string, pattern: '^[a-z0-9-]+$'}
+        is_active: {type: boolean}
+        names:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogName'}
+        catalog_revision: {type: integer, minimum: 1}
+      description: Authoritative tag state at a monotonic revision.
+    CatalogProductSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [product_id, sku, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, nullable: true}
+        translations:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogProductTranslation'}
+        prices:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogPrice'}
+        top_category_id: {type: string, format: uuid}
+        subcategory_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: Complete ordered set; Cloud replaces transactionally.
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: Complete ordered set; Cloud replaces transactionally.
+        width_cm: {type: integer, minimum: 1, nullable: true}
+        height_cm: {type: integer, minimum: 1, nullable: true}
+        is_active: {type: boolean}
+        catalog_revision: {type: integer, minimum: 1}
+      description: Authoritative product state at a monotonic revision. No stock, no provider identity, no images.
     BatchResult:
       type: object
       required: [events]

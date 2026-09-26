@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
@@ -33,6 +34,30 @@ func TestMain(m *testing.M) {
 			return err
 		}
 		_, err = returnrefund.Validate(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventCategorySnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeCategorySnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateCategorySnapshot(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventTagSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeTagSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateTagSnapshot(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventProductSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductSnapshot(p)
 		return err
 	})
 	os.Exit(m.Run())

@@ -1,0 +1,27 @@
+{
+  "product_id": "66666666-6666-4666-8666-666666666666",
+  "sku": "PAP-002",
+  "name": "بردية",
+  "translations": [
+    {
+      "locale": "ar",
+      "name": "بردية"
+    }
+  ],
+  "prices": [
+    {
+      "currency": "EGP",
+      "price_cents": 200000
+    }
+  ],
+  "top_category_id": "11111111-1111-4111-8111-111111111111",
+  "subcategory_ids": [],
+  "tag_ids": [
+    "44444444-4444-4333-8444-444444444444",
+    "77777777-7777-4777-8777-777777777777"
+  ],
+  "width_cm": 50,
+  "height_cm": 70,
+  "is_active": true,
+  "catalog_revision": 3
+}

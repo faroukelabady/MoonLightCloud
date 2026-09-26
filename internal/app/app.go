@@ -16,6 +16,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
@@ -40,20 +41,25 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg             config.Config
-	Log             *slog.Logger
-	Pool            *pgxpool.Pool
-	Devices         auth.Service
-	Sync            sync.Service
-	Reports         report.Service
-	Dashboard       dashboard.Service
-	Projector       *sale.Projector
-	SaleStore       sale.Store
-	ReturnProjector *returnrefund.Projector
-	ReturnStore     returnrefund.Store
-	Handler         http.Handler
-	Health          adapterhttp.Health
-	Version         adapterhttp.Version
+	Cfg               config.Config
+	Log               *slog.Logger
+	Pool              *pgxpool.Pool
+	Devices           auth.Service
+	Sync              sync.Service
+	Reports           report.Service
+	Dashboard         dashboard.Service
+	Projector         *sale.Projector
+	SaleStore         sale.Store
+	ReturnProjector   *returnrefund.Projector
+	ReturnStore       returnrefund.Store
+	CatalogStore      catalog.Store
+	CategoryProjector *catalog.Projector
+	TagProjector      *catalog.Projector
+	ProductProjector  *catalog.Projector
+	Catalog           catalog.Service
+	Handler           http.Handler
+	Health            adapterhttp.Health
+	Version           adapterhttp.Version
 }
 
 // New builds the app in startup order.
@@ -77,10 +83,18 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.Sync = sync.NewService(store, clock.System{})
 	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
 	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
+	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
+	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
+	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store
 	a.ReturnProjector = returnrefund.NewProjector(store, clock.System{}, log)
+	a.CatalogStore = store
+	a.CategoryProjector = catalog.NewCategoryProjector(store, clock.System{}, log)
+	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
+	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
+	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
@@ -133,6 +147,43 @@ func ValidateReturnRefundPayload(raw json.RawMessage) error {
 	return err
 }
 
+// ValidateCatalogCategoryPayload is the ingestion-time
+// catalog.category.snapshot.v1 gate: event-local validation only, before
+// durable ACK. Dependency resolution (missing parents) and DAG defense
+// belong to projection, never ingestion.
+func ValidateCatalogCategoryPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeCategorySnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateCategorySnapshot(p)
+	return err
+}
+
+// ValidateCatalogTagPayload is the ingestion-time
+// catalog.tag.snapshot.v1 gate: event-local validation only.
+func ValidateCatalogTagPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeTagSnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateTagSnapshot(p)
+	return err
+}
+
+// ValidateCatalogProductPayload is the ingestion-time
+// catalog.product.snapshot.v1 gate: event-local validation only.
+// Referenced categories/tags may not have projected yet; that wait
+// belongs to projection, never ingestion.
+func ValidateCatalogProductPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductSnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductSnapshot(p)
+	return err
+}
+
 // ProjectOne loads one inbox event and runs a single atomic projection
 // attempt. Used by tests and operator tooling; serve-path projection goes
 // through the background Projector.
@@ -153,6 +204,9 @@ func (a *App) ProjectOne(ctx context.Context, eventID string) (sale.ProjectResul
 func (a *App) notifyProjectors() {
 	a.Projector.Notify()
 	a.ReturnProjector.Notify()
+	a.CategoryProjector.Notify()
+	a.TagProjector.Notify()
+	a.ProductProjector.Notify()
 }
 
 // ProjectReturnOne loads one return inbox event and runs a single atomic
