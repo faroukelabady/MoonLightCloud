@@ -1035,7 +1035,7 @@ components:
       required: [product_id, sku, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
       properties:
         product_id: {type: string, format: uuid}
-        sku: {type: string, minLength: 1, maxLength: 64}
+        sku: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, nullable: true}
         translations:

@@ -144,3 +144,55 @@ SELECT product_id, sku, name, source_revision, source_event_id
 FROM catalog_products
 WHERE is_active ORDER BY sku, product_id
 LIMIT $1;
+
+-- Phase 5A-R1 cross-aggregate convergence (ADR-0028): accepted catalog
+-- events per entity with their processing state, projected products
+-- referencing a category, and graph-change product resets. All bounded by
+-- entity ID (never full-table scans beyond the small catalog event set).
+
+-- name: CatalogEntityEventRevisions :many
+-- Accepted events for one catalog entity (type + JSON identity key +
+-- identity value) with revision and processing state. Missing processing
+-- rows report 'missing'; callers treat missing/pending/retry as unsettled.
+SELECT e.event_id,
+    (e.payload->>'catalog_revision')::bigint AS revision,
+    COALESCE(p.status, 'missing') AS processing_status,
+    COALESCE(p.last_error_code, '') AS last_error_code
+FROM sync_events e
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = $4
+WHERE e.event_type = $1
+  AND e.payload->>($2::text) = ($3::text);
+
+-- name: CatalogProductsReferencingCategory :many
+-- Projected products whose top or subcategory set references a category.
+-- Indexed both sides (top FK index is implicit via PK lookups; the
+-- subcategory side uses idx_catalog_product_subcategories_category).
+SELECT product_id FROM catalog_products WHERE top_category_id = $1
+UNION
+SELECT product_id FROM catalog_product_subcategories WHERE category_id = $1;
+
+-- name: ResetCatalogProductRetriesForGraph :exec
+-- Re-evaluation trigger: after a category graph commit, waiting or
+-- graph-blocked product events referencing the changed category become
+-- pending again so they re-validate against the new graph with no operator
+-- retry and no Retail resend. Other error codes are never touched.
+UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
+    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
+WHERE processor = 'catalog_product_projection.v1'
+  AND status IN ('retry', 'blocked')
+  AND last_error_code IN ('CATALOG_DEPENDENCY_WAIT', 'CATALOG_INVALID_RELATION')
+  AND event_id IN (
+    SELECT e.event_id FROM sync_events e
+    WHERE e.event_type = 'catalog.product.snapshot.v1'
+      AND (e.payload->>'top_category_id' = ($1::text)
+           OR e.payload->'subcategory_ids' @> to_jsonb(($2::text)))
+  );
+
+-- name: LockCatalogEntity :exec
+-- PostgreSQL-enforced entity serialization (R04): one advisory
+-- transaction-scoped lock per (entity_type, entity_id), always acquired in
+-- globally sorted key order (see lockCatalogEntities). Concurrent
+-- revisions of the same entity serialize; different entities proceed in
+-- parallel. Released automatically at commit/rollback.
+SELECT pg_advisory_xact_lock(hashtext('catalog:' || $1::text || ':' || $2::text));

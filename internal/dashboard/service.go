@@ -919,6 +919,18 @@ func safeDiagnostic(code string) (ar, en string) {
 		return "تجاوز كمية الإرجاع", "Returns exceed the sold quantity"
 	case "CUMULATIVE_REFUND_EXCEEDED":
 		return "تجاوز مبلغ الاسترداد", "Refunds exceed the sale total"
+	case "CATALOG_DEPENDENCY_WAIT":
+		return "بانتظار عنصر كتالوج", "Waiting for a catalog dependency"
+	case "CATALOG_REVISION_CONFLICT":
+		return "تعارض مراجعة كتالوج", "Catalog revision conflict"
+	case "CATALOG_CATEGORY_CYCLE":
+		return "دورة فئات مرفوضة", "Category cycle rejected"
+	case "CATALOG_CATEGORY_DEPTH":
+		return "تجاوز عمق الفئات", "Category depth exceeded"
+	case "CATALOG_INVALID_RELATION":
+		return "علاقة كتالوج غير صالحة", "Invalid catalog relation"
+	case "CATALOG_GRAPH_CONFLICT":
+		return "تعارض الرسم البياني", "Category change conflicts with products"
 	default:
 		return "حدث خطأ أثناء المعالجة", "A processing error occurred"
 	}

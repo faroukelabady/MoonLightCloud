@@ -136,16 +136,21 @@ financial history. The procedure below never does.
 ## Ownership integrity query
 
 ```sql
--- Any row here is an integrity failure: projected source differs from the
--- durable winner. Investigate before serving reads from projections.
-SELECT s.sale_id, s.source_event_id AS projected_source, o.winning_event_id
-FROM sales_projection s
-JOIN sale_event_ownership o USING (sale_id)
-WHERE s.source_event_id <> o.winning_event_id;
-SELECT r.return_refund_id, r.source_event_id AS projected_source, o.winning_event_id
-FROM return_refund_projection r
-JOIN return_refund_ownership o USING (return_refund_id)
-WHERE r.source_event_id <> o.winning_event_id;
+-- Any row here is an integrity failure: a projected product whose top is
+-- not a root or whose subcategory is unreachable from its top under the
+-- current graph. Investigate before trusting catalog reads.
+WITH RECURSIVE reachable(top_id, category_id) AS (
+  SELECT top_category_id, top_category_id FROM catalog_products
+  UNION
+  SELECT r.top_id, e.child_id
+  FROM catalog_category_edges e JOIN reachable r ON e.parent_id = r.category_id
+)
+SELECT p.product_id FROM catalog_products p
+WHERE EXISTS (SELECT 1 FROM catalog_category_edges e WHERE e.child_id = p.top_category_id)
+   OR EXISTS (SELECT 1 FROM catalog_product_subcategories s WHERE s.product_id = p.product_id
+              AND s.category_id <> p.top_category_id
+              AND NOT EXISTS (SELECT 1 FROM reachable r
+                              WHERE r.top_id = p.top_category_id AND r.category_id = s.category_id));
 ```
 
 Resetting a losing conflict event during rebuild deterministically returns
@@ -229,7 +234,30 @@ catalog_product_projection.v1
 retry code `CATALOG_DEPENDENCY_WAIT` means a referenced entity has not
 projected yet — it converges automatically, never terminally. Terminal
 catalog codes (`CATALOG_REVISION_CONFLICT`, `CATALOG_CATEGORY_CYCLE`,
-`CATALOG_INVALID_RELATION`) need operator review like sale/return blocks.
+`CATALOG_INVALID_RELATION`, `CATALOG_CATEGORY_DEPTH`, `CATALOG_GRAPH_CONFLICT`)
+need operator review like sale/return blocks. Depth excess is reported
+separately from cycles; graph conflicts mean a category change would orphan
+current products with no accepted repair.
+A product that is invalid under the current graph but has unsettled
+category history waits with the same code and converges when the graph
+advances; every category commit automatically re-arms waiting or
+graph-blocked product events that reference the changed subgraph, so no
+operator retry and no Retail resend are ever needed for convergence.
+
+```sql
+-- Any row here is an integrity failure: a projected product whose top is
+-- not a root or whose subcategory is unreachable from its top under the
+-- current graph. Investigate before trusting catalog reads.
+SELECT p.product_id
+FROM catalog_products p
+WHERE EXISTS (SELECT 1 FROM catalog_category_edges e WHERE e.child_id = p.top_category_id)
+   OR EXISTS (SELECT 1 FROM catalog_product_subcategories s WHERE s.product_id = p.product_id
+              AND NOT EXISTS (SELECT 1 FROM catalog_category_edges e
+                              WHERE e.child_id = s.category_id
+                                AND (e.parent_id = p.top_category_id
+                                     OR e.parent_id IN (SELECT child_id FROM catalog_category_edges
+                                                        WHERE parent_id = p.top_category_id))));
+```
 
 ## Catalog rebuild
 

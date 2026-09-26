@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"crypto/sha256"
 	"testing"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
@@ -71,20 +70,14 @@ func TestReachableFromTop(t *testing.T) {
 	}
 }
 
-func TestRevisionDisposition(t *testing.T) {
-	h1 := sha256.Sum256([]byte(`{"a":1}`))
-	h2 := sha256.Sum256([]byte(`{"a":2}`))
-	stored := h1[:]
-	if proceed, _, _ := revisionDisposition(4, stored, 5, h2); !proceed {
+func TestRevisionGate(t *testing.T) {
+	if proceed, stale := revisionGate(5, 4); !proceed || stale {
 		t.Fatal("higher revision proceeds")
 	}
-	if proceed, outcome, _ := revisionDisposition(5, stored, 4, h1); proceed || outcome != catalog.OutcomeProcessed {
+	if proceed, stale := revisionGate(4, 5); proceed || !stale {
 		t.Fatal("stale revision is a terminal no-op")
 	}
-	if proceed, outcome, _ := revisionDisposition(5, stored, 5, h1); proceed || outcome != catalog.OutcomeProcessed {
-		t.Fatal("equal revision identical payload is idempotent")
-	}
-	if proceed, outcome, code := revisionDisposition(5, stored, 5, h2); proceed || outcome != catalog.OutcomeBlocked || code != ErrCatalogRevisionConflict {
-		t.Fatal("equal revision conflicting payload blocks")
+	if proceed, stale := revisionGate(5, 5); proceed || stale {
+		t.Fatal("equal revision needs reconstruction comparison")
 	}
 }

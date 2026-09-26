@@ -138,6 +138,70 @@ func (q *Queries) CatalogCategoryParents(ctx context.Context, childID pgtype.UUI
 	return items, nil
 }
 
+const catalogEntityEventRevisions = `-- name: CatalogEntityEventRevisions :many
+
+SELECT e.event_id,
+    (e.payload->>'catalog_revision')::bigint AS revision,
+    COALESCE(p.status, 'missing') AS processing_status,
+    COALESCE(p.last_error_code, '') AS last_error_code
+FROM sync_events e
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = $4
+WHERE e.event_type = $1
+  AND e.payload->>($2::text) = ($3::text)
+`
+
+type CatalogEntityEventRevisionsParams struct {
+	EventType string `json:"event_type"`
+	Column2   string `json:"column_2"`
+	Column3   string `json:"column_3"`
+	Processor string `json:"processor"`
+}
+
+type CatalogEntityEventRevisionsRow struct {
+	EventID          pgtype.UUID `json:"event_id"`
+	Revision         int64       `json:"revision"`
+	ProcessingStatus string      `json:"processing_status"`
+	LastErrorCode    string      `json:"last_error_code"`
+}
+
+// Phase 5A-R1 cross-aggregate convergence (ADR-0028): accepted catalog
+// events per entity with their processing state, projected products
+// referencing a category, and graph-change product resets. All bounded by
+// entity ID (never full-table scans beyond the small catalog event set).
+// Accepted events for one catalog entity (type + JSON identity key +
+// identity value) with revision and processing state. Missing processing
+// rows report 'missing'; callers treat missing/pending/retry as unsettled.
+func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEntityEventRevisionsParams) ([]CatalogEntityEventRevisionsRow, error) {
+	rows, err := q.db.Query(ctx, catalogEntityEventRevisions,
+		arg.EventType,
+		arg.Column2,
+		arg.Column3,
+		arg.Processor,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogEntityEventRevisionsRow{}
+	for rows.Next() {
+		var i CatalogEntityEventRevisionsRow
+		if err := rows.Scan(
+			&i.EventID,
+			&i.Revision,
+			&i.ProcessingStatus,
+			&i.LastErrorCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const catalogProductByID = `-- name: CatalogProductByID :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
     is_active, source_revision, source_event_id, source_device_id, source_payload_hash
@@ -331,6 +395,35 @@ func (q *Queries) CatalogProductTranslations(ctx context.Context, productID pgty
 	return items, nil
 }
 
+const catalogProductsReferencingCategory = `-- name: CatalogProductsReferencingCategory :many
+SELECT product_id FROM catalog_products WHERE top_category_id = $1
+UNION
+SELECT product_id FROM catalog_product_subcategories WHERE category_id = $1
+`
+
+// Projected products whose top or subcategory set references a category.
+// Indexed both sides (top FK index is implicit via PK lookups; the
+// subcategory side uses idx_catalog_product_subcategories_category).
+func (q *Queries) CatalogProductsReferencingCategory(ctx context.Context, topCategoryID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, catalogProductsReferencingCategory, topCategoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var product_id pgtype.UUID
+		if err := rows.Scan(&product_id); err != nil {
+			return nil, err
+		}
+		items = append(items, product_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const catalogTagByID = `-- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,
     source_event_id, source_device_id, source_payload_hash
@@ -509,6 +602,25 @@ func (q *Queries) InsertCatalogProductTranslation(ctx context.Context, arg Inser
 	return err
 }
 
+const lockCatalogEntity = `-- name: LockCatalogEntity :exec
+SELECT pg_advisory_xact_lock(hashtext('catalog:' || $1::text || ':' || $2::text))
+`
+
+type LockCatalogEntityParams struct {
+	Column1 string `json:"column_1"`
+	Column2 string `json:"column_2"`
+}
+
+// PostgreSQL-enforced entity serialization (R04): one advisory
+// transaction-scoped lock per (entity_type, entity_id), always acquired in
+// globally sorted key order (see lockCatalogEntities). Concurrent
+// revisions of the same entity serialize; different entities proceed in
+// parallel. Released automatically at commit/rollback.
+func (q *Queries) LockCatalogEntity(ctx context.Context, arg LockCatalogEntityParams) error {
+	_, err := q.db.Exec(ctx, lockCatalogEntity, arg.Column1, arg.Column2)
+	return err
+}
+
 const pendingCatalogEvents = `-- name: PendingCatalogEvents :many
 
 SELECT e.event_id
@@ -553,6 +665,34 @@ func (q *Queries) PendingCatalogEvents(ctx context.Context, arg PendingCatalogEv
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetCatalogProductRetriesForGraph = `-- name: ResetCatalogProductRetriesForGraph :exec
+UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
+    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
+WHERE processor = 'catalog_product_projection.v1'
+  AND status IN ('retry', 'blocked')
+  AND last_error_code IN ('CATALOG_DEPENDENCY_WAIT', 'CATALOG_INVALID_RELATION')
+  AND event_id IN (
+    SELECT e.event_id FROM sync_events e
+    WHERE e.event_type = 'catalog.product.snapshot.v1'
+      AND (e.payload->>'top_category_id' = ($1::text)
+           OR e.payload->'subcategory_ids' @> to_jsonb(($2::text)))
+  )
+`
+
+type ResetCatalogProductRetriesForGraphParams struct {
+	Column1 string `json:"column_1"`
+	Column2 string `json:"column_2"`
+}
+
+// Re-evaluation trigger: after a category graph commit, waiting or
+// graph-blocked product events referencing the changed category become
+// pending again so they re-validate against the new graph with no operator
+// retry and no Retail resend. Other error codes are never touched.
+func (q *Queries) ResetCatalogProductRetriesForGraph(ctx context.Context, arg ResetCatalogProductRetriesForGraphParams) error {
+	_, err := q.db.Exec(ctx, resetCatalogProductRetriesForGraph, arg.Column1, arg.Column2)
+	return err
 }
 
 const upsertCatalogCategory = `-- name: UpsertCatalogCategory :exec

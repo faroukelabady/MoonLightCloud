@@ -193,6 +193,12 @@ check("tag_valid.json", "CatalogTagSnapshotV1", load_fixture("internal/catalog/t
 check("product_valid.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_valid.json"))
 check("product_multi_root_tags.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_multi_root_tags.json"))
 check("product_minimal.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_minimal.json"))
+# R09: SKU parity with Retail/Cloud runtime CR/LF/TAB rejection.
+sku_base = load_fixture("internal/catalog/testdata/product_valid.json")
+for label, char in [("LF", "\n"), ("CR", "\r"), ("TAB", "\t")]:
+    bad_sku = copy.deepcopy(sku_base)
+    bad_sku["sku"] = "PAP" + char + "001"
+    check("sku-" + label + " product", "CatalogProductSnapshotV1", bad_sku, expect_valid=False)
 check("product_bad_money.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_bad_money.json"), expect_valid=False)
 check("product_bad_dims.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_bad_dims.json"), expect_valid=False)
 check("category_bad_shape.json", "CatalogCategorySnapshotV1", load_fixture("internal/catalog/testdata/category_bad_shape.json"), expect_valid=False)

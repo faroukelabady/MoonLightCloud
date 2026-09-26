@@ -42,6 +42,14 @@ reporting, inventory, or providers.
 8. **Isolation.** Reporting never joins catalog tables (historical
    snapshots stay authoritative). No provider columns, no stock columns.
 
+## Authority assumption
+
+Retail catalog is the single logical revision stream per entity; devices
+are transport identities, not independent masters. Cloud never merges
+concurrent business edits from multiple Retail databases: same entity,
+same revision, different semantic state blocks deterministically
+(`CATALOG_REVISION_CONFLICT`) as defensive integrity.
+
 ## Consequences
 
 Rebuilds choose the highest valid revision deterministically regardless of

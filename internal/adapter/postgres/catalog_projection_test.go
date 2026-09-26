@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -834,5 +835,808 @@ func TestCatalogRenameIsolatesHistory(t *testing.T) {
 	}
 	if len(sumAfter.CurrencyTotals) == 0 || sumAfter.CurrencyTotals[0].SalesTotalMinor != 200000 {
 		t.Fatalf("gross preserved: %+v", sumAfter.CurrencyTotals)
+	}
+}
+
+// coordinatedFixture builds the §36 graph: roots A and B, sub S under A
+// (all rev 1, projected), and product P (top A + S, rev 1, projected).
+// Returns IDs plus the accepted (unprocessed) rev-2 category/product event
+// IDs that move S under B and retarget P to top B.
+func coordinatedFixture(t *testing.T, env *saleEnv) (a, b, s, product string, catRev2, prodRev2 string) {
+	t.Helper()
+	ids := catalogIDs(t, 200, "a", "b", "s")
+	a, b, s = ids["a"], ids["b"], ids["s"]
+	project := func(event, typ, occurred, payload string) {
+		ingestCatalog(t, env, event, typ, occurred, payload)
+		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+			t.Fatalf("fixture %s: %+v", event, res)
+		}
+	}
+	project("d0003000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		categoryPayload(a, "active", map[string]string{"ar": "A"}, nil, 1))
+	project("d0003001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		categoryPayload(b, "active", map[string]string{"ar": "B"}, nil, 1))
+	project("d0003002-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{a}, 1))
+	product = "e0003000-0000-4000-8000-000000000000"
+	project("d0003003-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+		productPayload(product, "PAP-C", "x", a, []string{s}, nil, 1))
+	catRev2 = "d0003004-0000-4000-8000-000000000004"
+	ingestCatalog(t, env, catRev2, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{b}, 2))
+	prodRev2 = "d0003005-0000-4000-8000-000000000005"
+	return a, b, s, product, catRev2, prodRev2
+}
+
+// ingestProdRev2 accepts the coordinated product repair event. Tests that
+// need an accepted repair call this explicitly; the orphan test omits it
+// to prove a repair-less graph change is rejected.
+func ingestProdRev2(t *testing.T, env *saleEnv, product, b, s, prodRev2 string) {
+	t.Helper()
+	ingestCatalog(t, env, prodRev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+		productPayload(product, "PAP-C", "x", b, []string{s}, nil, 2))
+}
+
+func catalogProductTop(t *testing.T, env *saleEnv, productID string) (string, int64) {
+	t.Helper()
+	var top string
+	var revision int64
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT top_category_id::text, source_revision FROM catalog_products WHERE product_id=$1`,
+		productID).Scan(&top, &revision); err != nil {
+		t.Fatal(err)
+	}
+	return top, revision
+}
+
+func catalogChildParents(t *testing.T, env *saleEnv, childID string) []string {
+	t.Helper()
+	rows, err := env.pool.Query(context.Background(),
+		`SELECT parent_id::text FROM catalog_category_edges WHERE child_id=$1 ORDER BY position, parent_id::text`, childID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var parents []string
+	for rows.Next() {
+		var parent string
+		if err := rows.Scan(&parent); err != nil {
+			t.Fatal(err)
+		}
+		parents = append(parents, parent)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return parents
+}
+
+// TestCatalogCoordinatedProductFirst proves §36 ordering: the product
+// revision evaluated against the old graph waits (never terminally
+// blocks), the category revision commits, and the product advances with
+// no manual retry and no resend.
+func TestCatalogCoordinatedProductFirst(t *testing.T) {
+	env := openSaleEnv(t)
+	a, b, s, product, catRev2, prodRev2 := coordinatedFixture(t, env)
+	ingestProdRev2(t, env, product, b, s, prodRev2)
+
+	res := projectCatalogOnce(t, env, prodRev2)
+	if res.Outcome != catalog.OutcomeRetryable || res.ErrorCode != ErrCatalogDependencyWait {
+		t.Fatalf("product waits on unsettled graph: %+v", res)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != a || revision != 1 {
+		t.Fatalf("product still rev1/top A: %s %d", top, revision)
+	}
+
+	if res := projectCatalogOnce(t, env, catRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("category commits: %+v", res)
+	}
+	if parents := catalogChildParents(t, env, s); len(parents) != 1 || parents[0] != b {
+		t.Fatalf("graph moved S→B: %v", parents)
+	}
+	// The category commit automatically re-armed the waiting product: no
+	// operator reset, no forceDue call in this test.
+	if res := projectCatalogOnce(t, env, prodRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("product advances: %+v", res)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != b || revision != 2 {
+		t.Fatalf("final top B rev2: %s %d", top, revision)
+	}
+}
+
+// TestCatalogCoordinatedCategoryFirst proves the reverse order converges
+// to the same final state.
+func TestCatalogCoordinatedCategoryFirst(t *testing.T) {
+	env := openSaleEnv(t)
+	_, b, s, product, catRev2, prodRev2 := coordinatedFixture(t, env)
+	ingestProdRev2(t, env, product, b, s, prodRev2)
+
+	if res := projectCatalogOnce(t, env, catRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("category commits: %+v", res)
+	}
+	if res := projectCatalogOnce(t, env, prodRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("product advances: %+v", res)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != b || revision != 2 {
+		t.Fatalf("final top B rev2: %s %d", top, revision)
+	}
+	if parents := catalogChildParents(t, env, s); len(parents) != 1 || parents[0] != b {
+		t.Fatalf("graph S→B: %v", parents)
+	}
+}
+
+// TestCatalogOrphaningBlockedWithoutRepair proves §38: a category revision
+// that would orphan current products, with no accepted product repair,
+// is terminally blocked and the previous graph stays authoritative.
+func TestCatalogOrphaningBlockedWithoutRepair(t *testing.T) {
+	env := openSaleEnv(t)
+	a, b, s, product, _, _ := coordinatedFixture(t, env)
+	_ = product
+	// No product rev2 accepted: the reparent has no repair.
+	orphan := "d0003006-0000-4000-8000-000000000006"
+	ingestCatalog(t, env, orphan, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{b}, 2))
+	res := projectCatalogOnce(t, env, orphan)
+	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogGraphConflict {
+		t.Fatalf("orphaning change blocked: %+v", res)
+	}
+	if parents := catalogChildParents(t, env, s); len(parents) != 1 || parents[0] != a {
+		t.Fatalf("previous graph preserved: %v", parents)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != a || revision != 1 {
+		t.Fatalf("product still valid rev1: %s %d", top, revision)
+	}
+	if status, _ := catalogStatus(t, env, catalog.ProcessorCategoryProjectionV1, orphan); status != "blocked" {
+		t.Fatalf("terminal state: %q", status)
+	}
+}
+
+// TestCatalogTransientCategoryRecovery proves a transient category failure
+// never strands the product: after recovery the category commits and the
+// waiting product advances automatically.
+func TestCatalogTransientCategoryRecovery(t *testing.T) {
+	env := openSaleEnv(t)
+	_, b, s, product, catRev2, prodRev2 := coordinatedFixture(t, env)
+	ingestProdRev2(t, env, product, b, s, prodRev2)
+
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE FUNCTION fail_catalog_category() RETURNS trigger AS $$
+		 BEGIN RAISE EXCEPTION 'injected failure'; RETURN NEW; END; $$ LANGUAGE plpgsql;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE TRIGGER trg_fail_catalog_category BEFORE INSERT ON catalog_category_edges
+		 FOR EACH ROW EXECUTE FUNCTION fail_catalog_category();`); err != nil {
+		t.Fatal(err)
+	}
+	// Product waits on the unsettled graph (not on the fault).
+	if res := projectCatalogOnce(t, env, prodRev2); res.Outcome != catalog.OutcomeRetryable {
+		t.Fatalf("product waits: %+v", res)
+	}
+	// Category commit hits the injected fault: transient, zero partial rows.
+	store := catalogStore(env)
+	rec, ok, err := store.LoadCatalogEvent(context.Background(), catRev2)
+	if err != nil || !ok {
+		t.Fatal("load")
+	}
+	if _, err := store.ProjectCategory(context.Background(), rec, time.Now()); err == nil {
+		t.Fatal("injected failure must surface")
+	}
+	var edges int
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM catalog_category_edges WHERE child_id=$1`, s).Scan(&edges); err != nil || edges != 1 {
+		t.Fatalf("previous edges intact: %d (%v)", edges, err)
+	}
+	if status, _ := catalogStatus(t, env, catalog.ProcessorCategoryProjectionV1, catRev2); status != "retry" {
+		t.Fatalf("category retryable: %q", status)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`DROP TRIGGER trg_fail_catalog_category ON catalog_category_edges; DROP FUNCTION fail_catalog_category();`); err != nil {
+		t.Fatal(err)
+	}
+	forceCatalogDue(t, env, catalog.ProcessorCategoryProjectionV1, catRev2)
+	if res := projectCatalogOnce(t, env, catRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("category recovers: %+v", res)
+	}
+	if res := projectCatalogOnce(t, env, prodRev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("product advances: %+v", res)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != b || revision != 2 {
+		t.Fatalf("final top B rev2: %s %d", top, revision)
+	}
+}
+
+// TestCatalogCoordinatedRebuild replays the §36 history through a full
+// rebuild and expects the identical converged state.
+func TestCatalogCoordinatedRebuild(t *testing.T) {
+	env := openSaleEnv(t)
+	_, b, s, product, catRev2, prodRev2 := coordinatedFixture(t, env)
+	ingestProdRev2(t, env, product, b, s, prodRev2)
+	projectCatalogOnce(t, env, prodRev2)
+	forceCatalogDue(t, env, catalog.ProcessorProductProjectionV1, prodRev2)
+	projectCatalogOnce(t, env, catRev2)
+	projectCatalogOnce(t, env, prodRev2)
+	before := dumpCatalog(t, env)
+
+	ctx := context.Background()
+	for _, table := range []string{
+		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
+		"catalog_product_prices", "catalog_products", "catalog_category_edges",
+		"catalog_tags", "catalog_categories",
+	} {
+		if _, err := env.pool.Exec(ctx, `DELETE FROM `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
+		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
+		 WHERE processor LIKE 'catalog_%'`); err != nil {
+		t.Fatal(err)
+	}
+	// Deterministic multi-pass replay in inbox order: dependency waits
+	// converge as their dependencies land, with retry horizons defeated
+	// explicitly (no wall-clock dependence). Bounded: this DAG settles in
+	// at most three passes.
+	store := catalogStore(env)
+	for pass := 0; pass < 5; pass++ {
+		rows, err := env.pool.Query(ctx,
+			`SELECT e.event_id::text, e.event_type FROM sync_events e
+			 JOIN sync_event_processing p ON p.event_id = e.event_id
+			 WHERE e.event_type LIKE 'catalog.%' AND p.status IN ('pending', 'retry')
+			 ORDER BY e.received_at, e.event_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type queued struct{ id, typ string }
+		var order []queued
+		for rows.Next() {
+			var q queued
+			if err := rows.Scan(&q.id, &q.typ); err != nil {
+				t.Fatal(err)
+			}
+			order = append(order, q)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(order) == 0 {
+			break
+		}
+		// Defeat backoff horizons deterministically.
+		if _, err := env.pool.Exec(ctx,
+			`UPDATE sync_event_processing SET next_attempt_at = NULL WHERE status = 'retry'`); err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range order {
+			rec, ok, err := store.LoadCatalogEvent(ctx, q.id)
+			if err != nil || !ok {
+				t.Fatal("load")
+			}
+			var res catalog.ProjectResult
+			switch q.typ {
+			case catalog.EventCategorySnapshotV1:
+				res, err = store.ProjectCategory(ctx, rec, time.Now())
+			case catalog.EventTagSnapshotV1:
+				res, err = store.ProjectTag(ctx, rec, time.Now())
+			default:
+				res, err = store.ProjectProduct(ctx, rec, time.Now())
+			}
+			if err != nil && res.Outcome != catalog.OutcomeRetryable {
+				t.Fatalf("replay %s: %v", q.id, err)
+			}
+		}
+		if pass == 4 {
+			t.Fatal("rebuild did not converge in 5 passes")
+		}
+	}
+	if after := dumpCatalog(t, env); after != before {
+		t.Fatalf("rebuild mismatch:\nbefore: %s\nafter:  %s", before, after)
+	}
+	if top, revision := catalogProductTop(t, env, product); top != b || revision != 2 {
+		t.Fatalf("rebuilt top B rev2: %s %d", top, revision)
+	}
+}
+
+// driveCatalogToTerminal projects one event to a terminal outcome,
+// defeating backoff horizons deterministically and tolerating transient
+// serialization aborts with bounded retries. It returns the number of
+// rounds used; runaway ping-pong fails the test instead of hanging it.
+func driveCatalogToTerminal(t *testing.T, env *saleEnv, eventID string, maxRounds int) (catalog.ProjectResult, int) {
+	t.Helper()
+	store := catalogStore(env)
+	ctx := context.Background()
+	var last catalog.ProjectResult
+	rounds := 0
+	for rounds = 1; rounds <= maxRounds; rounds++ {
+		if _, err := env.pool.Exec(ctx,
+			`UPDATE sync_event_processing SET next_attempt_at = NULL WHERE event_id=$1 AND status='retry'`, eventID); err != nil {
+			t.Fatal(err)
+		}
+		rec, ok, err := store.LoadCatalogEvent(ctx, eventID)
+		if err != nil || !ok {
+			t.Fatal("load")
+		}
+		var res catalog.ProjectResult
+		var perr error
+		switch rec.EventType {
+		case catalog.EventCategorySnapshotV1:
+			res, perr = store.ProjectCategory(ctx, rec, time.Now())
+		case catalog.EventTagSnapshotV1:
+			res, perr = store.ProjectTag(ctx, rec, time.Now())
+		default:
+			res, perr = store.ProjectProduct(ctx, rec, time.Now())
+		}
+		last = res
+		if perr != nil && res.Outcome != catalog.OutcomeRetryable {
+			t.Fatalf("event %s: %v", eventID, perr)
+		}
+		if res.Outcome == catalog.OutcomeProcessed || res.Outcome == catalog.OutcomeBlocked {
+			return res, rounds
+		}
+	}
+	t.Fatalf("event %s did not reach terminal state in %d rounds (last %+v)", eventID, maxRounds, last)
+	return last, rounds
+}
+
+// TestCatalogConcurrentRevisionsDeterministic forces two product revisions
+// through the competing revision path simultaneously (barrier start over
+// pool connections). Whatever interleaving occurs, the final state must be
+// revision 6 with revision 6 scalars and relations: the older transaction
+// can never overwrite the newer revision or its relations.
+func TestCatalogConcurrentRevisionsDeterministic(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 140, "cc")
+	productID := "e0004000-0000-4000-8000-000000000000"
+	rev := func(revision int64, name string, tags []string, num string) string {
+		event := fmt.Sprintf("d00040%s-0000-4000-8000-0000000000%s", num, num)
+		ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+			productPayload(productID, "PAP-CC", name, root, []string{sub}, tags, revision))
+		return event
+	}
+	ev5 := rev(5, "five", []string{tag}, "50")
+	ev6 := rev(6, "six", []string{}, "60")
+
+	start := make(chan struct{})
+	done := make(chan catalog.ProjectResult, 2)
+	for _, event := range []string{ev5, ev6} {
+		go func(event string) {
+			store := catalogStore(env)
+			ctx := context.Background()
+			<-start
+			rec, ok, err := store.LoadCatalogEvent(ctx, event)
+			if err != nil || !ok {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "LOAD"}
+				return
+			}
+			res, err := store.ProjectProduct(ctx, rec, time.Now())
+			if err != nil && res.Outcome != catalog.OutcomeRetryable {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR"}
+				return
+			}
+			done <- res
+		}(event)
+	}
+	close(start)
+	results := []catalog.ProjectResult{<-done, <-done}
+	// Drive any transient (serialization abort, backoff) to terminal.
+	for _, event := range []string{ev5, ev6} {
+		driveCatalogToTerminal(t, env, event, 10)
+	}
+	_ = results
+
+	svc := catalog.NewService(catalogStore(env))
+	product, err := svc.GetProduct(context.Background(), productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if product.Revision != 6 || product.Name != "six" {
+		t.Fatalf("newest revision wins: %+v", product)
+	}
+	if len(product.TagIDs) != 0 {
+		t.Fatalf("rev6 relations only: %+v", product.TagIDs)
+	}
+	if len(product.SubcategoryIDs) != 1 || product.SubcategoryIDs[0] != sub {
+		t.Fatalf("rev6 subs: %+v", product.SubcategoryIDs)
+	}
+	var headers, lines, prices int
+	ctx := context.Background()
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM catalog_products WHERE product_id=$1`, productID).Scan(&headers); err != nil || headers != 1 {
+		t.Fatalf("one header: %d (%v)", headers, err)
+	}
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM catalog_product_tags WHERE product_id=$1`, productID).Scan(&lines); err != nil || lines != 0 {
+		t.Fatalf("zero tags: %d (%v)", lines, err)
+	}
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM catalog_product_prices WHERE product_id=$1`, productID).Scan(&prices); err != nil || prices != 2 {
+		t.Fatalf("rev6 prices: %d (%v)", prices, err)
+	}
+}
+
+// TestCatalogConcurrentFirstInsert proves rev1 vs rev2 with no existing row
+// converge on rev2: row-level locking alone cannot serialize a missing row,
+// so the entity advisory lock must.
+func TestCatalogConcurrentFirstInsert(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 150, "fi")
+	productID := "e0004001-0000-4000-8000-000000000001"
+	mk := func(revision int64, num string) string {
+		event := fmt.Sprintf("d00041%s-0000-4000-8000-0000000000%s", num, num)
+		ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+			productPayload(productID, "PAP-FI", "rev", root, []string{sub}, []string{tag}, revision))
+		return event
+	}
+	ev1 := mk(1, "10")
+	ev2 := mk(2, "20")
+	start := make(chan struct{})
+	done := make(chan catalog.ProjectResult, 2)
+	for _, event := range []string{ev1, ev2} {
+		go func(event string) {
+			store := catalogStore(env)
+			ctx := context.Background()
+			<-start
+			rec, ok, err := store.LoadCatalogEvent(ctx, event)
+			if err != nil || !ok {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "LOAD"}
+				return
+			}
+			res, err := store.ProjectProduct(ctx, rec, time.Now())
+			if err != nil && res.Outcome != catalog.OutcomeRetryable {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR:" + err.Error()}
+				return
+			}
+			done <- res
+		}(event)
+	}
+	close(start)
+	<-done
+	<-done
+	for _, event := range []string{ev1, ev2} {
+		driveCatalogToTerminal(t, env, event, 10)
+	}
+	var revision int64
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT source_revision FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision); err != nil || revision != 2 {
+		t.Fatalf("final rev2: %d (%v)", revision, err)
+	}
+}
+
+// TestCatalogConcurrentCategoryRevisions forces concurrent category
+// revisions with different parent sets: newest revision wins with exactly
+// its edges.
+func TestCatalogConcurrentCategoryRevisions(t *testing.T) {
+	env := openSaleEnv(t)
+	ids := catalogIDs(t, 160, "a", "b", "sub")
+	for i, name := range []string{"a", "b"} {
+		event := fmt.Sprintf("d000420%d-0000-4000-8000-00000000002%d", i, i)
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+			categoryPayload(ids[name], "active", map[string]string{"ar": name}, nil, 1))
+		projectCatalogOnce(t, env, event)
+	}
+	mk := func(parents []string, revision int64, num string) string {
+		event := fmt.Sprintf("d00042%s-0000-4000-8000-0000000000%s", num, num)
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+			categoryPayload(ids["sub"], "active", map[string]string{"ar": "s"}, parents, revision))
+		return event
+	}
+	ev2 := mk([]string{ids["a"]}, 2, "30")
+	ev3 := mk([]string{ids["b"]}, 3, "31")
+	start := make(chan struct{})
+	done := make(chan catalog.ProjectResult, 2)
+	for _, event := range []string{ev2, ev3} {
+		go func(event string) {
+			store := catalogStore(env)
+			ctx := context.Background()
+			<-start
+			rec, ok, err := store.LoadCatalogEvent(ctx, event)
+			if err != nil || !ok {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "LOAD"}
+				return
+			}
+			res, err := store.ProjectCategory(ctx, rec, time.Now())
+			if err != nil && res.Outcome != catalog.OutcomeRetryable {
+				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR"}
+				return
+			}
+			done <- res
+		}(event)
+	}
+	close(start)
+	<-done
+	<-done
+	for _, event := range []string{ev2, ev3} {
+		driveCatalogToTerminal(t, env, event, 10)
+	}
+	if revision := catalogCategoryRevision(t, env, ids["sub"]); revision != 3 {
+		t.Fatalf("final rev3: %d", revision)
+	}
+	if parents := catalogChildParents(t, env, ids["sub"]); len(parents) != 1 || parents[0] != ids["b"] {
+		t.Fatalf("rev3 edges only: %v", parents)
+	}
+}
+
+// TestCatalogConcurrentProductAndCategory proves a product projection
+// racing a graph change converges without deadlock: barrier start, bounded
+// drive, identical final state to serial execution.
+func TestCatalogConcurrentProductAndCategory(t *testing.T) {
+	env := openSaleEnv(t)
+	a, b, s, product, catRev2, prodRev2 := coordinatedFixture(t, env)
+	ingestProdRev2(t, env, product, b, s, prodRev2)
+	_ = a
+	start := make(chan struct{})
+	done := make(chan catalog.ProjectResult, 2)
+	go func() {
+		store := catalogStore(env)
+		ctx := context.Background()
+		<-start
+		rec, _, _ := store.LoadCatalogEvent(ctx, prodRev2)
+		res, err := store.ProjectProduct(ctx, rec, time.Now())
+		if err != nil && res.Outcome != catalog.OutcomeRetryable {
+			done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR"}
+			return
+		}
+		done <- res
+	}()
+	go func() {
+		store := catalogStore(env)
+		ctx := context.Background()
+		<-start
+		rec, _, _ := store.LoadCatalogEvent(ctx, catRev2)
+		res, err := store.ProjectCategory(ctx, rec, time.Now())
+		if err != nil && res.Outcome != catalog.OutcomeRetryable {
+			done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR"}
+			return
+		}
+		done <- res
+	}()
+	close(start)
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("deadlock: concurrent projections did not return")
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("deadlock: concurrent projections did not return")
+	}
+	driveCatalogToTerminal(t, env, prodRev2, 10)
+	driveCatalogToTerminal(t, env, catRev2, 10)
+	if top, revision := catalogProductTop(t, env, product); top != b || revision != 2 {
+		t.Fatalf("final top B rev2: %s %d", top, revision)
+	}
+	if parents := catalogChildParents(t, env, s); len(parents) != 1 || parents[0] != b {
+		t.Fatalf("graph S→B: %v", parents)
+	}
+}
+
+// TestCatalogProductProjectionRollback injects a fault in the middle of
+// product relation writes: the previous revision must remain fully intact
+// (zero partial rows), processing stays retryable, and retry after fault
+// removal succeeds exactly once.
+func TestCatalogProductProjectionRollback(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 170, "rbk")
+	productID := "e0005000-0000-4000-8000-000000000000"
+	rev1 := "d0005000-0000-4000-8000-000000000000"
+	ingestCatalog(t, env, rev1, catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+		productPayload(productID, "PAP-RBK", "one", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, rev1)
+
+	rev2 := "d0005001-0000-4000-8000-000000000001"
+	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+		productPayload(productID, "PAP-RBK", "two", root, []string{sub}, []string{tag}, 2))
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE FUNCTION fail_catalog_tx() RETURNS trigger AS $$
+		 BEGIN RAISE EXCEPTION 'injected failure'; RETURN NEW; END; $$ LANGUAGE plpgsql;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE TRIGGER trg_fail_catalog_tx BEFORE INSERT ON catalog_product_translations
+		 FOR EACH ROW EXECUTE FUNCTION fail_catalog_tx();`); err != nil {
+		t.Fatal(err)
+	}
+	store := catalogStore(env)
+	rec, ok, err := store.LoadCatalogEvent(context.Background(), rev2)
+	if err != nil || !ok {
+		t.Fatal("load")
+	}
+	if _, err := store.ProjectProduct(context.Background(), rec, time.Now()); err == nil {
+		t.Fatal("injected failure must surface")
+	}
+	// Previous revision fully intact: header, prices, translations, subs, tags.
+	var revision int64
+	var name string
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT source_revision, name FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 1 || name != "one" {
+		t.Fatalf("rev1 intact: %d %q", revision, name)
+	}
+	for table, want := range map[string]int{
+		"catalog_product_prices": 2, "catalog_product_translations": 1,
+		"catalog_product_subcategories": 1, "catalog_product_tags": 1,
+	} {
+		var n int
+		if err := env.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM `+table+` WHERE product_id=$1`, productID).Scan(&n); err != nil || n != want {
+			t.Fatalf("%s: %d (%v), want %d", table, n, err, want)
+		}
+	}
+	if status, _ := catalogStatus(t, env, catalog.ProcessorProductProjectionV1, rev2); status != "retry" {
+		t.Fatalf("retryable: %q", status)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`DROP TRIGGER trg_fail_catalog_tx ON catalog_product_translations; DROP FUNCTION fail_catalog_tx();`); err != nil {
+		t.Fatal(err)
+	}
+	forceCatalogDue(t, env, catalog.ProcessorProductProjectionV1, rev2)
+	if res := projectCatalogOnce(t, env, rev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("retry succeeds: %+v", res)
+	}
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT source_revision, name FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil || revision != 2 || name != "two" {
+		t.Fatalf("rev2 exactly once: %d %q (%v)", revision, name, err)
+	}
+	var headers int
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM catalog_products WHERE product_id=$1`, productID).Scan(&headers); err != nil || headers != 1 {
+		t.Fatalf("one header: %d (%v)", headers, err)
+	}
+}
+
+// TestCatalogCategoryProjectionRollback proves a mid-transaction category
+// fault leaves previous edges intact with retryable processing.
+func TestCatalogCategoryProjectionRollback(t *testing.T) {
+	env := openSaleEnv(t)
+	ids := catalogIDs(t, 180, "a", "sub")
+	ingestCatalog(t, env, "d0005100-0000-4000-8000-000000000100", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		categoryPayload(ids["a"], "active", map[string]string{"ar": "A"}, nil, 1))
+	projectCatalogOnce(t, env, "d0005100-0000-4000-8000-000000000100")
+	ingestCatalog(t, env, "d0005101-0000-4000-8000-000000000101", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		categoryPayload(ids["sub"], "active", map[string]string{"ar": "S"}, []string{ids["a"]}, 1))
+	projectCatalogOnce(t, env, "d0005101-0000-4000-8000-000000000101")
+
+	rev2 := "d0005102-0000-4000-8000-000000000102"
+	ingestCatalog(t, env, rev2, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+		categoryPayload(ids["sub"], "hidden", map[string]string{"ar": "S"}, []string{ids["a"]}, 2))
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE FUNCTION fail_catalog_edge() RETURNS trigger AS $$
+		 BEGIN RAISE EXCEPTION 'injected failure'; RETURN NEW; END; $$ LANGUAGE plpgsql;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`CREATE TRIGGER trg_fail_catalog_edge BEFORE INSERT ON catalog_category_edges
+		 FOR EACH ROW EXECUTE FUNCTION fail_catalog_edge();`); err != nil {
+		t.Fatal(err)
+	}
+	store := catalogStore(env)
+	rec, ok, err := store.LoadCatalogEvent(context.Background(), rev2)
+	if err != nil || !ok {
+		t.Fatal("load")
+	}
+	if _, err := store.ProjectCategory(context.Background(), rec, time.Now()); err == nil {
+		t.Fatal("injected failure must surface")
+	}
+	if revision := catalogCategoryRevision(t, env, ids["sub"]); revision != 1 {
+		t.Fatalf("rev1 intact: %d", revision)
+	}
+	if parents := catalogChildParents(t, env, ids["sub"]); len(parents) != 1 || parents[0] != ids["a"] {
+		t.Fatalf("edges intact: %v", parents)
+	}
+	if status, _ := catalogStatus(t, env, catalog.ProcessorCategoryProjectionV1, rev2); status != "retry" {
+		t.Fatalf("retryable: %q", status)
+	}
+	if _, err := env.pool.Exec(context.Background(),
+		`DROP TRIGGER trg_fail_catalog_edge ON catalog_category_edges; DROP FUNCTION fail_catalog_edge();`); err != nil {
+		t.Fatal(err)
+	}
+	forceCatalogDue(t, env, catalog.ProcessorCategoryProjectionV1, rev2)
+	if res := projectCatalogOnce(t, env, rev2); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("retry succeeds: %+v", res)
+	}
+}
+
+// TestCatalogDepthDiagnostic proves depth violations report
+// CATALOG_CATEGORY_DEPTH while real cycles report CATALOG_CATEGORY_CYCLE.
+func TestCatalogDepthDiagnostic(t *testing.T) {
+	env := openSaleEnv(t)
+	ids := catalogIDs(t, 190, "root", "a", "b", "c")
+	chain := []struct{ name, parent string }{
+		{"root", ""}, {"a", "root"}, {"b", "a"},
+	}
+	for i, link := range chain {
+		parents := []string{}
+		if link.parent != "" {
+			parents = []string{ids[link.parent]}
+		}
+		event := fmt.Sprintf("d00052%02d-0000-4000-8000-0000000000%02d", i, i)
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+			categoryPayload(ids[link.name], "active", map[string]string{"ar": link.name}, parents, 1))
+		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+			t.Fatalf("chain %s: %+v", link.name, res)
+		}
+	}
+	deep := "d0005210-0000-4000-8000-000000000010"
+	ingestCatalog(t, env, deep, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+		categoryPayload(ids["c"], "active", map[string]string{"ar": "c"}, []string{ids["b"]}, 1))
+	res := projectCatalogOnce(t, env, deep)
+	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogCategoryDepth {
+		t.Fatalf("depth diagnostic: %+v", res)
+	}
+	if status, code := catalogStatus(t, env, catalog.ProcessorCategoryProjectionV1, deep); status != "blocked" || code != ErrCatalogCategoryDepth {
+		t.Fatalf("persisted diagnostic: %q/%q", status, code)
+	}
+}
+
+// TestCatalogOldHashCompatibility proves upgrade safety (§72): a projection
+// row stored by the Phase 5A candidate (raw-payload hash) does not falsely
+// conflict when R1 replays the semantically identical revision — identity
+// comes from reconstructed state, never the stored hash.
+func TestCatalogOldHashCompatibility(t *testing.T) {
+	env := openSaleEnv(t)
+	ids := catalogIDs(t, 200, "root")
+	event := "d0005300-0000-4000-8000-000000000000"
+	payload := categoryPayload(ids["root"], "active", map[string]string{"ar": "جذر"}, nil, 1)
+	ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z", payload)
+	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("project: %+v", res)
+	}
+	// Simulate candidate storage: overwrite the semantic fingerprint with
+	// the raw-payload hash the old code persisted (computed client-side;
+	// no pgcrypto dependency).
+	rawHash := sha256.Sum256([]byte(payload))
+	if _, err := env.pool.Exec(context.Background(),
+		`UPDATE catalog_categories SET source_payload_hash = $1 WHERE category_id = $2`,
+		rawHash[:], ids["root"]); err != nil {
+		t.Fatal(err)
+	}
+	// Equal-revision semantically identical replay stays idempotent.
+	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("old-hash replay idempotent: %+v", res)
+	}
+	// A genuinely different payload at the same revision still conflicts.
+	rival := "d0005301-0000-4000-8000-000000000001"
+	ingestCatalog(t, env, rival, catalog.EventCategorySnapshotV1, "2026-09-20T10:01:00Z",
+		categoryPayload(ids["root"], "active", map[string]string{"ar": "مختلف"}, nil, 1))
+	if res := projectCatalogOnce(t, env, rival); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogRevisionConflict {
+		t.Fatalf("rival conflicts: %+v", res)
+	}
+}
+
+// TestCatalogSupersededInvalidResolvesNoOp proves a superseded revision is
+// never terminally blocked: product rev4 is invalid under the current
+// graph, but accepted rev5 is pending, so rev4 resolves as a stale no-op
+// with zero rows while rev5 later becomes authoritative.
+func TestCatalogSupersededInvalidResolvesNoOp(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 210, "ss")
+	productID := "e0006000-0000-4000-8000-000000000000"
+	// Rev4 references a nonexistent... no: use a valid-then-orphaned shape.
+	// Simpler deterministic shape: rev4 points at a non-root top while rev5
+	// is already accepted (pending). Rev4 must no-op; rev5 must process.
+	rev4 := "d0006000-0000-4000-8000-000000000000"
+	ingestCatalog(t, env, rev4, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-SS", "x", sub, nil, []string{tag}, 4))
+	rev5 := "d0006001-0000-4000-8000-000000000001"
+	ingestCatalog(t, env, rev5, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-SS", "x", root, []string{sub}, []string{tag}, 5))
+	if res := projectCatalogOnce(t, env, rev4); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("superseded rev4 no-op: %+v", res)
+	}
+	if status, code := catalogStatus(t, env, catalog.ProcessorProductProjectionV1, rev4); status != "processed" || code != "" {
+		t.Fatalf("no terminal noise: %q/%q", status, code)
+	}
+	if n := saleCount(t, env.pool, "catalog_products"); n != 0 {
+		t.Fatalf("zero rows from superseded event, got %d", n)
+	}
+	if res := projectCatalogOnce(t, env, rev5); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("rev5 authoritative: %+v", res)
+	}
+	var revision int64
+	if err := env.pool.QueryRow(context.Background(),
+		`SELECT source_revision FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision); err != nil || revision != 5 {
+		t.Fatalf("final rev5: %d (%v)", revision, err)
 	}
 }
