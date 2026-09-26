@@ -593,6 +593,22 @@ func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid
 	return fail()
 }
 
+// RearmBlockedProducts implements the durable R2 fallback for the product
+// projector: graph-dependent blocked rows whose involved graph has
+// advanced since the block decision return to pending. Pure processing
+// state transition (no projection writes); the subsequent attempt takes
+// the normal entity locks and revision gate, so serialization, staleness,
+// and atomicity guarantees are unchanged. Never touches retry rows,
+// other processors, or other error codes.
+func (d Devices) RearmBlockedProducts(ctx context.Context) error {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if err := sqlcgen.New(d.pool).RearmBlockedCatalogProducts(ctx); err != nil {
+		return apperr.Wrap(apperr.Internal, "re-arm blocked catalog products", redact(err))
+	}
+	return nil
+}
+
 // hasCatalogParents reports whether every parent ID has a projected row.
 func hasCatalogParents(ctx context.Context, q *sqlcgen.Queries, parentIDs []string) (bool, error) {
 	for _, parent := range parentIDs {

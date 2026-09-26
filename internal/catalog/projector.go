@@ -63,6 +63,10 @@ type Stats = sale.Stats
 // adapter. One Project* call is one atomic claim+project transaction.
 type Store interface {
 	PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int) ([]string, error)
+	// RearmBlockedProducts flips graph-dependent blocked Product events
+	// back to pending when the relevant graph has advanced since the
+	// block decision (durable R2 fallback; no-op when nothing qualifies).
+	RearmBlockedProducts(ctx context.Context) error
 	ProjectCategory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectTag(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProduct(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
@@ -83,13 +87,17 @@ type Projector struct {
 	store     Store
 	processor string
 	eventType string
-	project   func(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
-	load      func(ctx context.Context, eventID string) (EventRecord, bool, error)
-	clock     clock.Clock
-	log       *slog.Logger
-	wake      chan struct{}
-	interval  time.Duration
-	batchSize int
+	// rearmBlocked enables the durable blocked-row fallback in drain.
+	// Only the product processor has graph-dependent blocked states;
+	// category/tag blocks are always terminal-deterministic.
+	rearmBlocked bool
+	project      func(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	load         func(ctx context.Context, eventID string) (EventRecord, bool, error)
+	clock        clock.Clock
+	log          *slog.Logger
+	wake         chan struct{}
+	interval     time.Duration
+	batchSize    int
 }
 
 // DefaultScanInterval is the durable safety-net period.
@@ -105,9 +113,14 @@ func NewTagProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorTagProjectionV1, EventTagSnapshotV1, s.ProjectTag, c, log)
 }
 
-// NewProductProjector wires the product worker.
+// NewProductProjector wires the product worker with the durable
+// blocked-row fallback (R2): graph advancement re-arms
+// CATALOG_INVALID_RELATION blocks even if the post-commit reset failed,
+// was lost to a crash, or never ran.
 func NewProductProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
-	return newProjector(s, ProcessorProductProjectionV1, EventProductSnapshotV1, s.ProjectProduct, c, log)
+	p := newProjector(s, ProcessorProductProjectionV1, EventProductSnapshotV1, s.ProjectProduct, c, log)
+	p.rearmBlocked = true
+	return p
 }
 
 func newProjector(s Store, processor, eventType string,
@@ -149,6 +162,15 @@ func (p *Projector) drain(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+		if p.rearmBlocked {
+			// Durable fallback BEFORE discovery so re-armed rows are
+			// picked up in the same pass. Strictly monotonic predicate:
+			// steady state finds nothing and costs one cheap query.
+			if err := p.store.RearmBlockedProducts(ctx); err != nil {
+				p.log.Error("catalog re-arm scan failed", "processor", p.processor, "err", err.Error())
+				return
+			}
 		}
 		ids, err := p.store.PendingCatalogEvents(ctx, p.processor, p.eventType, p.batchSize)
 		if err != nil {

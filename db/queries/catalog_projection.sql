@@ -196,3 +196,35 @@ WHERE processor = 'catalog_product_projection.v1'
 -- revisions of the same entity serialize; different entities proceed in
 -- parallel. Released automatically at commit/rollback.
 SELECT pg_advisory_xact_lock(hashtext('catalog:' || $1::text || ':' || $2::text));
+
+-- Phase 5A-R2 durable re-evaluation fallback (M01): graph-dependent
+-- blocked Product events become eligible again when the relevant graph
+-- has advanced since the block decision. The predicate is strictly
+-- monotonic (involved category projected_at strictly newer than the block
+-- updated_at), so a re-blocked event can never hot-loop: each re-arm
+-- requires strictly newer graph advancement. Superseded events (a newer
+-- accepted revision exists) are never re-armed. Terminally invalid events
+-- under a static graph stay blocked forever. This is the correctness path;
+-- the post-commit reset is only a fast wake-up.
+
+-- name: RearmBlockedCatalogProducts :exec
+UPDATE sync_event_processing AS p SET status = 'pending', next_attempt_at = NULL,
+    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
+FROM sync_events e
+WHERE p.event_id = e.event_id
+  AND p.processor = 'catalog_product_projection.v1'
+  AND p.status = 'blocked'
+  AND p.last_error_code = 'CATALOG_INVALID_RELATION'
+  AND e.event_type = 'catalog.product.snapshot.v1'
+  AND NOT EXISTS (
+    SELECT 1 FROM sync_events e2
+    WHERE e2.event_type = 'catalog.product.snapshot.v1'
+      AND e2.payload->>'product_id' = e.payload->>'product_id'
+      AND (e2.payload->>'catalog_revision')::bigint > (e.payload->>'catalog_revision')::bigint
+  )
+  AND EXISTS (
+    SELECT 1 FROM catalog_categories c
+    WHERE (c.category_id::text = e.payload->>'top_category_id'
+           OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
+      AND c.projected_at > p.updated_at
+  );

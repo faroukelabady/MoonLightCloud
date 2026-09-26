@@ -133,7 +133,31 @@ Three tiers — never confuse them:
 A rebuild that deletes ownership can elect a different winner and rewrite
 financial history. The procedure below never does.
 
-## Ownership integrity query
+## Ownership integrity queries
+
+### Sale ownership integrity
+
+```sql
+-- Any row here is an integrity failure: projected source differs from the
+-- durable winner. Investigate before serving reads from projections.
+SELECT s.sale_id, s.source_event_id AS projected_source, o.winning_event_id
+FROM sales_projection s
+JOIN sale_event_ownership o USING (sale_id)
+WHERE s.source_event_id <> o.winning_event_id;
+```
+
+### Return/refund ownership integrity
+
+```sql
+-- Any row here is an integrity failure: projected source differs from the
+-- durable winner. Investigate before serving reads from projections.
+SELECT r.return_refund_id, r.source_event_id AS projected_source, o.winning_event_id
+FROM return_refund_projection r
+JOIN return_refund_ownership o USING (return_refund_id)
+WHERE r.source_event_id <> o.winning_event_id;
+```
+
+### Catalog reachability integrity
 
 ```sql
 -- Any row here is an integrity failure: a projected product whose top is
@@ -243,6 +267,16 @@ category history waits with the same code and converges when the graph
 advances; every category commit automatically re-arms waiting or
 graph-blocked product events that reference the changed subgraph, so no
 operator retry and no Retail resend are ever needed for convergence.
+
+The immediate post-commit reset is a fast wake-up only. Durable
+convergence does not depend on it: every product-projector safety scan
+first re-arms graph-dependent blocked (`CATALOG_INVALID_RELATION`) rows
+whose involved graph has advanced since the block decision, measured
+durably as any involved category `projected_at` strictly newer than the
+block row `updated_at`. Superseded events (a newer accepted revision
+exists) are never re-armed; settled-invalid events re-block without
+hot-looping because each re-arm requires strictly newer graph
+advancement. This predicate survives restarts, crashes, and lost resets.
 
 ```sql
 -- Any row here is an integrity failure: a projected product whose top is
