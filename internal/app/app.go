@@ -56,6 +56,7 @@ type App struct {
 	CategoryProjector *catalog.Projector
 	TagProjector      *catalog.Projector
 	ProductProjector  *catalog.Projector
+	PolicyProjector   *catalog.Projector
 	Catalog           catalog.Service
 	Handler           http.Handler
 	Health            adapterhttp.Health
@@ -86,6 +87,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
 	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
 	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
+	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store
@@ -94,6 +96,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.CategoryProjector = catalog.NewCategoryProjector(store, clock.System{}, log)
 	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
 	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
+	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
 	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -184,6 +187,19 @@ func ValidateCatalogProductPayload(raw json.RawMessage) error {
 	return err
 }
 
+// ValidateCatalogProductSalesPolicyPayload is the ingestion-time
+// catalog.product.sales_policy.snapshot.v1 gate: event-local validation
+// only. A missing core product is a projection wait, never an ingestion
+// rejection.
+func ValidateCatalogProductSalesPolicyPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductSalesPolicySnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductSalesPolicySnapshot(p)
+	return err
+}
+
 // ProjectOne loads one inbox event and runs a single atomic projection
 // attempt. Used by tests and operator tooling; serve-path projection goes
 // through the background Projector.
@@ -207,6 +223,7 @@ func (a *App) notifyProjectors() {
 	a.CategoryProjector.Notify()
 	a.TagProjector.Notify()
 	a.ProductProjector.Notify()
+	a.PolicyProjector.Notify()
 }
 
 // ProjectReturnOne loads one return inbox event and runs a single atomic

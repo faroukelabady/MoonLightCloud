@@ -245,18 +245,20 @@ authoritative and reprocessing reproduces identical rows (tested by
 
 ## Catalog processors
 
-Three additional processors share this runbook's machinery:
+Four processors share this runbook's machinery:
 
 ```text
 catalog_category_projection.v1
 catalog_tag_projection.v1
 catalog_product_projection.v1
+catalog_product_sales_policy_projection.v1
 ```
 
-`projection status` lists all five processors; `projection retry <id>
+`projection status` lists all six processors; `projection retry <id>
 [catalog_*_projection.v1]` resets one catalog event. Catalog-specific
 retry code `CATALOG_DEPENDENCY_WAIT` means a referenced entity has not
-projected yet — it converges automatically, never terminally. Terminal
+projected yet — it converges automatically, never terminally. For policy
+events the wait means the core product has not projected yet. Terminal
 catalog codes (`CATALOG_REVISION_CONFLICT`, `CATALOG_CATEGORY_CYCLE`,
 `CATALOG_INVALID_RELATION`, `CATALOG_CATEGORY_DEPTH`, `CATALOG_GRAPH_CONFLICT`)
 need operator review like sale/return blocks. Depth excess is reported
@@ -304,6 +306,7 @@ no catalog ownership table to retain — revision metadata in the projection
 rows is the arbitration. Procedure:
 
 ```sql
+DELETE FROM catalog_product_sales_policies;
 DELETE FROM catalog_product_tags;
 DELETE FROM catalog_product_subcategories;
 DELETE FROM catalog_product_translations;
@@ -314,17 +317,28 @@ DELETE FROM catalog_tags;
 DELETE FROM catalog_categories;
 UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
   attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1');
+  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1');
 ```
 
-Then reprocess categories, tags, and products (any order converges; the
-documented order minimizes dependency waits) and verify current revisions
-plus a row-level dump against the pre-rebuild snapshot.
+Then reprocess categories, tags, products, and policies (any order
+converges; the documented order minimizes dependency waits) and verify
+current revisions plus a row-level dump against the pre-rebuild snapshot.
+Policy replay converges on the highest valid `sales_policy_revision` per
+product independently from `catalog_revision`.
+
+```sql
+-- Any row here is an integrity failure: a projected policy whose disabled
+-- ONLINE still carries a cap. The CHECK constraint plus dual-layer
+-- validation forbid this; investigate before trusting policy reads.
+SELECT product_id FROM catalog_product_sales_policies
+WHERE NOT sell_online AND online_allocation_limit IS NOT NULL;
+```
 
 ## Observing catalog sync
 
 Pending catalog work is visible per processor in `projection status`
 (pending/retry counts, oldest pending age, last error code). Current
 revisions per entity are readable from the projection rows
-(`source_revision`, `source_event_id`). No dashboard surface exists in
-Phase 5A by design.
+(`source_revision`, `source_event_id`). Policy rows carry
+`source_revision` from the independent `sales_policy_revision` stream.
+No dashboard surface exists for catalog in Phase 5A/5B by design.

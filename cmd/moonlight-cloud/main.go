@@ -138,6 +138,7 @@ func serve(args []string) error {
 	go a.CategoryProjector.Run(projCtx)
 	go a.TagProjector.Run(projCtx)
 	go a.ProductProjector.Run(projCtx)
+	go a.PolicyProjector.Run(projCtx)
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err
 	}
@@ -265,7 +266,7 @@ func projectionCmd(args []string) error {
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	switch args[0] {
 	case "status":
-		for _, processor := range []string{sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1, catalog.ProcessorCategoryProjectionV1, catalog.ProcessorTagProjectionV1, catalog.ProcessorProductProjectionV1} {
+		for _, processor := range []string{sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1, catalog.ProcessorCategoryProjectionV1, catalog.ProcessorTagProjectionV1, catalog.ProcessorProductProjectionV1, catalog.ProcessorProductSalesPolicyProjectionV1} {
 			stats, err := store.ProcessingStats(ctx, processor)
 			if err != nil {
 				return err

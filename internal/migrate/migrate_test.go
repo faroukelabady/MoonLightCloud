@@ -208,8 +208,9 @@ func TestDownOwnershipPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Return ownership carries the same durable-decision policy: a present
-	// return decision refuses down-8. Down-9 (catalog projections, no
-	// durable-decision table) still applies, so the version rests at 8.
+	// return decision refuses down-8. Down-10 (policy projection) and
+	// down-9 (catalog projections, no durable-decision tables) still
+	// apply, so the version rests at 8.
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
@@ -221,8 +222,8 @@ func TestDownOwnershipPolicy(t *testing.T) {
 	if err := migrate.DownTo(ctx, conn, 7); err == nil {
 		t.Fatal("return ownership downgrade with decisions must fail")
 	}
-	if v := version(t, conn, ctx); v != migrate.TargetVersion-1 {
-		t.Fatalf("version must stay %d, got %d", migrate.TargetVersion-1, v)
+	if v := version(t, conn, ctx); v != migrate.TargetVersion-2 {
+		t.Fatalf("version must stay %d, got %d", migrate.TargetVersion-2, v)
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM return_refund_ownership`); err != nil {
 		t.Fatal(err)

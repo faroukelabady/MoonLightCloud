@@ -156,3 +156,30 @@ func FingerprintTag(v TagSnapshot) [32]byte {
 func FingerprintProduct(v ProductSnapshot) [32]byte {
 	return fingerprint(NormalizeProductSnapshot(v))
 }
+
+// NormalizedProductSalesPolicy is the comparison form of a policy
+// snapshot. There are no collections: the five scalar fields are the
+// entire semantic state (envelope excluded by construction).
+type NormalizedProductSalesPolicy struct {
+	ProductID             string `json:"product_id"`
+	SalesPolicyRevision   int64  `json:"sales_policy_revision"`
+	SellOffline           bool   `json:"sell_offline"`
+	SellOnline            bool   `json:"sell_online"`
+	OnlineAllocationLimit *int   `json:"online_allocation_limit,omitempty"`
+}
+
+// NormalizeProductSalesPolicySnapshot reduces a validated snapshot to
+// comparison form.
+func NormalizeProductSalesPolicySnapshot(v ProductSalesPolicySnapshot) NormalizedProductSalesPolicy {
+	return NormalizedProductSalesPolicy{
+		ProductID: v.ProductID, SalesPolicyRevision: v.SalesPolicyRevision,
+		SellOffline: v.SellOffline, SellOnline: v.SellOnline,
+		OnlineAllocationLimit: v.OnlineAllocationLimit,
+	}
+}
+
+// FingerprintProductSalesPolicy returns the semantic identity of a policy
+// snapshot.
+func FingerprintProductSalesPolicy(v ProductSalesPolicySnapshot) [32]byte {
+	return fingerprint(NormalizeProductSalesPolicySnapshot(v))
+}

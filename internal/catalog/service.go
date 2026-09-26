@@ -62,6 +62,31 @@ type Tag struct {
 	SourceEventID string
 }
 
+// ProductSalesPolicy is the projected channel/allocation configuration.
+// Effective eligibility always conjoins the product lifecycle state (see
+// IsStoreEligible/IsOnlineEligible): the policy never claims availability,
+// only configuration.
+type ProductSalesPolicy struct {
+	ProductID             string
+	SellOffline           bool
+	SellOnline            bool
+	OnlineAllocationLimit *int
+	Revision              int64
+	SourceEventID         string
+}
+
+// IsStoreEligible reports effective STORE eligibility: active product AND
+// store-configured policy.
+func IsStoreEligible(productActive bool, policy ProductSalesPolicy) bool {
+	return productActive && policy.SellOffline
+}
+
+// IsOnlineEligible reports effective ONLINE eligibility: active product
+// AND online-configured policy. Availability math belongs to Phase 5C.
+func IsOnlineEligible(productActive bool, policy ProductSalesPolicy) bool {
+	return productActive && policy.SellOnline
+}
+
 // Edge is one projected parent→child DAG edge.
 type Edge struct {
 	ParentID string
@@ -76,6 +101,7 @@ type Repository interface {
 	CatalogCategory(ctx context.Context, id string) (Category, error)
 	CatalogCategoryEdges(ctx context.Context) ([]Edge, error)
 	CatalogTag(ctx context.Context, id string) (Tag, error)
+	CatalogProductSalesPolicy(ctx context.Context, id string) (ProductSalesPolicy, error)
 }
 
 // Service fronts catalog reads for future phases.
@@ -134,4 +160,10 @@ func (s Service) CategoriesForProduct(ctx context.Context, productID string) (to
 // GetTag returns the projected tag.
 func (s Service) GetTag(ctx context.Context, id string) (Tag, error) {
 	return s.repo.CatalogTag(ctx, id)
+}
+
+// GetProductSalesPolicy returns the projected channel/allocation
+// configuration for one product.
+func (s Service) GetProductSalesPolicy(ctx context.Context, id string) (ProductSalesPolicy, error) {
+	return s.repo.CatalogProductSalesPolicy(ctx, id)
 }

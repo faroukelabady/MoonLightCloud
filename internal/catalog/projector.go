@@ -25,6 +25,8 @@ const (
 	ProcessorCategoryProjectionV1 = "catalog_category_projection.v1"
 	ProcessorTagProjectionV1      = "catalog_tag_projection.v1"
 	ProcessorProductProjectionV1  = "catalog_product_projection.v1"
+	// Phase 5B: independent policy stream with its own processing identity.
+	ProcessorProductSalesPolicyProjectionV1 = "catalog_product_sales_policy_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -70,6 +72,7 @@ type Store interface {
 	ProjectCategory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectTag(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProduct(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductSalesPolicy(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -121,6 +124,13 @@ func NewProductProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	p := newProjector(s, ProcessorProductProjectionV1, EventProductSnapshotV1, s.ProjectProduct, c, log)
 	p.rearmBlocked = true
 	return p
+}
+
+// NewProductSalesPolicyProjector wires the Phase 5B policy worker. Policy
+// blocks are terminal-deterministic (no graph waits), so no re-arm hook:
+// stale/conflict/out-of-order cases resolve through revision semantics.
+func NewProductSalesPolicyProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductSalesPolicyProjectionV1, EventProductSalesPolicySnapshotV1, s.ProjectProductSalesPolicy, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

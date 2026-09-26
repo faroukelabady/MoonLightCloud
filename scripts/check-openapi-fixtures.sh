@@ -193,6 +193,15 @@ check("tag_valid.json", "CatalogTagSnapshotV1", load_fixture("internal/catalog/t
 check("product_valid.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_valid.json"))
 check("product_multi_root_tags.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_multi_root_tags.json"))
 check("product_minimal.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_minimal.json"))
+# Phase 5B: sales-policy snapshots carry channel eligibility plus the
+# allocation cap only (never stock, availability, or provider identity).
+check("policy_offline_only.json", "CatalogProductSalesPolicySnapshotV1", load_fixture("internal/catalog/testdata/policy_offline_only.json"))
+check("policy_online_capped.json", "CatalogProductSalesPolicySnapshotV1", load_fixture("internal/catalog/testdata/policy_online_capped.json"))
+policy_bad = copy.deepcopy(load_fixture("internal/catalog/testdata/policy_online_capped.json"))
+policy_bad["online_allocation_limit"] = -1
+check("policy-negative-cap", "CatalogProductSalesPolicySnapshotV1", policy_bad, expect_valid=False)
+# Canonical rule (cap requires sell_online) is runtime validation, not
+# schema: covered by TestValidateProductSalesPolicySnapshot.
 # R09: SKU parity with Retail/Cloud runtime CR/LF/TAB rejection.
 sku_base = load_fixture("internal/catalog/testdata/product_valid.json")
 for label, char in [("LF", "\n"), ("CR", "\r"), ("TAB", "\t")]:

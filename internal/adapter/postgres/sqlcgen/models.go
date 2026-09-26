@@ -51,6 +51,19 @@ type CatalogProductPrice struct {
 	CostMinor  pgtype.Int8 `json:"cost_minor"`
 }
 
+type CatalogProductSalesPolicy struct {
+	ProductID             pgtype.UUID        `json:"product_id"`
+	SellOffline           bool               `json:"sell_offline"`
+	SellOnline            bool               `json:"sell_online"`
+	OnlineAllocationLimit pgtype.Int8        `json:"online_allocation_limit"`
+	SourceRevision        int64              `json:"source_revision"`
+	SourceEventID         pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash     []byte             `json:"source_payload_hash"`
+	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+}
+
 type CatalogProductSubcategory struct {
 	ProductID  pgtype.UUID `json:"product_id"`
 	CategoryID pgtype.UUID `json:"category_id"`

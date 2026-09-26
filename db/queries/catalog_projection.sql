@@ -154,8 +154,11 @@ LIMIT $1;
 -- Accepted events for one catalog entity (type + JSON identity key +
 -- identity value) with revision and processing state. Missing processing
 -- rows report 'missing'; callers treat missing/pending/retry as unsettled.
+-- The revision key is a parameter because the policy stream versions on
+-- sales_policy_revision while category/tag/product version on
+-- catalog_revision.
 SELECT e.event_id,
-    (e.payload->>'catalog_revision')::bigint AS revision,
+    (e.payload->>($5::text))::bigint AS revision,
     COALESCE(p.status, 'missing') AS processing_status,
     COALESCE(p.last_error_code, '') AS last_error_code
 FROM sync_events e

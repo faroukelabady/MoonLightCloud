@@ -847,7 +847,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -881,6 +881,7 @@ components:
         - $ref: '#/components/schemas/CatalogCategorySnapshotV1Event'
         - $ref: '#/components/schemas/CatalogTagSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductSnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type
@@ -890,6 +891,7 @@ components:
           catalog.category.snapshot.v1: '#/components/schemas/CatalogCategorySnapshotV1Event'
           catalog.tag.snapshot.v1: '#/components/schemas/CatalogTagSnapshotV1Event'
           catalog.product.snapshot.v1: '#/components/schemas/CatalogProductSnapshotV1Event'
+          catalog.product.sales_policy.snapshot.v1: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -974,6 +976,17 @@ components:
               enum: [catalog.product.snapshot.v1]
             payload:
               $ref: '#/components/schemas/CatalogProductSnapshotV1'
+    CatalogProductSalesPolicySnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.product.sales_policy.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1'
     CatalogName:
       type: object
       additionalProperties: false
@@ -1058,6 +1071,17 @@ components:
         is_active: {type: boolean}
         catalog_revision: {type: integer, minimum: 1}
       description: Authoritative product state at a monotonic revision. No stock, no provider identity, no images.
+    CatalogProductSalesPolicySnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [product_id, sales_policy_revision, sell_offline, sell_online]
+      properties:
+        product_id: {type: string, format: uuid}
+        sales_policy_revision: {type: integer, minimum: 1}
+        sell_offline: {type: boolean}
+        sell_online: {type: boolean}
+        online_allocation_limit: {type: integer, minimum: 0, maximum: 2147483647, nullable: true}
+      description: Authoritative per-product sales-channel configuration at an independent monotonic revision. Allocation cap only, never stock or availability.
     BatchResult:
       type: object
       required: [events]

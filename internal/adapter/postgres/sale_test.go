@@ -60,6 +60,14 @@ func TestMain(m *testing.M) {
 		_, err = catalog.ValidateProductSnapshot(p)
 		return err
 	})
+	isync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductSalesPolicySnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductSalesPolicySnapshot(p)
+		return err
+	})
 	os.Exit(m.Run())
 }
 

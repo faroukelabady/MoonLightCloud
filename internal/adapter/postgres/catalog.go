@@ -321,7 +321,7 @@ func graphSettledForProduct(ctx context.Context, q *sqlcgen.Queries, topID strin
 		}
 		events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 			EventType: catalog.EventCategorySnapshotV1, Column2: "category_id", Column3: id,
-			Processor: catalog.ProcessorCategoryProjectionV1,
+			Processor: catalog.ProcessorCategoryProjectionV1, Column5: "catalog_revision",
 		})
 		if err != nil {
 			return false, err
@@ -385,7 +385,7 @@ func categoryChangeRepairable(ctx context.Context, q *sqlcgen.Queries, categoryI
 			seenProducts[pid] = true
 			repairable, err := entityHasNewerRepairableEvent(ctx, q,
 				catalog.EventProductSnapshotV1, "product_id", pid,
-				catalog.ProcessorProductProjectionV1)
+				catalog.ProcessorProductProjectionV1, "catalog_revision")
 			if err != nil {
 				return false, err
 			}
@@ -403,10 +403,10 @@ func categoryChangeRepairable(ctx context.Context, q *sqlcgen.Queries, categoryI
 // the newer event is judged on its own merits. Terminally dead newer
 // events (validation/conflict/cycle/depth) do not supersede: the older
 // revision is then evaluated normally as the closest valid state.
-func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor string, incomingRevision int64) (bool, error) {
+func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, incomingRevision int64) (bool, error) {
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor,
+		Processor: processor, Column5: revKey,
 	})
 	if err != nil {
 		return false, err
@@ -422,7 +422,7 @@ func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey,
 // entityHasNewerRepairableEvent generalizes the repair check across catalog
 // entity types: a newer accepted event that is missing, pending, retrying,
 // or blocked on a transient graph wait can still advance the entity.
-func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor string) (bool, error) {
+func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string) (bool, error) {
 	uid, err := parseUUID(entityID)
 	if err != nil {
 		return false, nil
@@ -452,7 +452,7 @@ func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, even
 	}
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor,
+		Processor: processor, Column5: revKey,
 	})
 	if err != nil {
 		return false, err
@@ -819,7 +819,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		// revision: skip revalidation and resolve as a stale no-op.
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventCategorySnapshotV1, "category_id", valid.CategoryID,
-			catalog.ProcessorCategoryProjectionV1, valid.CatalogRevision)
+			catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -840,7 +840,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventCategorySnapshotV1, "category_id", valid.CategoryID,
-		catalog.ProcessorCategoryProjectionV1, valid.CatalogRevision)
+		catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1159,7 +1159,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	if !proceed {
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventTagSnapshotV1, "tag_id", valid.TagID,
-			catalog.ProcessorTagProjectionV1, valid.CatalogRevision)
+			catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1180,7 +1180,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventTagSnapshotV1, "tag_id", valid.TagID,
-		catalog.ProcessorTagProjectionV1, valid.CatalogRevision)
+		catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1296,7 +1296,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		// no-op without revalidation.
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventProductSnapshotV1, "product_id", valid.ProductID,
-			catalog.ProcessorProductProjectionV1, valid.CatalogRevision)
+			catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1322,7 +1322,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventProductSnapshotV1, "product_id", valid.ProductID,
-		catalog.ProcessorProductProjectionV1, valid.CatalogRevision)
+		catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1465,6 +1465,153 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
+// currentProductSalesPolicySnapshot reconstructs the normalized semantic
+// state of a projected sales policy.
+func currentProductSalesPolicySnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype.UUID) (catalog.NormalizedProductSalesPolicy, bool, error) {
+	row, err := q.CatalogProductSalesPolicyByID(ctx, puid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.NormalizedProductSalesPolicy{}, false, nil
+		}
+		return catalog.NormalizedProductSalesPolicy{}, false, err
+	}
+	var limit *int
+	if row.OnlineAllocationLimit.Valid {
+		v := int(row.OnlineAllocationLimit.Int64)
+		limit = &v
+	}
+	return catalog.NormalizeProductSalesPolicySnapshot(catalog.ProductSalesPolicySnapshot{
+		ProductID: uuidString(row.ProductID), SalesPolicyRevision: row.SourceRevision,
+		SellOffline: row.SellOffline, SellOnline: row.SellOnline,
+		OnlineAllocationLimit: limit,
+	}), true, nil
+}
+
+// ProjectProductSalesPolicy projects one sales-policy snapshot with
+// revision ordering and a product dependency wait. Either the policy row
+// commits or nothing does; failure leaves the previous revision visible.
+// Inactive products still project policy rows: lifecycle stays separate.
+func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductSalesPolicySnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductSalesPolicySnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	puid, err := parseUUID(valid.ProductID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrValidation, "product_id must be a UUID")
+	}
+
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+
+	if err := lockCatalogEntities(ctx, q, [2]string{"product", valid.ProductID}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+	storedRevision := int64(-1)
+	if row, err := q.CatalogProductSalesPolicyByID(ctx, puid); err == nil {
+		storedRevision = row.SourceRevision
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
+	}
+	proceed, stale := revisionGate(valid.SalesPolicyRevision, storedRevision)
+	if stale {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if !proceed {
+		supersededEqual, err := entitySuperseded(ctx, q,
+			catalog.EventProductSalesPolicySnapshotV1, "product_id", valid.ProductID,
+			catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		}
+		if supersededEqual {
+			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		}
+		currentSnapshot, exists, err := currentProductSalesPolicySnapshot(ctx, q, puid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+		}
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductSalesPolicySnapshot(valid), currentSnapshot) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	superseded, err := entitySuperseded(ctx, q,
+		catalog.EventProductSalesPolicySnapshotV1, "product_id", valid.ProductID,
+		catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+	}
+	if superseded {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+
+	// Dependency resolution: the core product must exist. Absence is a
+	// retryable wait (out-of-order arrival), never terminal.
+	if _, err := q.CatalogProductByID(ctx, puid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
+		}
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+
+	var allocation pgtype.Int8
+	if valid.OnlineAllocationLimit != nil {
+		allocation = pgtype.Int8{Int64: int64(*valid.OnlineAllocationLimit), Valid: true}
+	}
+	fingerprint := catalog.FingerprintProductSalesPolicy(valid)
+	if err := q.UpsertCatalogProductSalesPolicy(ctx, sqlcgen.UpsertCatalogProductSalesPolicyParams{
+		ProductID: puid, SellOffline: valid.SellOffline, SellOnline: valid.SellOnline,
+		OnlineAllocationLimit: allocation,
+		SourceRevision:        valid.SalesPolicyRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
+		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy upsert failed")
+	}
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
 
 // Catalog read API for future phases (internal/catalog.Repository).
@@ -1646,4 +1793,31 @@ func (d Devices) CatalogTag(ctx context.Context, id string) (catalog.Tag, error)
 		tag.NameEN = &name
 	}
 	return tag, nil
+}
+
+// CatalogProductSalesPolicy returns the projected channel/allocation
+// configuration for one product.
+func (d Devices) CatalogProductSalesPolicy(ctx context.Context, id string) (catalog.ProductSalesPolicy, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(id)
+	if err != nil {
+		return catalog.ProductSalesPolicy{}, catalogNotFound("sales policy")
+	}
+	row, err := sqlcgen.New(d.pool).CatalogProductSalesPolicyByID(ctx, uid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.ProductSalesPolicy{}, catalogNotFound("sales policy")
+		}
+		return catalog.ProductSalesPolicy{}, apperr.Wrap(apperr.Internal, "catalog sales policy", redact(err))
+	}
+	policy := catalog.ProductSalesPolicy{
+		ProductID: uuidString(row.ProductID), SellOffline: row.SellOffline, SellOnline: row.SellOnline,
+		Revision: row.SourceRevision, SourceEventID: uuidString(row.SourceEventID),
+	}
+	if row.OnlineAllocationLimit.Valid {
+		limit := int(row.OnlineAllocationLimit.Int64)
+		policy.OnlineAllocationLimit = &limit
+	}
+	return policy, nil
 }

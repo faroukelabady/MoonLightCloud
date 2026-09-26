@@ -12,6 +12,7 @@ sql:
       - "db/migrations/00007_sale_event_ownership.sql"
       - "db/migrations/00008_return_refund_projection.sql"
       - "db/migrations/00009_catalog_projection.sql"
+      - "db/migrations/00010_product_sales_policy.sql"
     gen:
       go:
         package: "sqlcgen"

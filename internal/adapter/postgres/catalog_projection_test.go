@@ -114,6 +114,8 @@ func projectCatalogOnce(t *testing.T, env *saleEnv, eventID string) catalog.Proj
 		res, err = store.ProjectTag(context.Background(), rec, time.Now())
 	case catalog.EventProductSnapshotV1:
 		res, err = store.ProjectProduct(context.Background(), rec, time.Now())
+	case catalog.EventProductSalesPolicySnapshotV1:
+		res, err = store.ProjectProductSalesPolicy(context.Background(), rec, time.Now())
 	default:
 		t.Fatalf("unexpected type %s", rec.EventType)
 	}
@@ -629,6 +631,7 @@ func dumpCatalog(t *testing.T, env *saleEnv) string {
 	dump(`SELECT product_id::text, locale, name FROM catalog_product_translations ORDER BY product_id::text, locale`)
 	dump(`SELECT product_id::text, category_id::text, position FROM catalog_product_subcategories ORDER BY product_id::text, position`)
 	dump(`SELECT product_id::text, tag_id::text FROM catalog_product_tags ORDER BY product_id::text, tag_id::text`)
+	dump(`SELECT product_id::text, sell_offline, sell_online, online_allocation_limit, source_revision FROM catalog_product_sales_policies ORDER BY product_id::text`)
 	return b.String()
 }
 
@@ -651,6 +654,10 @@ func TestCatalogRebuildStable(t *testing.T) {
 	hiddenRaw, _ := json.Marshal(hiddenMap)
 	ingestCatalog(t, env, "d0002051-0000-4000-8000-000000000051", catalog.EventProductSnapshotV1, "2026-09-20T13:00:00Z", string(hiddenRaw))
 	projectCatalogOnce(t, env, "d0002051-0000-4000-8000-000000000051")
+	// Online+capped policy at revision 2: rebuild must preserve it.
+	ingestCatalog(t, env, "d0002052-0000-4000-8000-000000000052", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T13:01:00Z",
+		policyPayload(productID, 2, true, true, policyInt(25)))
+	projectCatalogOnce(t, env, "d0002052-0000-4000-8000-000000000052")
 
 	before := dumpCatalog(t, env)
 	if before == "" {
@@ -660,6 +667,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	// Clear derived catalog state only; inbox stays authoritative.
 	ctx := context.Background()
 	for _, table := range []string{
+		"catalog_product_sales_policies",
 		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
 		"catalog_tags", "catalog_categories",
@@ -700,6 +708,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	}
 	rank := map[string]int{
 		catalog.EventCategorySnapshotV1: 0, catalog.EventTagSnapshotV1: 1, catalog.EventProductSnapshotV1: 2,
+		catalog.EventProductSalesPolicySnapshotV1: 3,
 	}
 	sort.SliceStable(order, func(i, j int) bool { return rank[order[i].typ] < rank[order[j].typ] })
 	for _, q := range order {
@@ -713,6 +722,8 @@ func TestCatalogRebuildStable(t *testing.T) {
 			res, err = store.ProjectCategory(ctx, rec, time.Now())
 		case catalog.EventTagSnapshotV1:
 			res, err = store.ProjectTag(ctx, rec, time.Now())
+		case catalog.EventProductSalesPolicySnapshotV1:
+			res, err = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
 		default:
 			res, err = store.ProjectProduct(ctx, rec, time.Now())
 		}
@@ -735,7 +746,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	}
 }
 
-// drainCatalog runs all three catalog projectors to quiescence (fresh
+// drainCatalog runs all four catalog projectors to quiescence (fresh
 // instances = restart proof) with a bounded wait.
 func drainCatalog(t *testing.T, env *saleEnv) {
 	t.Helper()
@@ -757,6 +768,11 @@ func drainCatalog(t *testing.T, env *saleEnv) {
 		defer close(done3)
 		catalog.NewProductProjector(store, testSystemClock(), nilLogger()).Run(ctx)
 	}()
+	done4 := make(chan struct{})
+	go func() {
+		defer close(done4)
+		catalog.NewProductSalesPolicyProjector(store, testSystemClock(), nilLogger()).Run(ctx)
+	}()
 	waitFor(t, 12*time.Second, func() bool {
 		var pending int
 		_ = env.pool.QueryRow(context.Background(),
@@ -767,6 +783,7 @@ func drainCatalog(t *testing.T, env *saleEnv) {
 	<-done
 	<-done2
 	<-done3
+	<-done4
 }
 
 // TestCatalogMoneyExact proves minor-unit values beyond 2^53 survive
@@ -1840,5 +1857,163 @@ func TestCatalogOldHashCompatibility(t *testing.T) {
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "مختلف"}, nil, 1))
 	if res := projectCatalogOnce(t, env, rival); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogRevisionConflict {
 		t.Fatalf("rival conflicts: %+v", res)
+	}
+}
+
+func policyPayload(productID string, revision int64, sellOffline, sellOnline bool, allocation *int) string {
+	m := map[string]any{
+		"product_id": productID, "sales_policy_revision": revision,
+		"sell_offline": sellOffline, "sell_online": sellOnline,
+	}
+	if allocation != nil {
+		m["online_allocation_limit"] = *allocation
+	}
+	raw, _ := json.Marshal(m)
+	return string(raw)
+}
+
+func policyInt(v int) *int { return &v }
+
+// TestCatalogPolicyProjects proves the offline-only default projects with
+// revision metadata once the core product exists.
+func TestCatalogPolicyProjects(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 90, "pol1")
+	productID := "e0002000-0000-4000-8000-000000000000"
+	ingestCatalog(t, env, "d0003000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-POL", "توت", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, "d0003000-0000-4000-8000-000000000000")
+	event := "d0003001-0000-4000-8000-000000000001"
+	ingestCatalog(t, env, event, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
+		policyPayload(productID, 1, true, false, nil))
+	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("policy: %+v", res)
+	}
+	svc := catalog.NewService(catalogStore(env))
+	policy, err := svc.GetProductSalesPolicy(context.Background(), productID)
+	if err != nil {
+		t.Fatalf("read service: %v", err)
+	}
+	if !policy.SellOffline || policy.SellOnline || policy.OnlineAllocationLimit != nil || policy.Revision != 1 {
+		t.Fatalf("policy: %+v", policy)
+	}
+	if !catalog.IsStoreEligible(true, policy) || catalog.IsOnlineEligible(true, policy) {
+		t.Fatalf("eligibility: %+v", policy)
+	}
+	if catalog.IsStoreEligible(false, policy) {
+		t.Fatal("inactive product is never store-eligible")
+	}
+}
+
+// TestCatalogPolicyWaitsForProduct proves a policy arriving before its core
+// product waits retryably, then converges without resend.
+func TestCatalogPolicyWaitsForProduct(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 91, "pol2")
+	productID := "e0002001-0000-4000-8000-000000000001"
+	event := "d0003010-0000-4000-8000-000000000010"
+	ingestCatalog(t, env, event, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T10:00:00Z",
+		policyPayload(productID, 1, true, false, nil))
+	res := projectCatalogOnce(t, env, event)
+	if res.Outcome != catalog.OutcomeRetryable || res.ErrorCode != ErrCatalogDependencyWait {
+		t.Fatalf("dependency wait: %+v", res)
+	}
+	if n := saleCount(t, env.pool, "catalog_product_sales_policies"); n != 0 {
+		t.Fatalf("zero rows while waiting, got %d", n)
+	}
+	ingestCatalog(t, env, "d0003011-0000-4000-8000-000000000011", catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+		productPayload(productID, "PAP-LATE", "متأخر", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, "d0003011-0000-4000-8000-000000000011")
+	forceCatalogDue(t, env, catalog.ProcessorProductSalesPolicyProjectionV1, event)
+	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("policy converges: %+v", res)
+	}
+}
+
+// TestCatalogPolicyRevisionOrdering proves stale no-ops, equal-revision
+// conflicts block, and newer revisions replace atomically.
+func TestCatalogPolicyRevisionOrdering(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 92, "pol3")
+	productID := "e0002002-0000-4000-8000-000000000002"
+	ingestCatalog(t, env, "d0003020-0000-4000-8000-000000000020", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-REV", "توت", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, "d0003020-0000-4000-8000-000000000020")
+	ingestCatalog(t, env, "d0003021-0000-4000-8000-000000000021", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
+		policyPayload(productID, 1, true, false, nil))
+	projectCatalogOnce(t, env, "d0003021-0000-4000-8000-000000000021")
+	// Advance to online+capped at revision 2.
+	ingestCatalog(t, env, "d0003022-0000-4000-8000-000000000022", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:02:00Z",
+		policyPayload(productID, 2, true, true, policyInt(25)))
+	if res := projectCatalogOnce(t, env, "d0003022-0000-4000-8000-000000000022"); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("rev2: %+v", res)
+	}
+	// Stale rev 1 redelivery is a no-op.
+	ingestCatalog(t, env, "d0003023-0000-4000-8000-000000000023", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:03:00Z",
+		policyPayload(productID, 1, true, false, nil))
+	if res := projectCatalogOnce(t, env, "d0003023-0000-4000-8000-000000000023"); res.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("stale no-op: %+v", res)
+	}
+	// Equal revision with conflicting state blocks.
+	ingestCatalog(t, env, "d0003024-0000-4000-8000-000000000024", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:04:00Z",
+		policyPayload(productID, 2, false, true, policyInt(25)))
+	if res := projectCatalogOnce(t, env, "d0003024-0000-4000-8000-000000000024"); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogRevisionConflict {
+		t.Fatalf("equal-revision conflict: %+v", res)
+	}
+	svc := catalog.NewService(catalogStore(env))
+	policy, err := svc.GetProductSalesPolicy(context.Background(), productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.Revision != 2 || !policy.SellOffline || !policy.SellOnline ||
+		policy.OnlineAllocationLimit == nil || *policy.OnlineAllocationLimit != 25 {
+		t.Fatalf("rev2 intact: %+v", policy)
+	}
+}
+
+// TestCatalogPolicyOutOfOrderRevisions proves higher revisions win
+// regardless of arrival order (highest valid revision converges).
+func TestCatalogPolicyOutOfOrderRevisions(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 93, "pol4")
+	productID := "e0002003-0000-4000-8000-000000000003"
+	ingestCatalog(t, env, "d0003030-0000-4000-8000-000000000030", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-OOO", "توت", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, "d0003030-0000-4000-8000-000000000030")
+	ingestCatalog(t, env, "d0003031-0000-4000-8000-000000000031", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
+		policyPayload(productID, 3, false, true, policyInt(7)))
+	ingestCatalog(t, env, "d0003032-0000-4000-8000-000000000032", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:02:00Z",
+		policyPayload(productID, 2, true, true, policyInt(25)))
+	projectCatalogOnce(t, env, "d0003032-0000-4000-8000-000000000032")
+	projectCatalogOnce(t, env, "d0003031-0000-4000-8000-000000000031")
+	svc := catalog.NewService(catalogStore(env))
+	policy, err := svc.GetProductSalesPolicy(context.Background(), productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.Revision != 3 || policy.SellOffline || !policy.SellOnline ||
+		policy.OnlineAllocationLimit == nil || *policy.OnlineAllocationLimit != 7 {
+		t.Fatalf("rev3 wins: %+v", policy)
+	}
+}
+
+// TestCatalogPolicyInvalidBlocked proves malformed policy is terminal:
+// stale caps and bad revisions never project.
+func TestCatalogPolicyInvalidBlocked(t *testing.T) {
+	env := openSaleEnv(t)
+	root, sub, tag := catalogProductFixture(t, env, 94, "pol5")
+	productID := "e0002004-0000-4000-8000-000000000004"
+	ingestCatalog(t, env, "d0003040-0000-4000-8000-000000000040", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		productPayload(productID, "PAP-BAD", "توت", root, []string{sub}, []string{tag}, 1))
+	projectCatalogOnce(t, env, "d0003040-0000-4000-8000-000000000040")
+	// Stale cap with online disabled is rejected at ingestion.
+	bad := "d0003041-0000-4000-8000-000000000041"
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":%q,"occurred_at":"2026-09-20T12:01:00Z","payload":%s}]}`,
+		bad, catalog.EventProductSalesPolicySnapshotV1, policyPayload(productID, 2, true, false, policyInt(5)))
+	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err == nil {
+		t.Fatal("stale cap must reject at ingestion")
+	}
+	if n := saleCount(t, env.pool, "catalog_product_sales_policies"); n != 0 {
+		t.Fatalf("nothing projects from invalid policy, got %d", n)
 	}
 }

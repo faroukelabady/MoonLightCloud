@@ -161,3 +161,53 @@ func TestValidateProductSnapshotRejects(t *testing.T) {
 		t.Fatal("duplicate subcategories must fail")
 	}
 }
+
+func TestValidateProductSalesPolicySnapshot(t *testing.T) {
+	cap := 25
+	valid, err := ValidateProductSalesPolicySnapshot(ProductSalesPolicySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 2,
+		SellOffline: true, SellOnline: true, OnlineAllocationLimit: &cap,
+	})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if valid.SalesPolicyRevision != 2 || valid.OnlineAllocationLimit == nil || *valid.OnlineAllocationLimit != 25 {
+		t.Fatalf("snapshot: %+v", valid)
+	}
+	// Offline-only defaults (nil cap) validate.
+	if _, err := ValidateProductSalesPolicySnapshot(ProductSalesPolicySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 1,
+		SellOffline: true,
+	}); err != nil {
+		t.Fatalf("offline-only: %v", err)
+	}
+	// Both channels disabled (cataloged, unsellable) validates.
+	if _, err := ValidateProductSalesPolicySnapshot(ProductSalesPolicySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 1,
+	}); err != nil {
+		t.Fatalf("both-disabled: %v", err)
+	}
+	cases := []ProductSalesPolicySnapshot{
+		{ProductID: "nope", SalesPolicyRevision: 1, SellOffline: true},
+		{ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 0, SellOffline: true},
+		{ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 1, SellOffline: true, OnlineAllocationLimit: &cap},
+		{ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 1, SellOffline: true, SellOnline: true, OnlineAllocationLimit: func() *int { n := -1; return &n }()},
+	}
+	for i, tc := range cases {
+		if _, err := ValidateProductSalesPolicySnapshot(tc); err == nil {
+			t.Fatalf("case %d must fail: %+v", i, tc)
+		}
+	}
+	// Fingerprint is semantic: equal state, one canonical hash.
+	a, _ := ValidateProductSalesPolicySnapshot(ProductSalesPolicySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 2,
+		SellOffline: true, SellOnline: true, OnlineAllocationLimit: &cap,
+	})
+	b, _ := ValidateProductSalesPolicySnapshot(ProductSalesPolicySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", SalesPolicyRevision: 2,
+		SellOffline: true, SellOnline: true, OnlineAllocationLimit: &cap,
+	})
+	if FingerprintProductSalesPolicy(a) != FingerprintProductSalesPolicy(b) {
+		t.Fatal("identical policy must share fingerprint")
+	}
+}

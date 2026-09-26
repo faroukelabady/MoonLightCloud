@@ -22,6 +22,9 @@ const (
 	EventCategorySnapshotV1 = "catalog.category.snapshot.v1"
 	EventTagSnapshotV1      = "catalog.tag.snapshot.v1"
 	EventProductSnapshotV1  = "catalog.product.snapshot.v1"
+	// Phase 5B: per-product channel/allocation policy at an independent
+	// revision (never overlapping catalog_revision).
+	EventProductSalesPolicySnapshotV1 = "catalog.product.sales_policy.snapshot.v1"
 )
 
 // Valid category lifecycle states (desktop-enforced).
@@ -333,6 +336,51 @@ func ValidateProductSnapshot(p ProductSnapshot) (ProductSnapshot, error) {
 	}
 	if !validRevision(p.CatalogRevision) {
 		return fail("catalog_revision must be >= 1")
+	}
+	return p, nil
+}
+
+// ProductSalesPolicySnapshot is the authoritative sales-policy state at a
+// revision (Phase 5B): channel eligibility plus the ONLINE allocation cap
+// only. No stock, no availability, no reservations, no prices, no provider
+// identity. Canonical rule: disabled ONLINE carries no cap.
+type ProductSalesPolicySnapshot struct {
+	ProductID             string `json:"product_id"`
+	SalesPolicyRevision   int64  `json:"sales_policy_revision"`
+	SellOffline           bool   `json:"sell_offline"`
+	SellOnline            bool   `json:"sell_online"`
+	OnlineAllocationLimit *int   `json:"online_allocation_limit,omitempty"`
+}
+
+// DecodeProductSalesPolicySnapshot parses the canonical payload bytes.
+func DecodeProductSalesPolicySnapshot(raw json.RawMessage) (ProductSalesPolicySnapshot, error) {
+	var p ProductSalesPolicySnapshot
+	if err := decodePayload(EventProductSalesPolicySnapshotV1, raw, &p); err != nil {
+		return ProductSalesPolicySnapshot{}, err
+	}
+	return p, nil
+}
+
+// ValidateProductSalesPolicySnapshot enforces the desktop policy contract:
+// UUID identity, positive revision, nullable non-negative whole-unit cap,
+// and the canonical rule (allocation requires sell_online).
+func ValidateProductSalesPolicySnapshot(p ProductSalesPolicySnapshot) (ProductSalesPolicySnapshot, error) {
+	fail := func(format string, args ...any) (ProductSalesPolicySnapshot, error) {
+		return ProductSalesPolicySnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSalesPolicySnapshotV1+": "+fmt.Sprintf(format, args...))
+	}
+	if !isUUID(p.ProductID) {
+		return fail("product_id must be a UUID")
+	}
+	if !validRevision(p.SalesPolicyRevision) {
+		return fail("sales_policy_revision must be >= 1")
+	}
+	if p.OnlineAllocationLimit != nil {
+		if *p.OnlineAllocationLimit < 0 || *p.OnlineAllocationLimit > math.MaxInt32 {
+			return fail("online_allocation_limit must be 0..MaxInt32")
+		}
+		if !p.SellOnline {
+			return fail("online_allocation_limit requires sell_online")
+		}
 	}
 	return p, nil
 }
