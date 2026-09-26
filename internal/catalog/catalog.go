@@ -25,6 +25,10 @@ const (
 	// Phase 5B: per-product channel/allocation policy at an independent
 	// revision (never overlapping catalog_revision).
 	EventProductSalesPolicySnapshotV1 = "catalog.product.sales_policy.snapshot.v1"
+	// Phase 5C: per-product authoritative stock at an independent
+	// revision (never overlapping catalog_revision or
+	// sales_policy_revision). Current state, never a delta.
+	EventInventoryProductSnapshotV1 = "inventory.product.snapshot.v1"
 )
 
 // Valid category lifecycle states (desktop-enforced).
@@ -381,6 +385,45 @@ func ValidateProductSalesPolicySnapshot(p ProductSalesPolicySnapshot) (ProductSa
 		if !p.SellOnline {
 			return fail("online_allocation_limit requires sell_online")
 		}
+	}
+	return p, nil
+}
+
+// ProductInventorySnapshot is the authoritative inventory state at a
+// revision (Phase 5C): product identity, monotonic inventory_revision,
+// and resulting whole-unit stock_quantity only. No names, prices,
+// relations, policy, movements, or provider data. Mirrors the Retail
+// ledger constraint exactly: 0..MaxInt32, never negative.
+type ProductInventorySnapshot struct {
+	ProductID         string `json:"product_id"`
+	InventoryRevision int64  `json:"inventory_revision"`
+	StockQuantity     int    `json:"stock_quantity"`
+}
+
+// DecodeProductInventorySnapshot parses the canonical payload bytes.
+func DecodeProductInventorySnapshot(raw json.RawMessage) (ProductInventorySnapshot, error) {
+	var p ProductInventorySnapshot
+	if err := decodePayload(EventInventoryProductSnapshotV1, raw, &p); err != nil {
+		return ProductInventorySnapshot{}, err
+	}
+	return p, nil
+}
+
+// ValidateProductInventorySnapshot enforces the desktop inventory
+// contract: UUID identity, positive revision, whole-unit quantity in
+// 0..MaxInt32 (the exact Retail ledger domain).
+func ValidateProductInventorySnapshot(p ProductInventorySnapshot) (ProductInventorySnapshot, error) {
+	fail := func(format string, args ...any) (ProductInventorySnapshot, error) {
+		return ProductInventorySnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventInventoryProductSnapshotV1+": "+fmt.Sprintf(format, args...))
+	}
+	if !isUUID(p.ProductID) {
+		return fail("product_id must be a UUID")
+	}
+	if !validRevision(p.InventoryRevision) {
+		return fail("inventory_revision must be >= 1")
+	}
+	if p.StockQuantity < 0 || p.StockQuantity > math.MaxInt32 {
+		return fail("stock_quantity must be 0..MaxInt32")
 	}
 	return p, nil
 }

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 )
 
@@ -209,5 +210,44 @@ func TestValidateProductSalesPolicySnapshot(t *testing.T) {
 	})
 	if FingerprintProductSalesPolicy(a) != FingerprintProductSalesPolicy(b) {
 		t.Fatal("identical policy must share fingerprint")
+	}
+}
+
+func TestValidateProductInventorySnapshot(t *testing.T) {
+	valid, err := ValidateProductInventorySnapshot(ProductInventorySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 27, StockQuantity: 17,
+	})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if valid.InventoryRevision != 27 || valid.StockQuantity != 17 {
+		t.Fatalf("snapshot: %+v", valid)
+	}
+	// Zero stock is valid state.
+	if _, err := ValidateProductInventorySnapshot(ProductInventorySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1,
+	}); err != nil {
+		t.Fatalf("zero stock: %v", err)
+	}
+	cases := []ProductInventorySnapshot{
+		{ProductID: "nope", InventoryRevision: 1, StockQuantity: 5},
+		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 0, StockQuantity: 5},
+		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1, StockQuantity: -1},
+		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1, StockQuantity: math.MaxInt32 + 1},
+	}
+	for i, tc := range cases {
+		if _, err := ValidateProductInventorySnapshot(tc); err == nil {
+			t.Fatalf("case %d must fail: %+v", i, tc)
+		}
+	}
+	// Fingerprint is semantic: equal state, one canonical hash.
+	a, _ := ValidateProductInventorySnapshot(ProductInventorySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 2, StockQuantity: 9,
+	})
+	b, _ := ValidateProductInventorySnapshot(ProductInventorySnapshot{
+		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 2, StockQuantity: 9,
+	})
+	if FingerprintProductInventory(a) != FingerprintProductInventory(b) {
+		t.Fatal("identical inventory must share fingerprint")
 	}
 }

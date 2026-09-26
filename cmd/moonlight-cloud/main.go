@@ -139,6 +139,7 @@ func serve(args []string) error {
 	go a.TagProjector.Run(projCtx)
 	go a.ProductProjector.Run(projCtx)
 	go a.PolicyProjector.Run(projCtx)
+	go a.InventoryProjector.Run(projCtx)
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err
 	}
@@ -244,6 +245,32 @@ func dashboardCmd(args []string) error {
 	return nil
 }
 
+// allProjectionProcessors is the single canonical registry of every
+// durable projection processor. Both `projection status` and `projection
+// retry` validate against this list, so a new processor can never again
+// be visible in one and rejected by the other (Phase 5B Low).
+func allProjectionProcessors() []string {
+	return []string{
+		sale.ProcessorSaleProjectionV1,
+		returnrefund.ProcessorReturnProjectionV1,
+		catalog.ProcessorCategoryProjectionV1,
+		catalog.ProcessorTagProjectionV1,
+		catalog.ProcessorProductProjectionV1,
+		catalog.ProcessorProductSalesPolicyProjectionV1,
+		catalog.ProcessorProductInventoryProjectionV1,
+	}
+}
+
+// validProjectionProcessor reports whether name is a registered processor.
+func validProjectionProcessor(name string) bool {
+	for _, processor := range allProjectionProcessors() {
+		if processor == name {
+			return true
+		}
+	}
+	return false
+}
+
 // projectionCmd is the small operator surface for both projectors:
 // status shows pending/retry/blocked/processed counts, oldest pending age,
 // and the last error per processor; retry returns one blocked/retryable
@@ -266,7 +293,7 @@ func projectionCmd(args []string) error {
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	switch args[0] {
 	case "status":
-		for _, processor := range []string{sale.ProcessorSaleProjectionV1, returnrefund.ProcessorReturnProjectionV1, catalog.ProcessorCategoryProjectionV1, catalog.ProcessorTagProjectionV1, catalog.ProcessorProductProjectionV1, catalog.ProcessorProductSalesPolicyProjectionV1} {
+		for _, processor := range allProjectionProcessors() {
 			stats, err := store.ProcessingStats(ctx, processor)
 			if err != nil {
 				return err
@@ -297,12 +324,7 @@ func projectionCmd(args []string) error {
 		if len(args) >= 3 {
 			processor = args[2]
 		}
-		validProcessors := map[string]bool{
-			sale.ProcessorSaleProjectionV1: true, returnrefund.ProcessorReturnProjectionV1: true,
-			catalog.ProcessorCategoryProjectionV1: true, catalog.ProcessorTagProjectionV1: true,
-			catalog.ProcessorProductProjectionV1: true,
-		}
-		if !validProcessors[processor] {
+		if !validProjectionProcessor(processor) {
 			return fmt.Errorf("unknown processor %q", processor)
 		}
 		return store.ResetProcessing(ctx, processor, args[1])

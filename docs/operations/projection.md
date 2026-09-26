@@ -245,20 +245,24 @@ authoritative and reprocessing reproduces identical rows (tested by
 
 ## Catalog processors
 
-Four processors share this runbook's machinery:
+Five processors share this runbook's machinery:
 
 ```text
 catalog_category_projection.v1
 catalog_tag_projection.v1
 catalog_product_projection.v1
 catalog_product_sales_policy_projection.v1
+inventory_product_projection.v1
 ```
 
-`projection status` lists all six processors; `projection retry <id>
-[catalog_*_projection.v1]` resets one catalog event. Catalog-specific
+`projection status` lists all seven processors; `projection retry <id>
+[<processor>]` resets one event for any registered processor (both
+commands validate against one canonical registry, so they can never
+diverge again). Catalog-specific
 retry code `CATALOG_DEPENDENCY_WAIT` means a referenced entity has not
 projected yet — it converges automatically, never terminally. For policy
-events the wait means the core product has not projected yet. Terminal
+and inventory events the wait means the core product has not projected
+yet. Terminal
 catalog codes (`CATALOG_REVISION_CONFLICT`, `CATALOG_CATEGORY_CYCLE`,
 `CATALOG_INVALID_RELATION`, `CATALOG_CATEGORY_DEPTH`, `CATALOG_GRAPH_CONFLICT`)
 need operator review like sale/return blocks. Depth excess is reported
@@ -306,6 +310,7 @@ no catalog ownership table to retain — revision metadata in the projection
 rows is the arbitration. Procedure:
 
 ```sql
+DELETE FROM catalog_product_inventory;
 DELETE FROM catalog_product_sales_policies;
 DELETE FROM catalog_product_tags;
 DELETE FROM catalog_product_subcategories;
@@ -317,7 +322,7 @@ DELETE FROM catalog_tags;
 DELETE FROM catalog_categories;
 UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
   attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1');
+  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1', 'inventory_product_projection.v1');
 ```
 
 Then reprocess categories, tags, products, and policies (any order
@@ -340,5 +345,41 @@ Pending catalog work is visible per processor in `projection status`
 (pending/retry counts, oldest pending age, last error code). Current
 revisions per entity are readable from the projection rows
 (`source_revision`, `source_event_id`). Policy rows carry
-`source_revision` from the independent `sales_policy_revision` stream.
+`source_revision` from the independent `sales_policy_revision` stream;
+inventory rows from the independent `inventory_revision` stream.
 No dashboard surface exists for catalog in Phase 5A/5B by design.
+
+## Inventory projection and availability (Phase 5C)
+
+Inventory events (`inventory.product.snapshot.v1`) project into
+`catalog_product_inventory`: one row per product carrying the highest
+valid `inventory_revision` and its stock. Inactive products and
+`SELL_ONLINE=false` still project rows — lifecycle and policy affect
+availability, never inventory truth.
+
+Availability is a derived read, not a stored projection: ONLINE
+availability = 0 when product, policy, or inventory is missing
+(not-ready), when the product is inactive, or when `sell_online` is
+false; otherwise `max(stock, 0)` capped by `online_allocation_limit`
+when set (NULL = uncapped). Missing inputs always mean safe-zero, never
+unlimited. Cloud inventory is last-known synchronized Retail stock, not
+proof the device is connected: no staleness timeout is inferred, and
+`projected_at`/`source_received_at` are exposed as metadata for future
+consumers. Reading availability never reserves, decrements, or consumes
+allocation.
+
+```sql
+-- Pending inventory snapshots by state (normal: zeros outside outage).
+SELECT status, count(*) FROM sync_event_processing
+WHERE processor = 'inventory_product_projection.v1' GROUP BY status;
+-- Current inventory revision per product.
+SELECT product_id, stock_quantity, source_revision, projected_at
+FROM catalog_product_inventory WHERE product_id = $1;
+-- Any row here is an integrity failure (CHECK plus dual-layer
+-- validation forbid negative stock); investigate before trusting reads.
+SELECT product_id FROM catalog_product_inventory WHERE stock_quantity < 0;
+```
+
+Inventory rebuild clears only the inventory table plus the inventory
+processor rows (see Catalog rebuild), preserving `sync_events`; replay
+converges on the highest valid revision regardless of order.

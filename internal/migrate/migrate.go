@@ -17,7 +17,7 @@ import (
 )
 
 // TargetVersion is the schema version Phase 5B code requires.
-const TargetVersion int64 = 10
+const TargetVersion int64 = 11
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())

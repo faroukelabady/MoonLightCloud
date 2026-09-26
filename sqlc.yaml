@@ -13,6 +13,7 @@ sql:
       - "db/migrations/00008_return_refund_projection.sql"
       - "db/migrations/00009_catalog_projection.sql"
       - "db/migrations/00010_product_sales_policy.sql"
+      - "db/migrations/00011_product_inventory.sql"
     gen:
       go:
         package: "sqlcgen"

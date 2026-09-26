@@ -27,6 +27,8 @@ const (
 	ProcessorProductProjectionV1  = "catalog_product_projection.v1"
 	// Phase 5B: independent policy stream with its own processing identity.
 	ProcessorProductSalesPolicyProjectionV1 = "catalog_product_sales_policy_projection.v1"
+	// Phase 5C: independent inventory stream with its own processing identity.
+	ProcessorProductInventoryProjectionV1 = "inventory_product_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -73,6 +75,7 @@ type Store interface {
 	ProjectTag(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProduct(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductSalesPolicy(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -131,6 +134,13 @@ func NewProductProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 // stale/conflict/out-of-order cases resolve through revision semantics.
 func NewProductSalesPolicyProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductSalesPolicyProjectionV1, EventProductSalesPolicySnapshotV1, s.ProjectProductSalesPolicy, c, log)
+}
+
+// NewProductInventoryProjector wires the Phase 5C inventory worker.
+// Inventory blocks are terminal-deterministic (product dependency is the
+// only wait); no re-arm hook.
+func NewProductInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductInventoryProjectionV1, EventInventoryProductSnapshotV1, s.ProjectProductInventory, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

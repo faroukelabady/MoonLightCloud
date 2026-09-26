@@ -847,7 +847,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -882,6 +882,7 @@ components:
         - $ref: '#/components/schemas/CatalogTagSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
+        - $ref: '#/components/schemas/InventoryProductSnapshotV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type
@@ -892,6 +893,7 @@ components:
           catalog.tag.snapshot.v1: '#/components/schemas/CatalogTagSnapshotV1Event'
           catalog.product.snapshot.v1: '#/components/schemas/CatalogProductSnapshotV1Event'
           catalog.product.sales_policy.snapshot.v1: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
+          inventory.product.snapshot.v1: '#/components/schemas/InventoryProductSnapshotV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -987,6 +989,17 @@ components:
               enum: [catalog.product.sales_policy.snapshot.v1]
             payload:
               $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1'
+    InventoryProductSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [inventory.product.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/InventoryProductSnapshotV1'
     CatalogName:
       type: object
       additionalProperties: false
@@ -1082,6 +1095,15 @@ components:
         sell_online: {type: boolean}
         online_allocation_limit: {type: integer, minimum: 0, maximum: 2147483647, nullable: true}
       description: Authoritative per-product sales-channel configuration at an independent monotonic revision. Allocation cap only, never stock or availability.
+    InventoryProductSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [product_id, inventory_revision, stock_quantity]
+      properties:
+        product_id: {type: string, format: uuid}
+        inventory_revision: {type: integer, minimum: 1}
+        stock_quantity: {type: integer, minimum: 0, maximum: 2147483647}
+      description: Authoritative per-product stock at an independent monotonic revision. Current state, never a delta. Mirrors the Retail ledger (whole units, never negative).
     BatchResult:
       type: object
       required: [events]

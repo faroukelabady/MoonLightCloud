@@ -202,6 +202,23 @@ policy_bad["online_allocation_limit"] = -1
 check("policy-negative-cap", "CatalogProductSalesPolicySnapshotV1", policy_bad, expect_valid=False)
 # Canonical rule (cap requires sell_online) is runtime validation, not
 # schema: covered by TestValidateProductSalesPolicySnapshot.
+# Phase 5C: inventory snapshots carry authoritative stock only (never
+# negative: the Retail ledger guarantees >= 0 and Cloud mirrors it).
+check("inventory_valid.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_valid.json"))
+check("inventory_zero.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_zero.json"))
+check("inventory_max.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_max.json"))
+inv_bad = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
+inv_bad["stock_quantity"] = -1
+check("inventory-negative", "InventoryProductSnapshotV1", inv_bad, expect_valid=False)
+inv_huge = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
+inv_huge["stock_quantity"] = 2147483648
+check("inventory-overflow", "InventoryProductSnapshotV1", inv_huge, expect_valid=False)
+inv_rev0 = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
+inv_rev0["inventory_revision"] = 0
+check("inventory-rev0", "InventoryProductSnapshotV1", inv_rev0, expect_valid=False)
+inv_noid = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
+del inv_noid["product_id"]
+check("inventory-missing-id", "InventoryProductSnapshotV1", inv_noid, expect_valid=False)
 # R09: SKU parity with Retail/Cloud runtime CR/LF/TAB rejection.
 sku_base = load_fixture("internal/catalog/testdata/product_valid.json")
 for label, char in [("LF", "\n"), ("CR", "\r"), ("TAB", "\t")]:

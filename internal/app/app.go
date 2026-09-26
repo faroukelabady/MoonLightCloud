@@ -41,26 +41,27 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg               config.Config
-	Log               *slog.Logger
-	Pool              *pgxpool.Pool
-	Devices           auth.Service
-	Sync              sync.Service
-	Reports           report.Service
-	Dashboard         dashboard.Service
-	Projector         *sale.Projector
-	SaleStore         sale.Store
-	ReturnProjector   *returnrefund.Projector
-	ReturnStore       returnrefund.Store
-	CatalogStore      catalog.Store
-	CategoryProjector *catalog.Projector
-	TagProjector      *catalog.Projector
-	ProductProjector  *catalog.Projector
-	PolicyProjector   *catalog.Projector
-	Catalog           catalog.Service
-	Handler           http.Handler
-	Health            adapterhttp.Health
-	Version           adapterhttp.Version
+	Cfg                config.Config
+	Log                *slog.Logger
+	Pool               *pgxpool.Pool
+	Devices            auth.Service
+	Sync               sync.Service
+	Reports            report.Service
+	Dashboard          dashboard.Service
+	Projector          *sale.Projector
+	SaleStore          sale.Store
+	ReturnProjector    *returnrefund.Projector
+	ReturnStore        returnrefund.Store
+	CatalogStore       catalog.Store
+	CategoryProjector  *catalog.Projector
+	TagProjector       *catalog.Projector
+	ProductProjector   *catalog.Projector
+	PolicyProjector    *catalog.Projector
+	InventoryProjector *catalog.Projector
+	Catalog            catalog.Service
+	Handler            http.Handler
+	Health             adapterhttp.Health
+	Version            adapterhttp.Version
 }
 
 // New builds the app in startup order.
@@ -88,6 +89,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
 	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
 	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
+	sync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, ValidateCatalogProductInventoryPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store
@@ -97,6 +99,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
 	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
 	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
+	a.InventoryProjector = catalog.NewProductInventoryProjector(store, clock.System{}, log)
 	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -187,6 +190,18 @@ func ValidateCatalogProductPayload(raw json.RawMessage) error {
 	return err
 }
 
+// ValidateCatalogProductInventoryPayload is the ingestion-time
+// inventory.product.snapshot.v1 gate: event-local validation only. A
+// missing core product is a projection wait, never an ingestion rejection.
+func ValidateCatalogProductInventoryPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductInventorySnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductInventorySnapshot(p)
+	return err
+}
+
 // ValidateCatalogProductSalesPolicyPayload is the ingestion-time
 // catalog.product.sales_policy.snapshot.v1 gate: event-local validation
 // only. A missing core product is a projection wait, never an ingestion
@@ -224,6 +239,7 @@ func (a *App) notifyProjectors() {
 	a.TagProjector.Notify()
 	a.ProductProjector.Notify()
 	a.PolicyProjector.Notify()
+	a.InventoryProjector.Notify()
 }
 
 // ProjectReturnOne loads one return inbox event and runs a single atomic

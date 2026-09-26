@@ -44,6 +44,17 @@ type CatalogProduct struct {
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 }
 
+type CatalogProductInventory struct {
+	ProductID         pgtype.UUID        `json:"product_id"`
+	StockQuantity     int64              `json:"stock_quantity"`
+	SourceRevision    int64              `json:"source_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+}
+
 type CatalogProductPrice struct {
 	ProductID  pgtype.UUID `json:"product_id"`
 	Currency   string      `json:"currency"`

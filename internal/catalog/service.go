@@ -102,6 +102,8 @@ type Repository interface {
 	CatalogCategoryEdges(ctx context.Context) ([]Edge, error)
 	CatalogTag(ctx context.Context, id string) (Tag, error)
 	CatalogProductSalesPolicy(ctx context.Context, id string) (ProductSalesPolicy, error)
+	CatalogProductInventory(ctx context.Context, id string) (ProductInventory, error)
+	CatalogProductAvailability(ctx context.Context, id string) (ProductAvailability, error)
 }
 
 // Service fronts catalog reads for future phases.

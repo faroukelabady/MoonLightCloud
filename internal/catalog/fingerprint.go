@@ -183,3 +183,27 @@ func NormalizeProductSalesPolicySnapshot(v ProductSalesPolicySnapshot) Normalize
 func FingerprintProductSalesPolicy(v ProductSalesPolicySnapshot) [32]byte {
 	return fingerprint(NormalizeProductSalesPolicySnapshot(v))
 }
+
+// NormalizedProductInventory is the comparison form of an inventory
+// snapshot. The three scalar fields are the entire semantic state
+// (envelope excluded by construction).
+type NormalizedProductInventory struct {
+	ProductID         string `json:"product_id"`
+	InventoryRevision int64  `json:"inventory_revision"`
+	StockQuantity     int    `json:"stock_quantity"`
+}
+
+// NormalizeProductInventorySnapshot reduces a validated snapshot to
+// comparison form.
+func NormalizeProductInventorySnapshot(v ProductInventorySnapshot) NormalizedProductInventory {
+	return NormalizedProductInventory{
+		ProductID: v.ProductID, InventoryRevision: v.InventoryRevision,
+		StockQuantity: v.StockQuantity,
+	}
+}
+
+// FingerprintProductInventory returns the semantic identity of an
+// inventory snapshot.
+func FingerprintProductInventory(v ProductInventorySnapshot) [32]byte {
+	return fingerprint(NormalizeProductInventorySnapshot(v))
+}

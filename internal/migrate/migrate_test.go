@@ -208,9 +208,11 @@ func TestDownOwnershipPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Return ownership carries the same durable-decision policy: a present
-	// return decision refuses down-8. Down-10 (policy projection) and
-	// down-9 (catalog projections, no durable-decision tables) still
-	// apply, so the version rests at 8.
+	// return decision refuses down-8. Down-11 (inventory), down-10
+	// (policy), and down-9 (catalog projections, no durable-decision
+	// tables) still apply, so the version rests at 8: the refusal point
+	// is the return-ownership migration itself, independent of how many
+	// projection-only migrations sit above it.
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
@@ -222,8 +224,8 @@ func TestDownOwnershipPolicy(t *testing.T) {
 	if err := migrate.DownTo(ctx, conn, 7); err == nil {
 		t.Fatal("return ownership downgrade with decisions must fail")
 	}
-	if v := version(t, conn, ctx); v != migrate.TargetVersion-2 {
-		t.Fatalf("version must stay %d, got %d", migrate.TargetVersion-2, v)
+	if v := version(t, conn, ctx); v != 8 {
+		t.Fatalf("version must stay 8 (return-ownership refusal), got %d", v)
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM return_refund_ownership`); err != nil {
 		t.Fatal(err)
@@ -233,5 +235,27 @@ func TestDownOwnershipPolicy(t *testing.T) {
 	}
 	if v := version(t, conn, ctx); v != 6 {
 		t.Fatalf("want 6, got %d", v)
+	}
+}
+
+// TestV10ToLatest proves the frozen Phase 5B schema upgrades to the
+// inventory projection cleanly: 00011 only adds the inventory table.
+func TestV10ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 10); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 10 {
+		t.Fatalf("want 10, got %d", v)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var exists bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='catalog_product_inventory')`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("inventory table missing (%v)", err)
 	}
 }

@@ -1614,6 +1614,145 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
 
+// currentProductInventorySnapshot reconstructs the normalized semantic
+// state of a projected inventory row.
+func currentProductInventorySnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype.UUID) (catalog.NormalizedProductInventory, bool, error) {
+	row, err := q.CatalogProductInventoryByID(ctx, puid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.NormalizedProductInventory{}, false, nil
+		}
+		return catalog.NormalizedProductInventory{}, false, err
+	}
+	return catalog.NormalizeProductInventorySnapshot(catalog.ProductInventorySnapshot{
+		ProductID: uuidString(row.ProductID), InventoryRevision: row.SourceRevision,
+		StockQuantity: int(row.StockQuantity),
+	}), true, nil
+}
+
+// ProjectProductInventory projects one inventory snapshot with revision
+// ordering and a product dependency wait. Either the inventory row commits
+// or nothing does; failure leaves the previous revision visible.
+// Inactive products and sell_online=false still project rows: lifecycle
+// and policy affect availability, never inventory truth.
+func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductInventorySnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductInventorySnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	puid, err := parseUUID(valid.ProductID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrValidation, "product_id must be a UUID")
+	}
+
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+
+	// Distinct lock namespace: inventory decisions serialize per product
+	// without joining product/policy lock traffic.
+	if err := lockCatalogEntities(ctx, q, [2]string{"product-inventory", valid.ProductID}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+	storedRevision := int64(-1)
+	if row, err := q.CatalogProductInventoryByID(ctx, puid); err == nil {
+		storedRevision = row.SourceRevision
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
+	}
+	proceed, stale := revisionGate(valid.InventoryRevision, storedRevision)
+	if stale {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if !proceed {
+		supersededEqual, err := entitySuperseded(ctx, q,
+			catalog.EventInventoryProductSnapshotV1, "product_id", valid.ProductID,
+			catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		}
+		if supersededEqual {
+			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		}
+		currentSnapshot, exists, err := currentProductInventorySnapshot(ctx, q, puid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+		}
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductInventorySnapshot(valid), currentSnapshot) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	superseded, err := entitySuperseded(ctx, q,
+		catalog.EventInventoryProductSnapshotV1, "product_id", valid.ProductID,
+		catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+	}
+	if superseded {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+
+	// Dependency resolution: the core product must exist. Absence is a
+	// retryable wait (out-of-order arrival), never terminal.
+	if _, err := q.CatalogProductByID(ctx, puid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
+		}
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+
+	fingerprint := catalog.FingerprintProductInventory(valid)
+	if err := q.UpsertCatalogProductInventory(ctx, sqlcgen.UpsertCatalogProductInventoryParams{
+		ProductID: puid, StockQuantity: int64(valid.StockQuantity),
+		SourceRevision: valid.InventoryRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
+		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory upsert failed")
+	}
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
 // Catalog read API for future phases (internal/catalog.Repository).
 
 func catalogNotFound(what string) error {
@@ -1820,4 +1959,86 @@ func (d Devices) CatalogProductSalesPolicy(ctx context.Context, id string) (cata
 		policy.OnlineAllocationLimit = &limit
 	}
 	return policy, nil
+}
+
+// CatalogProductInventory returns the projected last-known inventory.
+func (d Devices) CatalogProductInventory(ctx context.Context, id string) (catalog.ProductInventory, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(id)
+	if err != nil {
+		return catalog.ProductInventory{}, catalogNotFound("inventory")
+	}
+	row, err := sqlcgen.New(d.pool).CatalogProductInventoryByID(ctx, uid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.ProductInventory{}, catalogNotFound("inventory")
+		}
+		return catalog.ProductInventory{}, apperr.Wrap(apperr.Internal, "catalog inventory", redact(err))
+	}
+	return catalog.ProductInventory{
+		ProductID: uuidString(row.ProductID), StockQuantity: int(row.StockQuantity),
+		Revision: row.SourceRevision, SourceEventID: uuidString(row.SourceEventID),
+		SourceReceivedAt: row.SourceReceivedAt.Time, ProjectedAt: row.ProjectedAt.Time,
+	}, nil
+}
+
+// CatalogProductAvailability derives provider-neutral ONLINE availability
+// from current product, policy, and inventory rows in one read
+// transaction, so the three inputs are mutually consistent. The read
+// performs no writes.
+func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (catalog.ProductAvailability, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(id)
+	if err != nil {
+		return catalog.ProductAvailability{}, catalogNotFound("availability")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return catalog.ProductAvailability{}, apperr.Wrap(apperr.Internal, "catalog availability", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	row, err := sqlcgen.New(tx).CatalogAvailabilityByProductID(ctx, uid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.ProductAvailability{ProductID: id}, nil
+		}
+		return catalog.ProductAvailability{}, apperr.Wrap(apperr.Internal, "catalog availability", redact(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.ProductAvailability{}, apperr.Wrap(apperr.Internal, "catalog availability", redact(err))
+	}
+	availability := catalog.ProductAvailability{
+		ProductID: uuidString(row.ProductID), ProductActive: row.ProductActive,
+		MissingPolicy: !row.SellOnline.Valid, MissingInventory: !row.StockQuantity.Valid,
+	}
+	if row.SellOnline.Valid {
+		availability.SellOnline = row.SellOnline.Bool
+	}
+	if row.OnlineAllocationLimit.Valid {
+		limit := int(row.OnlineAllocationLimit.Int64)
+		availability.OnlineAllocationLimit = &limit
+	}
+	var stock int
+	inventoryFound := row.StockQuantity.Valid
+	if inventoryFound {
+		stock = int(row.StockQuantity.Int64)
+		quantity := stock
+		availability.StockQuantity = &quantity
+		availability.InventoryRevision = row.InventoryRevision.Int64
+		availability.InventoryEventID = uuidString(row.InventoryEventID)
+		if row.InventoryProjectedAt.Valid {
+			projected := row.InventoryProjectedAt.Time
+			availability.InventoryProjectedAt = &projected
+		}
+	}
+	online, ready := catalog.ComputeProductAvailability(
+		row.ProductActive, true,
+		availability.SellOnline, !availability.MissingPolicy, availability.OnlineAllocationLimit,
+		stock, inventoryFound,
+	)
+	availability.OnlineAvailable = online
+	availability.Ready = ready
+	return availability, nil
 }

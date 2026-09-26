@@ -68,6 +68,14 @@ func TestMain(m *testing.M) {
 		_, err = catalog.ValidateProductSalesPolicySnapshot(p)
 		return err
 	})
+	isync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductInventorySnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductInventorySnapshot(p)
+		return err
+	})
 	os.Exit(m.Run())
 }
 
