@@ -85,7 +85,7 @@ func run(args []string) error {
 	case "projection":
 		return projectionCmd(args)
 	case "commerce":
-		return commerceCmd(args)
+		return commerceCmd(args, os.Stdout, os.Stderr)
 	case "dashboard":
 		return dashboardCmd(args)
 	case "probe":
@@ -345,11 +345,12 @@ func projectionCmd(args []string) error {
 // sync: no scheduler, no loop, no bulk command. It loads config, opens
 // the database, registers the enabled Woo provider (if any), runs one
 // CommerceService.SyncProduct, and prints the bounded safe result.
-func commerceCmd(args []string) error {
+func commerceCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || args[0] != "sync-product" {
 		return fmt.Errorf("usage: moonlight-cloud commerce sync-product --provider <provider-key> --product <product-uuid>")
 	}
 	fs := flag.NewFlagSet("commerce sync-product", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	providerKey := fs.String("provider", "", "registered provider key")
 	productID := fs.String("product", "", "MoonLight product UUID")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -373,9 +374,9 @@ func commerceCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	service := newCommerceService(store, registry, logger)
-	return runCommerceSync(ctx, service, os.Stdout, *providerKey, *productID)
+	return runCommerceSync(ctx, service, stdout, *providerKey, *productID)
 }
 
 func deviceCmd(args []string) error {

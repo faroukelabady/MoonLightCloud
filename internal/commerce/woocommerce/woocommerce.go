@@ -61,11 +61,20 @@ func NewWooCommerceProvider(cfg config.WooCommerceConfig, httpClient *http.Clien
 
 func validateBaseURL(raw string) error {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return apperr.New(apperr.InvalidInput, "woocommerce base URL must be https://host[/subpath]")
+	if err != nil {
+		return apperr.New(apperr.InvalidInput, "woocommerce base URL is not a valid URL")
 	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return apperr.New(apperr.InvalidInput, "woocommerce base URL must not carry userinfo, query, or fragment")
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return apperr.New(apperr.InvalidInput, "woocommerce base URL must use https")
+	}
+	if parsed.User != nil {
+		return apperr.New(apperr.InvalidInput, "woocommerce base URL must not contain userinfo")
+	}
+	if parsed.RawQuery != "" {
+		return apperr.New(apperr.InvalidInput, "woocommerce base URL must not contain query parameters")
+	}
+	if parsed.Fragment != "" {
+		return apperr.New(apperr.InvalidInput, "woocommerce base URL must not contain a fragment")
 	}
 	return nil
 }
@@ -223,11 +232,18 @@ func (p *WooCommerceProvider) SetInventory(ctx context.Context, req commerce.Inv
 	if err != nil {
 		return err
 	}
-	if updated.ID.String() != "" {
-		if id, idErr := wooResponseID(updated); idErr == nil && id != wooID {
-			return commerce.ConflictError(
-				fmt.Sprintf("woo inventory identity mismatch: want %d got %d", wooID, id))
-		}
+	// Success must prove which product was acknowledged: missing or
+	// malformed identities are Temporary (the remote may have applied
+	// stock, but the response names no product), and a different valid
+	// identity is a Conflict. Retrying the same inventory update is
+	// idempotent, so no rollback is attempted.
+	id, err := wooResponseID(updated)
+	if err != nil {
+		return err
+	}
+	if id != wooID {
+		return commerce.ConflictError(
+			fmt.Sprintf("woo inventory identity mismatch: want %d got %d", wooID, id))
 	}
 	return nil
 }

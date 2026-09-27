@@ -32,6 +32,7 @@ type Client struct {
 	key       string
 	secret    string
 	userAgent string
+	scrub     *secretScrubber
 }
 
 // newClient builds the transport over an injected *http.Client so tests
@@ -49,6 +50,7 @@ func newClient(baseURL, key, secret string, timeout time.Duration, transport *ht
 	return &Client{
 		http: httpClient, baseURL: strings.TrimSuffix(baseURL, "/"),
 		key: key, secret: secret, userAgent: "moonlight-cloud-commerce/1.0",
+		scrub: newSecretScrubber(key, secret),
 	}
 }
 
@@ -103,7 +105,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		}
 		return response.StatusCode, nil
 	}
-	return response.StatusCode, classifyStatus(response.StatusCode, response.Header.Get("Retry-After"), parseWooError(raw))
+	return response.StatusCode, c.classifyStatus(response.StatusCode, response.Header.Get("Retry-After"), parseWooError(raw))
 }
 
 // parseWooError decodes Woo's standard error shape best-effort. It never
@@ -119,17 +121,24 @@ func parseWooError(raw []byte) *wooErrorResponse {
 }
 
 // safeWooMessage bounds the Woo error code and message for the generic
-// error. Bodies, credentials, and request payloads never enter here.
-func safeWooMessage(wooError *wooErrorResponse) string {
+// error, then scrubs configured credential material. Bodies, request
+// payloads, and raw response text never enter here; only the bounded
+// code/message pair does, and even those are remote-controlled.
+func (c *Client) safeWooMessage(wooError *wooErrorResponse) string {
 	code := truncateASCII(wooError.Code, 64)
 	message := truncateASCII(wooError.Message, 200)
+	var text string
 	if code == "" && message == "" {
-		return "woo request failed"
+		text = "woo request failed"
+	} else if code == "" {
+		text = "woo error: " + message
+	} else {
+		text = "woo error " + code + ": " + message
 	}
-	if code == "" {
-		return "woo error: " + message
+	if c == nil || c.scrub == nil {
+		return text
 	}
-	return "woo error " + code + ": " + message
+	return c.scrub.scrub(text)
 }
 
 func truncateASCII(value string, limit int) string {
@@ -149,25 +158,25 @@ func truncateASCII(value string, limit int) string {
 // classifyStatus maps HTTP status plus Woo error semantics to the frozen
 // taxonomy. Redirects never reach here: the no-follow policy refuses
 // them at the transport layer.
-func classifyStatus(status int, retryAfter string, wooError *wooErrorResponse) *commerce.ProviderError {
+func (c *Client) classifyStatus(status int, retryAfter string, wooError *wooErrorResponse) *commerce.ProviderError {
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return commerce.AuthenticationError(safeWooMessage(wooError))
+		return commerce.AuthenticationError(c.safeWooMessage(wooError))
 	case status == http.StatusRequestTimeout:
-		return commerce.TemporaryError(safeWooMessage(wooError))
+		return commerce.TemporaryError(c.safeWooMessage(wooError))
 	case status == http.StatusTooManyRequests:
-		return commerce.RateLimitedError(safeWooMessage(wooError), parseRetryAfter(retryAfter))
+		return commerce.RateLimitedError(c.safeWooMessage(wooError), parseRetryAfter(retryAfter))
 	case status == http.StatusNotFound || status == http.StatusConflict:
-		return commerce.ConflictError(safeWooMessage(wooError))
+		return commerce.ConflictError(c.safeWooMessage(wooError))
 	case status == http.StatusBadRequest || status == http.StatusUnprocessableEntity:
 		if wooError.Code == wooCodeDuplicateSKU {
-			return commerce.ConflictError(safeWooMessage(wooError))
+			return commerce.ConflictError(c.safeWooMessage(wooError))
 		}
-		return commerce.ValidationError(safeWooMessage(wooError))
+		return commerce.ValidationError(c.safeWooMessage(wooError))
 	case status >= 500:
-		return commerce.TemporaryError(safeWooMessage(wooError))
+		return commerce.TemporaryError(c.safeWooMessage(wooError))
 	default:
-		return commerce.TemporaryError(safeWooMessage(wooError))
+		return commerce.TemporaryError(c.safeWooMessage(wooError))
 	}
 }
 

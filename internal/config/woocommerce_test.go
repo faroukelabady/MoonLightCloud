@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,6 +106,32 @@ func TestWooCommerceConfigMatrix(t *testing.T) {
 			setWooEnv(t, env)
 			if _, err := loadWooCommerceConfig(); err == nil {
 				t.Fatalf("%s must fail", name)
+			}
+		})
+	}
+}
+
+func TestWooBaseURLRejectsCredentialMaterial(t *testing.T) {
+	cases := []string{
+		"http://ck-review:sk-review@example.com",
+		"https://ck-review:sk-review@example.com",
+		"http://example.com/?consumer_secret=sk-review",
+		"https://example.com/?consumer_key=ck-review",
+		"https://example.com/#sk-review",
+		"http://%zz",
+		"https://user:pass@example.com/shop",
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			setWooEnv(t, withWooEnv(map[string]string{"COMMERCE_WOO_BASE_URL": raw}))
+			_, err := loadWooCommerceConfig()
+			if err == nil {
+				t.Fatalf("%q must fail", raw)
+			}
+			for _, forbidden := range []string{raw, "ck-review", "sk-review"} {
+				if strings.Contains(err.Error(), forbidden) {
+					t.Fatalf("error echoes %q: %q", forbidden, err.Error())
+				}
 			}
 		})
 	}

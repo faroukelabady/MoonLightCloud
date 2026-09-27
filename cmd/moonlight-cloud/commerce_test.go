@@ -94,7 +94,8 @@ func TestCommerceCmdUsage(t *testing.T) {
 		{"sync-product", "--product", "11111111-1111-4111-8111-111111111111"},
 		{"sync-product", "--provider", "", "--product", "11111111-1111-4111-8111-111111111111"},
 	} {
-		if err := commerceCmd(args); err == nil {
+		var stdout, stderr bytes.Buffer
+		if err := commerceCmd(args, &stdout, &stderr); err == nil {
 			t.Fatalf("args %v must fail", args)
 		}
 	}

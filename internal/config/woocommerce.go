@@ -125,17 +125,25 @@ func validWooProviderKey(key string) bool {
 }
 
 // validateWooBaseURL enforces https origins without userinfo, query, or
-// fragment. Basic Auth credentials must never travel over HTTP.
+// fragment. Basic Auth credentials must never travel over HTTP. Error
+// text never echoes the supplied value: it may itself carry credential
+// material (userinfo, query secrets, or unparseable input).
 func validateWooBaseURL(raw string) error {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return fmt.Errorf("invalid COMMERCE_WOO_BASE_URL %q: want https://host[/subpath]", raw)
+	if err != nil {
+		return fmt.Errorf("COMMERCE_WOO_BASE_URL is not a valid URL")
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("COMMERCE_WOO_BASE_URL must use https")
 	}
 	if parsed.User != nil {
-		return fmt.Errorf("invalid COMMERCE_WOO_BASE_URL: userinfo is forbidden")
+		return fmt.Errorf("COMMERCE_WOO_BASE_URL must not contain userinfo")
 	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("invalid COMMERCE_WOO_BASE_URL: query and fragment are forbidden")
+	if parsed.RawQuery != "" {
+		return fmt.Errorf("COMMERCE_WOO_BASE_URL must not contain query parameters")
+	}
+	if parsed.Fragment != "" {
+		return fmt.Errorf("COMMERCE_WOO_BASE_URL must not contain a fragment")
 	}
 	return nil
 }

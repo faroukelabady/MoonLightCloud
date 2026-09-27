@@ -99,6 +99,28 @@ retryable by future orchestration; authentication, validation, and
 conflict are terminal for the same desired state. Mapped-product 404s
 and identity mismatches are conflicts, never silent remaps.
 
+## Error sanitization
+
+Woo `code`/`message` fields are remote-controlled input and are never
+copied blindly into operator-visible errors. A centralized scrubber
+redacts the configured consumer key/secret (raw, URL-escaped, and
+percent-decoded forms) plus the Basic Authorization value before any
+`ProviderError` message is built, so the same failure stays safe
+whether it surfaces in CLI output, logs, wrapped errors, or future
+callers. Classification and `Retry-After` are preserved; context
+cancellation is never wrapped. Configuration errors name the rule
+(`COMMERCE_WOO_BASE_URL must use https`) without echoing the supplied
+value.
+
+## Inventory identity rule
+
+A 2xx inventory response must carry the requested mapped Woo ID
+(canonical decimal). Missing, malformed, zero, negative, or overflow
+IDs are Temporary failures — the remote may have applied stock, but
+the response proves nothing, so `SyncProduct` never reports
+`InventoryUpdated=true`. A different valid ID is a Conflict. Retrying
+the same inventory update is idempotent; no rollback is attempted.
+
 ## Deferred adapter capabilities
 
 Deliberate v1 boundaries, not omissions: Woo category/tag

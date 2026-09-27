@@ -501,3 +501,30 @@ func TestWooMoneyExact(t *testing.T) {
 		t.Fatal("negative must fail")
 	}
 }
+
+func TestWooConstructorRejectsUnsafeURLs(t *testing.T) {
+	harness := newWooHarness(t, testConsumerKey, testConsumerSec)
+	base := testConfig(harness)
+	for _, raw := range []string{
+		"http://ck-review:sk-review@example.com",
+		"https://ck-review:sk-review@example.com",
+		"http://example.com/?consumer_secret=sk-review",
+		"https://example.com/#sk-review",
+		"http://%zz",
+		"",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			cfg := base
+			cfg.BaseURL = raw
+			_, err := NewWooCommerceProvider(cfg, harness.server.Client())
+			if err == nil {
+				t.Fatalf("%q must fail", raw)
+			}
+			for _, forbidden := range []string{raw, "ck-review", "sk-review"} {
+				if forbidden != "" && strings.Contains(err.Error(), forbidden) {
+					t.Fatalf("error echoes %q: %q", forbidden, err.Error())
+				}
+			}
+		})
+	}
+}
