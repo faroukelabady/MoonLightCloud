@@ -8,6 +8,7 @@
 //	moonlight-cloud device revoke <id>      revoke a device and all its credentials
 //	moonlight-cloud projection status       projector diagnostics (safe counts)
 //	moonlight-cloud projection retry <id> [processor]  return one event to pending
+//	moonlight-cloud commerce sync-product --provider KEY --product UUID  converge one provider product once
 //	moonlight-cloud probe --url U           single health probe (container healthcheck)
 //
 // Version metadata injects at build time:
@@ -83,6 +84,8 @@ func run(args []string) error {
 		return deviceCmd(args)
 	case "projection":
 		return projectionCmd(args)
+	case "commerce":
+		return commerceCmd(args)
 	case "dashboard":
 		return dashboardCmd(args)
 	case "probe":
@@ -93,7 +96,7 @@ func run(args []string) error {
 		fmt.Printf("moonlight-cloud version=%s commit=%s build_time=%s\n", version, commit, buildTime)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|dashboard|probe|version", cmd)
+		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|commerce|dashboard|probe|version", cmd)
 	}
 }
 
@@ -124,6 +127,11 @@ func serve(args []string) error {
 		return err
 	}
 	defer a.Close()
+	commerceRegistry, err := newCommerceRegistry(cfg)
+	if err != nil {
+		return err
+	}
+	a.Log.Info("commerce providers", "count", commerceRegistry.Count())
 	srv := adapterhttp.Server(cfg.HTTPAddr, a.Handler, adapterhttp.Config{})
 	a.Log.Info("listening", "addr", cfg.HTTPAddr, "env", cfg.Environment,
 		"version", version, "commit", commit)
@@ -331,6 +339,43 @@ func projectionCmd(args []string) error {
 	default:
 		return fmt.Errorf("unknown projection subcommand %q", args[0])
 	}
+}
+
+// commerceCmd is the narrow operator surface for one explicit product
+// sync: no scheduler, no loop, no bulk command. It loads config, opens
+// the database, registers the enabled Woo provider (if any), runs one
+// CommerceService.SyncProduct, and prints the bounded safe result.
+func commerceCmd(args []string) error {
+	if len(args) == 0 || args[0] != "sync-product" {
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product --provider <provider-key> --product <product-uuid>")
+	}
+	fs := flag.NewFlagSet("commerce sync-product", flag.ContinueOnError)
+	providerKey := fs.String("provider", "", "registered provider key")
+	productID := fs.String("product", "", "MoonLight product UUID")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*providerKey) == "" || strings.TrimSpace(*productID) == "" {
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product --provider <provider-key> --product <product-uuid>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := postgres.Open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	registry, err := newCommerceRegistry(cfg)
+	if err != nil {
+		return err
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	service := newCommerceService(store, registry, logger)
+	return runCommerceSync(ctx, service, os.Stdout, *providerKey, *productID)
 }
 
 func deviceCmd(args []string) error {

@@ -627,3 +627,30 @@ func TestSyncProductFailureRecovery(t *testing.T) {
 		}
 	})
 }
+
+type nilKeyProvider struct{}
+
+func (*nilKeyProvider) Key() ProviderKey { return "typed-nil" }
+func (*nilKeyProvider) UpsertProduct(_ context.Context, _ ProductUpsertRequest) (ProductUpsertResult, error) {
+	return ProductUpsertResult{}, nil
+}
+func (*nilKeyProvider) SetInventory(_ context.Context, _ InventoryUpdateRequest) error { return nil }
+
+// TestRegistryRejectsTypedNilProvider proves a typed-nil concrete
+// provider inside the interface is rejected without panic.
+func TestRegistryRejectsTypedNilProvider(t *testing.T) {
+	registry := NewRegistry()
+	var typedNil *nilKeyProvider
+	if err := registry.Register("typed-nil", typedNil); err == nil {
+		t.Fatal("typed-nil provider must be rejected")
+	}
+	if err := registry.Register("literal-nil", nil); err == nil {
+		t.Fatal("literal nil must be rejected")
+	}
+	if registry.Count() != 0 {
+		t.Fatal("failed registrations store nothing")
+	}
+	if _, err := registry.Get("typed-nil"); !UnknownProvider(err) {
+		t.Fatalf("absent key stays unknown: %v", err)
+	}
+}

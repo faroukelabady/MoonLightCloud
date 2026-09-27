@@ -33,3 +33,4 @@ Concise, irreversible-or-important choices only.
 - [0029](0029-sales-policy-projection.md) — product sales-policy projection (5B)
 - [0030](0030-inventory-availability-projection.md) — product inventory projection and availability (5C)
 - [0031](0031-commerce-provider-abstraction.md) — commerce provider abstraction (6A)
+- [0032](0032-woocommerce-adapter.md) — WooCommerce adapter (6B)

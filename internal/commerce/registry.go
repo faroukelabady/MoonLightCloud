@@ -3,6 +3,7 @@ package commerce
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 
@@ -22,13 +23,15 @@ func NewRegistry() *Registry {
 	return &Registry{providers: map[ProviderKey]CommerceProvider{}}
 }
 
-// Register adds one provider instance. Duplicate keys, nil providers, and
-// providers whose Key disagrees with the registration key fail.
+// Register adds one provider instance. Duplicate keys, nil providers
+// (including typed-nil pointers inside the interface, which would
+// otherwise panic on Key()), and providers whose Key disagrees with the
+// registration key fail.
 func (r *Registry) Register(key ProviderKey, provider CommerceProvider) error {
 	if _, err := ValidateProviderKey(string(key)); err != nil {
 		return apperr.New(apperr.InvalidInput, err.Error())
 	}
-	if provider == nil {
+	if isNilProvider(provider) {
 		return apperr.New(apperr.InvalidInput, fmt.Sprintf("cannot register nil provider for key %q", key))
 	}
 	if provider.Key() != key {
@@ -52,6 +55,22 @@ func (r *Registry) Get(key ProviderKey) (CommerceProvider, error) {
 		return nil, apperr.New(apperr.NotFound, fmt.Sprintf("unknown provider key %q", key))
 	}
 	return provider, nil
+}
+
+// isNilProvider detects literal nil interfaces and typed-nil concrete
+// values (nil pointers, maps, slices, channels, funcs) stored inside the
+// interface. Calling methods on those would panic.
+func isNilProvider(provider CommerceProvider) bool {
+	if provider == nil {
+		return true
+	}
+	value := reflect.ValueOf(provider)
+	switch value.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // UnknownProvider reports whether err is a registry unknown-key failure.

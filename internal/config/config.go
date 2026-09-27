@@ -132,6 +132,10 @@ type Config struct {
 	// believed for login rate limiting. Empty (default) trusts none:
 	// forwarded headers from untrusted peers are ignored entirely.
 	TrustedProxyCIDRs []net.IPNet
+	// WooCommerce holds the optional first commerce adapter configuration
+	// (Phase 6B). Disabled by default: no provider, no credentials, no
+	// network client.
+	WooCommerce WooCommerceConfig
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -203,6 +207,11 @@ func Load() (Config, error) {
 		}
 		c.DBMaxConns = int32(n)
 	}
+	woo, err := loadWooCommerceConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	c.WooCommerce = woo
 	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
