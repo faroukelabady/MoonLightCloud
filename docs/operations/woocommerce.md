@@ -112,6 +112,12 @@ cancellation is never wrapped. Configuration errors name the rule
 (`COMMERCE_WOO_BASE_URL must use https`) without echoing the supplied
 value.
 
+Ordering invariant: scrubbing applies to the complete decoded field
+BEFORE printable normalization and the 64/200-char diagnostic bounds.
+Truncating first could slice a credential into an unmatchable fragment
+that leaks; the HTTP response body is already globally bounded, so
+scrubbing the complete field is safe.
+
 ## Inventory identity rule
 
 A 2xx inventory response must carry the requested mapped Woo ID

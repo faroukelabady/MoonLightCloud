@@ -80,6 +80,12 @@ func (s *cliWooStub) serve(w http.ResponseWriter, r *http.Request) {
 		switch s.inventoryMode {
 		case "empty-id":
 			write(http.StatusOK, map[string]any{"stock_quantity": 7})
+		case "boundary-error":
+			write(http.StatusBadRequest, map[string]any{
+				"code":    "woocommerce_rest_error",
+				"message": strings.Repeat("x", 195) + s.secret,
+				"data":    map[string]any{"status": 400},
+			})
 		case "secret-error":
 			write(http.StatusBadRequest, map[string]any{
 				"code":    "woocommerce_rest_error",
@@ -159,6 +165,29 @@ func TestCommerceCLIAmbiguousInventory(t *testing.T) {
 // rejects a credential-bearing invalid configuration without echoing
 // secrets to stdout, stderr, or the error (no DB is touched: config
 // loading fails first).
+// TestCommerceCLIBoundaryLeak runs the real sync-product path against a
+// hostile error whose credential crosses the 200-char diagnostic
+// boundary. Both captured streams must lack the full secret and the
+// boundary-created fragment, with classification intact.
+func TestCommerceCLIBoundaryLeak(t *testing.T) {
+	const key, secret = "ck-review-secret-key", "sk-review-super-secret"
+	stub := newCLIWooStub(t, key, secret, "boundary-error")
+	service := cliServiceWithStub(t, stub, key, secret)
+	var stdout bytes.Buffer
+	err := runCommerceSync(context.Background(), service, &stdout, "website", "cli-1")
+	if err == nil {
+		t.Fatal("expected the injected failure")
+	}
+	assertNoSecret(t, "stdout", stdout.String(), key, secret)
+	if strings.Contains(stdout.String(), "sk-re") {
+		t.Fatalf("boundary fragment leaks in: %q", stdout.String())
+	}
+	var providerErr *commerce.ProviderError
+	if !isCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorValidation {
+		t.Fatalf("classification preserved: %v", err)
+	}
+}
+
 func TestCommerceCmdMaliciousConfigSafe(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "development")
 	t.Setenv("ALLOW_UNAUTHENTICATED_REPORTING", "true")

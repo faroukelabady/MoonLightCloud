@@ -121,12 +121,16 @@ func parseWooError(raw []byte) *wooErrorResponse {
 }
 
 // safeWooMessage bounds the Woo error code and message for the generic
-// error, then scrubs configured credential material. Bodies, request
-// payloads, and raw response text never enter here; only the bounded
-// code/message pair does, and even those are remote-controlled.
+// error, with credential scrubbing applied FIRST on the complete
+// decoded field. Truncating before scrubbing would slice a credential
+// into an unmatchable fragment that leaks to operator output; the HTTP
+// response body is already globally bounded, so scrubbing the complete
+// field is safe. Bodies, request payloads, and raw response text never
+// enter here; only the bounded code/message pair does, and even those
+// are remote-controlled.
 func (c *Client) safeWooMessage(wooError *wooErrorResponse) string {
-	code := truncateASCII(wooError.Code, 64)
-	message := truncateASCII(wooError.Message, 200)
+	code := boundField(c.scrubField(wooError.Code), codeLimit)
+	message := boundField(c.scrubField(wooError.Message), messageLimit)
 	var text string
 	if code == "" && message == "" {
 		text = "woo request failed"
@@ -135,10 +139,29 @@ func (c *Client) safeWooMessage(wooError *wooErrorResponse) string {
 	} else {
 		text = "woo error " + code + ": " + message
 	}
+	return text
+}
+
+// scrubField redacts configured credential material from one complete
+// remote field. Nil-safe: without credentials there is nothing to redact.
+func (c *Client) scrubField(field string) string {
 	if c == nil || c.scrub == nil {
-		return text
+		return field
 	}
-	return c.scrub.scrub(text)
+	return c.scrub.scrub(field)
+}
+
+// Diagnostic output bounds (operator-output formatting, applied after
+// redaction).
+const (
+	codeLimit    = 64
+	messageLimit = 200
+)
+
+// boundField strips unsafe control content and truncates to the
+// diagnostic limit.
+func boundField(field string, limit int) string {
+	return truncateASCII(field, limit)
 }
 
 func truncateASCII(value string, limit int) string {
