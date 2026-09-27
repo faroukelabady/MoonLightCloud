@@ -42,6 +42,8 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/app"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
@@ -148,6 +150,9 @@ func serve(args []string) error {
 	go a.ProductProjector.Run(projCtx)
 	go a.PolicyProjector.Run(projCtx)
 	go a.InventoryProjector.Run(projCtx)
+	if a.OrderProcessor != nil {
+		go a.OrderProcessor.Run(projCtx)
+	}
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err
 	}
@@ -341,42 +346,124 @@ func projectionCmd(args []string) error {
 	}
 }
 
-// commerceCmd is the narrow operator surface for one explicit product
-// sync: no scheduler, no loop, no bulk command. It loads config, opens
-// the database, registers the enabled Woo provider (if any), runs one
-// CommerceService.SyncProduct, and prints the bounded safe result.
+// commerceCmd is the narrow operator surface for explicit commerce
+// work: one product sync or one order reconciliation. No scheduler, no
+// loop, no bulk commands. It loads config, opens the database,
+// registers the enabled Woo provider (if any), runs once, and prints
+// the bounded safe result.
 func commerceCmd(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 || args[0] != "sync-product" {
-		return fmt.Errorf("usage: moonlight-cloud commerce sync-product --provider <provider-key> --product <product-uuid>")
+	if len(args) == 0 {
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order ...")
 	}
+	switch args[0] {
+	case "sync-product":
+		return commerceSyncProductCmd(args[1:], stdout, stderr)
+	case "sync-order":
+		return commerceSyncOrderCmd(args[1:], stdout, stderr)
+	default:
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order ...")
+	}
+}
+
+func commerceSyncProductCmd(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("commerce sync-product", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	providerKey := fs.String("provider", "", "registered provider key")
 	productID := fs.String("product", "", "MoonLight product UUID")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*providerKey) == "" || strings.TrimSpace(*productID) == "" {
 		return fmt.Errorf("usage: moonlight-cloud commerce sync-product --provider <provider-key> --product <product-uuid>")
 	}
-	cfg, err := config.Load()
+	env, err := openCommerceEnv(stderr)
 	if err != nil {
 		return err
+	}
+	defer env.close()
+	return runCommerceSync(context.Background(), env.productService, stdout, *providerKey, *productID)
+}
+
+// commerceSyncOrderCmd reconciles one provider order by external ID:
+// GET current provider order, normalize, project, print safe summary.
+func commerceSyncOrderCmd(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("commerce sync-order", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	providerKey := fs.String("provider", "", "registered provider key")
+	externalOrderID := fs.String("order", "", "provider external order ID")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*providerKey) == "" || strings.TrimSpace(*externalOrderID) == "" {
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-order --provider <provider-key> --order <external-order-id>")
+	}
+	env, err := openCommerceEnv(stderr)
+	if err != nil {
+		return err
+	}
+	defer env.close()
+	return runCommerceSyncOrder(context.Background(), env.orderService, stdout, *providerKey, *externalOrderID)
+}
+
+// runCommerceSyncOrder reconciles one order and prints the safe summary.
+// Separated from CLI wiring for testability.
+func runCommerceSyncOrder(ctx context.Context, orderService *orders.OrderService, out io.Writer, providerKey, externalOrderID string) error {
+	result, err := orderService.ReconcileOrder(ctx, providerKey, externalOrderID)
+	if err != nil {
+		if providerErr, ok := asCommerceProviderError(err); ok {
+			fmt.Fprintf(out, "provider=%s order=%s error_kind=%s retryable=%v error=%s\n",
+				providerKey, externalOrderID, providerErr.Kind, providerErr.Retryable(), providerErr.Message)
+		} else {
+			fmt.Fprintf(out, "provider=%s order=%s error=%s\n", providerKey, externalOrderID, err.Error())
+		}
+		return err
+	}
+	fmt.Fprintf(out, "provider=%s order=%s revision=%d changed=%v status=%s mapping_complete=%v unmapped_lines=%d deleted=%v\n",
+		result.ProviderKey, result.ExternalOrderID, result.Revision, result.Changed,
+		result.Canonical, result.MappingComplete, result.UnmappedLines, result.ProviderDeleted)
+	return nil
+}
+
+// commerceEnv holds one CLI invocation's database pool and wired
+// commerce services. The pool stays open until close runs.
+type commerceEnv struct {
+	pool           interface{ Close() }
+	productService *commerce.CommerceService
+	registry       *commerce.Registry
+	orderService   *orders.OrderService
+}
+
+func (e *commerceEnv) close() {
+	if e != nil && e.pool != nil {
+		e.pool.Close()
+	}
+}
+
+// openCommerceEnv loads config, opens the database, and wires the
+// commerce registry plus product and order orchestration services.
+func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
 	}
 	ctx := context.Background()
 	pool, err := postgres.Open(ctx, cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer pool.Close()
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	registry, err := newCommerceRegistry(cfg)
 	if err != nil {
-		return err
+		pool.Close()
+		return nil, err
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	service := newCommerceService(store, registry, logger)
-	return runCommerceSync(ctx, service, stdout, *providerKey, *productID)
+	return &commerceEnv{
+		pool:           pool,
+		productService: newCommerceService(store, registry, logger),
+		registry:       registry,
+		orderService:   orders.NewOrderService(registry, store, logger),
+	}, nil
 }
 
 func deviceCmd(args []string) error {

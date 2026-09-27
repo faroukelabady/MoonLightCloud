@@ -7,7 +7,7 @@
 		{ r: 'daily', ar: 'الاتجاهات اليومية', en: 'Daily Trends', ready: true, icon: 'trend' },
 		{ r: 'products', ar: 'المنتجات', en: 'Products', ready: true, icon: 'box' },
 		{ r: 'categories', ar: 'الفئات', en: 'Categories', ready: true, icon: 'layers' },
-		{ r: 'orders', ar: 'الطلبات', en: 'Orders', ready: false, note: 'قريبًا — Orders sync is a future phase', icon: 'clip' },
+		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', ready: true, icon: 'clip' },
 		{ r: 'reports', ar: 'التقارير', en: 'Reports', ready: false, note: 'قريبًا', icon: 'report' },
 		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', ready: true, icon: 'cloud' },
 		{ r: 'settings', ar: 'الإعدادات', en: 'Settings', ready: false, note: 'قريبًا', icon: 'gear' },

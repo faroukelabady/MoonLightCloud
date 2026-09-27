@@ -13,9 +13,10 @@
 	import SyncHealthCard from './components/SyncHealthCard.svelte';
 	import ActivityCard from './components/ActivityCard.svelte';
 	import LatestSalesCard from './components/LatestSalesCard.svelte';
+	import OrdersPage from './components/OrdersPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError } from './lib/api.js';
-	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind } from './lib/api.js';
+	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats } from './lib/api.js';
 	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
@@ -41,6 +42,7 @@
 		const map: Record<string, string> = {
 			'': 'overview',
 			overview: 'overview',
+			orders: 'orders',
 			sales: 'sales',
 			daily: 'daily',
 			products: 'products',
@@ -119,6 +121,16 @@
 	let activityState: WidgetState = $state('loading');
 	let latest: LatestSale[] = $state([]);
 	let latestState: WidgetState = $state('loading');
+	let orderList: OrderSummary[] = $state([]);
+	let orderCounts: OrderStatusCount[] = $state([]);
+	let orderInbox: WebhookInboxStats | null = $state(null);
+	let ordersState: WidgetState = $state('loading');
+	let ordersErr: number | null = $state(null);
+	let orderFilterStatus = $state('');
+	let orderFilterProvider = $state('');
+	let orderSelected: OrderDetail | null = $state(null);
+	let orderDetailState: 'idle' | 'loading' | 'loaded' | 'error' = $state('idle');
+	let orderDetailErr: number | null = $state(null);
 	let overviewErr: number | null = $state(null);
 	let dailyErr: number | null = $state(null);
 	let productsErr: number | null = $state(null);
@@ -127,6 +139,42 @@
 	let syncErr: number | null = $state(null);
 	let activityErr: number | null = $state(null);
 	let latestErr: number | null = $state(null);
+
+	async function reloadOrders() {
+		if (!authed) return;
+		const signal = freshSignal();
+		ordersState = 'loading';
+		try {
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, signal);
+			orderList = v.orders;
+			orderCounts = v.status_counts;
+			orderInbox = v.webhook_inbox;
+			ordersState = v.orders.length === 0 ? 'empty' : 'loaded';
+		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			if (requireAuth(err)) return;
+			ordersState = 'error';
+			ordersErr = err instanceof ApiError ? err.status : 0;
+		}
+	}
+
+	async function selectOrder(order: OrderSummary | null) {
+		orderSelected = null;
+		if (!order) {
+			orderDetailState = 'idle';
+			return;
+		}
+		orderDetailState = 'loading';
+		try {
+			orderSelected = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, freshSignal());
+			orderDetailState = 'loaded';
+		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			if (requireAuth(err)) return;
+			orderDetailState = 'error';
+			orderDetailErr = err instanceof ApiError ? err.status : 0;
+		}
+	}
 	function retryAll() {
 		void reloadAll();
 	}
@@ -141,7 +189,7 @@
 		fatal = null;
 		const signal = freshSignal();
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
-			'loading';
+			ordersState = 'loading';
 		const done = async <T>(
 			p: Promise<T>,
 			apply: (v: T) => void,
@@ -230,7 +278,13 @@
 			done(dashboardApi.latestSales(signal), (v) => {
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
-			}, (s) => (latestState = s), (n) => (latestErr = n))
+			}, (s) => (latestState = s), (n) => (latestErr = n)),
+			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, signal), (v) => {
+				orderList = v.orders;
+				orderCounts = v.status_counts;
+				orderInbox = v.webhook_inbox;
+				ordersState = emptyOf(v.orders);
+			}, (s) => (ordersState = s), (n) => (ordersErr = n))
 		]);
 	}
 
@@ -394,6 +448,32 @@
 				{#if route === 'overview' || route === 'sync'}
 					<div class="cell a-latest">
 						<LatestSalesCard sales={latest} status={latestState} errStatus={latestErr} onretry={retryAll} />
+					</div>
+				{/if}
+				{#if route === 'overview' || route === 'orders'}
+					<div class="cell a-orders">
+						<OrdersPage
+							orders={orderList}
+							counts={orderCounts}
+							inbox={orderInbox}
+							status={ordersState}
+							errStatus={ordersErr}
+							filterStatus={orderFilterStatus}
+							filterProvider={orderFilterProvider}
+							onstatus={(s) => {
+								orderFilterStatus = s;
+								void reloadOrders();
+							}}
+							onprovider={(p) => {
+								orderFilterProvider = p;
+								void reloadOrders();
+							}}
+							selected={orderSelected}
+							detailStatus={orderDetailState}
+							detailErr={orderDetailErr}
+							onselect={selectOrder}
+							onretry={() => void reloadOrders()}
+						/>
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

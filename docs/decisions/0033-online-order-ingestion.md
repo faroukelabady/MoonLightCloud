@@ -1,0 +1,58 @@
+# ADR-0033 — Online Order Ingestion (Phase 6C)
+
+Date: 2026-09-27
+Status: accepted
+Scope: Phase 6C (Cloud-only; Retail untouched, no Retail Sale fabrication)
+
+## Context
+
+Phase 6B publishes MoonLight state outward. The reverse direction —
+learning about online orders — needs a provider-neutral inbound
+boundary that cannot corrupt catalog, inventory, or sales authority,
+leak customer PII, or confuse operator reporting.
+
+## Decision
+
+1. **Webhooks are triggers, not versions.** Signed Woo
+   `order.created/updated/deleted` deliveries persist minimal
+   metadata + payload hash (never raw bodies) and wake a worker; each
+   attempt re-reads provider current state via `GET /orders/{id}`, so
+   reordered/duplicate webhooks converge instead of regressing.
+2. **Separate order capability.** The frozen `CommerceProvider`
+   interface is untouched; `CommerceOrderProvider.GetOrder` is
+   asserted per call with a typed capability error. Woo implements
+   both over the frozen hardened HTTP client.
+3. **Current-state projection.** `(provider_key, external_order_id)`
+   rows carry a monotonic MoonLight revision advanced only by
+   semantic-fingerprint change, with atomic header/lines/addresses
+   replacement and append-only status history on status transitions.
+   Unknown provider statuses ingest as UNKNOWN; deletions tombstone
+   with last-known data preserved.
+4. **Exact money, UTC time.** Decimal strings parse to int64 minor
+   units without floats (EGP/USD only); GMT timestamps persist as
+   UTC; dashboard renders string money end to end.
+5. **Mapping without fabrication.** Lines resolve through the frozen
+   generic product mapping (variations never resolve); unmapped lines
+   persist with snapshots and completeness flags. Unknown lines never
+   create products, mappings, or catalog edits.
+6. **Durable worker.** Pending/retry/processed/blocked inbox with
+   `FOR UPDATE SKIP LOCKED` claims, bounded leases (no forever state),
+   release-before-I/O, classified retries honoring `Retry-After`,
+   machine-readable error codes only.
+7. **PII minimization.** No raw webhook bodies, IPs, user-agents, or
+   unnecessary metadata persisted; customer contact stays out of
+   logs, errors, metrics, and URLs; dashboard order APIs need the
+   operator session while webhooks need only HMAC.
+8. **Hard boundaries.** No Sale fabrication or reporting contact, no
+   inventory mutation or reservation, no automatic `SetInventory` on
+   order receipt, no Woo order writes, no payments/refunds/
+   fulfillment, no dashboard actions, no schedulers or webhooks
+   beyond the three order topics.
+
+## Consequences
+
+- 7A/7B can consume order facts for notifications/reports without
+  Woo-specific code; 7C can later bridge Cloud orders to Retail
+  awareness over an explicit contract.
+- `sync-order` repairs current state from the provider at any time;
+  raw bodies were never kept, so replay means re-fetch, not re-parse.

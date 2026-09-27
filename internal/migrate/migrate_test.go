@@ -286,3 +286,54 @@ func TestV11ToLatest(t *testing.T) {
 		t.Fatalf("mapping table created empty (%v)", err)
 	}
 }
+
+// TestV12ToLatest proves the frozen Phase 6B schema upgrades to the
+// order domain cleanly: 00013 only adds order/webhook tables, existing
+// projection and mapping data is untouched, order tables start empty.
+func TestV12ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 12); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 12 {
+		t.Fatalf("want 12, got %d", v)
+	}
+	// A frozen v12 provider mapping survives the upgrade untouched.
+	if _, err := conn.Exec(`INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id)
+		VALUES ('website', '11111111-1111-4111-8111-111111111111', '500')`); err != nil {
+		t.Fatalf("seed mapping at v12: %v", err)
+	}
+	// A v12 sync event survives untouched (00013 adds tables only).
+	if _, err := conn.Exec(`INSERT INTO devices (id, name, status) VALUES
+		('11111111-1111-7111-8111-111111111111','shop','active')`); err != nil {
+		t.Fatalf("seed device at v12: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
+		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v1',now(),now(),'{}','\x00')`); err != nil {
+		t.Fatalf("seed event at v12: %v", err)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var external string
+	if err := conn.QueryRow(`SELECT external_product_id FROM commerce_product_mappings
+		WHERE provider_key='website' AND product_id='11111111-1111-4111-8111-111111111111'`).Scan(&external); err != nil || external != "500" {
+		t.Fatalf("mapping preserved: %q (%v)", external, err)
+	}
+	var events int
+	if err := conn.QueryRow(`SELECT count(*) FROM sync_events WHERE event_id='22222222-2222-7222-8222-222222222222'`).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("sync event preserved: %d (%v)", events, err)
+	}
+	for _, table := range []string{
+		"commerce_online_order_webhook_events", "commerce_online_orders", "commerce_online_order_lines",
+		"commerce_online_order_addresses", "commerce_online_order_status_history",
+	} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s missing (%v)", table, err)
+		}
+	}
+}

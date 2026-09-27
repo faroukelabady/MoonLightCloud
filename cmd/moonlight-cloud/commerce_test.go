@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 )
 
@@ -227,5 +229,138 @@ func TestNewCommerceRegistry(t *testing.T) {
 	broken.WooCommerce.BaseURL = "http://insecure.example.com"
 	if _, err := newCommerceRegistry(broken); err == nil {
 		t.Fatal("insecure URL must fail")
+	}
+}
+
+func TestCommerceCmdSyncOrderUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"sync-order"},
+		{"sync-order", "--provider", "website"},
+		{"sync-order", "--order", "100"},
+		{"bogus"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if err := commerceCmd(args, &stdout, &stderr); err == nil {
+			t.Fatalf("args %v must fail", args)
+		}
+	}
+}
+
+// cliStubOrderProvider serves canned order snapshots.
+type cliStubOrderProvider struct {
+	key      commerce.ProviderKey
+	snapshot commerceOrderSnapshot
+	err      error
+}
+
+type commerceOrderSnapshot = orders.OrderSnapshot
+
+func (s *cliStubOrderProvider) Key() commerce.ProviderKey { return s.key }
+
+func (s *cliStubOrderProvider) UpsertProduct(_ context.Context, _ commerce.ProductUpsertRequest) (commerce.ProductUpsertResult, error) {
+	return commerce.ProductUpsertResult{}, errors.New("not implemented")
+}
+
+func (s *cliStubOrderProvider) SetInventory(_ context.Context, _ commerce.InventoryUpdateRequest) error {
+	return errors.New("not implemented")
+}
+
+func (s *cliStubOrderProvider) GetOrder(_ context.Context, _ string) (orders.OrderSnapshot, error) {
+	if s.err != nil {
+		return orders.OrderSnapshot{}, s.err
+	}
+	return s.snapshot, nil
+}
+
+// cliStubOrderStore is an in-memory projection store.
+type cliStubOrderStore struct {
+	orders map[string]orders.OrderSnapshot
+	revs   map[string]int64
+}
+
+func (s *cliStubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte) (int64, bool, error) {
+	key := snapshot.ProviderKey + "/" + snapshot.ExternalOrderID
+	if s.orders == nil {
+		s.orders = map[string]orders.OrderSnapshot{}
+		s.revs = map[string]int64{}
+	}
+	if existing, ok := s.orders[key]; ok && orders.Fingerprint(existing) == fingerprint {
+		return s.revs[key], false, nil
+	}
+	s.orders[key] = snapshot
+	s.revs[key]++
+	return s.revs[key], true, nil
+}
+
+func (s *cliStubOrderStore) LoadProjectedOrder(_ context.Context, providerKey, externalOrderID string) (orders.OrderSnapshot, int64, bool, error) {
+	key := providerKey + "/" + externalOrderID
+	snapshot, ok := s.orders[key]
+	if !ok {
+		return orders.OrderSnapshot{}, 0, false, nil
+	}
+	return snapshot, s.revs[key], true, nil
+}
+
+func cliOrderService(t *testing.T, snapshot orders.OrderSnapshot, err error) *orders.OrderService {
+	t.Helper()
+	provider := &cliStubOrderProvider{key: "website", snapshot: snapshot, err: err}
+	registry := commerce.NewRegistry()
+	if rerr := registry.Register("website", provider); rerr != nil {
+		t.Fatal(rerr)
+	}
+	return orders.NewOrderService(registry, &cliStubOrderStore{}, nil)
+}
+
+func cliOrderSnapshot() orders.OrderSnapshot {
+	return orders.OrderSnapshot{
+		ProviderKey: "website", ExternalOrderID: "700", OrderNumber: "700",
+		ProviderStatus: "processing", Canonical: orders.StatusProcessing,
+		Currency: "EGP", TotalMinor: 68000,
+		CreatedAt:  time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC),
+		ModifiedAt: time.Date(2026, 9, 27, 11, 0, 0, 0, time.UTC),
+		Lines: []orders.OrderLine{
+			{ExternalLineID: 1, ExternalProductID: "500", SKU: "PAP-1", Name: "X", Quantity: 2, TotalMinor: 68000},
+		},
+		MappingComplete: true,
+	}
+}
+
+func TestRunCommerceSyncOrderSuccess(t *testing.T) {
+	service := cliOrderService(t, cliOrderSnapshot(), nil)
+	var out bytes.Buffer
+	if err := runCommerceSyncOrder(context.Background(), service, &out, "website", "700"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		"provider=website", "order=700", "revision=1", "changed=true",
+		"status=PROCESSING", "mapping_complete=true", "unmapped_lines=0", "deleted=false",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q: %q", want, output)
+		}
+	}
+	for _, forbidden := range []string{"a@example.com", "secret", "Bearer"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("output leaks %q: %q", forbidden, output)
+		}
+	}
+}
+
+func TestRunCommerceSyncOrderTemporary(t *testing.T) {
+	service := cliOrderService(t, orders.OrderSnapshot{}, commerce.TemporaryError("outage"))
+	var out bytes.Buffer
+	err := runCommerceSyncOrder(context.Background(), service, &out, "website", "700")
+	if err == nil {
+		t.Fatal("temporary must exit non-zero")
+	}
+	output := out.String()
+	for _, want := range []string{"error_kind=temporary", "retryable=true"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q: %q", want, output)
+		}
+	}
+	if strings.Contains(output, "revision=") {
+		t.Fatalf("no success fields: %q", output)
 	}
 }

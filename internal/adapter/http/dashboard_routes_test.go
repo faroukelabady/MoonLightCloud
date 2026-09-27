@@ -25,6 +25,8 @@ func TestDashboardRoutesWired(t *testing.T) {
 		"/api/v1/dashboard/sync-health",
 		"/api/v1/dashboard/activity",
 		"/api/v1/dashboard/sales/latest",
+		"/api/v1/dashboard/orders",
+		"/api/v1/dashboard/orders/website/100",
 		"/api/v1/dashboard/auth/me",
 	} {
 		req := httptest.NewRequest("GET", path, nil)

@@ -136,3 +136,63 @@ func TestWooBaseURLRejectsCredentialMaterial(t *testing.T) {
 		})
 	}
 }
+
+func TestWooOrdersConfig(t *testing.T) {
+	setOrdersEnv := func(t *testing.T, values map[string]string) {
+		t.Helper()
+		t.Setenv("COMMERCE_WOO_ORDERS_ENABLED", "")
+		t.Setenv("COMMERCE_WOO_WEBHOOK_SECRET", "")
+		for key, value := range values {
+			t.Setenv(key, value)
+		}
+	}
+	t.Run("orders require woo enabled", func(t *testing.T) {
+		setWooEnv(t, map[string]string{})
+		setOrdersEnv(t, map[string]string{"COMMERCE_WOO_ORDERS_ENABLED": "true"})
+		if _, err := loadWooCommerceConfig(); err == nil {
+			t.Fatal("orders without woo must fail")
+		}
+	})
+	t.Run("orders need webhook secret", func(t *testing.T) {
+		setWooEnv(t, validWooEnv())
+		setOrdersEnv(t, map[string]string{"COMMERCE_WOO_ORDERS_ENABLED": "true"})
+		if _, err := loadWooCommerceConfig(); err == nil {
+			t.Fatal("missing webhook secret must fail")
+		}
+	})
+	t.Run("short webhook secret rejected", func(t *testing.T) {
+		setWooEnv(t, validWooEnv())
+		setOrdersEnv(t, map[string]string{
+			"COMMERCE_WOO_ORDERS_ENABLED": "true",
+			"COMMERCE_WOO_WEBHOOK_SECRET": "too-short",
+		})
+		if _, err := loadWooCommerceConfig(); err == nil {
+			t.Fatal("short secret must fail")
+		}
+	})
+	t.Run("orders enabled valid", func(t *testing.T) {
+		setWooEnv(t, validWooEnv())
+		setOrdersEnv(t, map[string]string{
+			"COMMERCE_WOO_ORDERS_ENABLED": "true",
+			"COMMERCE_WOO_WEBHOOK_SECRET": "0123456789abcdef0123456789abcdef",
+		})
+		cfg, err := loadWooCommerceConfig()
+		if err != nil {
+			t.Fatalf("valid orders config: %v", err)
+		}
+		if !cfg.OrdersEnabled || cfg.WebhookSecret == "" {
+			t.Fatalf("orders config: %+v", cfg.Enabled)
+		}
+	})
+	t.Run("disabled ignores orders secret", func(t *testing.T) {
+		setWooEnv(t, map[string]string{})
+		setOrdersEnv(t, map[string]string{"COMMERCE_WOO_WEBHOOK_SECRET": "whatever"})
+		cfg, err := loadWooCommerceConfig()
+		if err != nil {
+			t.Fatalf("disabled: %v", err)
+		}
+		if cfg.OrdersEnabled || cfg.WebhookSecret != "" {
+			t.Fatalf("disabled ignores orders: %+v", cfg)
+		}
+	})
+}

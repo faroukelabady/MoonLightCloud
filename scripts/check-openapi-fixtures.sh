@@ -229,5 +229,43 @@ check("product_bad_money.json", "CatalogProductSnapshotV1", load_fixture("intern
 check("product_bad_dims.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_bad_dims.json"), expect_valid=False)
 check("category_bad_shape.json", "CatalogCategorySnapshotV1", load_fixture("internal/catalog/testdata/category_bad_shape.json"), expect_valid=False)
 check("revision_zero.json", "CatalogTagSnapshotV1", load_fixture("internal/catalog/testdata/revision_zero.json"), expect_valid=False)
+
+# Phase 6C: dashboard order list/detail carry exact string money beyond
+# 2^53, canonical statuses, mapping completeness, and deletion flags.
+order_summary = {
+    "provider_key": "website", "external_order_id": "100", "order_number": "100",
+    "provider_status": "processing", "canonical_status": "PROCESSING",
+    "currency": "EGP", "total_minor": "9007199254740993",
+    "created_at": "2026-09-27T10:00:00Z", "modified_at": "2026-09-27T11:00:00Z",
+    "customer_name": "A B", "mapping_complete": False, "unmapped_line_count": 1,
+    "provider_deleted": False, "revision": 2,
+}
+check("order list", "DashboardOrderList", {
+    "orders": [order_summary],
+    "status_counts": [{"canonical_status": "PROCESSING", "total": 1}],
+    "webhook_inbox": {"pending": 0, "retry": 1, "blocked": 0, "oldest_pending_at": None}})
+check("order detail", "DashboardOrderDetail", {
+    "summary": order_summary,
+    "discount_minor": "0", "shipping_minor": "3000", "cart_tax_minor": "0",
+    "total_tax_minor": "0", "prices_include_tax": False,
+    "paid_at": "2026-09-27T10:05:00Z", "completed_at": None,
+    "payment_method": "cod", "payment_method_title": "Cash on delivery",
+    "customer_first_name": "A", "customer_last_name": "B",
+    "customer_email": "a@example.com", "customer_phone": "+201000000000",
+    "lines": [{"external_line_id": 1, "external_product_id": "500", "variation_id": 0,
+               "sku": "PAP-1", "name": "X", "quantity": 2,
+               "total_minor": "9007199254740993",
+               "moonlight_product_id": None, "mapped": False}],
+    "addresses": [{"kind": "billing", "first_name": "A", "last_name": "B",
+                   "company": "", "address_1": "Cairo", "address_2": "",
+                   "city": "Cairo", "state": "", "postcode": "", "country": "EG",
+                   "email": "a@example.com", "phone": "+201000000000"}],
+    "status_history": [{"order_revision": 1, "provider_status": "pending",
+                        "canonical_status": "PENDING", "observed_at": "2026-09-27T10:00:00Z"},
+                       {"order_revision": 2, "provider_status": "processing",
+                        "canonical_status": "PROCESSING", "observed_at": "2026-09-27T11:00:00Z"}]})
+bad_order = copy.deepcopy(order_summary)
+bad_order["total_minor"] = 9007199254740993
+check("order unsafe money", "DashboardOrderSummary", bad_order, expect_valid=False)
 print("openapi fixture parity: PASS")
 PYEOF

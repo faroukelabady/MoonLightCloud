@@ -34,3 +34,4 @@ Concise, irreversible-or-important choices only.
 - [0030](0030-inventory-availability-projection.md) — product inventory projection and availability (5C)
 - [0031](0031-commerce-provider-abstraction.md) — commerce provider abstraction (6A)
 - [0032](0032-woocommerce-adapter.md) — WooCommerce adapter (6B)
+- [0033](0033-online-order-ingestion.md) — Online order ingestion (6C)

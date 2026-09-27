@@ -37,6 +37,8 @@ type wooHarness struct {
 	requests     []wooRecordedRequest
 	products     map[int64]map[string]any
 	nextID       int64
+	wooOrders    map[int64]map[string]any
+	nextOrderID  int64
 	failWith     map[string]harnessFailure
 	intercept    func(wooRecordedRequest) (status int, body any, handled bool)
 	dropCreate   bool
@@ -56,9 +58,11 @@ func newWooHarness(t *testing.T, key, secret string) *wooHarness {
 	t.Helper()
 	harness := &wooHarness{
 		t: t, expectedKey: key, expectedPass: secret,
-		products: map[int64]map[string]any{},
-		nextID:   500,
-		failWith: map[string]harnessFailure{},
+		products:    map[int64]map[string]any{},
+		nextID:      500,
+		wooOrders:   map[int64]map[string]any{},
+		nextOrderID: 1000,
+		failWith:    map[string]harnessFailure{},
 	}
 	harness.server = httptest.NewTLSServer(http.HandlerFunc(harness.serve))
 	t.Cleanup(harness.server.Close)
@@ -132,6 +136,21 @@ func (h *wooHarness) recorded() []wooRecordedRequest {
 	return append([]wooRecordedRequest(nil), h.requests...)
 }
 
+// preloadOrder inserts a stored Woo order with an explicit identity.
+func (h *wooHarness) preloadOrder(id int64, body map[string]any) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	stored := map[string]any{}
+	for key, value := range body {
+		stored[key] = value
+	}
+	stored["id"] = float64(id)
+	h.wooOrders[id] = stored
+	if id >= h.nextOrderID {
+		h.nextOrderID = id + 1
+	}
+}
+
 func (h *wooHarness) productState(id int64) map[string]any {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -203,6 +222,10 @@ func (h *wooHarness) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(r.URL.Path, "/wp-json/wc/v3/orders") {
+		h.serveOrder(w, r)
+		return
+	}
 	rest := strings.TrimPrefix(r.URL.Path, "/wp-json/wc/v3/products")
 	switch {
 	case r.Method == http.MethodGet && (rest == "" || rest == "/"):
@@ -226,6 +249,31 @@ func (h *wooHarness) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.writeWooError(w, http.StatusNotFound, "rest_no_route", "No route was found matching the URL and request method.")
 	}
+}
+
+// serveOrder emulates GET /orders/{id} for Phase 6C reconciliation.
+func (h *wooHarness) serveOrder(w http.ResponseWriter, r *http.Request) {
+	if failure, ok := h.takeFailure(r.Method, r.URL.Path); ok {
+		h.writeJSON(w, failure.status, failure.body)
+		return
+	}
+	if r.Method != http.MethodGet {
+		h.writeWooError(w, http.StatusBadRequest, "rest_no_route", "No route was found matching the URL and request method.")
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/wp-json/wc/v3/orders/"), 10, 64)
+	if err != nil || id <= 0 {
+		h.writeWooError(w, http.StatusNotFound, "woocommerce_rest_term_invalid", "Resource doesn't exist.")
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	stored, ok := h.wooOrders[id]
+	if !ok {
+		h.writeWooError(w, http.StatusNotFound, "woocommerce_rest_term_invalid", "Resource doesn't exist.")
+		return
+	}
+	h.writeJSON(w, http.StatusOK, stored)
 }
 
 func (h *wooHarness) serveList(w http.ResponseWriter, r *http.Request) {

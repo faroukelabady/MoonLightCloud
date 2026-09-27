@@ -577,6 +577,178 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/commerce/webhooks/woocommerce/{provider_key}:
+    post:
+      summary: WooCommerce order webhook ingestion (signed, durable trigger)
+      operationId: commerceWooWebhook
+      parameters:
+        - name: provider_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      description: >-
+        Verifies X-WC-Webhook-Signature (base64 HMAC-SHA256 of the exact
+        raw body), validates topic/resource/delivery identity, persists
+        delivery metadata plus payload hash (never the raw body), and
+        returns 202. Reconciliation happens asynchronously against the
+        provider's current order state. No dashboard, device, or report
+        credential is accepted here.
+      responses:
+        '202':
+          description: Delivery durably accepted (or idempotent duplicate).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [accepted]}
+        '400':
+          description: Unsupported topic/resource, malformed JSON, or invalid order identity. No event persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, malformed, or mismatched webhook signature. Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown provider key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Delivery ID already recorded with a different payload. Original unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: Body exceeds the 1 MiB webhook limit. No persistence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/orders:
+    get:
+      summary: Recent online orders (read-only; never Sales)
+      operationId: dashboardOrders
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, PROCESSING, ON_HOLD, COMPLETED, CANCELLED, REFUNDED, FAILED, UNKNOWN, DELETED]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Online order summaries with status counts and webhook inbox stats. Money as exact strings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOrderList'
+        '400':
+          description: Invalid limit or status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/orders/{provider_key}/{external_order_id}:
+    get:
+      summary: Single online order detail (read-only)
+      operationId: dashboardOrderDetail
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: provider_key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: external_order_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order header, lines, addresses, and status history. Money as exact strings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOrderDetail'
+        '400':
+          description: Invalid provider or order identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Order not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
             application/json:
@@ -1693,6 +1865,114 @@ components:
               units_returned: {type: integer}
               amount_minor: {type: string, description: Exact minor units in display_currency (normalized EGP in All mode).}
               refund_minor: {type: string, description: Exact refund minor units in display_currency. Nonnegative.}
+    DashboardOrderList:
+      type: object
+      required: [orders, status_counts, webhook_inbox]
+      properties:
+        orders:
+          type: array
+          items: {$ref: '#/components/schemas/DashboardOrderSummary'}
+        status_counts:
+          type: array
+          items: {$ref: '#/components/schemas/DashboardOrderStatusCount'}
+        webhook_inbox: {$ref: '#/components/schemas/DashboardWebhookInbox'}
+      description: Online orders are provider-derived and never Sales.
+    DashboardOrderSummary:
+      type: object
+      required: [provider_key, external_order_id, order_number, provider_status, canonical_status, currency, total_minor, created_at, modified_at, customer_name, mapping_complete, unmapped_line_count, provider_deleted, revision]
+      properties:
+        provider_key: {type: string}
+        external_order_id: {type: string}
+        order_number: {type: string}
+        provider_status: {type: string}
+        canonical_status: {type: string, enum: [PENDING, PROCESSING, ON_HOLD, COMPLETED, CANCELLED, REFUNDED, FAILED, UNKNOWN, DELETED]}
+        currency: {type: string}
+        total_minor: {type: string, description: Exact minor units.}
+        created_at: {type: string, format: date-time}
+        modified_at: {type: string, format: date-time}
+        customer_name: {type: string}
+        mapping_complete: {type: boolean}
+        unmapped_line_count: {type: integer}
+        provider_deleted: {type: boolean}
+        revision: {type: integer}
+    DashboardOrderStatusCount:
+      type: object
+      required: [canonical_status, total]
+      properties:
+        canonical_status: {type: string}
+        total: {type: integer}
+    DashboardWebhookInbox:
+      type: object
+      required: [pending, retry, blocked]
+      properties:
+        pending: {type: integer}
+        retry: {type: integer}
+        blocked: {type: integer}
+        oldest_pending_at: {type: string, format: date-time, nullable: true}
+    DashboardOrderDetail:
+      type: object
+      required: [summary, discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, prices_include_tax, payment_method, payment_method_title, customer_first_name, customer_last_name, customer_email, customer_phone, lines, addresses, status_history]
+      properties:
+        summary: {$ref: '#/components/schemas/DashboardOrderSummary'}
+        discount_minor: {type: string, description: Exact minor units.}
+        shipping_minor: {type: string, description: Exact minor units.}
+        cart_tax_minor: {type: string, description: Exact minor units.}
+        total_tax_minor: {type: string, description: Exact minor units.}
+        prices_include_tax: {type: boolean}
+        paid_at: {type: string, format: date-time, nullable: true}
+        completed_at: {type: string, format: date-time, nullable: true}
+        payment_method: {type: string}
+        payment_method_title: {type: string}
+        customer_first_name: {type: string}
+        customer_last_name: {type: string}
+        customer_email: {type: string}
+        customer_phone: {type: string}
+        lines:
+          type: array
+          items: {$ref: '#/components/schemas/DashboardOrderLine'}
+        addresses:
+          type: array
+          items: {$ref: '#/components/schemas/DashboardOrderAddress'}
+        status_history:
+          type: array
+          items: {$ref: '#/components/schemas/DashboardOrderStatusEvent'}
+    DashboardOrderLine:
+      type: object
+      required: [external_line_id, external_product_id, variation_id, sku, name, quantity, total_minor, mapped]
+      properties:
+        external_line_id: {type: integer}
+        external_product_id: {type: string}
+        variation_id: {type: integer}
+        sku: {type: string}
+        name: {type: string}
+        quantity: {type: integer}
+        total_minor: {type: string, description: Exact minor units.}
+        moonlight_product_id: {type: string, format: uuid, nullable: true}
+        mapped: {type: boolean}
+    DashboardOrderAddress:
+      type: object
+      required: [kind, first_name, last_name, company, address_1, address_2, city, state, postcode, country, email, phone]
+      properties:
+        kind: {type: string, enum: [billing, shipping]}
+        first_name: {type: string}
+        last_name: {type: string}
+        company: {type: string}
+        address_1: {type: string}
+        address_2: {type: string}
+        city: {type: string}
+        state: {type: string}
+        postcode: {type: string}
+        country: {type: string}
+        email: {type: string}
+        phone: {type: string}
+    DashboardOrderStatusEvent:
+      type: object
+      required: [order_revision, provider_status, canonical_status, observed_at]
+      properties:
+        order_revision: {type: integer}
+        provider_status: {type: string}
+        canonical_status: {type: string}
+        observed_at: {type: string, format: date-time}
     DashboardProductList:
       type: object
       required: [timezone, period, mode, unit, rows]

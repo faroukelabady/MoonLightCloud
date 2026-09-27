@@ -162,6 +162,95 @@ export interface ActivityItem {
 	detail?: string | null;
 }
 
+export interface OrderSummary {
+	provider_key: string;
+	external_order_id: string;
+	order_number: string;
+	provider_status: string;
+	canonical_status: string;
+	currency: string;
+	total_minor: string;
+	created_at: string;
+	modified_at: string;
+	customer_name: string;
+	mapping_complete: boolean;
+	unmapped_line_count: number;
+	provider_deleted: boolean;
+	revision: number;
+}
+
+export interface OrderLineView {
+	external_line_id: number;
+	external_product_id: string;
+	variation_id: number;
+	sku: string;
+	name: string;
+	quantity: number;
+	total_minor: string;
+	moonlight_product_id: string | null;
+	mapped: boolean;
+}
+
+export interface OrderAddressView {
+	kind: string;
+	first_name: string;
+	last_name: string;
+	company: string;
+	address_1: string;
+	address_2: string;
+	city: string;
+	state: string;
+	postcode: string;
+	country: string;
+	email: string;
+	phone: string;
+}
+
+export interface OrderStatusEvent {
+	order_revision: number;
+	provider_status: string;
+	canonical_status: string;
+	observed_at: string;
+}
+
+export interface OrderDetail {
+	summary: OrderSummary;
+	discount_minor: string;
+	shipping_minor: string;
+	cart_tax_minor: string;
+	total_tax_minor: string;
+	prices_include_tax: boolean;
+	paid_at: string | null;
+	completed_at: string | null;
+	payment_method: string;
+	payment_method_title: string;
+	customer_first_name: string;
+	customer_last_name: string;
+	customer_email: string;
+	customer_phone: string;
+	lines: OrderLineView[];
+	addresses: OrderAddressView[];
+	status_history: OrderStatusEvent[];
+}
+
+export interface OrderStatusCount {
+	canonical_status: string;
+	total: number;
+}
+
+export interface WebhookInboxStats {
+	pending: number;
+	retry: number;
+	blocked: number;
+	oldest_pending_at: string | null;
+}
+
+export interface OrderListResponse {
+	orders: OrderSummary[];
+	status_counts: OrderStatusCount[];
+	webhook_inbox: WebhookInboxStats;
+}
+
 export interface LatestSale {
 	sale_id: string;
 	sale_number: string;
@@ -249,5 +338,9 @@ export const dashboardApi = {
 		get<{ rows: BranchRow[] }>(`/api/v1/dashboard/branches?${query(p)}`, s),
 	syncHealth: (s?: AbortSignal) => get<SyncHealth>('/api/v1/dashboard/sync-health', s),
 	activity: (s?: AbortSignal) => get<{ items: ActivityItem[] }>('/api/v1/dashboard/activity?limit=20', s),
-	latestSales: (s?: AbortSignal) => get<{ sales: LatestSale[] }>('/api/v1/dashboard/sales/latest?limit=8', s)
+	latestSales: (s?: AbortSignal) => get<{ sales: LatestSale[] }>('/api/v1/dashboard/sales/latest?limit=8', s),
+	orders: (status: string, provider: string, s?: AbortSignal) =>
+		get<OrderListResponse>(`/api/v1/dashboard/orders?status=${encodeURIComponent(status)}&provider=${encodeURIComponent(provider)}&limit=20`, s),
+	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
+		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s)
 };

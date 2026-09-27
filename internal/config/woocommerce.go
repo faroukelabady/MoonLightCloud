@@ -31,6 +31,14 @@ type WooCommerceConfig struct {
 	DimensionUnit string
 	// HTTPTimeout bounds every Woo request. Default 15s.
 	HTTPTimeout time.Duration
+	// OrdersEnabled turns on Woo order ingestion (webhooks +
+	// reconciliation). Default false. Requires the Woo provider itself
+	// to be enabled: order reads authenticate with the same credentials.
+	OrdersEnabled bool
+	// WebhookSecret authenticates inbound Woo order webhooks via
+	// HMAC-SHA256. Deliberately distinct from the REST consumer secret.
+	// Runtime configuration only: never persisted, logged, or returned.
+	WebhookSecret string
 }
 
 // Supported Woo adapter values.
@@ -54,6 +62,11 @@ func loadWooCommerceConfig() (WooCommerceConfig, error) {
 	}
 	cfg := WooCommerceConfig{Enabled: enabled}
 	if !enabled {
+		if orders, err := parseBoolFlag("COMMERCE_WOO_ORDERS_ENABLED"); err != nil {
+			return WooCommerceConfig{}, err
+		} else if orders {
+			return WooCommerceConfig{}, fmt.Errorf("COMMERCE_WOO_ORDERS_ENABLED requires COMMERCE_WOO_ENABLED")
+		}
 		return cfg, nil
 	}
 	cfg.ProviderKey = strings.TrimSpace(os.Getenv("COMMERCE_WOO_PROVIDER_KEY"))
@@ -62,6 +75,11 @@ func loadWooCommerceConfig() (WooCommerceConfig, error) {
 	cfg.ConsumerSecret = strings.TrimSpace(os.Getenv("COMMERCE_WOO_CONSUMER_SECRET"))
 	cfg.Currency = strings.ToUpper(strings.TrimSpace(os.Getenv("COMMERCE_WOO_CURRENCY")))
 	cfg.DimensionUnit = strings.ToLower(strings.TrimSpace(os.Getenv("COMMERCE_WOO_DIMENSION_UNIT")))
+	cfg.OrdersEnabled, err = parseBoolFlag("COMMERCE_WOO_ORDERS_ENABLED")
+	if err != nil {
+		return WooCommerceConfig{}, err
+	}
+	cfg.WebhookSecret = strings.TrimSpace(os.Getenv("COMMERCE_WOO_WEBHOOK_SECRET"))
 	cfg.HTTPTimeout = DefaultWooHTTPTimeout
 	if v := strings.TrimSpace(os.Getenv("COMMERCE_WOO_HTTP_TIMEOUT")); v != "" {
 		timeout, err := time.ParseDuration(v)
@@ -102,6 +120,11 @@ func (c WooCommerceConfig) validate() error {
 	}
 	if c.HTTPTimeout < MinWooHTTPTimeout || c.HTTPTimeout > MaxWooHTTPTimeout {
 		return fmt.Errorf("COMMERCE_WOO_HTTP_TIMEOUT must be within [%s, %s]", MinWooHTTPTimeout, MaxWooHTTPTimeout)
+	}
+	if c.OrdersEnabled {
+		if len(c.WebhookSecret) < 32 {
+			return fmt.Errorf("COMMERCE_WOO_WEBHOOK_SECRET must be at least 32 characters when order ingestion is enabled")
+		}
 	}
 	return nil
 }

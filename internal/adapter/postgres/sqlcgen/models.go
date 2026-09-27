@@ -107,6 +107,101 @@ type CatalogTag struct {
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 }
 
+type CommerceOnlineOrder struct {
+	ProviderKey        string             `json:"provider_key"`
+	ExternalOrderID    string             `json:"external_order_id"`
+	OrderNumber        string             `json:"order_number"`
+	ProviderStatus     string             `json:"provider_status"`
+	CanonicalStatus    string             `json:"canonical_status"`
+	Currency           string             `json:"currency"`
+	DiscountMinor      int64              `json:"discount_minor"`
+	ShippingMinor      int64              `json:"shipping_minor"`
+	CartTaxMinor       int64              `json:"cart_tax_minor"`
+	TotalTaxMinor      int64              `json:"total_tax_minor"`
+	TotalMinor         int64              `json:"total_minor"`
+	PricesIncludeTax   bool               `json:"prices_include_tax"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ModifiedAt         pgtype.Timestamptz `json:"modified_at"`
+	PaidAt             pgtype.Timestamptz `json:"paid_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	PaymentMethod      string             `json:"payment_method"`
+	PaymentMethodTitle string             `json:"payment_method_title"`
+	CustomerFirstName  string             `json:"customer_first_name"`
+	CustomerLastName   string             `json:"customer_last_name"`
+	CustomerEmail      string             `json:"customer_email"`
+	CustomerPhone      string             `json:"customer_phone"`
+	Revision           int64              `json:"revision"`
+	Fingerprint        []byte             `json:"fingerprint"`
+	ProviderDeleted    bool               `json:"provider_deleted"`
+	MappingComplete    bool               `json:"mapping_complete"`
+	UnmappedLines      int32              `json:"unmapped_lines"`
+	ProjectedAt        pgtype.Timestamptz `json:"projected_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CommerceOnlineOrderAddress struct {
+	ProviderKey     string `json:"provider_key"`
+	ExternalOrderID string `json:"external_order_id"`
+	Kind            string `json:"kind"`
+	FirstName       string `json:"first_name"`
+	LastName        string `json:"last_name"`
+	Company         string `json:"company"`
+	Address1        string `json:"address_1"`
+	Address2        string `json:"address_2"`
+	City            string `json:"city"`
+	State           string `json:"state"`
+	Postcode        string `json:"postcode"`
+	Country         string `json:"country"`
+	Email           string `json:"email"`
+	Phone           string `json:"phone"`
+}
+
+type CommerceOnlineOrderLine struct {
+	ProviderKey        string      `json:"provider_key"`
+	ExternalOrderID    string      `json:"external_order_id"`
+	ExternalLineID     int64       `json:"external_line_id"`
+	ExternalProductID  string      `json:"external_product_id"`
+	VariationID        int64       `json:"variation_id"`
+	Sku                string      `json:"sku"`
+	Name               string      `json:"name"`
+	Quantity           int64       `json:"quantity"`
+	SubtotalMinor      int64       `json:"subtotal_minor"`
+	SubtotalTaxMinor   int64       `json:"subtotal_tax_minor"`
+	TotalMinor         int64       `json:"total_minor"`
+	TotalTaxMinor      int64       `json:"total_tax_minor"`
+	MoonlightProductID pgtype.UUID `json:"moonlight_product_id"`
+	Mapped             bool        `json:"mapped"`
+	UnsupportedReason  string      `json:"unsupported_reason"`
+}
+
+type CommerceOnlineOrderStatusHistory struct {
+	ProviderKey        string             `json:"provider_key"`
+	ExternalOrderID    string             `json:"external_order_id"`
+	OrderRevision      int64              `json:"order_revision"`
+	ProviderStatus     string             `json:"provider_status"`
+	CanonicalStatus    string             `json:"canonical_status"`
+	ProviderModifiedAt pgtype.Timestamptz `json:"provider_modified_at"`
+	ObservedAt         pgtype.Timestamptz `json:"observed_at"`
+}
+
+type CommerceOnlineOrderWebhookEvent struct {
+	ProviderKey     string             `json:"provider_key"`
+	DeliveryID      string             `json:"delivery_id"`
+	Topic           string             `json:"topic"`
+	ExternalOrderID string             `json:"external_order_id"`
+	PayloadHash     []byte             `json:"payload_hash"`
+	WebhookID       pgtype.Text        `json:"webhook_id"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+	Status          string             `json:"status"`
+	AttemptCount    int32              `json:"attempt_count"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	ProcessedAt     pgtype.Timestamptz `json:"processed_at"`
+	LastErrorCode   pgtype.Text        `json:"last_error_code"`
+	LeaseOwner      pgtype.Text        `json:"lease_owner"`
+	LeaseUntil      pgtype.Timestamptz `json:"lease_until"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CommerceProductMapping struct {
 	ProviderKey       string             `json:"provider_key"`
 	ProductID         pgtype.UUID        `json:"product_id"`

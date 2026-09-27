@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"
@@ -17,6 +18,9 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/woocommerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
@@ -59,6 +63,9 @@ type App struct {
 	PolicyProjector    *catalog.Projector
 	InventoryProjector *catalog.Projector
 	Catalog            catalog.Service
+	CommerceRegistry   *commerce.Registry
+	OrderService       *orders.OrderService
+	OrderProcessor     *orders.Processor
 	Handler            http.Handler
 	Health             adapterhttp.Health
 	Version            adapterhttp.Version
@@ -118,14 +125,51 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		dashboard.Credentials{Username: cfg.DashboardUsername, PasswordHash: cfg.DashboardPasswordHash},
 		sessionKey, cfg.DashboardSessionTTL, secureCookies, cfg.TrustedProxyCIDRs, log)
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
+	dashOrders := adapterhttp.NewDashboardOrderHandlers(store, log)
+	a.CommerceRegistry = commerce.NewRegistry()
+	var commerceWebhooks *adapterhttp.CommerceWebhookHandlers
+	if cfg.WooCommerce.Enabled {
+		provider, err := woocommerce.NewWooCommerceProvider(cfg.WooCommerce, nil)
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+		if err := a.CommerceRegistry.Register(provider.Key(), provider); err != nil {
+			pool.Close()
+			return nil, err
+		}
+		a.OrderService = orders.NewOrderService(a.CommerceRegistry, store, log)
+		if cfg.WooCommerce.OrdersEnabled {
+			a.OrderProcessor = orders.NewProcessor(store, a.OrderService, orders.SystemClock{}, commerceOwner(), log)
+			secret := cfg.WooCommerce.WebhookSecret
+			key := string(provider.Key())
+			commerceWebhooks = adapterhttp.NewCommerceWebhookHandlers(store,
+				func(providerKey string) (string, bool) {
+					if providerKey == key {
+						return secret, true
+					}
+					return "", false
+				}, a.OrderProcessor.Notify, log)
+		}
+	}
+	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
+		"orders", cfg.WooCommerce.OrdersEnabled)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}
 	return a, nil
+}
+
+// commerceOwner names this process for webhook lease observability.
+func commerceOwner() string {
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return "cloud-" + hostname
+	}
+	return "cloud-serve"
 }
 
 // ValidateSalePayload is the ingestion-time sale.finalized.v1 gate: decode
