@@ -37,19 +37,37 @@ func (s *stubOrderProvider) GetOrder(_ context.Context, _ string) (OrderSnapshot
 	return s.snapshot, nil
 }
 
-// stubOrderStore is an in-memory projection store.
+// stubOrderStore is an in-memory projection store with a trivial
+// generation fence: the newest begun generation wins, mirroring the
+// production contract for service-level tests.
 type stubOrderStore struct {
 	orders map[string]OrderSnapshot
 	revs   map[string]int64
+	gens   map[string]ReconcileGeneration
+	begun  map[string]ReconcileGeneration
 }
 
 func stubKey(provider, order string) string { return provider + "/" + order }
 
-func (s *stubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot OrderSnapshot, fingerprint [32]byte) (int64, bool, error) {
+func (s *stubOrderStore) BeginOrderReconcile(_ context.Context, providerKey, externalOrderID string) (ReconcileGeneration, error) {
+	if s.begun == nil {
+		s.begun = map[string]ReconcileGeneration{}
+	}
+	key := stubKey(providerKey, externalOrderID)
+	s.begun[key]++
+	return s.begun[key], nil
+}
+
+func (s *stubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot OrderSnapshot, fingerprint [32]byte, generation ReconcileGeneration) (ReconcileOutcome, error) {
 	key := stubKey(snapshot.ProviderKey, snapshot.ExternalOrderID)
+	if s.gens == nil {
+		s.gens = map[string]ReconcileGeneration{}
+	}
+	if generation < s.gens[key] {
+		return ReconcileOutcome{Superseded: true}, nil
+	}
+	s.gens[key] = generation
 	existing, ok := s.orders[key]
-	_ = existing
-	_ = fingerprint
 	if !ok {
 		if s.orders == nil {
 			s.orders = map[string]OrderSnapshot{}
@@ -57,14 +75,14 @@ func (s *stubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot Ord
 		}
 		s.orders[key] = snapshot
 		s.revs[key] = 1
-		return 1, true, nil
+		return ReconcileOutcome{Revision: 1, Changed: true}, nil
 	}
 	if Fingerprint(existing) == fingerprint {
-		return s.revs[key], false, nil
+		return ReconcileOutcome{Revision: s.revs[key]}, nil
 	}
 	s.orders[key] = snapshot
 	s.revs[key]++
-	return s.revs[key], true, nil
+	return ReconcileOutcome{Revision: s.revs[key], Changed: true}, nil
 }
 
 func (s *stubOrderStore) LoadProjectedOrder(_ context.Context, providerKey, externalOrderID string) (OrderSnapshot, int64, bool, error) {
@@ -156,7 +174,13 @@ func TestReconcileOrderTemporary(t *testing.T) {
 
 func TestReconcileDeletionTombstone(t *testing.T) {
 	ctx := context.Background()
-	service, _, _ := orderTestService(baseSnapshot(), nil)
+	notFound := &BlockedError{Code: CodeOrderNotFound, Message: "gone"}
+	provider := &stubOrderProvider{key: "website", err: notFound}
+	registry := commerce.NewRegistry()
+	if err := registry.Register("website", provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewOrderService(registry, &stubOrderStore{}, nil)
 	// Unseen order: minimal tombstone at rev 1.
 	result, err := service.ReconcileDeletion(ctx, "website", "100")
 	if err != nil {
@@ -179,10 +203,19 @@ func TestReconcileDeletionPreservesData(t *testing.T) {
 	ctx := context.Background()
 	snapshot := baseSnapshot()
 	snapshot.ProviderKey = "website"
-	service, _, store := orderTestService(snapshot, nil)
+	provider := &stubOrderProvider{key: "website", snapshot: snapshot}
+	registry := commerce.NewRegistry()
+	if err := registry.Register("website", provider); err != nil {
+		t.Fatal(err)
+	}
+	store := &stubOrderStore{}
+	service := NewOrderService(registry, store, nil)
 	if _, err := service.ReconcileOrder(ctx, "website", "100"); err != nil {
 		t.Fatal(err)
 	}
+	// Provider now confirms absence: tombstone preserves last-known data.
+	provider.snapshot = OrderSnapshot{}
+	provider.err = &BlockedError{Code: CodeOrderNotFound, Message: "gone"}
 	result, err := service.ReconcileDeletion(ctx, "website", "100")
 	if err != nil {
 		t.Fatal(err)

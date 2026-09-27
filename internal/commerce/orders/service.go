@@ -9,11 +9,30 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 )
 
+// ReconcileGeneration is a per-order concurrency fence token: a
+// later-started reconciliation supersedes earlier-started ones for the
+// same provider order. It is operational metadata, never the semantic
+// order revision, and never exposed publicly.
+type ReconcileGeneration int64
+
+// LeaseGeneration is a per-delivery claim token: each successful webhook
+// claim increments it, so a stale worker can never finalize an event
+// owned by a newer lease.
+type LeaseGeneration int64
+
+// ReconcileOutcome is the result of one generation-checked projection.
+type ReconcileOutcome struct {
+	Revision   int64
+	Changed    bool
+	Superseded bool
+}
+
 // OrderStore is the durable boundary for webhook inbox state and order
 // projection. One ReconcileProjectedOrder call is one atomic
-// compare-and-swap transaction.
+// fence-check-and-swap transaction.
 type OrderStore interface {
-	ReconcileProjectedOrder(ctx context.Context, snapshot OrderSnapshot, fingerprint [32]byte) (revision int64, changed bool, err error)
+	BeginOrderReconcile(ctx context.Context, providerKey, externalOrderID string) (ReconcileGeneration, error)
+	ReconcileProjectedOrder(ctx context.Context, snapshot OrderSnapshot, fingerprint [32]byte, generation ReconcileGeneration) (ReconcileOutcome, error)
 	LoadProjectedOrder(ctx context.Context, providerKey, externalOrderID string) (OrderSnapshot, int64, bool, error)
 }
 
@@ -23,6 +42,7 @@ type ReconcileResult struct {
 	ExternalOrderID string
 	Revision        int64
 	Changed         bool
+	Superseded      bool
 	Canonical       CanonicalStatus
 	MappingComplete bool
 	UnmappedLines   int
@@ -45,25 +65,17 @@ func NewOrderService(providers *commerce.Registry, store OrderStore, log *slog.L
 }
 
 // ReconcileOrder fetches the provider's current order and converges the
-// MoonLight projection to it. An already-current provider state is an
-// idempotent no-op; a changed state advances the revision atomically.
-// Errors are classified for the caller: BlockedError is terminal,
-// Temporary/RateLimited provider failures are retryable, anything
-// infrastructure-shaped should be retried by the caller.
+// MoonLight projection to it under a fresh reconciliation generation.
+// A generation superseded by a later-started reconciliation returns
+// Superseded=true without mutating state. Errors are classified for
+// the caller: BlockedError is terminal, Temporary/RateLimited provider
+// failures are retryable, infrastructure errors should be retried.
 func (s *OrderService) ReconcileOrder(ctx context.Context, providerKey, externalOrderID string) (ReconcileResult, error) {
-	key, err := commerce.ValidateProviderKey(providerKey)
-	if err != nil {
-		return ReconcileResult{}, apperr.New(apperr.InvalidInput, err.Error())
-	}
-	canonicalID, err := CanonicalExternalOrderID(externalOrderID)
-	if err != nil {
-		return ReconcileResult{}, &BlockedError{Code: CodeOrderInvalid, Message: "invalid external order id"}
-	}
-	provider, err := s.providers.Get(key)
+	key, canonicalID, orderProvider, err := s.resolveOrderProvider(providerKey, externalOrderID)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
-	orderProvider, err := AsOrderProvider(provider)
+	generation, err := s.store.BeginOrderReconcile(ctx, string(key), canonicalID)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
@@ -74,34 +86,81 @@ func (s *OrderService) ReconcileOrder(ctx context.Context, providerKey, external
 	if snapshot.ExternalOrderID != canonicalID || snapshot.ProviderKey != string(key) {
 		return ReconcileResult{}, &BlockedError{Code: CodeOrderConflict, Message: "order identity mismatch"}
 	}
-	revision, changed, err := s.store.ReconcileProjectedOrder(ctx, snapshot, Fingerprint(snapshot))
+	return s.projectCurrent(ctx, key, canonicalID, snapshot, generation)
+}
+
+// ReconcileDeletion converges one order to provider-confirmed deletion:
+// obtain a generation, check CURRENT provider state, and tombstone only
+// on confirmed absence. A live provider order wins over the delete
+// event; transient provider failures retry without tombstoning.
+func (s *OrderService) ReconcileDeletion(ctx context.Context, providerKey, externalOrderID string) (ReconcileResult, error) {
+	key, canonicalID, orderProvider, err := s.resolveOrderProvider(providerKey, externalOrderID)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	generation, err := s.store.BeginOrderReconcile(ctx, string(key), canonicalID)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	snapshot, err := orderProvider.GetOrder(ctx, canonicalID)
+	if err == nil {
+		if snapshot.ExternalOrderID != canonicalID || snapshot.ProviderKey != string(key) {
+			return ReconcileResult{}, &BlockedError{Code: CodeOrderConflict, Message: "order identity mismatch"}
+		}
+		return s.projectCurrent(ctx, key, canonicalID, snapshot, generation)
+	}
+	if code, blocked := IsBlocked(err); blocked && code == CodeOrderNotFound {
+		return s.projectDeleted(ctx, key, canonicalID, generation)
+	}
+	return ReconcileResult{}, err
+}
+
+// resolveOrderProvider validates identity inputs and resolves the
+// order-capable provider instance.
+func (s *OrderService) resolveOrderProvider(providerKey, externalOrderID string) (commerce.ProviderKey, string, CommerceOrderProvider, error) {
+	key, err := commerce.ValidateProviderKey(providerKey)
+	if err != nil {
+		return "", "", nil, apperr.New(apperr.InvalidInput, err.Error())
+	}
+	canonicalID, err := CanonicalExternalOrderID(externalOrderID)
+	if err != nil {
+		return "", "", nil, &BlockedError{Code: CodeOrderInvalid, Message: "invalid external order id"}
+	}
+	provider, err := s.providers.Get(key)
+	if err != nil {
+		return "", "", nil, err
+	}
+	orderProvider, err := AsOrderProvider(provider)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return key, canonicalID, orderProvider, nil
+}
+
+// projectCurrent converges the projection to a live snapshot under the
+// caller's generation token.
+func (s *OrderService) projectCurrent(ctx context.Context, key commerce.ProviderKey, canonicalID string, snapshot OrderSnapshot, generation ReconcileGeneration) (ReconcileResult, error) {
+	outcome, err := s.store.ReconcileProjectedOrder(ctx, snapshot, Fingerprint(snapshot), generation)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
 	s.logInfo("order reconciled", "provider", string(key), "order", canonicalID,
-		"revision", revision, "changed", changed, "status", string(snapshot.Canonical))
+		"generation", int64(generation), "revision", outcome.Revision,
+		"changed", outcome.Changed, "superseded", outcome.Superseded,
+		"status", string(snapshot.Canonical))
 	return ReconcileResult{
 		ProviderKey: string(key), ExternalOrderID: canonicalID,
-		Revision: revision, Changed: changed, Canonical: snapshot.Canonical,
+		Revision: outcome.Revision, Changed: outcome.Changed, Superseded: outcome.Superseded,
+		Canonical:       snapshot.Canonical,
 		MappingComplete: snapshot.MappingComplete, UnmappedLines: snapshot.UnmappedLines,
 	}, nil
 }
 
-// ReconcileDeletion marks the provider-deleted lifecycle state while
-// preserving last-known order data. For never-observed orders it writes
-// a minimal tombstone with no fabricated customer or financial data.
-// Repeated deletes are idempotent: unchanged semantics mean no new
-// revision and no duplicate history.
-func (s *OrderService) ReconcileDeletion(ctx context.Context, providerKey, externalOrderID string) (ReconcileResult, error) {
-	key, err := commerce.ValidateProviderKey(providerKey)
-	if err != nil {
-		return ReconcileResult{}, apperr.New(apperr.InvalidInput, err.Error())
-	}
-	canonicalID, err := CanonicalExternalOrderID(externalOrderID)
-	if err != nil {
-		return ReconcileResult{}, &BlockedError{Code: CodeOrderInvalid, Message: "invalid external order id"}
-	}
-	snapshot, revision, found, err := s.store.LoadProjectedOrder(ctx, string(key), canonicalID)
+// projectDeleted converges the projection to provider-confirmed deletion
+// under the caller's generation token, preserving last-known data or
+// writing a minimal tombstone for unseen orders.
+func (s *OrderService) projectDeleted(ctx context.Context, key commerce.ProviderKey, canonicalID string, generation ReconcileGeneration) (ReconcileResult, error) {
+	snapshot, _, found, err := s.store.LoadProjectedOrder(ctx, string(key), canonicalID)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
@@ -113,23 +172,23 @@ func (s *OrderService) ReconcileDeletion(ctx context.Context, providerKey, exter
 			CreatedAt: now, ModifiedAt: now,
 			Billing: Address{Kind: "billing"}, Shipping: Address{Kind: "shipping"},
 		}
-		_ = revision
 	} else {
 		// Preserve the loaded ModifiedAt: deletion delivery time is
-		// transport metadata, not order state, so repeat deletes stay
-		// fingerprint-identical instead of churning revisions.
+		// transport metadata, so repeat deletes stay identical.
 		snapshot.ProviderDeleted = true
 		snapshot.Canonical = StatusDeleted
 	}
-	revision, changed, err := s.store.ReconcileProjectedOrder(ctx, snapshot, Fingerprint(snapshot))
+	outcome, err := s.store.ReconcileProjectedOrder(ctx, snapshot, Fingerprint(snapshot), generation)
 	if err != nil {
 		return ReconcileResult{}, err
 	}
 	s.logInfo("order deletion reconciled", "provider", string(key), "order", canonicalID,
-		"revision", revision, "changed", changed)
+		"generation", int64(generation), "revision", outcome.Revision,
+		"changed", outcome.Changed, "superseded", outcome.Superseded)
 	return ReconcileResult{
 		ProviderKey: string(key), ExternalOrderID: canonicalID,
-		Revision: revision, Changed: changed, Canonical: StatusDeleted,
+		Revision: outcome.Revision, Changed: outcome.Changed, Superseded: outcome.Superseded,
+		Canonical:       StatusDeleted,
 		MappingComplete: snapshot.MappingComplete, UnmappedLines: snapshot.UnmappedLines,
 		ProviderDeleted: true,
 	}, nil

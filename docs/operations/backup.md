@@ -20,7 +20,11 @@ Most Cloud tables are derived projections rebuildable from the durable
 projections). `commerce_product_mappings` (Phase 6A) is the exception:
 provider↔MoonLight external identities cannot be reconstructed from
 MoonLight events and must survive every projection rebuild. Backup and
-restore verification must cover this table explicitly.
+restore verification must cover this table explicitly. Phase 6C adds
+the same durability class: `commerce_online_orders*` tables, the
+webhook inbox, and the reconciliation fence table are provider-derived
+or operational integration state, never cleared by projection
+rebuilds, and covered by normal database backup.
 
 ## Local development
 

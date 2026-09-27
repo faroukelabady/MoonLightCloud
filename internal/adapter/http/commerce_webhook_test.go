@@ -16,26 +16,33 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 )
 
-// memWebhookInbox is an in-memory delivery ledger for handler tests.
+// memWebhookInbox is an in-memory delivery ledger for handler tests,
+// mirroring production conflict semantics over identity metadata.
 type memWebhookInbox struct {
 	mu   sync.Mutex
-	rows map[string][]byte
+	rows map[string]memWebhookRow
 }
 
-func (m *memWebhookInbox) InsertOrderWebhookEvent(_ context.Context, _ commerce.ProviderKey, deliveryID string, _ orders.WebhookTopic, _ string, payloadHash []byte, _ *string) (bool, error) {
+type memWebhookRow struct {
+	hash     string
+	topic    orders.WebhookTopic
+	external string
+}
+
+func (m *memWebhookInbox) InsertOrderWebhookEvent(_ context.Context, _ commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, _ *string) (orders.WebhookInsertOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.rows == nil {
-		m.rows = map[string][]byte{}
+		m.rows = map[string]memWebhookRow{}
 	}
 	if existing, ok := m.rows[deliveryID]; ok {
-		if string(existing) == string(payloadHash) {
-			return false, nil
+		if string(existing.hash) == string(payloadHash) && existing.topic == topic && existing.external == externalOrderID {
+			return orders.WebhookDuplicateIdentical, nil
 		}
-		return false, apperr.New(apperr.Conflict, "delivery already recorded")
+		return orders.WebhookInserted, apperr.New(apperr.Conflict, "delivery already recorded")
 	}
-	m.rows[deliveryID] = payloadHash
-	return true, nil
+	m.rows[deliveryID] = memWebhookRow{hash: string(payloadHash), topic: topic, external: externalOrderID}
+	return orders.WebhookInserted, nil
 }
 
 func signWebhook(secret, body string) string {
@@ -283,4 +290,53 @@ func TestWebhookCrossAuthIsolation(t *testing.T) {
 	if len(inbox.rows) != 0 {
 		t.Fatal("nothing persisted without HMAC")
 	}
+}
+
+// TestWebhookDeliveryMetadataConflict proves same delivery identity
+// with contradictory topic or order identity is a 409 that leaves the
+// original row unchanged.
+func TestWebhookDeliveryMetadataConflict(t *testing.T) {
+	secret := "test-webhook-secret-0123456789abcdef"
+	newHandler := func() *CommerceWebhookHandlers {
+		inbox := &memWebhookInbox{}
+		return NewCommerceWebhookHandlers(inbox, func(providerKey string) (string, bool) {
+			if providerKey == "website" || providerKey == "shop2" {
+				return secret, true
+			}
+			return "", false
+		}, nil, nil)
+	}
+	deliver := func(t *testing.T, handler *CommerceWebhookHandlers, delivery, topic, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost,
+			"/api/v1/commerce/webhooks/woocommerce/website", strings.NewReader(body))
+		request.SetPathValue("provider_key", "website")
+		request.Header.Set("X-WC-Webhook-Signature", signWebhook(secret, body))
+		request.Header.Set("X-WC-Webhook-Topic", topic)
+		request.Header.Set("X-WC-Webhook-Resource", "order")
+		request.Header.Set("X-WC-Webhook-Delivery-ID", delivery)
+		recorder := httptest.NewRecorder()
+		handler.WooCommerceWebhook(recorder, request)
+		return recorder
+	}
+	t.Run("topic conflict", func(t *testing.T) {
+		handler := newHandler()
+		if recorder := deliver(t, handler, "delivery-1", "order.created", `{"id":710}`); recorder.Code != http.StatusAccepted {
+			t.Fatalf("first: %d", recorder.Code)
+		}
+		if recorder := deliver(t, handler, "delivery-1", "order.deleted", `{"id":710}`); recorder.Code != http.StatusConflict {
+			t.Fatalf("topic conflict: %d", recorder.Code)
+		}
+	})
+	t.Run("order identity conflict", func(t *testing.T) {
+		// Same delivery identity with a contradictory body is a 409
+		// regardless of which field disagrees; the original row stands.
+		handler := newHandler()
+		if recorder := deliver(t, handler, "delivery-2", "order.created", `{"id":711}`); recorder.Code != http.StatusAccepted {
+			t.Fatalf("first: %d", recorder.Code)
+		}
+		if recorder := deliver(t, handler, "delivery-2", "order.created", `{"id":712}`); recorder.Code != http.StatusConflict {
+			t.Fatalf("order conflict: %d", recorder.Code)
+		}
+	})
 }

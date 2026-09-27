@@ -33,18 +33,36 @@ const (
 )
 
 // WebhookStore is the durable inbox boundary for the processor.
+// FinishResult reports whether a completion took effect. Stale is a
+// safe no-op: another owner already controls the event.
+type FinishResult int
+
+const (
+	// FinishApplied means the fenced transition committed.
+	FinishApplied FinishResult = iota + 1
+	// FinishStale means ownership moved on; the row is untouched.
+	FinishStale
+)
+
+// WebhookStore is the durable inbox boundary for the processor.
+// Completion always carries the claim token; the previous unfenced
+// finish shape is gone so production code cannot accidentally bypass
+// fencing.
 type WebhookStore interface {
 	ClaimOrderWebhookEvent(ctx context.Context, owner string, lease time.Duration, now time.Time) (ClaimedWebhookEvent, bool, error)
-	FinishOrderWebhookEvent(ctx context.Context, providerKey, deliveryID, status string, nextAttemptAt *time.Time, processed bool, errorCode string) error
+	FinishOrderWebhookEvent(ctx context.Context, claim ClaimedWebhookEvent, status string, next *time.Time, processed bool, code string) (FinishResult, error)
 }
 
-// ClaimedWebhookEvent is one leased inbox row.
+// ClaimedWebhookEvent is one leased inbox row with its fencing token:
+// the owner and generation that must still hold at completion time.
 type ClaimedWebhookEvent struct {
 	ProviderKey     string
 	DeliveryID      string
 	Topic           WebhookTopic
 	ExternalOrderID string
 	AttemptCount    int32
+	LeaseOwner      string
+	LeaseGeneration LeaseGeneration
 }
 
 // Processor drains webhook events: claim with a bounded lease, release
@@ -129,10 +147,16 @@ func (p *Processor) drain(ctx context.Context) {
 func (p *Processor) processOne(ctx context.Context, claimed ClaimedWebhookEvent) {
 	now := p.clock.Now()
 	finish := func(status string, next *time.Time, processed bool, code string) {
-		if err := p.webhooks.FinishOrderWebhookEvent(ctx,
-			claimed.ProviderKey, claimed.DeliveryID, status, next, processed, code); err != nil {
+		result, err := p.webhooks.FinishOrderWebhookEvent(ctx, claimed, status, next, processed, code)
+		if err != nil {
 			p.logError("order webhook finish failed",
 				"provider", claimed.ProviderKey, "delivery", claimed.DeliveryID, "err", err.Error())
+			return
+		}
+		if result == FinishStale {
+			p.logInfo("order webhook finish stale",
+				"provider", claimed.ProviderKey, "delivery", claimed.DeliveryID,
+				"lease_owner", claimed.LeaseOwner, "lease_generation", int64(claimed.LeaseGeneration))
 		}
 	}
 	var result ReconcileResult

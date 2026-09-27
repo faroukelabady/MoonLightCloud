@@ -635,7 +635,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Delivery ID already recorded with a different payload. Original unchanged.
+          description: Delivery ID already recorded with contradictory content (different payload, topic, or order identity). Original unchanged.
           content:
             application/json:
               schema:

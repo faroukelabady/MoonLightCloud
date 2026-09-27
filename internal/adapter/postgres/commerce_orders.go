@@ -21,16 +21,17 @@ import (
 // rebuild path touches these tables.
 
 // InsertOrderWebhookEvent persists one delivery or classifies the
-// duplicate: same payload hash returns the existing row (idempotent
-// 202), a different hash is a 409 conflict that never overwrites.
-func (d Devices) InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (inserted bool, err error) {
+// duplicate. An identical redelivery (same hash, topic, and order
+// identity) is idempotent; any contradiction — different hash, topic,
+// or external order ID — is a conflict that never overwrites.
+func (d Devices) InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (orders.WebhookInsertOutcome, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
-		return false, apperr.New(apperr.InvalidInput, err.Error())
+		return orders.WebhookInserted, apperr.New(apperr.InvalidInput, err.Error())
 	}
 	if err := orders.ValidateDeliveryID(deliveryID); err != nil {
-		return false, apperr.New(apperr.InvalidInput, err.Error())
+		return orders.WebhookInserted, apperr.New(apperr.InvalidInput, err.Error())
 	}
 	var webhook pgtype.Text
 	if webhookID != nil {
@@ -44,21 +45,22 @@ func (d Devices) InsertOrderWebhookEvent(ctx context.Context, providerKey commer
 	})
 	if err == nil {
 		_ = row
-		return true, nil
+		return orders.WebhookInserted, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return false, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
+		return orders.WebhookInserted, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
 	}
 	existing, err := q.GetCommerceWebhookEvent(ctx, sqlcgen.GetCommerceWebhookEventParams{
 		ProviderKey: string(providerKey), DeliveryID: deliveryID,
 	})
 	if err != nil {
-		return false, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
+		return orders.WebhookInserted, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
 	}
-	if !bytes.Equal(existing.PayloadHash, payloadHash) {
-		return false, apperr.New(apperr.Conflict, "webhook delivery already recorded with different payload")
+	if !bytes.Equal(existing.PayloadHash, payloadHash) ||
+		existing.Topic != string(topic) || existing.ExternalOrderID != externalOrderID {
+		return orders.WebhookInserted, apperr.New(apperr.Conflict, "webhook delivery already recorded with different content")
 	}
-	return false, nil
+	return orders.WebhookDuplicateIdentical, nil
 }
 
 // ClaimOrderWebhookEvent leases one due event to this worker. Row-level
@@ -81,16 +83,36 @@ func (d Devices) ClaimOrderWebhookEvent(ctx context.Context, owner string, lease
 	if err != nil {
 		return orders.ClaimedWebhookEvent{}, false, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
 	}
+	// The claim just wrote this owner, so it is always present.
+	claimedOwner := row.LeaseOwner.String
 	return orders.ClaimedWebhookEvent{
 		ProviderKey: row.ProviderKey, DeliveryID: row.DeliveryID,
 		Topic: topic, ExternalOrderID: row.ExternalOrderID,
 		AttemptCount: row.AttemptCount,
+		LeaseOwner:   claimedOwner, LeaseGeneration: orders.LeaseGeneration(row.LeaseGeneration),
 	}, true, nil
 }
 
-// FinishOrderWebhookEvent records the terminal outcome and releases the
-// lease. Only machine-readable codes persist: no prose, PII, or bodies.
-func (d Devices) FinishOrderWebhookEvent(ctx context.Context, providerKey, deliveryID, status string, nextAttemptAt *time.Time, processed bool, errorCode string) error {
+// BeginOrderReconcile atomically creates or increments the per-order
+// reconciliation fence and returns the caller's generation token. Must
+// run before provider HTTP; never inside the projection transaction.
+func (d Devices) BeginOrderReconcile(ctx context.Context, providerKey, externalOrderID string) (orders.ReconcileGeneration, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	generation, err := sqlcgen.New(d.pool).BeginOrderReconcile(ctx, sqlcgen.BeginOrderReconcileParams{
+		ProviderKey: providerKey, ExternalOrderID: externalOrderID,
+	})
+	if err != nil {
+		return 0, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	}
+	return orders.ReconcileGeneration(generation), nil
+}
+
+// FinishOrderWebhookEvent records the outcome under the claim token and
+// releases the lease. A superseded claim affects zero rows and reports
+// stale: the current owner controls the event. Only machine-readable
+// codes persist: no prose, PII, or bodies.
+func (d Devices) FinishOrderWebhookEvent(ctx context.Context, claim orders.ClaimedWebhookEvent, status string, nextAttemptAt *time.Time, processed bool, errorCode string) (orders.FinishResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	var next pgtype.Timestamptz
@@ -101,14 +123,19 @@ func (d Devices) FinishOrderWebhookEvent(ctx context.Context, providerKey, deliv
 	if processed {
 		processedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
-	if err := sqlcgen.New(d.pool).FinishCommerceWebhookEvent(ctx, sqlcgen.FinishCommerceWebhookEventParams{
-		ProviderKey: providerKey, DeliveryID: deliveryID, Status: status,
-		NextAttemptAt: next, ProcessedAt: processedAt,
+	affected, err := sqlcgen.New(d.pool).FinishCommerceWebhookEvent(ctx, sqlcgen.FinishCommerceWebhookEventParams{
+		ProviderKey: claim.ProviderKey, DeliveryID: claim.DeliveryID,
+		LeaseOwner: pgText(claim.LeaseOwner), LeaseGeneration: int64(claim.LeaseGeneration),
+		Status: status, NextAttemptAt: next, ProcessedAt: processedAt,
 		LastErrorCode: pgText(errorCode),
-	}); err != nil {
-		return apperr.Wrap(apperr.Internal, "order webhook", redact(err))
+	})
+	if err != nil {
+		return orders.FinishStale, apperr.Wrap(apperr.Internal, "order webhook", redact(err))
 	}
-	return nil
+	if affected == 0 {
+		return orders.FinishStale, nil
+	}
+	return orders.FinishApplied, nil
 }
 
 // OrderWebhookStats returns pending/retry/blocked counts plus the oldest
@@ -128,24 +155,47 @@ func (d Devices) OrderWebhookStats(ctx context.Context) (pending, retry, blocked
 }
 
 // ReconcileProjectedOrder atomically converges one current order to a
-// resolved snapshot: fingerprint compare, revision bump on semantic
-// change, header/lines/addresses replacement, and status history only
-// when the status pair changes. A fault anywhere leaves the previous
-// full revision visible. Returns the resulting revision and whether the
-// semantic state changed.
-func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte) (revision int64, changed bool, err error) {
+// resolved snapshot under the caller's generation token. Lock order is
+// fixed: reconciliation fence first, then order rows — no path locks in
+// the opposite order. A token older than the fence's current generation
+// is superseded and mutates nothing (not header, lines, history, or
+// revision). A fault anywhere leaves the previous full revision
+// visible. A missing fence row fails closed: every production path
+// begins a generation before projecting.
+func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte, generation orders.ReconcileGeneration) (orders.ReconcileOutcome, error) {
+	none := orders.ReconcileOutcome{}
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
 
+	// Fence first, order rows second: the locked generation read is
+	// the single ordering point. A concurrent Begin either commits
+	// before this lock (we observe its generation) or blocks behind
+	// our projection commit. No DB lock ever spans provider HTTP: the
+	// fence was obtained before the GET and released long ago.
+	fence, err := q.LockOrderReconcileFence(ctx, sqlcgen.LockOrderReconcileFenceParams{
+		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(errors.New("no reconcile fence")))
+		}
+		return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	}
+	if fence != int64(generation) {
+		_ = tx.Rollback(ctx)
+		return orders.ReconcileOutcome{Superseded: true}, nil
+	}
+
 	resolved, err := resolveOrderLines(ctx, q, snapshot)
 	if err != nil {
-		return 0, false, err
+		return none, err
 	}
 	fingerprint = orders.Fingerprint(resolved)
 
@@ -153,18 +203,18 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 	}
 	if err == nil {
 		if bytes.Equal(existing.Fingerprint, fingerprint[:]) {
 			if err := tx.Commit(ctx); err != nil {
-				return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+				return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 			}
-			return existing.Revision, false, nil
+			return orders.ReconcileOutcome{Revision: existing.Revision}, nil
 		}
 		resolvedRevision := existing.Revision + 1
 		if err := writeProjectedOrder(ctx, q, resolved, fingerprint, resolvedRevision); err != nil {
-			return 0, false, err
+			return none, err
 		}
 		if existing.ProviderStatus != resolved.ProviderStatus || existing.CanonicalStatus != string(resolved.Canonical) {
 			if err := q.InsertCommerceOrderStatusHistory(ctx, sqlcgen.InsertCommerceOrderStatusHistoryParams{
@@ -173,16 +223,16 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 				CanonicalStatus:    string(resolved.Canonical),
 				ProviderModifiedAt: pgTime(resolved.ModifiedAt),
 			}); err != nil {
-				return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+				return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 			}
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+			return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 		}
-		return resolvedRevision, true, nil
+		return orders.ReconcileOutcome{Revision: resolvedRevision, Changed: true}, nil
 	}
 	if err := writeProjectedOrder(ctx, q, resolved, fingerprint, 1); err != nil {
-		return 0, false, err
+		return none, err
 	}
 	if err := q.InsertCommerceOrderStatusHistory(ctx, sqlcgen.InsertCommerceOrderStatusHistoryParams{
 		ProviderKey: resolved.ProviderKey, ExternalOrderID: resolved.ExternalOrderID,
@@ -190,12 +240,12 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 		CanonicalStatus:    string(resolved.Canonical),
 		ProviderModifiedAt: pgTime(resolved.ModifiedAt),
 	}); err != nil {
-		return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		return none, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 	}
-	return 1, true, nil
+	return orders.ReconcileOutcome{Revision: 1, Changed: true}, nil
 }
 
 // LoadProjectedOrder reconstructs the current normalized snapshot for

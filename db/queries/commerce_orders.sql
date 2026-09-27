@@ -35,20 +35,26 @@ WITH candidate AS (
 )
 UPDATE commerce_online_order_webhook_events AS event
 SET lease_owner = $1, lease_until = $2,
+    lease_generation = event.lease_generation + 1,
     attempt_count = event.attempt_count + 1, updated_at = now()
 FROM candidate
 WHERE event.provider_key = candidate.provider_key
   AND event.delivery_id = candidate.delivery_id
 RETURNING event.provider_key, event.delivery_id, event.topic,
     event.external_order_id, event.payload_hash, event.received_at,
-    event.status, event.attempt_count;
+    event.status, event.attempt_count, event.lease_owner, event.lease_generation;
 
--- name: FinishCommerceWebhookEvent :exec
+-- name: FinishCommerceWebhookEvent :execrows
+-- Fenced completion: only the current lease owner holding the current
+-- generation on a non-terminal row may transition it. Stale workers
+-- affect zero rows and must treat that as a safe no-op.
 UPDATE commerce_online_order_webhook_events
-SET status = $3, next_attempt_at = $4, processed_at = $5,
-    last_error_code = $6, lease_owner = NULL, lease_until = NULL,
+SET status = $5, next_attempt_at = $6, processed_at = $7,
+    last_error_code = $8, lease_owner = NULL, lease_until = NULL,
     updated_at = now()
-WHERE provider_key = $1 AND delivery_id = $2;
+WHERE provider_key = $1 AND delivery_id = $2
+  AND lease_owner = $3 AND lease_generation = $4
+  AND status IN ('pending', 'retry');
 
 -- name: CommerceWebhookStats :one
 SELECT
@@ -176,3 +182,25 @@ SELECT canonical_status, count(*)::bigint AS total
 FROM commerce_online_orders
 WHERE (NULLIF($1::text, '') IS NULL OR provider_key = $1)
 GROUP BY canonical_status;
+
+-- name: BeginOrderReconcile :one
+-- Per-order reconciliation fence: first starter creates generation 1,
+-- every later starter atomically increments exactly once. The increment
+-- guard fails safely instead of wrapping BIGINT on overflow.
+INSERT INTO commerce_online_order_reconcile_fences AS fence (provider_key, external_order_id, generation)
+VALUES ($1, $2, 1)
+ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
+    generation = fence.generation + 1, updated_at = now()
+WHERE fence.generation < 9223372036854775807
+RETURNING generation;
+
+-- name: GetOrderReconcileGeneration :one
+SELECT generation FROM commerce_online_order_reconcile_fences
+WHERE provider_key = $1 AND external_order_id = $2;
+
+-- name: LockOrderReconcileFence :one
+-- Fence value under lock: the single ordering point for concurrent
+-- reconciliations of one order. Always locked before any order row.
+SELECT generation FROM commerce_online_order_reconcile_fences
+WHERE provider_key = $1 AND external_order_id = $2
+FOR UPDATE;

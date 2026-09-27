@@ -337,3 +337,127 @@ func TestV12ToLatest(t *testing.T) {
 		}
 	}
 }
+
+// TestV13ToLatest proves the frozen Phase 6C schema upgrades to the R1
+// concurrency fences cleanly: 00014 only adds the reconcile-fence table
+// and the lease_generation column. Seeded order domain rows (order,
+// lines, addresses, history, pending/retry/processed/blocked webhook
+// events), the product mapping, and representative catalog/policy/
+// inventory/Sale/Return rows survive untouched; pre-existing webhook
+// rows default to lease_generation=0 so pending/retry stay claimable
+// and terminal rows stay terminal.
+func TestV13ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 13); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 13 {
+		t.Fatalf("want 13, got %d", v)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := conn.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	dev := "11111111-1111-7111-8111-111111111111"
+	eSale := "22222222-2222-7222-8222-222222222222"
+	eReturn := "33333333-3333-7333-8333-333333333333"
+	eCatalog := "44444444-4444-7444-8444-444444444444"
+	saleID := "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"
+	returnID := "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb"
+	catID := "cccccccc-cccc-7ccc-8ccc-cccccccccccc"
+	productID := "dddddddd-dddd-7ddd-8ddd-dddddddddddd"
+	exec(`INSERT INTO devices (id, name, status) VALUES ($1,'shop','active')`, dev)
+	for _, e := range []string{eSale, eReturn, eCatalog} {
+		exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
+			VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e, dev)
+	}
+	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+		VALUES ($1,'active','ورق',1,$2,$3,'\x00',now())`, catID, eCatalog, dev)
+	exec(`INSERT INTO catalog_products (product_id, sku, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+		VALUES ($1,'PAP-1','Papyrus',$2,TRUE,1,$3,$4,'\x00',now())`, productID, catID, eCatalog, dev)
+	exec(`INSERT INTO catalog_product_sales_policies (product_id, sell_offline, sell_online, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+		VALUES ($1,TRUE,TRUE,1,$2,$3,'\x00',now())`, productID, eCatalog, dev)
+	exec(`INSERT INTO catalog_product_inventory (product_id, stock_quantity, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+		VALUES ($1,7,1,$2,$3,'\x00',now())`, productID, eCatalog, dev)
+	exec(`INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at,
+		shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en,
+		currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at)
+		VALUES ($1,$2,$3,'MLR-1','STORE',now(),now(),'a','b','c','d','e','f','g','EGP',100,0,0,100,now())`,
+		saleID, eSale, dev)
+	exec(`INSERT INTO return_refund_projection (return_refund_id, source_event_id, source_device_id, return_number, kind, reason,
+		sale_id, sale_number, channel, occurred_at, currency, gross_refunded_minor, discount_refunded_minor, tax_refunded_minor,
+		refund_total_minor, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone,
+		shop_receipt_footer_ar, shop_receipt_footer_en, received_at)
+		VALUES ($1,$2,$3,'RT-1','return','defect',$4,'MLR-1','STORE',now(),'EGP',100,0,0,100,'a','b','c','d','e','f','g',now())`,
+		returnID, eReturn, dev, saleID)
+	exec(`INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id)
+		VALUES ('website', $1, '500')`, productID)
+	exec(`INSERT INTO commerce_online_orders (provider_key, external_order_id, order_number, provider_status, canonical_status,
+		currency, discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, total_minor, created_at, modified_at,
+		payment_method, revision, fingerprint, mapping_complete, unmapped_lines)
+		VALUES ('website','980','980','processing','PROCESSING','EGP',0,0,0,0,68000,now(),now(),'cod',1,'\x01',TRUE,0)`)
+	exec(`INSERT INTO commerce_online_order_lines (provider_key, external_order_id, external_line_id, external_product_id,
+		sku, name, quantity, subtotal_minor, subtotal_tax_minor, total_minor, total_tax_minor, moonlight_product_id, mapped)
+		VALUES ('website','980',1,'500','PAP-1','Papyrus',1,68000,0,68000,0,$1,TRUE)`, productID)
+	for _, kind := range []string{"billing", "shipping"} {
+		exec(`INSERT INTO commerce_online_order_addresses (provider_key, external_order_id, kind, city, country)
+			VALUES ('website','980',$1,'Cairo','EG')`, kind)
+	}
+	exec(`INSERT INTO commerce_online_order_status_history (provider_key, external_order_id, order_revision, provider_status, canonical_status)
+		VALUES ('website','980',1,'processing','PROCESSING')`)
+	webhooks := []struct{ delivery, topic, order, status string }{
+		{"delivery-p", "order.created", "980", "pending"},
+		{"delivery-r", "order.updated", "980", "retry"},
+		{"delivery-ok", "order.updated", "980", "processed"},
+		{"delivery-block", "order.created", "981", "blocked"},
+	}
+	for _, w := range webhooks {
+		exec(`INSERT INTO commerce_online_order_webhook_events (provider_key, delivery_id, topic, external_order_id, payload_hash, status)
+			VALUES ('website',$1,$2,$3,'\x02',$4)`, w.delivery, w.topic, w.order, w.status)
+	}
+
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var exists bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='commerce_online_order_reconcile_fences')`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("fence table missing (%v)", err)
+	}
+	var fences int
+	if err := conn.QueryRow(`SELECT count(*) FROM commerce_online_order_reconcile_fences`).Scan(&fences); err != nil || fences != 0 {
+		t.Fatalf("fence table starts empty (%d %v)", fences, err)
+	}
+	var total int64
+	var canonical string
+	var rev int64
+	if err := conn.QueryRow(`SELECT total_minor, canonical_status, revision FROM commerce_online_orders
+		WHERE provider_key='website' AND external_order_id='980'`).Scan(&total, &canonical, &rev); err != nil || total != 68000 || canonical != "PROCESSING" || rev != 1 {
+		t.Fatalf("order preserved: %d %s %d (%v)", total, canonical, rev, err)
+	}
+	for _, table := range []string{
+		"commerce_online_order_lines", "commerce_online_order_addresses",
+		"commerce_online_order_status_history", "commerce_product_mappings",
+		"catalog_products", "catalog_product_sales_policies", "catalog_product_inventory",
+		"sales_projection", "return_refund_projection",
+	} {
+		var count int
+		if err := conn.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count == 0 {
+			t.Fatalf("table %s preserved (%d %v)", table, count, err)
+		}
+	}
+	// Pre-existing deliveries default to lease generation 0: pending and
+	// retry stay claimable, terminal rows stay terminal.
+	for _, w := range webhooks {
+		var status string
+		var generation int64
+		if err := conn.QueryRow(`SELECT status, lease_generation FROM commerce_online_order_webhook_events
+			WHERE provider_key='website' AND delivery_id=$1`, w.delivery).Scan(&status, &generation); err != nil || status != w.status || generation != 0 {
+			t.Fatalf("webhook %s: %s gen %d (%v)", w.delivery, status, generation, err)
+		}
+	}
+}

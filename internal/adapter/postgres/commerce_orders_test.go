@@ -34,11 +34,20 @@ func orderTestSnapshot(provider, external string, status orders.CanonicalStatus,
 
 func reconcileSnapshot(t *testing.T, env *saleEnv, snapshot orders.OrderSnapshot) (int64, bool) {
 	t.Helper()
-	revision, changed, err := catalogStore(env).ReconcileProjectedOrder(context.Background(), snapshot, orders.Fingerprint(snapshot))
+	ctx := context.Background()
+	store := catalogStore(env)
+	generation, err := store.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	outcome, err := store.ReconcileProjectedOrder(ctx, snapshot, orders.Fingerprint(snapshot), generation)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	return revision, changed
+	if outcome.Superseded {
+		t.Fatal("fresh generation must not supersede")
+	}
+	return outcome.Revision, outcome.Changed
 }
 
 // TestCommerceOrderProjectionMatrix proves initial revision, semantic
@@ -125,7 +134,12 @@ func TestCommerceOrderAtomicity(t *testing.T) {
 	snapshot.TotalMinor = 12000
 	snapshot.ModifiedAt = snapshot.ModifiedAt.Add(time.Hour)
 	snapshot.Lines[0].Quantity = 0
-	_, _, err := catalogStore(env).ReconcileProjectedOrder(context.Background(), snapshot, orders.Fingerprint(snapshot))
+	store := catalogStore(env)
+	generation, err := store.BeginOrderReconcile(context.Background(), snapshot.ProviderKey, snapshot.ExternalOrderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ReconcileProjectedOrder(context.Background(), snapshot, orders.Fingerprint(snapshot), generation)
 	if err == nil {
 		t.Fatal("constraint failure must surface")
 	}
@@ -276,11 +290,14 @@ func TestCommerceOrderReads(t *testing.T) {
 	first := orderTestSnapshot("website", "220", orders.StatusPending, "pending", 9007199254740993)
 	second := orderTestSnapshot("website", "221", orders.StatusCompleted, "completed", 1300)
 	second.CreatedAt = second.CreatedAt.Add(-time.Hour)
-	if _, _, err := store.ReconcileProjectedOrder(ctx, first, orders.Fingerprint(first)); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := store.ReconcileProjectedOrder(ctx, second, orders.Fingerprint(second)); err != nil {
-		t.Fatal(err)
+	for _, snapshot := range []orders.OrderSnapshot{first, second} {
+		generation, err := store.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReconcileProjectedOrder(ctx, snapshot, orders.Fingerprint(snapshot), generation); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	summaries, err := store.ListOrderSummaries(ctx, "", "", 10, nil)
@@ -363,9 +380,9 @@ func TestCommerceWebhookInboxMinimization(t *testing.T) {
 	ctx := context.Background()
 	body := []byte(`{"id":400,"billing":{"first_name":"Layla","email":"layla-pii@example.com","phone":"+201111111111","address_1":"5 PII Street"},"customer_note":"PII note here"}`)
 	sum := sha256.Sum256(body)
-	inserted, err := catalogStore(env).InsertOrderWebhookEvent(ctx, "website", "delivery-pii", orders.TopicOrderCreated, "400", sum[:], nil)
-	if err != nil || !inserted {
-		t.Fatalf("insert: %v %v", inserted, err)
+	outcome, err := catalogStore(env).InsertOrderWebhookEvent(ctx, "website", "delivery-pii", orders.TopicOrderCreated, "400", sum[:], nil)
+	if err != nil || outcome != orders.WebhookInserted {
+		t.Fatalf("insert: %v %v", outcome, err)
 	}
 	var dump string
 	if err := env.pool.QueryRow(ctx,
@@ -418,5 +435,64 @@ func TestCommerceOrderDeleteThenRevive(t *testing.T) {
 	stored, _, _, err := store.LoadProjectedOrder(ctx, "website", "230")
 	if err != nil || stored.ProviderDeleted || stored.TotalMinor != 15000 {
 		t.Fatalf("live state restored: %+v %v", stored, err)
+	}
+}
+
+// TestCommerceOrderLeavesSalesMetricsUnchanged is the F-05 gate: a Woo
+// order ingested through pending → completed → refunded must not move
+// frozen Sale/Return reporting. Uses the real reporting query path on
+// real PostgreSQL; no production Sale/Return code is touched.
+func TestCommerceOrderLeavesSalesMetricsUnchanged(t *testing.T) {
+	env := openDashEnv(t)
+	ctx := context.Background()
+	projectDashSale(t, env, "77777777-7777-4777-8777-777777777777", "2026-09-20T10:00:00Z", fixture(t, "sale_egp.json"))
+	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
+	before, err := env.rep.Summary(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.TransactionCount == 0 {
+		t.Fatal("seeded sale must register")
+	}
+	snapshot := func() (int64, int64, int64) {
+		t.Helper()
+		sum, err := env.rep.Summary(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var revenue, refunds int64
+		for _, bucket := range sum.CurrencyTotals {
+			revenue += bucket.SalesTotalMinor
+			refunds += bucket.RefundTotalMinor
+		}
+		return sum.TransactionCount, revenue, refunds
+	}
+	baseCount, baseRevenue, baseRefunds := snapshot()
+
+	store := catalogStore(env.saleEnv)
+	project := func(status orders.CanonicalStatus, providerStatus string, total int64) {
+		t.Helper()
+		order := orderTestSnapshot("website", "970", status, providerStatus, total)
+		generation, err := store.BeginOrderReconcile(ctx, "website", "970")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReconcileProjectedOrder(ctx, order, orders.Fingerprint(order), generation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		status         orders.CanonicalStatus
+		providerStatus string
+	}{
+		{orders.StatusPending, "pending"},
+		{orders.StatusCompleted, "completed"},
+		{orders.StatusRefunded, "refunded"},
+	} {
+		project(tc.status, tc.providerStatus, 68000)
+		if count, revenue, refunds := snapshot(); count != baseCount || revenue != baseRevenue || refunds != baseRefunds {
+			t.Fatalf("%s moved sales metrics: (%d,%d,%d) vs baseline (%d,%d,%d)",
+				tc.status, count, revenue, refunds, baseCount, baseRevenue, baseRefunds)
+		}
 	}
 }

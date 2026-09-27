@@ -24,7 +24,7 @@ const commerceWebhookMaxBodyBytes = 1 << 20
 
 // WebhookInboxStore is the durable delivery boundary for webhook ingestion.
 type WebhookInboxStore interface {
-	InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (bool, error)
+	InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (orders.WebhookInsertOutcome, error)
 }
 
 // CommerceWebhookHandlers serves signed provider webhooks. The route is
@@ -85,7 +85,7 @@ func (h *CommerceWebhookHandlers) WooCommerceWebhook(w http.ResponseWriter, r *h
 		webhookID = &id
 	}
 	sum := sha256.Sum256(raw)
-	inserted, err := h.store.InsertOrderWebhookEvent(r.Context(),
+	outcome, err := h.store.InsertOrderWebhookEvent(r.Context(),
 		commerce.ProviderKey(providerKey), deliveryID, topic, externalOrderID, sum[:], webhookID)
 	if err != nil {
 		var appErr *apperr.Error
@@ -96,7 +96,7 @@ func (h *CommerceWebhookHandlers) WooCommerceWebhook(w http.ResponseWriter, r *h
 		WriteError(w, r, err)
 		return
 	}
-	if inserted && h.notify != nil {
+	if outcome == orders.WebhookInserted && h.notify != nil {
 		h.notify()
 	}
 	if h.log != nil {

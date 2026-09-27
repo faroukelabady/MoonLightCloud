@@ -274,22 +274,37 @@ func (s *cliStubOrderProvider) GetOrder(_ context.Context, _ string) (orders.Ord
 
 // cliStubOrderStore is an in-memory projection store.
 type cliStubOrderStore struct {
-	orders map[string]orders.OrderSnapshot
-	revs   map[string]int64
+	orders        map[string]orders.OrderSnapshot
+	revs          map[string]int64
+	gens          map[string]orders.ReconcileGeneration
+	supersedeNext bool
 }
 
-func (s *cliStubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte) (int64, bool, error) {
+func (s *cliStubOrderStore) BeginOrderReconcile(_ context.Context, providerKey, externalOrderID string) (orders.ReconcileGeneration, error) {
+	if s.gens == nil {
+		s.gens = map[string]orders.ReconcileGeneration{}
+	}
+	key := providerKey + "/" + externalOrderID
+	s.gens[key]++
+	return s.gens[key], nil
+}
+
+func (s *cliStubOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte, _ orders.ReconcileGeneration) (orders.ReconcileOutcome, error) {
+	if s.supersedeNext {
+		s.supersedeNext = false
+		return orders.ReconcileOutcome{Superseded: true}, nil
+	}
 	key := snapshot.ProviderKey + "/" + snapshot.ExternalOrderID
 	if s.orders == nil {
 		s.orders = map[string]orders.OrderSnapshot{}
 		s.revs = map[string]int64{}
 	}
 	if existing, ok := s.orders[key]; ok && orders.Fingerprint(existing) == fingerprint {
-		return s.revs[key], false, nil
+		return orders.ReconcileOutcome{Revision: s.revs[key]}, nil
 	}
 	s.orders[key] = snapshot
 	s.revs[key]++
-	return s.revs[key], true, nil
+	return orders.ReconcileOutcome{Revision: s.revs[key], Changed: true}, nil
 }
 
 func (s *cliStubOrderStore) LoadProjectedOrder(_ context.Context, providerKey, externalOrderID string) (orders.OrderSnapshot, int64, bool, error) {
@@ -362,5 +377,27 @@ func TestRunCommerceSyncOrderTemporary(t *testing.T) {
 	}
 	if strings.Contains(output, "revision=") {
 		t.Fatalf("no success fields: %q", output)
+	}
+}
+
+// TestRunCommerceSyncOrderSuperseded proves a concurrently superseded
+// manual sync returns success with superseded=true instead of looping.
+func TestRunCommerceSyncOrderSuperseded(t *testing.T) {
+	provider := &cliStubOrderProvider{key: "website", snapshot: cliOrderSnapshot()}
+	registry := commerce.NewRegistry()
+	if err := registry.Register("website", provider); err != nil {
+		t.Fatal(err)
+	}
+	store := &cliStubOrderStore{supersedeNext: true}
+	service := orders.NewOrderService(registry, store, nil)
+	var out bytes.Buffer
+	if err := runCommerceSyncOrder(context.Background(), service, &out, "website", "700"); err != nil {
+		t.Fatalf("superseded is success: %v", err)
+	}
+	if !strings.Contains(out.String(), "superseded=true") {
+		t.Fatalf("superseded reported: %q", out.String())
+	}
+	if strings.Contains(out.String(), "changed=true") {
+		t.Fatalf("no change reported: %q", out.String())
 	}
 }

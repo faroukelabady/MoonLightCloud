@@ -41,6 +41,26 @@ Responses: `202` accepted (or idempotent duplicate), `400` bad
 topic/resource/body/identity, `401` bad signature (nothing persisted),
 `409` delivery-ID reuse with a different body, `413` over 1 MiB.
 
+## Concurrency model
+
+Every current-state reconcile — webhook created/updated, delete
+confirmation, manual `sync-order` — first takes a per-order
+reconciliation generation, then reads provider state, then verifies
+the token inside the projection transaction (fence row locked before
+order rows). A superseded token mutates nothing: no header, lines,
+history, or revision change. Later-started reconciliations win
+because they initiate later current-state reads. Generations are
+internal operational state, never order revisions and never public.
+
+Webhook claims carry lease generations: each claim increments, and
+every finish requires the claiming owner + generation on a
+non-terminal row. Stale completions are safe no-ops that change
+nothing — terminal states cannot resurrect.
+
+Deletion never trusts the topic alone: each attempt confirms current
+provider state (live wins, 404 tombstones, transient retries). No DB
+lock or transaction ever spans provider HTTP in any path.
+
 ## Processing states
 
 `pending → retry → processed`, or `blocked` with a machine-readable
@@ -99,7 +119,10 @@ audit. Repeat deletes are idempotent.
 
 ## Backup significance
 
-`commerce_online_orders`, lines, addresses, status history, and the webhook
-inbox are durable integration state (like provider mappings): back
-them up; no catalog/policy/inventory rebuild touches them, and raw
-bodies were never kept so replay means re-fetch via `sync-order`.
+`commerce_online_orders`, lines, addresses, status history, the webhook
+inbox, and the reconciliation fence table are durable integration
+state (like provider mappings): back them up; no catalog/policy/
+inventory rebuild touches them, and raw bodies were never kept so
+replay means re-fetch via `sync-order`. Fences are operational (not
+business history) but must survive restarts and instances; never
+garbage-collect them automatically in R1.

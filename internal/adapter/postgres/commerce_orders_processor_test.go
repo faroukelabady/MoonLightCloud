@@ -70,10 +70,10 @@ func runProcessorBriefly(t *testing.T, processor *orders.Processor) {
 func insertTestWebhook(t *testing.T, env *saleEnv, provider, delivery, topic, external string, body []byte) {
 	t.Helper()
 	sum := sha256.Sum256(body)
-	inserted, err := catalogStore(env).InsertOrderWebhookEvent(context.Background(),
+	outcome, err := catalogStore(env).InsertOrderWebhookEvent(context.Background(),
 		commerce.ProviderKey(provider), delivery, orders.WebhookTopic(topic), external, sum[:], nil)
-	if err != nil || !inserted {
-		t.Fatalf("insert webhook: %v %v", inserted, err)
+	if err != nil || outcome != orders.WebhookInserted {
+		t.Fatalf("insert webhook: %v %v", outcome, err)
 	}
 }
 
@@ -97,13 +97,13 @@ func TestOrderWebhookDedupe(t *testing.T) {
 	store := catalogStore(env)
 	body := []byte(`{"id":300,"status":"pending"}`)
 	sum := sha256.Sum256(body)
-	inserted, err := store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", sum[:], nil)
-	if err != nil || !inserted {
-		t.Fatalf("first: %v %v", inserted, err)
+	outcome, err := store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", sum[:], nil)
+	if err != nil || outcome != orders.WebhookInserted {
+		t.Fatalf("first: %v %v", outcome, err)
 	}
-	inserted, err = store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", sum[:], nil)
-	if err != nil || inserted {
-		t.Fatalf("duplicate: %v %v", inserted, err)
+	outcome, err = store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", sum[:], nil)
+	if err != nil || outcome != orders.WebhookDuplicateIdentical {
+		t.Fatalf("duplicate: %v %v", outcome, err)
 	}
 	other := sha256.Sum256([]byte(`{"id":300,"status":"changed"}`))
 	_, err = store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", other[:], nil)
@@ -215,6 +215,9 @@ func TestOrderProcessorDeleteFlow(t *testing.T) {
 	processor := orderProcessorEnv(env, provider)
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "304", []byte(`{"id":304}`))
 	runProcessorBriefly(t, processor)
+	// Provider confirms absence for the delete attempt: genuine deletion.
+	provider.snapshots = map[string]orders.OrderSnapshot{}
+	provider.errs = map[string]error{"304": &orders.BlockedError{Code: orders.CodeOrderNotFound, Message: "gone"}}
 	insertTestWebhook(t, env, "website", "delivery-2", "order.deleted", "304", []byte(`{"id":304}`))
 	runProcessorBriefly(t, processor)
 	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "304")
@@ -380,5 +383,51 @@ func TestOrderProcessorRateLimitedRetry(t *testing.T) {
 	}
 	if delay := next.Sub(before); delay < 80*time.Second || delay > 100*time.Second {
 		t.Fatalf("hint respected: %v", delay)
+	}
+}
+
+// TestWebhookDeliveryIdentityConflict proves same delivery ID with the
+// same payload hash but contradictory topic or order identity is a
+// conflict that leaves the original row unchanged, while the same
+// delivery ID under another provider stays independent.
+func TestWebhookDeliveryIdentityConflict(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	body := []byte(`{"id":960}`)
+	sum := sha256.Sum256(body)
+	outcome, err := store.InsertOrderWebhookEvent(ctx, "website", "delivery-9",
+		orders.TopicOrderCreated, "960", sum[:], nil)
+	if err != nil || outcome != orders.WebhookInserted {
+		t.Fatalf("first: %v %v", outcome, err)
+	}
+	// Same hash, different topic: conflict.
+	_, err = store.InsertOrderWebhookEvent(ctx, "website", "delivery-9",
+		orders.TopicOrderDeleted, "960", sum[:], nil)
+	var appErr *apperr.Error
+	if !errors.As(err, &appErr) || appErr.Kind != apperr.Conflict {
+		t.Fatalf("topic conflict: %v", err)
+	}
+	// Same hash and topic, different order identity: conflict.
+	_, err = store.InsertOrderWebhookEvent(ctx, "website", "delivery-9",
+		orders.TopicOrderCreated, "961", sum[:], nil)
+	if !errors.As(err, &appErr) || appErr.Kind != apperr.Conflict {
+		t.Fatalf("order conflict: %v", err)
+	}
+	// Original row unchanged.
+	var topic, external string
+	var hash []byte
+	if err := env.pool.QueryRow(ctx,
+		`SELECT topic, external_order_id, payload_hash FROM commerce_online_order_webhook_events WHERE provider_key='website' AND delivery_id='delivery-9'`).Scan(&topic, &external, &hash); err != nil {
+		t.Fatal(err)
+	}
+	if topic != "order.created" || external != "960" || string(hash) != string(sum[:]) {
+		t.Fatalf("original intact: %s %s", topic, external)
+	}
+	// Same delivery ID under another provider is independent.
+	outcome, err = store.InsertOrderWebhookEvent(ctx, "shop2", "delivery-9",
+		orders.TopicOrderCreated, "960", sum[:], nil)
+	if err != nil || outcome != orders.WebhookInserted {
+		t.Fatalf("cross-provider: %v %v", outcome, err)
 	}
 }

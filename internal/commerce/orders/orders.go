@@ -29,6 +29,19 @@ const (
 	StatusDeleted    CanonicalStatus = "DELETED"
 )
 
+// WebhookInsertOutcome makes delivery dedupe explicit: inserted or
+// identical-duplicate. Contradictions surface as apperr Conflict, never
+// a boolean.
+type WebhookInsertOutcome int
+
+const (
+	// WebhookInserted means the delivery row was created.
+	WebhookInserted WebhookInsertOutcome = iota + 1
+	// WebhookDuplicateIdentical means the same delivery identity,
+	// payload hash, topic, and order ID already exist: no new work.
+	WebhookDuplicateIdentical
+)
+
 // WebhookTopic is the supported Woo order lifecycle trigger set.
 type WebhookTopic string
 

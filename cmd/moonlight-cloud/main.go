@@ -418,8 +418,8 @@ func runCommerceSyncOrder(ctx context.Context, orderService *orders.OrderService
 		}
 		return err
 	}
-	fmt.Fprintf(out, "provider=%s order=%s revision=%d changed=%v status=%s mapping_complete=%v unmapped_lines=%d deleted=%v\n",
-		result.ProviderKey, result.ExternalOrderID, result.Revision, result.Changed,
+	fmt.Fprintf(out, "provider=%s order=%s revision=%d changed=%v superseded=%v status=%s mapping_complete=%v unmapped_lines=%d deleted=%v\n",
+		result.ProviderKey, result.ExternalOrderID, result.Revision, result.Changed, result.Superseded,
 		result.Canonical, result.MappingComplete, result.UnmappedLines, result.ProviderDeleted)
 	return nil
 }

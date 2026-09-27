@@ -174,6 +174,13 @@ type CommerceOnlineOrderLine struct {
 	UnsupportedReason  string      `json:"unsupported_reason"`
 }
 
+type CommerceOnlineOrderReconcileFence struct {
+	ProviderKey     string             `json:"provider_key"`
+	ExternalOrderID string             `json:"external_order_id"`
+	Generation      int64              `json:"generation"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CommerceOnlineOrderStatusHistory struct {
 	ProviderKey        string             `json:"provider_key"`
 	ExternalOrderID    string             `json:"external_order_id"`
@@ -200,6 +207,7 @@ type CommerceOnlineOrderWebhookEvent struct {
 	LeaseOwner      pgtype.Text        `json:"lease_owner"`
 	LeaseUntil      pgtype.Timestamptz `json:"lease_until"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LeaseGeneration int64              `json:"lease_generation"`
 }
 
 type CommerceProductMapping struct {

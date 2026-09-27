@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const beginOrderReconcile = `-- name: BeginOrderReconcile :one
+INSERT INTO commerce_online_order_reconcile_fences AS fence (provider_key, external_order_id, generation)
+VALUES ($1, $2, 1)
+ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
+    generation = fence.generation + 1, updated_at = now()
+WHERE fence.generation < 9223372036854775807
+RETURNING generation
+`
+
+type BeginOrderReconcileParams struct {
+	ProviderKey     string `json:"provider_key"`
+	ExternalOrderID string `json:"external_order_id"`
+}
+
+// Per-order reconciliation fence: first starter creates generation 1,
+// every later starter atomically increments exactly once. The increment
+// guard fails safely instead of wrapping BIGINT on overflow.
+func (q *Queries) BeginOrderReconcile(ctx context.Context, arg BeginOrderReconcileParams) (int64, error) {
+	row := q.db.QueryRow(ctx, beginOrderReconcile, arg.ProviderKey, arg.ExternalOrderID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
 const claimCommerceWebhookEvent = `-- name: ClaimCommerceWebhookEvent :one
 WITH candidate AS (
     SELECT provider_key, delivery_id
@@ -24,13 +48,14 @@ WITH candidate AS (
 )
 UPDATE commerce_online_order_webhook_events AS event
 SET lease_owner = $1, lease_until = $2,
+    lease_generation = event.lease_generation + 1,
     attempt_count = event.attempt_count + 1, updated_at = now()
 FROM candidate
 WHERE event.provider_key = candidate.provider_key
   AND event.delivery_id = candidate.delivery_id
 RETURNING event.provider_key, event.delivery_id, event.topic,
     event.external_order_id, event.payload_hash, event.received_at,
-    event.status, event.attempt_count
+    event.status, event.attempt_count, event.lease_owner, event.lease_generation
 `
 
 type ClaimCommerceWebhookEventParams struct {
@@ -47,6 +72,8 @@ type ClaimCommerceWebhookEventRow struct {
 	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
 	Status          string             `json:"status"`
 	AttemptCount    int32              `json:"attempt_count"`
+	LeaseOwner      pgtype.Text        `json:"lease_owner"`
+	LeaseGeneration int64              `json:"lease_generation"`
 }
 
 // Single eligible event with row-level claiming: concurrent workers
@@ -64,6 +91,8 @@ func (q *Queries) ClaimCommerceWebhookEvent(ctx context.Context, arg ClaimCommer
 		&i.ReceivedAt,
 		&i.Status,
 		&i.AttemptCount,
+		&i.LeaseOwner,
+		&i.LeaseGeneration,
 	)
 	return i, err
 }
@@ -156,33 +185,45 @@ func (q *Queries) DeleteCommerceOrderLines(ctx context.Context, arg DeleteCommer
 	return err
 }
 
-const finishCommerceWebhookEvent = `-- name: FinishCommerceWebhookEvent :exec
+const finishCommerceWebhookEvent = `-- name: FinishCommerceWebhookEvent :execrows
 UPDATE commerce_online_order_webhook_events
-SET status = $3, next_attempt_at = $4, processed_at = $5,
-    last_error_code = $6, lease_owner = NULL, lease_until = NULL,
+SET status = $5, next_attempt_at = $6, processed_at = $7,
+    last_error_code = $8, lease_owner = NULL, lease_until = NULL,
     updated_at = now()
 WHERE provider_key = $1 AND delivery_id = $2
+  AND lease_owner = $3 AND lease_generation = $4
+  AND status IN ('pending', 'retry')
 `
 
 type FinishCommerceWebhookEventParams struct {
-	ProviderKey   string             `json:"provider_key"`
-	DeliveryID    string             `json:"delivery_id"`
-	Status        string             `json:"status"`
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
-	LastErrorCode pgtype.Text        `json:"last_error_code"`
+	ProviderKey     string             `json:"provider_key"`
+	DeliveryID      string             `json:"delivery_id"`
+	LeaseOwner      pgtype.Text        `json:"lease_owner"`
+	LeaseGeneration int64              `json:"lease_generation"`
+	Status          string             `json:"status"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	ProcessedAt     pgtype.Timestamptz `json:"processed_at"`
+	LastErrorCode   pgtype.Text        `json:"last_error_code"`
 }
 
-func (q *Queries) FinishCommerceWebhookEvent(ctx context.Context, arg FinishCommerceWebhookEventParams) error {
-	_, err := q.db.Exec(ctx, finishCommerceWebhookEvent,
+// Fenced completion: only the current lease owner holding the current
+// generation on a non-terminal row may transition it. Stale workers
+// affect zero rows and must treat that as a safe no-op.
+func (q *Queries) FinishCommerceWebhookEvent(ctx context.Context, arg FinishCommerceWebhookEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishCommerceWebhookEvent,
 		arg.ProviderKey,
 		arg.DeliveryID,
+		arg.LeaseOwner,
+		arg.LeaseGeneration,
 		arg.Status,
 		arg.NextAttemptAt,
 		arg.ProcessedAt,
 		arg.LastErrorCode,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getCommerceOrder = `-- name: GetCommerceOrder :one
@@ -286,6 +327,23 @@ func (q *Queries) GetCommerceWebhookEvent(ctx context.Context, arg GetCommerceWe
 		&i.LastErrorCode,
 	)
 	return i, err
+}
+
+const getOrderReconcileGeneration = `-- name: GetOrderReconcileGeneration :one
+SELECT generation FROM commerce_online_order_reconcile_fences
+WHERE provider_key = $1 AND external_order_id = $2
+`
+
+type GetOrderReconcileGenerationParams struct {
+	ProviderKey     string `json:"provider_key"`
+	ExternalOrderID string `json:"external_order_id"`
+}
+
+func (q *Queries) GetOrderReconcileGeneration(ctx context.Context, arg GetOrderReconcileGenerationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getOrderReconcileGeneration, arg.ProviderKey, arg.ExternalOrderID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
 }
 
 const insertCommerceOrderAddress = `-- name: InsertCommerceOrderAddress :exec
@@ -696,6 +754,26 @@ func (q *Queries) ListCommerceOrders(ctx context.Context, arg ListCommerceOrders
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockOrderReconcileFence = `-- name: LockOrderReconcileFence :one
+SELECT generation FROM commerce_online_order_reconcile_fences
+WHERE provider_key = $1 AND external_order_id = $2
+FOR UPDATE
+`
+
+type LockOrderReconcileFenceParams struct {
+	ProviderKey     string `json:"provider_key"`
+	ExternalOrderID string `json:"external_order_id"`
+}
+
+// Fence value under lock: the single ordering point for concurrent
+// reconciliations of one order. Always locked before any order row.
+func (q *Queries) LockOrderReconcileFence(ctx context.Context, arg LockOrderReconcileFenceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockOrderReconcileFence, arg.ProviderKey, arg.ExternalOrderID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
 }
 
 const upsertCommerceOrder = `-- name: UpsertCommerceOrder :exec

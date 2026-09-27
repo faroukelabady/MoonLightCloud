@@ -23,6 +23,8 @@ type stubWebhookEvent struct {
 	next                               *time.Time
 	code                               string
 	processed                          bool
+	owner                              string
+	generation                         LeaseGeneration
 }
 
 func (s *stubWebhookStore) add(provider, delivery, topic, orderID string) {
@@ -37,7 +39,7 @@ func (s *stubWebhookStore) add(provider, delivery, topic, orderID string) {
 	s.order = append(s.order, provider+"/"+delivery)
 }
 
-func (s *stubWebhookStore) ClaimOrderWebhookEvent(_ context.Context, _ string, _ time.Duration, now time.Time) (ClaimedWebhookEvent, bool, error) {
+func (s *stubWebhookStore) ClaimOrderWebhookEvent(_ context.Context, owner string, _ time.Duration, now time.Time) (ClaimedWebhookEvent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, key := range s.order {
@@ -49,6 +51,8 @@ func (s *stubWebhookStore) ClaimOrderWebhookEvent(_ context.Context, _ string, _
 			continue
 		}
 		event.attempts++
+		event.owner = owner
+		event.generation++
 		topic, err := ParseWebhookTopic(event.topic)
 		if err != nil {
 			return ClaimedWebhookEvent{}, false, err
@@ -57,20 +61,24 @@ func (s *stubWebhookStore) ClaimOrderWebhookEvent(_ context.Context, _ string, _
 			ProviderKey: event.provider, DeliveryID: event.delivery,
 			Topic: topic, ExternalOrderID: event.orderID,
 			AttemptCount: int32(event.attempts),
+			LeaseOwner:   owner, LeaseGeneration: event.generation,
 		}, true, nil
 	}
 	return ClaimedWebhookEvent{}, false, nil
 }
 
-func (s *stubWebhookStore) FinishOrderWebhookEvent(_ context.Context, providerKey, deliveryID, status string, next *time.Time, processed bool, code string) error {
+func (s *stubWebhookStore) FinishOrderWebhookEvent(_ context.Context, claim ClaimedWebhookEvent, status string, next *time.Time, processed bool, code string) (FinishResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	event := s.events[providerKey+"/"+deliveryID]
+	event := s.events[claim.ProviderKey+"/"+claim.DeliveryID]
+	if event.owner != claim.LeaseOwner || event.generation != claim.LeaseGeneration {
+		return FinishStale, nil
+	}
 	event.status = status
 	event.next = next
 	event.processed = processed
 	event.code = code
-	return nil
+	return FinishApplied, nil
 }
 
 func (s *stubWebhookStore) state(provider, delivery string) (string, int, string) {
@@ -171,9 +179,12 @@ func TestProcessorDeleteEvent(t *testing.T) {
 	ctx := context.Background()
 	snapshot := baseSnapshot()
 	snapshot.ProviderKey = "website"
-	processor, webhooks, store, _ := processorTestSetup(snapshot, nil)
+	processor, webhooks, store, provider := processorTestSetup(snapshot, nil)
 	webhooks.add("website", "delivery-1", "order.created", "100")
 	processor.drain(ctx)
+	// Provider confirms absence for the delete attempt.
+	provider.snapshot = OrderSnapshot{}
+	provider.err = &BlockedError{Code: CodeOrderNotFound, Message: "gone"}
 	webhooks.add("website", "delivery-2", "order.deleted", "100")
 	processor.drain(ctx)
 	stored, rev, _, err := store.LoadProjectedOrder(ctx, "website", "100")

@@ -16,6 +16,7 @@ sql:
       - "db/migrations/00011_product_inventory.sql"
       - "db/migrations/00012_commerce_product_mappings.sql"
       - "db/migrations/00013_commerce_orders.sql"
+      - "db/migrations/00014_order_concurrency_fences.sql"
     gen:
       go:
         package: "sqlcgen"

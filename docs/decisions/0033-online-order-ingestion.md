@@ -11,6 +11,37 @@ learning about online orders — needs a provider-neutral inbound
 boundary that cannot corrupt catalog, inventory, or sales authority,
 leak customer PII, or confuse operator reporting.
 
+## R1 remediation (order concurrency, lease fencing, lifecycle)
+
+The 6C freeze review demonstrated three ordering races plus two
+follow-ups, closed without redesigning the domain:
+
+1. **Reconciliation generations.** Every current-state reconcile
+   (webhook created/updated, delete confirmation, manual sync-order)
+   first obtains a per-order generation token
+   (`commerce_online_order_reconcile_fences`), then GETs provider
+   state, then projects under a fenced check inside the projection
+   transaction (fence row locked first, order rows second). A token
+   older than the fence is superseded and mutates nothing. The later
+   starter wins because it initiates the later current-state read;
+   MoonLight cannot fix stale reads inside Woo itself. No DB lock ever
+   spans provider HTTP. Generation is operational metadata, never the
+   semantic order revision and never publicly exposed.
+2. **Lease generations.** Every webhook claim increments
+   `lease_generation`; every finish requires owner + generation on a
+   non-terminal row and reports applied vs stale no-op. Expired
+   workers can neither resurrect terminal states nor touch
+   scheduling/error metadata owned by newer leases.
+3. **Delete requires current confirmation.** `order.deleted` triggers
+   GET-then-decide under a generation: live provider state wins (no
+   tombstone), confirmed 404 tombstones, transient failures retry,
+   terminal provider errors block. A stale delete generation cannot
+   commit after a newer live reconcile.
+4. **Delivery metadata conflicts** (same delivery + hash but different
+   topic or order ID) are 409 like payload conflicts.
+5. **Sales isolation** is now DB-proven: Woo order lifecycles never
+   move frozen Sale/Return metrics.
+
 ## Decision
 
 1. **Webhooks are triggers, not versions.** Signed Woo
