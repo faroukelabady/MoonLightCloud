@@ -42,6 +42,34 @@ follow-ups, closed without redesigning the domain:
 5. **Sales isolation** is now DB-proven: Woo order lifecycles never
    move frozen Sale/Return metrics.
 
+## R2 remediation (order error semantics, read-model closure)
+
+The R1 freeze review left one HIGH plus three smaller findings,
+closed without touching fencing, revisions, or the projection schema:
+
+1. **Exact 404/409 order semantics.** The shared Woo client classifies
+   both HTTP 404 and 409 as generic Conflict (frozen 6B behavior,
+   unchanged). The order reader previously mapped any Conflict kind to
+   ORDER_NOT_FOUND, so a 409 behind `order.deleted` could tombstone a
+   live order. `GetOrder` now uses the exact HTTP status the client
+   already returns: only 404 becomes ORDER_NOT_FOUND; 409 stays
+   Conflict and blocks (delete, created/updated, and manual
+   sync-order alike) without mutating the projection.
+2. **Orders cursor pagination.** The store already keyset-paginated
+   (`created_at DESC, provider_key, external_order_id`) but HTTP/UI
+   exposed only the first page. `GET /api/v1/dashboard/orders` now
+   accepts an opaque versioned cursor and returns `next_cursor`
+   (lookahead row, never a count), with filter-bound tokens, 400 on
+   misuse, and a UI Load-more continuation that resets on filter
+   change.
+3. **Oldest-pending metric.** The webhook inbox stat used
+   `max(received_at)` (newest) for a value named oldest; it now uses
+   `min(received_at)` over pending/retry.
+4. **Secret separation enforced.** The documented webhook/REST secret
+   distinction is now startup validation: identical
+   `COMMERCE_WOO_WEBHOOK_SECRET` and `COMMERCE_WOO_CONSUMER_SECRET`
+   fail config with value-free errors; disabled mode is unchanged.
+
 ## Decision
 
 1. **Webhooks are triggers, not versions.** Signed Woo

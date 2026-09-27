@@ -14,6 +14,10 @@
 		errStatus,
 		filterStatus,
 		filterProvider,
+		nextCursor,
+		more,
+		moreErr,
+		onloadmore,
 		onstatus,
 		onprovider,
 		selected,
@@ -29,6 +33,10 @@
 		errStatus: number | null;
 		filterStatus: string;
 		filterProvider: string;
+		nextCursor: string | null;
+		more: 'idle' | 'loading' | 'error';
+		moreErr: number | null;
+		onloadmore: () => void;
 		onstatus: (s: string) => void;
 		onprovider: (p: string) => void;
 		selected: OrderDetail | null;
@@ -77,7 +85,7 @@
 		<table class="data">
 			<thead><tr><th>#</th><th>رقم الطلب / Number</th><th>الحالة / Status</th><th>الإجمالي / Total</th><th>الربط / Mapping</th><th></th></tr></thead>
 			<tbody>
-				{#each orders as o}
+				{#each orders as o (o.provider_key + '/' + o.external_order_id)}
 					<tr>
 						<td class="num">{o.external_order_id}</td>
 						<td class="num">{o.order_number || '—'}</td>
@@ -89,6 +97,16 @@
 				{/each}
 			</tbody>
 		</table>
+		{#if nextCursor}
+			<div class="more">
+				<button class="link" disabled={more === 'loading'} onclick={onloadmore}>
+					{more === 'loading' ? 'جارٍ التحميل… / Loading…' : 'تحميل المزيد / Load more'}
+				</button>
+			</div>
+		{/if}
+		{#if more === 'error'}
+			<WidgetError status={moreErr} onretry={onloadmore} />
+		{/if}
 	{/if}
 	{#if selected}
 		<div class="drawer" role="dialog" aria-label="Order detail">
@@ -149,6 +167,9 @@
 		gap: 0.75rem;
 		flex-wrap: wrap;
 		margin-bottom: 0.5rem;
+	}
+	.more {
+		margin-top: 0.5rem;
 	}
 	.chips {
 		display: flex;

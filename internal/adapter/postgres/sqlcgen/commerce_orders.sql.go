@@ -102,7 +102,7 @@ SELECT
     count(*) FILTER (WHERE status = 'pending')::bigint AS pending,
     count(*) FILTER (WHERE status = 'retry')::bigint AS retry,
     count(*) FILTER (WHERE status = 'blocked')::bigint AS blocked,
-    max(received_at) FILTER (WHERE status IN ('pending', 'retry'))::timestamptz AS oldest_pending
+    min(received_at) FILTER (WHERE status IN ('pending', 'retry'))::timestamptz AS oldest_pending
 FROM commerce_online_order_webhook_events
 `
 

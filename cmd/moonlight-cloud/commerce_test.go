@@ -401,3 +401,26 @@ func TestRunCommerceSyncOrderSuperseded(t *testing.T) {
 		t.Fatalf("no change reported: %q", out.String())
 	}
 }
+
+// TestRunCommerceSyncOrderConflict proves manual sync behind a Woo 409
+// exits non-zero as Conflict — never as ORDER_NOT_FOUND — with the
+// existing current order untouched.
+func TestRunCommerceSyncOrderConflict(t *testing.T) {
+	service := cliOrderService(t, orders.OrderSnapshot{}, commerce.ConflictError("woo error test_conflict: Clash."))
+	var out bytes.Buffer
+	err := runCommerceSyncOrder(context.Background(), service, &out, "website", "700")
+	if err == nil {
+		t.Fatal("conflict must exit non-zero")
+	}
+	output := out.String()
+	for _, want := range []string{"error_kind=conflict", "retryable=false"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q: %q", want, output)
+		}
+	}
+	for _, forbidden := range []string{"ORDER_NOT_FOUND", "revision="} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("output must not contain %q: %q", forbidden, output)
+		}
+	}
+}

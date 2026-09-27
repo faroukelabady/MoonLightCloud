@@ -242,6 +242,12 @@ order_summary = {
 }
 check("order list", "DashboardOrderList", {
     "orders": [order_summary],
+    "next_cursor": "eyJ2IjoxLCJ0IjoiMjAyNi0wOS0yN1QxMTowMDowMFoiLCJwIjoid2Vic2l0ZSIsIm8iOiIxMDAiLCJmcCI6IiIsImZzIjoiIn0",
+    "status_counts": [{"canonical_status": "PROCESSING", "total": 1}],
+    "webhook_inbox": {"pending": 0, "retry": 1, "blocked": 0, "oldest_pending_at": None}})
+check("order list final page", "DashboardOrderList", {
+    "orders": [order_summary],
+    "next_cursor": None,
     "status_counts": [{"canonical_status": "PROCESSING", "total": 1}],
     "webhook_inbox": {"pending": 0, "retry": 1, "blocked": 0, "oldest_pending_at": None}})
 check("order detail", "DashboardOrderDetail", {

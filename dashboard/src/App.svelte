@@ -126,6 +126,9 @@
 	let orderInbox: WebhookInboxStats | null = $state(null);
 	let ordersState: WidgetState = $state('loading');
 	let ordersErr: number | null = $state(null);
+	let orderCursor: string | null = $state(null);
+	let ordersMore: 'idle' | 'loading' | 'error' = $state('idle');
+	let ordersMoreErr: number | null = $state(null);
 	let orderFilterStatus = $state('');
 	let orderFilterProvider = $state('');
 	let orderSelected: OrderDetail | null = $state(null);
@@ -144,9 +147,12 @@
 		if (!authed) return;
 		const signal = freshSignal();
 		ordersState = 'loading';
+		ordersMore = 'idle';
+		ordersMoreErr = null;
 		try {
-			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, signal);
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, signal);
 			orderList = v.orders;
+			orderCursor = v.next_cursor;
 			orderCounts = v.status_counts;
 			orderInbox = v.webhook_inbox;
 			ordersState = v.orders.length === 0 ? 'empty' : 'loaded';
@@ -155,6 +161,41 @@
 			if (requireAuth(err)) return;
 			ordersState = 'error';
 			ordersErr = err instanceof ApiError ? err.status : 0;
+		}
+	}
+
+	// orderKey is the stable row identity for append dedupe and render keys.
+	function orderKey(o: OrderSummary): string {
+		return `${o.provider_key}/${o.external_order_id}`;
+	}
+
+	async function loadMoreOrders() {
+		if (!authed || !orderCursor || ordersMore === 'loading') return;
+		ordersMore = 'loading';
+		ordersMoreErr = null;
+		try {
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, freshSignal());
+			const seen = new Set(orderList.map(orderKey));
+			for (const row of v.orders) {
+				if (!seen.has(orderKey(row))) {
+					seen.add(orderKey(row));
+					orderList.push(row);
+				}
+			}
+			orderCursor = v.next_cursor;
+			ordersMore = 'idle';
+		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError') {
+				ordersMore = 'idle';
+				return;
+			}
+			if (requireAuth(err)) {
+				ordersMore = 'idle';
+				return;
+			}
+			// Loaded rows stay visible; only the continuation fails.
+			ordersMore = 'error';
+			ordersMoreErr = err instanceof ApiError ? err.status : 0;
 		}
 	}
 
@@ -279,8 +320,11 @@
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
 			}, (s) => (latestState = s), (n) => (latestErr = n)),
-			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, signal), (v) => {
+			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, signal), (v) => {
 				orderList = v.orders;
+				orderCursor = v.next_cursor;
+				ordersMore = 'idle';
+				ordersMoreErr = null;
 				orderCounts = v.status_counts;
 				orderInbox = v.webhook_inbox;
 				ordersState = emptyOf(v.orders);
@@ -460,6 +504,10 @@
 							errStatus={ordersErr}
 							filterStatus={orderFilterStatus}
 							filterProvider={orderFilterProvider}
+							nextCursor={orderCursor}
+							more={ordersMore}
+							moreErr={ordersMoreErr}
+							onloadmore={() => void loadMoreOrders()}
 							onstatus={(s) => {
 								orderFilterStatus = s;
 								void reloadOrders();

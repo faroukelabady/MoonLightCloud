@@ -125,6 +125,9 @@ func (c WooCommerceConfig) validate() error {
 		if len(c.WebhookSecret) < 32 {
 			return fmt.Errorf("COMMERCE_WOO_WEBHOOK_SECRET must be at least 32 characters when order ingestion is enabled")
 		}
+		if c.WebhookSecret == c.ConsumerSecret {
+			return fmt.Errorf("COMMERCE_WOO_WEBHOOK_SECRET must differ from COMMERCE_WOO_CONSUMER_SECRET")
+		}
 	}
 	return nil
 }

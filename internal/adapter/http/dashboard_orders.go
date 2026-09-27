@@ -23,7 +23,8 @@ func NewDashboardOrderHandlers(reader orders.OrderReader, log *slog.Logger) Dash
 }
 
 // Orders serves GET /api/v1/dashboard/orders with bounded filters:
-// provider, canonical status, limit, and an opaque cursor.
+// provider, canonical status, limit, and an opaque cursor. Responses
+// carry next_cursor (null on the final page) for keyset traversal.
 func (h DashboardOrderHandlers) Orders(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	limit := 20
@@ -35,6 +36,11 @@ func (h DashboardOrderHandlers) Orders(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	if limit <= 0 || limit > 100 {
+		WriteError(w, r, apperr.New(apperr.InvalidInput, "invalid limit"))
+		return
+	}
+	provider := r.URL.Query().Get("provider")
 	status := r.URL.Query().Get("status")
 	if status != "" {
 		valid := false
@@ -53,13 +59,21 @@ func (h DashboardOrderHandlers) Orders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	items, err := h.reader.ListOrderSummaries(r.Context(),
-		r.URL.Query().Get("provider"), status, limit, nil)
+	var cursor *orders.OrderCursor
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		decoded, err := decodeOrderCursor(v, provider, status)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		cursor = decoded
+	}
+	page, err := h.reader.ListOrderPage(r.Context(), provider, status, limit, cursor)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	counts, err := h.reader.CountOrdersByStatus(r.Context(), r.URL.Query().Get("provider"))
+	counts, err := h.reader.CountOrdersByStatus(r.Context(), provider)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -69,11 +83,21 @@ func (h DashboardOrderHandlers) Orders(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	var nextCursor *string
+	if page.Next != nil {
+		encoded, err := encodeOrderCursor(page.Next, provider, status)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		nextCursor = &encoded
+	}
 	h.log.Info("dashboard served", "request_id", RequestID(r),
 		"endpoint", "dashboard_orders",
 		"duration_ms", time.Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"orders": items, "status_counts": counts, "webhook_inbox": inbox,
+		"orders": page.Items, "next_cursor": nextCursor,
+		"status_counts": counts, "webhook_inbox": inbox,
 	})
 }
 

@@ -28,6 +28,17 @@ func (s *stubOrderReader) ListOrderSummaries(_ context.Context, _, _ string, _ i
 	return s.summaries, nil
 }
 
+func (s *stubOrderReader) ListOrderPage(_ context.Context, _, _ string, limit int, _ *orders.OrderCursor) (orders.OrderPage, error) {
+	if s.err != nil {
+		return orders.OrderPage{}, s.err
+	}
+	items := s.summaries
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return orders.OrderPage{Items: items}, nil
+}
+
 func (s *stubOrderReader) GetOrderDetail(_ context.Context, _, _ string) (orders.OrderDetail, error) {
 	if s.err != nil {
 		return orders.OrderDetail{}, s.err

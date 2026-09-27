@@ -28,6 +28,9 @@ const base: {
 	errStatus: null;
 	filterStatus: string;
 	filterProvider: string;
+	nextCursor: null;
+	more: 'idle';
+	moreErr: null;
 	selected: null;
 	detailStatus: 'idle' | 'loading' | 'loaded' | 'error';
 	detailErr: null;
@@ -39,6 +42,9 @@ const base: {
 	errStatus: null,
 	filterStatus: '',
 	filterProvider: '',
+	nextCursor: null,
+	more: 'idle' as const,
+	moreErr: null,
 	selected: null,
 	detailStatus: 'idle',
 	detailErr: null
@@ -47,50 +53,50 @@ const base: {
 describe('OrdersPage', () => {
 	afterEach(() => cleanup());
 	it('shows Arabic and English labels', () => {
-		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/الطلبات عبر الإنترنت/)).toBeTruthy();
 		expect(screen.getByText(/Online Orders/)).toBeTruthy();
 	});
 
 	it('renders exact >2^53 money without float loss', () => {
-		const { container } = render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		const { container } = render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(container.textContent).toContain('90,071,992,547,409.93');
 	});
 
 	it('shows the unmapped-lines warning, never a fake product', () => {
-		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getAllByText(/غير مكتمل/).length).toBeGreaterThan(0);
 		expect(document.body.textContent).not.toContain('MoonLight Product');
 	});
 
 	it('shows the deleted indicator for provider-deleted orders', () => {
 		const deleted = { ...order, provider_deleted: true, canonical_status: 'DELETED' };
-		render(OrdersPage, { props: { ...base, orders: [deleted], onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, orders: [deleted], onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/محذوف/)).toBeTruthy();
 	});
 
 	it('shows empty state', () => {
-		render(OrdersPage, { props: { ...base, orders: [], status: 'empty', onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, orders: [], status: 'empty', onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/لا توجد طلبات/)).toBeTruthy();
 	});
 
 	it('shows error state with retry', async () => {
 		const onretry = vi.fn();
-		render(OrdersPage, { props: { ...base, orders: [], status: 'error', errStatus: 503, onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry } });
+		render(OrdersPage, { props: { ...base, orders: [], status: 'error', errStatus: 503, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry } });
 		await fireEvent.click(screen.getByRole('button', { name: /إعادة المحاولة/ }));
 		expect(onretry).toHaveBeenCalled();
 	});
 
 	it('opens detail on view and closes it', async () => {
 		const onselect = vi.fn();
-		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onselect, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect, onretry: () => {} } });
 		await fireEvent.click(screen.getByText(/عرض \/ View/));
 		expect(onselect).toHaveBeenCalledWith(order);
 	});
 
 	it('forwards status filter changes', async () => {
 		const onstatus = vi.fn();
-		render(OrdersPage, { props: { ...base, onstatus, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		render(OrdersPage, { props: { ...base, onstatus, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		const select = screen.getByLabelText(/الحالة \/ Status/) as HTMLSelectElement;
 		await fireEvent.change(select, { target: { value: 'COMPLETED' } });
 		expect(onstatus).toHaveBeenCalledWith('COMPLETED');
@@ -118,10 +124,54 @@ describe('OrdersPage', () => {
 			addresses: [],
 			status_history: [{ order_revision: 1, provider_status: 'pending', canonical_status: 'PENDING', observed_at: '2026-09-27T10:00:00Z' }]
 		} as never;
-		const { container } = render(OrdersPage, { props: { ...base, selected: detail, detailStatus: 'loaded', onstatus: () => {}, onprovider: () => {}, onselect: () => {}, onretry: () => {} } });
+		const { container } = render(OrdersPage, { props: { ...base, selected: detail, detailStatus: 'loaded', onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/غير مربوطة بكتالوج/)).toBeTruthy();
 		expect(container.textContent).toContain('FOREIGN');
 		expect(container.textContent).toContain('rev 1');
 		expect(container.textContent).toContain('a@example.com');
+	});
+});
+
+describe('OrdersPage pagination', () => {
+	afterEach(() => cleanup());
+	const pageProps = (extra: Record<string, unknown>) => ({
+		...base,
+		onstatus: () => {},
+		onprovider: () => {},
+		onloadmore: () => {},
+		onselect: () => {},
+		onretry: () => {},
+		...extra
+	});
+
+	it('shows Load more exactly when a cursor exists', () => {
+		render(OrdersPage, { props: pageProps({ nextCursor: 'opaque-token' }) });
+		expect(screen.getByRole('button', { name: /تحميل المزيد \/ Load more/ })).toBeTruthy();
+	});
+
+	it('hides Load more on the final page', () => {
+		render(OrdersPage, { props: pageProps({ nextCursor: null }) });
+		expect(screen.queryByRole('button', { name: /تحميل المزيد/ })).toBeNull();
+	});
+
+	it('disables Load more while loading the next page', () => {
+		render(OrdersPage, { props: pageProps({ nextCursor: 'opaque-token', more: 'loading' as const }) });
+		expect((screen.getByRole('button', { name: /جارٍ التحميل/ }) as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it('keeps loaded rows and offers retry when the next page fails', async () => {
+		const onloadmore = vi.fn();
+		render(OrdersPage, { props: pageProps({ nextCursor: 'opaque-token', more: 'error' as const, moreErr: 503, onloadmore }) });
+		// Page-1 rows stay visible.
+		expect(screen.getAllByText('800').length).toBeGreaterThan(0);
+		await fireEvent.click(screen.getAllByRole('button', { name: /إعادة المحاولة/ })[0]);
+		expect(onloadmore).toHaveBeenCalled();
+	});
+
+	it('fires continuation on Load more click', async () => {
+		const onloadmore = vi.fn();
+		render(OrdersPage, { props: pageProps({ nextCursor: 'opaque-token', onloadmore }) });
+		await fireEvent.click(screen.getByRole('button', { name: /تحميل المزيد/ }));
+		expect(onloadmore).toHaveBeenCalledTimes(1);
 	});
 });

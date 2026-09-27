@@ -247,6 +247,7 @@ export interface WebhookInboxStats {
 
 export interface OrderListResponse {
 	orders: OrderSummary[];
+	next_cursor: string | null;
 	status_counts: OrderStatusCount[];
 	webhook_inbox: WebhookInboxStats;
 }
@@ -339,8 +340,11 @@ export const dashboardApi = {
 	syncHealth: (s?: AbortSignal) => get<SyncHealth>('/api/v1/dashboard/sync-health', s),
 	activity: (s?: AbortSignal) => get<{ items: ActivityItem[] }>('/api/v1/dashboard/activity?limit=20', s),
 	latestSales: (s?: AbortSignal) => get<{ sales: LatestSale[] }>('/api/v1/dashboard/sales/latest?limit=8', s),
-	orders: (status: string, provider: string, s?: AbortSignal) =>
-		get<OrderListResponse>(`/api/v1/dashboard/orders?status=${encodeURIComponent(status)}&provider=${encodeURIComponent(provider)}&limit=20`, s),
+	orders: (status: string, provider: string, cursor?: string | null, s?: AbortSignal) =>
+		get<OrderListResponse>(
+			`/api/v1/dashboard/orders?status=${encodeURIComponent(status)}&provider=${encodeURIComponent(provider)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+			s
+		),
 	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s)
 };

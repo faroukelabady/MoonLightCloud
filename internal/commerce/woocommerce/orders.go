@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -75,9 +76,9 @@ func (p *WooCommerceProvider) GetOrder(ctx context.Context, externalOrderID stri
 		return orders.OrderSnapshot{}, &orders.BlockedError{Code: orders.CodeOrderInvalid, Message: "invalid external order id"}
 	}
 	var raw wooOrderResponse
-	_, err = p.client.do(ctx, "GET", "/orders/"+strconv.FormatInt(id, 10), nil, nil, &raw)
+	status, err := p.client.do(ctx, "GET", "/orders/"+strconv.FormatInt(id, 10), nil, nil, &raw)
 	if err != nil {
-		return orders.OrderSnapshot{}, mapOrderReadError(err)
+		return orders.OrderSnapshot{}, mapOrderReadError(err, status)
 	}
 	responseID, err := wooJSONID(raw.ID)
 	if err != nil {
@@ -93,19 +94,15 @@ func asCommerceProviderError(err error, target **commerce.ProviderError) bool {
 	return errors.As(err, target)
 }
 
-// mapOrderReadError translates transport outcomes for reconciliation:
-// 404 is a typed not-found condition (blocked: no silent tombstone from
-// an ordinary GET unless the topic proves deletion); other provider
-// failures keep their taxonomy for retry/blocked routing.
-func mapOrderReadError(err error) error {
-	var providerErr *commerce.ProviderError
-	if asCommerceProviderError(err, &providerErr) {
-		// 404 from the frozen client classifies as Conflict; for order
-		// reads it means the provider has no such order.
-		if providerErr.Kind == commerce.ErrorConflict {
-			return &orders.BlockedError{Code: orders.CodeOrderNotFound, Message: "provider order not found"}
-		}
-		return err
+// mapOrderReadError translates transport outcomes for reconciliation.
+// Only an actual HTTP 404 becomes ORDER_NOT_FOUND (confirmed provider
+// absence for delete processing). HTTP 409 stays a generic Conflict and
+// must never be mistaken for absence: the shared client classifies both
+// 404 and 409 as Conflict kinds, so the kind alone cannot decide. Other
+// provider failures keep their taxonomy for retry/blocked routing.
+func mapOrderReadError(err error, status int) error {
+	if status == http.StatusNotFound {
+		return &orders.BlockedError{Code: orders.CodeOrderNotFound, Message: "provider order not found"}
 	}
 	return err
 }

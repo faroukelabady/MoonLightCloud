@@ -99,6 +99,7 @@ type WebhookQueueStats struct {
 // OrderReader is the dashboard read boundary over projected orders.
 type OrderReader interface {
 	ListOrderSummaries(ctx context.Context, provider, status string, limit int, cursor *OrderCursor) ([]OrderSummary, error)
+	ListOrderPage(ctx context.Context, provider, status string, limit int, cursor *OrderCursor) (OrderPage, error)
 	GetOrderDetail(ctx context.Context, providerKey, externalOrderID string) (OrderDetail, error)
 	CountOrdersByStatus(ctx context.Context, provider string) ([]OrderStatusCount, error)
 	OrderInboxStats(ctx context.Context) (WebhookQueueStats, error)
@@ -110,6 +111,13 @@ type OrderCursor struct {
 	CreatedAt       time.Time
 	ProviderKey     string
 	ExternalOrderID string
+}
+
+// OrderPage is one dashboard list page with its continuation cursor.
+// Next is nil on the final page.
+type OrderPage struct {
+	Items []OrderSummary
+	Next  *OrderCursor
 }
 
 // MinorString renders exact minor units for JSON string-money fields.

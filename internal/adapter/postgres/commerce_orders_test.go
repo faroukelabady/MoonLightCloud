@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"crypto/sha256"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -493,6 +494,233 @@ func TestCommerceOrderLeavesSalesMetricsUnchanged(t *testing.T) {
 		if count, revenue, refunds := snapshot(); count != baseCount || revenue != baseRevenue || refunds != baseRefunds {
 			t.Fatalf("%s moved sales metrics: (%d,%d,%d) vs baseline (%d,%d,%d)",
 				tc.status, count, revenue, refunds, baseCount, baseRevenue, baseRefunds)
+		}
+	}
+}
+
+// TestCommerceInboxOldestPending proves the operational oldest-pending
+// metric reflects the earliest eligible received timestamp, not the
+// newest: pending 10:00 + pending 11:00 + retry 09:00 → 09:00, while
+// processed/blocked rows never count. Empty inbox keeps null/zero.
+func TestCommerceInboxOldestPending(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	seed := func(delivery, topic, order, status, received string) {
+		t.Helper()
+		if _, err := env.pool.Exec(ctx,
+			`INSERT INTO commerce_online_order_webhook_events (provider_key, delivery_id, topic, external_order_id, payload_hash, status, received_at)
+			 VALUES ('website', $1, $2, $3, '\x02', $4, $5::timestamptz)`,
+			delivery, topic, order, status, received); err != nil {
+			t.Fatalf("seed %s: %v", delivery, err)
+		}
+	}
+	seed("old-p", "order.created", "700", "pending", "2026-09-27T10:00:00Z")
+	seed("old-q", "order.updated", "701", "pending", "2026-09-27T11:00:00Z")
+	seed("old-r", "order.updated", "702", "retry", "2026-09-27T09:00:00Z")
+	seed("old-ok", "order.updated", "703", "processed", "2026-09-27T08:00:00Z")
+	seed("old-block", "order.created", "704", "blocked", "2026-09-27T07:00:00Z")
+	stats, err := catalogStore(env).OrderInboxStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Pending != 2 || stats.Retry != 1 || stats.Blocked != 1 {
+		t.Fatalf("counts: %+v", stats)
+	}
+	if stats.OldestPending == nil || *stats.OldestPending != "2026-09-27T09:00:00Z" {
+		t.Fatalf("oldest pending: %+v", stats.OldestPending)
+	}
+	// Empty inbox: zero counts and null oldest.
+	fresh := openSaleEnv(t)
+	empty, err := catalogStore(fresh).OrderInboxStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Pending != 0 || empty.Retry != 0 || empty.Blocked != 0 || empty.OldestPending != nil {
+		t.Fatalf("empty inbox: %+v", empty)
+	}
+}
+
+// seedPagedOrders projects count orders with distinct creation seconds
+// under provider; every third order is DELETED-tombstoned, every fifth
+// unmapped, so traversal tests prove deleted/unmapped rows stay
+// pageable. IDs are zero-padded for deterministic tie-breaks.
+func seedPagedOrders(t *testing.T, env *saleEnv, provider string, base time.Time, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		external := "04" + strings.Repeat("0", 2) + strconv.Itoa(100+i)
+		snapshot := orderTestSnapshot(provider, external, orders.StatusProcessing, "processing", int64(1000+i))
+		snapshot.CreatedAt = base.Add(time.Duration(i) * time.Second)
+		snapshot.ModifiedAt = snapshot.CreatedAt.Add(time.Hour)
+		if i%5 == 4 {
+			snapshot.Lines[0].ExternalProductID = "foreign"
+		}
+		if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
+			t.Fatalf("seed %s changed", external)
+		}
+		if i%3 == 2 {
+			store := catalogStore(env)
+			generation, err := store.BeginOrderReconcile(context.Background(), provider, external)
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, _, _, err := store.LoadProjectedOrder(context.Background(), provider, external)
+			if err != nil {
+				t.Fatal(err)
+			}
+			live.ProviderDeleted = true
+			live.Canonical = orders.StatusDeleted
+			if outcome, err := store.ReconcileProjectedOrder(context.Background(), live, orders.Fingerprint(live), generation); err != nil || !outcome.Changed {
+				t.Fatalf("tombstone %s: %+v %v", external, outcome, err)
+			}
+		}
+	}
+}
+
+// collectPageIDs walks ListOrderPage to exhaustion, asserting stable
+// keyset traversal: every row exactly once, in deterministic order.
+func collectPageIDs(t *testing.T, env *saleEnv, provider, status string, limit int) []string {
+	t.Helper()
+	ctx := context.Background()
+	store := catalogStore(env)
+	var ids []string
+	seen := map[string]bool{}
+	var cursor *orders.OrderCursor
+	for {
+		page, err := store.ListOrderPage(ctx, provider, status, limit, cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) > limit {
+			t.Fatalf("page exceeds limit: %d", len(page.Items))
+		}
+		for _, item := range page.Items {
+			id := item.ProviderKey + "/" + item.ExternalOrderID
+			if seen[id] {
+				t.Fatalf("duplicate row %s", id)
+			}
+			seen[id] = true
+			ids = append(ids, id)
+		}
+		if page.Next == nil {
+			break
+		}
+		cursor = page.Next
+	}
+	return ids
+}
+
+// TestCommerceOrderPageTraversal proves full keyset traversal: 25
+// orders at limit 10 visit every durable row (live, deleted, unmapped)
+// exactly once across pages.
+func TestCommerceOrderPageTraversal(t *testing.T) {
+	env := openSaleEnv(t)
+	base := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	seedPagedOrders(t, env, "website", base, 25)
+	ids := collectPageIDs(t, env, "website", "", 10)
+	if len(ids) != 25 {
+		t.Fatalf("traversal: %d rows", len(ids))
+	}
+}
+
+// TestCommerceOrderPageEqualTimestamps proves identical created_at
+// values paginate without duplicates or gaps via (provider, order)
+// tie-breaks.
+func TestCommerceOrderPageEqualTimestamps(t *testing.T) {
+	env := openSaleEnv(t)
+	base := time.Date(2026, 9, 27, 13, 0, 0, 0, time.UTC)
+	for i := 0; i < 7; i++ {
+		external := "05" + strings.Repeat("0", 2) + strconv.Itoa(100+i)
+		snapshot := orderTestSnapshot("website", external, orders.StatusPending, "pending", 1000)
+		snapshot.CreatedAt = base
+		snapshot.ModifiedAt = base.Add(time.Hour)
+		if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
+			t.Fatalf("seed %s changed", external)
+		}
+	}
+	ids := collectPageIDs(t, env, "website", "", 3)
+	if len(ids) != 7 {
+		t.Fatalf("equal-timestamp traversal: %d rows", len(ids))
+	}
+	for i := 1; i < len(ids); i++ {
+		if ids[i-1] >= ids[i] {
+			t.Fatalf("unstable order: %v", ids)
+		}
+	}
+}
+
+// TestCommerceOrderPageFilters proves provider and status filters
+// traverse exactly their matching rows.
+func TestCommerceOrderPageFilters(t *testing.T) {
+	env := openSaleEnv(t)
+	base := time.Date(2026, 9, 27, 14, 0, 0, 0, time.UTC)
+	seedPagedOrders(t, env, "website", base, 12)
+	seedPagedOrders(t, env, "shop2", base, 6)
+	website := collectPageIDs(t, env, "website", "", 5)
+	if len(website) != 12 {
+		t.Fatalf("provider filter: %d rows", len(website))
+	}
+	for _, id := range website {
+		if !strings.HasPrefix(id, "website/") {
+			t.Fatalf("cross-provider leak: %s", id)
+		}
+	}
+	// Status filter: website seeds alternate live PROCESSING and
+	// DELETED tombstones (every third). PROCESSING count = 8 of 12.
+	processing := collectPageIDs(t, env, "website", "PROCESSING", 5)
+	if len(processing) != 8 {
+		t.Fatalf("status filter: %d rows", len(processing))
+	}
+	store := catalogStore(env)
+	page, err := store.ListOrderPage(context.Background(), "website", "PROCESSING", 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.CanonicalStatus != "PROCESSING" {
+			t.Fatalf("status leak: %+v", item)
+		}
+	}
+}
+
+// TestCommerceOrderPageConcurrentInsert proves keyset current-state
+// semantics: rows inserted after page 1 never duplicate in later pages.
+func TestCommerceOrderPageConcurrentInsert(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	base := time.Date(2026, 9, 27, 15, 0, 0, 0, time.UTC)
+	seedPagedOrders(t, env, "website", base, 8)
+	first, err := store.ListOrderPage(ctx, "website", "", 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 5 || first.Next == nil {
+		t.Fatalf("page1: %+v", first)
+	}
+	newer := orderTestSnapshot("website", "04999", orders.StatusPending, "pending", 1000)
+	newer.CreatedAt = base.Add(24 * time.Hour)
+	newer.ModifiedAt = newer.CreatedAt.Add(time.Hour)
+	if _, changed := reconcileSnapshot(t, env, newer); !changed {
+		t.Fatal("newer seed changed")
+	}
+	older := orderTestSnapshot("website", "04000", orders.StatusPending, "pending", 1000)
+	older.CreatedAt = base.Add(-24 * time.Hour)
+	older.ModifiedAt = older.CreatedAt.Add(-23 * time.Hour)
+	if _, changed := reconcileSnapshot(t, env, older); !changed {
+		t.Fatal("older seed changed")
+	}
+	second, err := store.ListOrderPage(ctx, "website", "", 5, first.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, item := range first.Items {
+		seen[item.ProviderKey+"/"+item.ExternalOrderID] = true
+	}
+	for _, item := range second.Items {
+		id := item.ProviderKey + "/" + item.ExternalOrderID
+		if seen[id] {
+			t.Fatalf("duplicate after insert: %s", id)
 		}
 	}
 }

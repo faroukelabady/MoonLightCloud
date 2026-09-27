@@ -2,6 +2,7 @@ package woocommerce
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -249,6 +250,120 @@ func TestWooOrderLineMatrix(t *testing.T) {
 		}
 		if len(snapshot.Lines) != 1 || snapshot.Lines[0].ExternalProductID != "" || snapshot.Lines[0].Mapped {
 			t.Fatalf("manual line: %+v", snapshot.Lines)
+		}
+	})
+}
+
+// TestWooGetOrderStatusMatrix proves exact HTTP status semantics for
+// order reads through the real client: only 404 becomes
+// ORDER_NOT_FOUND; 409 stays Conflict and can never read as absence.
+func TestWooGetOrderStatusMatrix(t *testing.T) {
+	newProvider := func(t *testing.T) (*WooCommerceProvider, *wooHarness) {
+		t.Helper()
+		harness := newWooHarness(t, testConsumerKey, testConsumerSec)
+		return testProvider(t, harness), harness
+	}
+	wooErr := func(code, message string) map[string]any {
+		return map[string]any{"code": code, "message": message}
+	}
+	t.Run("404 not found", func(t *testing.T) {
+		provider, _ := newProvider(t)
+		_, err := provider.GetOrder(context.Background(), "999")
+		if code, blocked := orders.IsBlocked(err); !blocked || code != orders.CodeOrderNotFound {
+			t.Fatalf("404 must be ORDER_NOT_FOUND: %v", err)
+		}
+	})
+	t.Run("409 conflict is not absence", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/500", http.StatusConflict,
+			wooErr("test_conflict", "Clash."))
+		_, err := provider.GetOrder(context.Background(), "500")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorConflict {
+			t.Fatalf("409 must stay generic Conflict: %v", err)
+		}
+		if code, blocked := orders.IsBlocked(err); blocked && code == orders.CodeOrderNotFound {
+			t.Fatal("409 must never read as ORDER_NOT_FOUND")
+		}
+	})
+	t.Run("400 validation", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/501", http.StatusBadRequest,
+			wooErr("rest_no_route", "No route."))
+		_, err := provider.GetOrder(context.Background(), "501")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorValidation {
+			t.Fatalf("400 must be Validation: %v", err)
+		}
+	})
+	t.Run("401 authentication", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/502", http.StatusUnauthorized,
+			wooErr("rest_forbidden", "Denied."))
+		_, err := provider.GetOrder(context.Background(), "502")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorAuthentication {
+			t.Fatalf("401 must be Authentication: %v", err)
+		}
+	})
+	t.Run("408 temporary", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/503", http.StatusRequestTimeout,
+			wooErr("timeout", "Slow."))
+		_, err := provider.GetOrder(context.Background(), "503")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || !providerErr.Retryable() {
+			t.Fatalf("408 must be retryable: %v", err)
+		}
+	})
+	t.Run("422 validation", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/504", http.StatusUnprocessableEntity,
+			wooErr("rest_invalid_param", "Bad param."))
+		_, err := provider.GetOrder(context.Background(), "504")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorValidation {
+			t.Fatalf("422 must be Validation: %v", err)
+		}
+	})
+	t.Run("429 rate limited", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.failHeaders(http.MethodGet, "/wp-json/wc/v3/orders/505", http.StatusTooManyRequests,
+			wooErr("throttled", "Slow down."), map[string]string{"Retry-After": "7"})
+		_, err := provider.GetOrder(context.Background(), "505")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || providerErr.Kind != commerce.ErrorRateLimited {
+			t.Fatalf("429 must be RateLimited: %v", err)
+		}
+	})
+	for _, status := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			provider, harness := newProvider(t)
+			harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/506", status,
+				wooErr("test_boom", "Down."))
+			_, err := provider.GetOrder(context.Background(), "506")
+			var providerErr *commerce.ProviderError
+			if !asCommerceProviderError(err, &providerErr) || !providerErr.Retryable() {
+				t.Fatalf("%d must be retryable: %v", status, err)
+			}
+		})
+	}
+	t.Run("network failure temporary", func(t *testing.T) {
+		provider, harness := newProvider(t)
+		harness.server.Close()
+		_, err := provider.GetOrder(context.Background(), "507")
+		var providerErr *commerce.ProviderError
+		if !asCommerceProviderError(err, &providerErr) || !providerErr.Retryable() {
+			t.Fatalf("network failure must be retryable: %v", err)
+		}
+	})
+	t.Run("caller cancellation preserved", func(t *testing.T) {
+		provider, _ := newProvider(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := provider.GetOrder(ctx, "508")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancellation must propagate: %v", err)
 		}
 	})
 }

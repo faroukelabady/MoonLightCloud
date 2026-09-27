@@ -11,7 +11,7 @@ back to Woo.
 |---|---|---|
 | `COMMERCE_WOO_ENABLED` | yes | The Woo provider itself must be on |
 | `COMMERCE_WOO_ORDERS_ENABLED` | yes | `true` enables webhook route + processor |
-| `COMMERCE_WOO_WEBHOOK_SECRET` | when enabled | ≥ 32 chars, distinct from the REST consumer secret, runtime only |
+| `COMMERCE_WOO_WEBHOOK_SECRET` | when enabled | ≥ 32 chars, enforced distinct from the REST consumer secret, runtime only |
 
 Disabled (default): webhook route unregistered (404), no processor
 runs, no secret required. Enabling never requires Woo network access
@@ -58,7 +58,9 @@ non-terminal row. Stale completions are safe no-ops that change
 nothing — terminal states cannot resurrect.
 
 Deletion never trusts the topic alone: each attempt confirms current
-provider state (live wins, 404 tombstones, transient retries). No DB
+provider state (live wins, transient retries). Only an actual HTTP 404
+from Woo becomes ORDER_NOT_FOUND and tombstones; HTTP 409 stays a
+generic Conflict and blocks without tombstoning. No DB
 lock or transaction ever spans provider HTTP in any path.
 
 ## Processing states
@@ -112,10 +114,24 @@ at last-known state meanwhile.
 
 ## Deleted order behavior
 
-`order.deleted` tombstones with last-known lines preserved
+`order.deleted` tombstones only on provider-confirmed absence (HTTP
+404 → ORDER_NOT_FOUND) with last-known lines preserved
 (`provider_deleted=true`, canonical `DELETED`); unseen orders get a
-minimal tombstone without fabricated data. History is retained for
+minimal tombstone without fabricated data. A live provider order
+(including an HTTP 409 Conflict response) never tombstones: the event
+blocks and the live projection stands. History is retained for
 audit. Repeat deletes are idempotent.
+
+## Order list pagination
+
+`GET /api/v1/dashboard/orders` pages by keyset (`created_at DESC,
+provider_key, external_order_id`): `limit` defaults to 20 (max 100),
+`cursor` is an opaque versioned token from the previous
+`next_cursor` (`null` on the final page). Cursors carry only list
+position plus the filter set they were issued for — no PII or
+secrets — and are rejected (400) when malformed, oversized, or reused
+under different `provider`/`status` filters. The UI appends pages via
+Load more and resets pagination whenever filters change.
 
 ## Backup significance
 

@@ -441,11 +441,76 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 // keyset pagination (created_at DESC, provider_key, external_order_id).
 // Empty provider/status means no filter; limit is bounded.
 func (d Devices) ListOrderSummaries(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]orders.OrderSummary, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
 	if limit <= 0 || limit > 100 {
 		return nil, apperr.New(apperr.InvalidInput, "limit must be 1..100")
 	}
+	rows, err := d.listOrderRows(ctx, provider, status, limit, cursor)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]orders.OrderSummary, 0, len(rows))
+	for _, row := range rows {
+		summaries = append(summaries, orderSummaryRow(row))
+	}
+	return summaries, nil
+}
+
+// orderSummaryRow maps one list row to its dashboard summary with exact
+// string money and UTC RFC3339 timestamps.
+func orderSummaryRow(row sqlcgen.ListCommerceOrdersRow) orders.OrderSummary {
+	name := strings.TrimSpace(row.CustomerFirstName + " " + row.CustomerLastName)
+	return orders.OrderSummary{
+		ProviderKey: row.ProviderKey, ExternalOrderID: row.ExternalOrderID,
+		OrderNumber: row.OrderNumber, ProviderStatus: row.ProviderStatus,
+		CanonicalStatus: row.CanonicalStatus, Currency: row.Currency,
+		TotalMinor:   orders.MinorString(row.TotalMinor),
+		CreatedAt:    row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		ModifiedAt:   row.ModifiedAt.Time.UTC().Format(time.RFC3339),
+		CustomerName: name, MappingComplete: row.MappingComplete,
+		UnmappedLineCount: int(row.UnmappedLines),
+		ProviderDeleted:   row.ProviderDeleted, Revision: row.Revision,
+	}
+}
+
+// ListOrderPage returns one dashboard page plus its continuation cursor
+// using the same deterministic keyset ordering as ListOrderSummaries.
+// It fetches one lookahead row to decide continuation without a full
+// count; Next is nil on the final page and otherwise points after the
+// last returned row (never the lookahead row).
+func (d Devices) ListOrderPage(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) (orders.OrderPage, error) {
+	if limit <= 0 || limit > 100 {
+		return orders.OrderPage{}, apperr.New(apperr.InvalidInput, "limit must be 1..100")
+	}
+	// One unbounded page past the configured maximum: the lookahead
+	// row only decides continuation and is never returned.
+	rows, err := d.listOrderRows(ctx, provider, status, limit+1, cursor)
+	if err != nil {
+		return orders.OrderPage{}, err
+	}
+	page := orders.OrderPage{Items: make([]orders.OrderSummary, 0, len(rows))}
+	for _, row := range rows {
+		if len(page.Items) == limit {
+			break
+		}
+		page.Items = append(page.Items, orderSummaryRow(row))
+	}
+	if len(rows) > limit {
+		// Full-precision row time: summaries render seconds, but the
+		// fence must keep sub-second precision so same-second rows
+		// can neither repeat nor skip.
+		last := rows[limit-1]
+		page.Next = &orders.OrderCursor{
+			CreatedAt: last.CreatedAt.Time, ProviderKey: last.ProviderKey, ExternalOrderID: last.ExternalOrderID,
+		}
+	}
+	return page, nil
+}
+
+// listOrderRows runs the shared keyset list query for both list entry
+// points so ordering can never diverge between them.
+func (d Devices) listOrderRows(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]sqlcgen.ListCommerceOrdersRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
 	var cursorAt pgtype.Timestamptz
 	var cursorProvider, cursorOrder string
 	if cursor != nil {
@@ -459,22 +524,7 @@ func (d Devices) ListOrderSummaries(ctx context.Context, provider, status string
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Internal, "order list", redact(err))
 	}
-	summaries := make([]orders.OrderSummary, 0, len(rows))
-	for _, row := range rows {
-		name := strings.TrimSpace(row.CustomerFirstName + " " + row.CustomerLastName)
-		summaries = append(summaries, orders.OrderSummary{
-			ProviderKey: row.ProviderKey, ExternalOrderID: row.ExternalOrderID,
-			OrderNumber: row.OrderNumber, ProviderStatus: row.ProviderStatus,
-			CanonicalStatus: row.CanonicalStatus, Currency: row.Currency,
-			TotalMinor:   orders.MinorString(row.TotalMinor),
-			CreatedAt:    row.CreatedAt.Time.UTC().Format(time.RFC3339),
-			ModifiedAt:   row.ModifiedAt.Time.UTC().Format(time.RFC3339),
-			CustomerName: name, MappingComplete: row.MappingComplete,
-			UnmappedLineCount: int(row.UnmappedLines),
-			ProviderDeleted:   row.ProviderDeleted, Revision: row.Revision,
-		})
-	}
-	return summaries, nil
+	return rows, nil
 }
 
 // GetOrderDetail assembles the full operator-visible order.

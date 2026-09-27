@@ -184,6 +184,23 @@ func TestWooOrdersConfig(t *testing.T) {
 			t.Fatalf("orders config: %+v", cfg.Enabled)
 		}
 	})
+	t.Run("identical webhook and consumer secret rejected", func(t *testing.T) {
+		shared := "0123456789abcdef0123456789abcdef"
+		env := validWooEnv()
+		env["COMMERCE_WOO_CONSUMER_SECRET"] = shared
+		setWooEnv(t, env)
+		setOrdersEnv(t, map[string]string{
+			"COMMERCE_WOO_ORDERS_ENABLED": "true",
+			"COMMERCE_WOO_WEBHOOK_SECRET": shared,
+		})
+		_, err := loadWooCommerceConfig()
+		if err == nil {
+			t.Fatal("identical secrets must fail")
+		}
+		if got := err.Error(); strings.Contains(got, shared) {
+			t.Fatalf("error must not leak secret values: %q", got)
+		}
+	})
 	t.Run("disabled ignores orders secret", func(t *testing.T) {
 		setWooEnv(t, map[string]string{})
 		setOrdersEnv(t, map[string]string{"COMMERCE_WOO_WEBHOOK_SECRET": "whatever"})
