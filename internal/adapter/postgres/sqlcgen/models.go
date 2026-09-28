@@ -242,6 +242,57 @@ type DeviceCredential struct {
 	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type NotificationDeliveryStatusHistory struct {
+	NotificationID    pgtype.UUID        `json:"notification_id"`
+	ProviderKey       string             `json:"provider_key"`
+	ProviderMessageID string             `json:"provider_message_id"`
+	ProviderStatusRaw string             `json:"provider_status_raw"`
+	CanonicalStatus   string             `json:"canonical_status"`
+	ProviderTimestamp pgtype.Timestamptz `json:"provider_timestamp"`
+	EventFingerprint  []byte             `json:"event_fingerprint"`
+	ProviderErrorCode pgtype.Text        `json:"provider_error_code"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+}
+
+type NotificationMessage struct {
+	ID                  pgtype.UUID        `json:"id"`
+	ProviderKey         string             `json:"provider_key"`
+	IdempotencyKey      string             `json:"idempotency_key"`
+	SemanticFingerprint []byte             `json:"semantic_fingerprint"`
+	Recipient           string             `json:"recipient"`
+	TemplateKey         string             `json:"template_key"`
+	Locale              string             `json:"locale"`
+	Parameters          []byte             `json:"parameters"`
+	ExtTemplateName     string             `json:"ext_template_name"`
+	ExtLanguageCode     string             `json:"ext_language_code"`
+	ExtParameterOrder   []string           `json:"ext_parameter_order"`
+	DispatchStatus      string             `json:"dispatch_status"`
+	AttemptCount        int32              `json:"attempt_count"`
+	NextAttemptAt       pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseOwner          pgtype.Text        `json:"lease_owner"`
+	LeaseUntil          pgtype.Timestamptz `json:"lease_until"`
+	LeaseGeneration     int64              `json:"lease_generation"`
+	SendStartedAt       pgtype.Timestamptz `json:"send_started_at"`
+	ProviderMessageID   pgtype.Text        `json:"provider_message_id"`
+	DeliveryStatus      string             `json:"delivery_status"`
+	DeliveryStatusAt    pgtype.Timestamptz `json:"delivery_status_at"`
+	LastErrorCode       pgtype.Text        `json:"last_error_code"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTemplateMapping struct {
+	ProviderKey          string             `json:"provider_key"`
+	TemplateKey          string             `json:"template_key"`
+	Locale               string             `json:"locale"`
+	ExternalTemplateName string             `json:"external_template_name"`
+	ExternalLanguageCode string             `json:"external_language_code"`
+	ParameterNames       []string           `json:"parameter_names"`
+	Enabled              bool               `json:"enabled"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ReturnRefundLinesProjection struct {
 	ReturnRefundID     pgtype.UUID `json:"return_refund_id"`
 	SaleID             pgtype.UUID `json:"sale_id"`

@@ -652,6 +652,123 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/notifications/webhooks/whatsapp/{provider_key}:
+    get:
+      summary: Meta webhook callback verification (verify token)
+      operationId: notificationsWhatsAppVerify
+      parameters:
+        - name: provider_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        - name: hub.mode
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [subscribe]
+        - name: hub.verify_token
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      description: >-
+        Answers Meta callback verification: hub.mode must read subscribe
+        and hub.verify_token must match the configured webhook verify
+        token (constant-time comparison). Returns the bounded challenge
+        as plain text. No dashboard, device, or report credential is
+        accepted here; the verification token is never logged.
+      responses:
+        '200':
+          description: Verification accepted; body is the echoed challenge.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Wrong verification mode or invalid challenge. Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Missing or mismatched verify token. Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown provider key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      summary: WhatsApp delivery-status callbacks (HMAC signed)
+      operationId: notificationsWhatsAppStatus
+      parameters:
+        - name: provider_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      description: >-
+        Verifies X-Hub-Signature-256 (hex HMAC-SHA256 of the exact raw
+        body with the configured app secret), then applies outbound
+        message status callbacks idempotently: history insert plus
+        timestamp-ordered current-state advance in one transaction.
+        Inbound customer content and unknown provider message IDs are
+        acknowledged without persistence. No raw bodies are stored. No
+        dashboard, device, or report credential is accepted here.
+      responses:
+        '200':
+          description: Callback acknowledged (applied, deduplicated, or ignored).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [accepted]}
+        '400':
+          description: Unreadable or structurally invalid body. Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, malformed, or mismatched HMAC signature. Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown provider key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: Body exceeds the 1 MiB webhook limit. No persistence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Durable status persistence failed; Meta may redeliver. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/orders:
     get:
       summary: Recent online orders (read-only; never Sales)

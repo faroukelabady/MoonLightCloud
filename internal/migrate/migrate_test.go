@@ -461,3 +461,69 @@ func TestV13ToLatest(t *testing.T) {
 		}
 	}
 }
+
+// TestV14ToLatest proves the frozen Phase 6C schema upgrades to the
+// notification domain cleanly: 00015 only adds notification tables,
+// and representative 6C state (mapping, order webhook inbox, reconcile
+// fence, sync event) is untouched. Notification tables start empty.
+func TestV14ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 14); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 14 {
+		t.Fatalf("want 14, got %d", v)
+	}
+	if _, err := conn.Exec(`INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id)
+		VALUES ('website', '11111111-1111-4111-8111-111111111111', '500')`); err != nil {
+		t.Fatalf("seed mapping at v14: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO commerce_online_order_webhook_events
+		(provider_key, delivery_id, topic, external_order_id, payload_hash, status)
+		VALUES ('website', 'delivery-1', 'order.created', '100', '\x02', 'pending')`); err != nil {
+		t.Fatalf("seed order inbox at v14: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO commerce_online_order_reconcile_fences
+		(provider_key, external_order_id, generation)
+		VALUES ('website', '100', 3)`); err != nil {
+		t.Fatalf("seed fence at v14: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO devices (id, name, status) VALUES
+		('11111111-1111-7111-8111-111111111111','shop','active')`); err != nil {
+		t.Fatalf("seed device at v14: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
+		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v1',now(),now(),'{}','\x00')`); err != nil {
+		t.Fatalf("seed event at v14: %v", err)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var generation int64
+	if err := conn.QueryRow(`SELECT generation FROM commerce_online_order_reconcile_fences
+		WHERE provider_key='website' AND external_order_id='100'`).Scan(&generation); err != nil || generation != 3 {
+		t.Fatalf("fence preserved: %d (%v)", generation, err)
+	}
+	var status string
+	var leaseGen int64
+	if err := conn.QueryRow(`SELECT status, lease_generation FROM commerce_online_order_webhook_events
+		WHERE provider_key='website' AND delivery_id='delivery-1'`).Scan(&status, &leaseGen); err != nil || status != "pending" || leaseGen != 0 {
+		t.Fatalf("inbox preserved: %s %d (%v)", status, leaseGen, err)
+	}
+	for _, table := range []string{
+		"notification_template_mappings", "notification_messages",
+		"notification_delivery_status_history",
+	} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s missing (%v)", table, err)
+		}
+		var count int
+		if err := conn.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("table %s starts empty (%d %v)", table, count, err)
+		}
+	}
+}

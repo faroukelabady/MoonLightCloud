@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -76,6 +76,15 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	if commerceWebhooks != nil {
 		mux.Handle("POST /api/v1/commerce/webhooks/woocommerce/{provider_key}",
 			http.HandlerFunc(commerceWebhooks.WooCommerceWebhook))
+	}
+	// WhatsApp notification callbacks are public-but-signed: verify-token
+	// (GET) or app-secret HMAC (POST) authority only, never dashboard
+	// session or device tokens. Unregistered while disabled.
+	if notificationWebhooks != nil {
+		mux.Handle("GET /api/v1/notifications/webhooks/whatsapp/{provider_key}",
+			http.HandlerFunc(notificationWebhooks.VerifyWhatsAppWebhook))
+		mux.Handle("POST /api/v1/notifications/webhooks/whatsapp/{provider_key}",
+			http.HandlerFunc(notificationWebhooks.StatusWhatsAppWebhook))
 	}
 	// Dashboard SPA (static build; API routes above take precedence).
 	mux.Handle("/dashboard", DashboardAssets(assetsDir, log))

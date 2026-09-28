@@ -24,6 +24,8 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
+	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
+	"github.com/faroukelabady/MoonLightCloud/internal/notifications/whatsapp"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
@@ -45,30 +47,32 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg                config.Config
-	Log                *slog.Logger
-	Pool               *pgxpool.Pool
-	Devices            auth.Service
-	Sync               sync.Service
-	Reports            report.Service
-	Dashboard          dashboard.Service
-	Projector          *sale.Projector
-	SaleStore          sale.Store
-	ReturnProjector    *returnrefund.Projector
-	ReturnStore        returnrefund.Store
-	CatalogStore       catalog.Store
-	CategoryProjector  *catalog.Projector
-	TagProjector       *catalog.Projector
-	ProductProjector   *catalog.Projector
-	PolicyProjector    *catalog.Projector
-	InventoryProjector *catalog.Projector
-	Catalog            catalog.Service
-	CommerceRegistry   *commerce.Registry
-	OrderService       *orders.OrderService
-	OrderProcessor     *orders.Processor
-	Handler            http.Handler
-	Health             adapterhttp.Health
-	Version            adapterhttp.Version
+	Cfg                    config.Config
+	Log                    *slog.Logger
+	Pool                   *pgxpool.Pool
+	Devices                auth.Service
+	Sync                   sync.Service
+	Reports                report.Service
+	Dashboard              dashboard.Service
+	Projector              *sale.Projector
+	SaleStore              sale.Store
+	ReturnProjector        *returnrefund.Projector
+	ReturnStore            returnrefund.Store
+	CatalogStore           catalog.Store
+	CategoryProjector      *catalog.Projector
+	TagProjector           *catalog.Projector
+	ProductProjector       *catalog.Projector
+	PolicyProjector        *catalog.Projector
+	InventoryProjector     *catalog.Projector
+	Catalog                catalog.Service
+	CommerceRegistry       *commerce.Registry
+	OrderService           *orders.OrderService
+	OrderProcessor         *orders.Processor
+	NotificationRegistry   *notifications.Registry
+	NotificationDispatcher *notifications.Dispatcher
+	Handler                http.Handler
+	Health                 adapterhttp.Health
+	Version                adapterhttp.Version
 }
 
 // New builds the app in startup order.
@@ -154,9 +158,42 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
 		"orders", cfg.WooCommerce.OrdersEnabled)
+	a.NotificationRegistry = notifications.NewRegistry()
+	var notificationWebhooks *adapterhttp.WhatsAppWebhookHandlers
+	if cfg.WhatsAppNotifications.Enabled {
+		provider, err := whatsapp.NewProvider(cfg.WhatsAppNotifications, nil)
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+		if err := a.NotificationRegistry.Register(provider.Key(), provider); err != nil {
+			pool.Close()
+			return nil, err
+		}
+		a.NotificationDispatcher = notifications.NewDispatcher(
+			store, a.NotificationRegistry, notifications.SystemClock{}, commerceOwner(), log)
+		secret := cfg.WhatsAppNotifications.WebhookVerifyToken
+		appSecret := cfg.WhatsAppNotifications.AppSecret
+		key := string(provider.Key())
+		notificationWebhooks = adapterhttp.NewWhatsAppWebhookHandlers(store,
+			func(providerKey string) (string, bool) {
+				if providerKey == key {
+					return secret, true
+				}
+				return "", false
+			},
+			func(providerKey string) (string, bool) {
+				if providerKey == key {
+					return appSecret, true
+				}
+				return "", false
+			}, log)
+	}
+	a.Log.Info("notification providers", "count", a.NotificationRegistry.Count(),
+		"whatsapp", cfg.WhatsAppNotifications.Enabled)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

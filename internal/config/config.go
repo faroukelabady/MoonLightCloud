@@ -136,6 +136,10 @@ type Config struct {
 	// (Phase 6B). Disabled by default: no provider, no credentials, no
 	// network client.
 	WooCommerce WooCommerceConfig
+	// WhatsAppNotifications holds the optional first notification
+	// adapter configuration (Phase 7A). Disabled by default: no
+	// provider, no credentials, no network client.
+	WhatsAppNotifications WhatsAppNotificationConfig
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -212,6 +216,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.WooCommerce = woo
+	whatsApp, err := loadWhatsAppNotificationConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	c.WhatsAppNotifications = whatsApp
 	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
