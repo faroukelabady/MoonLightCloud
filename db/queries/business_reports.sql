@@ -12,6 +12,12 @@ SELECT id, label, provider_key, recipient, locale, enabled
 FROM business_report_recipients
 WHERE id = $1;
 
+-- name: GetRecipientForUpdate :one
+SELECT id, label, provider_key, recipient, locale, enabled
+FROM business_report_recipients
+WHERE id = $1
+FOR UPDATE;
+
 -- name: ListRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM business_report_recipients
@@ -45,6 +51,14 @@ UPDATE business_report_schedules
 SET enabled = $2, revision = revision + 1,
     next_run_local_date = $3, next_run_at = $4, updated_at = now()
 WHERE id = $1;
+
+-- name: EnableScheduleIfDisabled :one
+UPDATE business_report_schedules
+SET enabled = TRUE, revision = revision + 1,
+    next_run_local_date = $2, next_run_at = $3, updated_at = now()
+WHERE id = $1 AND enabled = FALSE
+RETURNING id, name, report_kind, timezone, local_time, anchor_local_date,
+    enabled, revision, next_run_local_date, next_run_at;
 
 -- name: GetScheduleForUpdate :one
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
@@ -203,16 +217,35 @@ WHERE delivery.id = $1 AND delivery.report_body_snapshot IS NULL
       AND run.lease_owner = $5 AND run.lease_generation = $6
       AND run.status IN ('pending', 'retry'));
 
+-- name: GetRunForUpdate :one
+SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+    scheduled_for, period_start, period_end, schedule_revision,
+    status, attempt_count, next_attempt_at,
+    lease_owner, lease_until, lease_generation, last_error_code
+FROM business_report_runs
+WHERE id = $1
+FOR UPDATE;
+
 -- name: FinishDeliveryEnqueued :execrows
-UPDATE business_report_deliveries
+UPDATE business_report_deliveries AS delivery
 SET status = 'enqueued', notification_id = $2, last_error_code = NULL,
     updated_at = now()
-WHERE id = $1 AND status = 'pending';
+FROM business_report_runs AS run
+WHERE delivery.id = $1 AND delivery.status = 'pending'
+  AND run.id = delivery.run_id AND run.id = $3
+  AND run.lease_owner = $4 AND run.lease_generation = $5
+  AND run.lease_until > now()
+  AND run.status IN ('pending', 'retry');
 
 -- name: FinishDeliveryBlocked :execrows
-UPDATE business_report_deliveries
+UPDATE business_report_deliveries AS delivery
 SET status = 'blocked', last_error_code = $2, updated_at = now()
-WHERE id = $1 AND status = 'pending';
+FROM business_report_runs AS run
+WHERE delivery.id = $1 AND delivery.status = 'pending'
+  AND run.id = delivery.run_id AND run.id = $3
+  AND run.lease_owner = $4 AND run.lease_generation = $5
+  AND run.lease_until > now()
+  AND run.status IN ('pending', 'retry');
 
 -- name: BusinessReportStats :one
 SELECT

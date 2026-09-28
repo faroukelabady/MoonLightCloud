@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -138,74 +137,8 @@ func TestReportRunnerManualIdempotency(t *testing.T) {
 	}
 }
 
-// TestReportRunnerPartialRetry proves a temporary per-delivery
-// failure retries only that delivery: already-enqueued rows are never
-// re-enqueued.
-func TestReportRunnerPartialRetry(t *testing.T) {
-	env := openSaleEnv(t)
-	source := &stubReportSummary{summary: cannedSummary()}
-	service := reportTestService(t, env, source)
-	ar := addTestRecipient(t, service, "owner-ar")
-	ctx := context.Background()
-	store := catalogStore(env)
-	en, err := service.AddRecipient(ctx, "owner-en", "whatsapp-main", "201012345679", "en")
-	if err != nil {
-		t.Fatal(err)
-	}
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
-	_ = schedule
-	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Fail the second composition (English delivery) once.
-	failing := &flakyReportSource{summary: cannedSummary(), failOn: map[int]bool{2: true}}
-	runner := testRunnerWithSource(t, env, failing)
-	drainRunner(t, runner)
-	detail, err := service.GetRunStatus(ctx, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Run.Status != businessreports.RunRetry {
-		t.Fatalf("run retries: %+v", detail.Run)
-	}
-	var doneCount, pendingCount int
-	for _, delivery := range detail.Deliveries {
-		switch delivery.Status {
-		case businessreports.DeliveryEnqueued:
-			doneCount++
-		case businessreports.DeliveryPending:
-			pendingCount++
-		}
-	}
-	if doneCount != 1 || pendingCount != 1 {
-		t.Fatalf("one done one pending: %+v", detail.Deliveries)
-	}
-	// Heal and drain: only the pending delivery enqueues; the done one
-	// keeps its single notification.
-	failing.failOn = map[int]bool{}
-	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_runs SET next_attempt_at = now() - interval '1 second' WHERE id = $1`,
-		mustReportPgID(runID)); err != nil {
-		t.Fatal(err)
-	}
-	drainRunner(t, testRunner(t, env, &stubReportSummary{summary: cannedSummary()}))
-	detail, err = service.GetRunStatus(ctx, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Run.Status != businessreports.RunCompleted {
-		t.Fatalf("completed: %+v", detail.Run)
-	}
-	var notifications int
-	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM notification_messages`).Scan(&notifications); err != nil || notifications != 2 {
-		t.Fatalf("two notifications total: %d %v", notifications, err)
-	}
-	_ = store
-}
-
 // flakyReportSource fails Summary on configured call numbers to
-// simulate temporary canonical-service outages mid-run.
+// simulate temporary canonical-service outages.
 type flakyReportSource struct {
 	summary report.Summary
 	failOn  map[int]bool
@@ -228,16 +161,68 @@ func (s *flakyReportSource) Summary(_ context.Context, _ report.Request) (report
 	return s.summary, nil
 }
 
-func errFlakyReport() error { return errors.New("flaky canonical service") }
+func errFlakyReport() error { return errFlakyReportValue }
 
-func testRunnerWithSource(t *testing.T, env *saleEnv, source businessreports.ReportSource) *businessreports.Runner {
-	t.Helper()
-	store := catalogStore(env)
-	seedReportTemplateMapping(t, env)
-	return businessreports.NewRunner(store, store, source,
-		notifications.NewService(store, store, nilLogger()),
-		businessreports.SystemClock{}, mustCairo(), time.Minute, 25,
-		"worker-A", 5*time.Minute, nilLogger())
+type errFlakyReportType string
+
+func (e errFlakyReportType) Error() string { return string(e) }
+
+var errFlakyReportValue = errFlakyReportType("flaky canonical service")
+
+// TestReportRunnerBarrierFailureRetry proves F01 failure-before-
+// snapshot semantics: a Summary failure before the barrier commits
+// leaves zero snapshots and zero enqueues; the healed retry snapshots
+// the new canonical basis once for all recipients.
+func TestReportRunnerBarrierFailureRetry(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	ar := addTestRecipient(t, service, "owner-ar")
+	en, err := service.AddRecipient(ctx, "owner-en", "whatsapp-main", "201012345679", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &flakyReportSource{summary: cannedSummary(), failOn: map[int]bool{1: true}}
+	drainRunner(t, testRunner(t, env, failing))
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != businessreports.RunRetry {
+		t.Fatalf("barrier failure retries: %+v", detail.Run)
+	}
+	for _, delivery := range detail.Deliveries {
+		if delivery.HasBody || delivery.Status != businessreports.DeliveryPending {
+			t.Fatalf("zero snapshots, all pending: %+v", delivery)
+		}
+	}
+	var notifications int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM notification_messages`).Scan(&notifications); err != nil || notifications != 0 {
+		t.Fatalf("no enqueue before barrier: %d %v", notifications, err)
+	}
+	// Heal: the retry snapshots the current basis once for both.
+	failing.failOn = map[int]bool{}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET next_attempt_at = now() - interval '1 second' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	drainRunner(t, testRunner(t, env, &stubReportSummary{summary: cannedSummary()}))
+	detail, err = service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != businessreports.RunCompleted {
+		t.Fatalf("completed: %+v", detail.Run)
+	}
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM notification_messages`).Scan(&notifications); err != nil || notifications != 2 {
+		t.Fatalf("two notifications: %d %v", notifications, err)
+	}
 }
 
 // TestReportRunnerStaleFencing proves an expired worker cannot alter
@@ -606,4 +591,330 @@ func TestReportRunnerLogPrivacy(t *testing.T) {
 			t.Fatalf("private content in logs: %q in:\n%s", private, output)
 		}
 	}
+}
+
+// TestReportLateDataInterleaving is the F01 adversarial core: A is
+// enqueued from canonical basis S1, late data moves the canonical
+// basis to S2, then B is processed. B must use the persisted S1 body,
+// never recompose from S2.
+func TestReportLateDataInterleaving(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	seedReportTemplateMapping(t, env)
+	basisV1 := &stubReportSummary{summary: cannedSummary()}
+	service := reportTestService(t, env, basisV1)
+	ar := addTestRecipient(t, service, "owner-ar")
+	en, err := service.AddRecipient(ctx, "owner-en", "whatsapp-main", "201012345679", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Phase 1: barrier snapshots both deliveries from S1 (direct store
+	// calls mirror the runner barrier exactly).
+	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to := "2026-09-27", "2026-09-27"
+	snapshots := map[string]businessreports.SnapshotBody{}
+	for _, delivery := range detail.Deliveries {
+		body, fp, err := businessreports.ComposeReport(ctx, basisV1,
+			businessreports.ReportDaily, from, to, delivery.Locale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshots[delivery.ID] = businessreports.SnapshotBody{Body: body, Fingerprint: fp[:]}
+	}
+	persisted, err := store.PersistRunDeliverySnapshots(ctx, runID,
+		claimed.LeaseOwner, claimed.LeaseGeneration, snapshots)
+	if err != nil || !persisted {
+		t.Fatalf("barrier: %v %v", persisted, err)
+	}
+	// Phase 2: A enqueues from S1 (ends its participation).
+	var arabicID string
+	for _, delivery := range detail.Deliveries {
+		if delivery.Locale == "ar" {
+			arabicID = delivery.ID
+		}
+	}
+	notificationService := notifications.NewService(store, store, nilLogger())
+	res, err := notificationService.EnqueueTemplate(ctx, notifications.EnqueueTemplateRequest{
+		ProviderKey: "whatsapp-main", IdempotencyKey: "business-report:" + runID + ":" + arabicID,
+		Recipient: "201012345678", TemplateKey: "daily_business_report_v1", Locale: "ar",
+		Parameters: map[string]string{"report_body": snapshots[arabicID].Body},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.FinishDeliveryEnqueued(ctx, runID, arabicID,
+		claimed.LeaseOwner, claimed.LeaseGeneration, res.ID); err != nil || !ok {
+		t.Fatalf("A finish: %v %v", ok, err)
+	}
+	// Phase 3: late canonical data arrives (S2).
+	basisV2 := cannedSummary()
+	basisV2.TransactionCount = 99
+	// Phase 4: lease expires; the runner processes B with S2 live.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	drainRunner(t, testRunner(t, env, &stubReportSummary{summary: basisV2}))
+	detail, err = service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != businessreports.RunCompleted {
+		t.Fatalf("completed: %+v", detail.Run)
+	}
+	for _, delivery := range detail.Deliveries {
+		if delivery.Locale == "en" && !strings.Contains(delivery.Body, "Transactions: 5") {
+			t.Fatalf("B uses S1 basis:\n%s", delivery.Body)
+		}
+		if strings.Contains(delivery.Body, "99") {
+			t.Fatalf("S2 leaked into run:\n%s", delivery.Body)
+		}
+	}
+	var bodies int
+	if err := env.pool.QueryRow(ctx,
+		`SELECT count(DISTINCT report_fingerprint) FROM business_report_deliveries WHERE run_id = $1`,
+		mustReportPgID(runID)).Scan(&bodies); err != nil {
+		t.Fatal(err)
+	}
+	_ = bodies
+}
+
+// TestDeliveryStaleWritesFenced proves every delivery terminal
+// mutation requires the current run lease: expired-generation writes
+// affect zero rows for blocked, enqueued, and snapshot paths.
+func TestDeliveryStaleWritesFenced(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	seedReportTemplateMapping(t, env)
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	recipient := addTestRecipient(t, service, "owner")
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim A: %v %v", ok, err)
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim B: %v %v", ok, err)
+	}
+	if claimedB.LeaseGeneration != claimedA.LeaseGeneration+1 {
+		t.Fatalf("generations: %+v %+v", claimedA, claimedB)
+	}
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil || len(detail.Deliveries) != 1 {
+		t.Fatalf("one delivery: %+v %v", detail, err)
+	}
+	deliveryID := detail.Deliveries[0].ID
+	// Stale snapshot persist.
+	ok, err = store.PersistRunDeliverySnapshots(ctx, runID,
+		claimedA.LeaseOwner, claimedA.LeaseGeneration,
+		map[string]businessreports.SnapshotBody{deliveryID: {Body: "x", Fingerprint: []byte{1}}})
+	if err != nil || ok {
+		t.Fatalf("stale snapshot: %v %v", ok, err)
+	}
+	// Stale blocked write.
+	applied, err := store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+		claimedA.LeaseOwner, claimedA.LeaseGeneration, "x")
+	if err != nil || applied {
+		t.Fatalf("stale blocked: %v %v", applied, err)
+	}
+	// Stale enqueued write.
+	applied, err = store.FinishDeliveryEnqueued(ctx, runID, deliveryID,
+		claimedA.LeaseOwner, claimedA.LeaseGeneration, "00000000-0000-4000-8000-000000000000")
+	if err != nil || applied {
+		t.Fatalf("stale enqueued: %v %v", applied, err)
+	}
+	// Expired-but-unclaimed lease also fences: expire B without reclaim.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err = store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+		claimedB.LeaseOwner, claimedB.LeaseGeneration, "x")
+	if err != nil || applied {
+		t.Fatalf("expired lease blocked: %v %v", applied, err)
+	}
+}
+
+// TestDeliveryMappingRepairRace reproduces the exact review failure:
+// gen1 goes stale, the mapping is repaired, gen2 enqueues, gen1's
+// late blocked write must lose. Final: delivery enqueued with
+// notification ID, run completed, exactly one notification.
+func TestDeliveryMappingRepairRace(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	recipient := addTestRecipient(t, service, "owner")
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim A: %v %v", ok, err)
+	}
+	// Mapping broken while A stalls: A would block on it.
+	if _, err := env.pool.Exec(ctx, `DELETE FROM notification_template_mappings`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	// Mapping repaired; B claims (generation advances past A), then
+	// releases so the drain converges under a fresh claim.
+	seedReportTemplateMapping(t, env)
+	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim B: %v %v", ok, err)
+	}
+	_ = claimedB
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	drainRunner(t, testRunner(t, env, &stubReportSummary{summary: cannedSummary()}))
+	// A's late blocked write must fail against B's enqueued delivery.
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil || len(detail.Deliveries) != 1 {
+		t.Fatalf("one delivery: %+v %v", detail, err)
+	}
+	applied, err := store.FinishDeliveryBlocked(ctx, runID, detail.Deliveries[0].ID,
+		claimedA.LeaseOwner, claimedA.LeaseGeneration, businessreports.CodeNotificationMappingMissing)
+	if err != nil || applied {
+		t.Fatalf("stale blocked loses: %v %v", applied, err)
+	}
+	detail, err = service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := detail.Deliveries[0]
+	if detail.Run.Status != businessreports.RunCompleted || delivery.Status != businessreports.DeliveryEnqueued ||
+		delivery.NotificationID == "" {
+		t.Fatalf("enqueued wins: %+v %+v", detail.Run, delivery)
+	}
+	var notifications int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM notification_messages`).Scan(&notifications); err != nil || notifications != 1 {
+		t.Fatalf("one notification: %d %v", notifications, err)
+	}
+}
+
+// TestReportManualSemanticMatrix proves manual idempotency compares
+// full delivery semantics: address, provider, locale, set membership
+// conflict; labels and row ordering do not.
+func TestReportManualSemanticMatrix(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	ar := addTestRecipient(t, service, "owner-ar")
+	en, err := service.AddRecipient(ctx, "owner-en", "whatsapp-main", "201012345679", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	first, created, err := service.RunNow(ctx, schedule.ID, "manual-matrix")
+	if err != nil || !created {
+		t.Fatalf("first: %v %v", first, err)
+	}
+	same, created, err := service.RunNow(ctx, schedule.ID, "manual-matrix")
+	if err != nil || created || same != first {
+		t.Fatalf("identical replay: %v %v %v", same, created, err)
+	}
+	// Address-only change conflicts.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET recipient = '201099988877', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.RunNow(ctx, schedule.ID, "manual-matrix"); err == nil {
+		t.Fatal("address change must conflict")
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET recipient = '201012345678', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	// Provider change conflicts.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET provider_key = 'whatsapp-second', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.RunNow(ctx, schedule.ID, "manual-matrix"); err == nil {
+		t.Fatal("provider change must conflict")
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET provider_key = 'whatsapp-main', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	// Locale change conflicts.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET locale = 'en', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.RunNow(ctx, schedule.ID, "manual-matrix"); err == nil {
+		t.Fatal("locale change must conflict")
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET locale = 'ar', updated_at = now() WHERE id = $1`,
+		mustReportPgID(ar.ID)); err != nil {
+		t.Fatal(err)
+	}
+	// Recipient removal conflicts.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET enabled = FALSE, updated_at = now() WHERE id = $1`,
+		mustReportPgID(en.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.RunNow(ctx, schedule.ID, "manual-matrix"); err == nil {
+		t.Fatal("recipient removal must conflict")
+	}
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET enabled = TRUE, updated_at = now() WHERE id = $1`,
+		mustReportPgID(en.ID)); err != nil {
+		t.Fatal(err)
+	}
+	// Change only the label: same run.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_recipients SET label = 'renamed', updated_at = now() WHERE id = $1`,
+		mustReportPgID(en.ID)); err != nil {
+		t.Fatal(err)
+	}
+	replay, created, err := service.RunNow(ctx, schedule.ID, "manual-matrix")
+	if err != nil || created || replay != first {
+		t.Fatalf("label-only change replays: %v %v %v", replay, created, err)
+	}
+	_ = store
 }

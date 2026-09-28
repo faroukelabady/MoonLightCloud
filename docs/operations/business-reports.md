@@ -91,7 +91,9 @@ moonlight-cloud business-reports schedules enable --id <uuid>
 
 Disabling stops future materialization but keeps history, pending
 runs, and notifications. Re-enabling starts from the first future
-slot — the disabled interval is intentionally skipped.
+slot — the disabled interval is intentionally skipped. Enabling an
+already-enabled schedule changes nothing: cursor and backlog are
+preserved.
 
 ## Manual run-now
 

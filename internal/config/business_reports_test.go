@@ -78,3 +78,25 @@ func TestBusinessReportsConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestBusinessReportsBatchBound(t *testing.T) {
+	for value, ok := range map[string]bool{
+		"0": false, "1": true, "25": true, "100": true, "101": false,
+		"4294967321": false, "9223372036854775807": false, "-1": false,
+		"25x": false, "": true, " 25 ": true,
+	} {
+		setBusinessReportsEnv(t, map[string]string{
+			"BUSINESS_REPORTS_ENABLED": "true", "BUSINESS_REPORTS_BATCH_SIZE": value,
+		})
+		cfg, err := loadBusinessReports()
+		if ok && err != nil {
+			t.Fatalf("%q must pass: %v", value, err)
+		}
+		if !ok && err == nil {
+			t.Fatalf("%q must fail", value)
+		}
+		if ok && err == nil && value != "" {
+			_ = cfg
+		}
+	}
+}

@@ -35,13 +35,28 @@ func ComposeReport(ctx context.Context, source ReportSource, kind ReportKind, fr
 	if err != nil {
 		return "", [32]byte{}, apperr.Wrap(apperr.Internal, "report composition", err)
 	}
-	body, err = renderBody(kind, from, to, locale, summary)
+	return renderDeliveryBody(kind, from, to, locale, summary)
+}
+
+// renderDeliveryBody renders and fingerprints one localized body from
+// an already-queried canonical Summary: the barrier's per-locale step
+// over a single shared reporting basis.
+func renderDeliveryBody(kind ReportKind, from, to, locale string, summary report.Summary) (string, [32]byte, error) {
+	if err := ValidateLocale(locale); err != nil {
+		return "", [32]byte{}, err
+	}
+	body, err := renderBody(kind, from, to, locale, summary)
 	if err != nil {
 		return "", [32]byte{}, err
 	}
 	if len(body) > notifications.MaxParameterValueLen {
 		return "", [32]byte{}, apperr.New(apperr.InvalidInput, CodeBodyTooLarge)
 	}
+	return fingerprintBody(kind, from, to, locale, body)
+}
+
+// fingerprintBody hashes kind, period, locale, and body.
+func fingerprintBody(kind ReportKind, from, to, locale, body string) (string, [32]byte, error) {
 	sum := sha256.New()
 	for _, field := range []string{string(kind), from, to, locale, body} {
 		sum.Write([]byte(field))

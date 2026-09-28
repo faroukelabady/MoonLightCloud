@@ -134,7 +134,10 @@ func NextDailySlot(localTime string, after time.Time, loc *time.Location) (strin
 }
 
 // NextTenDaySlot returns the first anchor-aligned slot date with an
-// instant strictly after the reference time.
+// instant strictly after the reference time, using bounded civil-date
+// arithmetic: no iteration over historical slots, so arbitrarily old
+// anchors resolve. Alignment is in civil dates (DST-immune); only the
+// final candidate and its successor touch wall-clock resolution.
 func NextTenDaySlot(anchor, localTime string, after time.Time, loc *time.Location) (string, time.Time, error) {
 	if loc == nil {
 		return "", time.Time{}, apperr.New(apperr.Internal, "report schedule: timezone not configured")
@@ -146,8 +149,16 @@ func NextTenDaySlot(anchor, localTime string, after time.Time, loc *time.Locatio
 	if err := ValidateLocalTime(localTime); err != nil {
 		return "", time.Time{}, err
 	}
+	reference := report.CivilDate{
+		Year: after.In(loc).Year(), Month: after.In(loc).Month(), Day: after.In(loc).Day(),
+	}
 	candidate := anchorDate
-	for i := 0; i < 400; i++ {
+	if compareCivilDate(reference, anchorDate) >= 0 {
+		// Whole 10-day cycles fully before the reference date.
+		elapsed := civilDayDifference(anchorDate, reference)
+		candidate = anchorDate.AddDays((elapsed / 10) * 10)
+	}
+	for i := 0; i < 3; i++ {
 		at, err := SlotInstant(candidate.String(), localTime, loc)
 		if err != nil {
 			return "", time.Time{}, err
@@ -158,6 +169,51 @@ func NextTenDaySlot(anchor, localTime string, after time.Time, loc *time.Locatio
 		candidate = candidate.AddDays(10)
 	}
 	return "", time.Time{}, apperr.New(apperr.Internal, "report schedule: no future ten-day slot")
+}
+
+// compareCivilDate orders two civil dates.
+func compareCivilDate(a, b report.CivilDate) int {
+	if a.Year != b.Year {
+		if a.Year < b.Year {
+			return -1
+		}
+		return 1
+	}
+	if a.Month != b.Month {
+		if a.Month < b.Month {
+			return -1
+		}
+		return 1
+	}
+	if a.Day != b.Day {
+		if a.Day < b.Day {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// civilDayDifference counts whole civil days from a to b (b >= a)
+// with O(1) date arithmetic (Howard Hinnant days-from-civil): no
+// iteration, no instants, immune to DST hour changes.
+func civilDayDifference(a, b report.CivilDate) int {
+	return daysFromCivil(b.Year, b.Month, b.Day) - daysFromCivil(a.Year, a.Month, a.Day)
+}
+
+// daysFromCivil counts days since 0000-03-01 (any consistent epoch
+// works for differences).
+func daysFromCivil(year int, month time.Month, day int) int {
+	y := year
+	if month <= time.February {
+		y--
+	}
+	era := y / 400
+	yoe := y - era*400
+	mp := (int(month) + 9) % 12
+	doy := (153*mp+2)/5 + day - 1
+	doe := yoe*365 + yoe/4 - yoe/100 + doy
+	return era*146097 + doe
 }
 
 // SlotPlan is the computed materialization for one due schedule row:

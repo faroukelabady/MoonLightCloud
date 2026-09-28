@@ -76,6 +76,7 @@ const (
 	CodeNotificationMappingMissing = "REPORT_NOTIFICATION_MAPPING_MISSING"
 	CodeNotificationValidation     = "REPORT_NOTIFICATION_VALIDATION"
 	CodeNotificationIdemConflict   = "REPORT_NOTIFICATION_IDEMPOTENCY_CONFLICT"
+	CodeSnapshotInconsistent       = "REPORT_SNAPSHOT_INCONSISTENT"
 	CodeInternalRetry              = "REPORT_INTERNAL_RETRY"
 )
 

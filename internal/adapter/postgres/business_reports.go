@@ -3,9 +3,10 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -20,7 +21,7 @@ import (
 // order/sale rebuild path touches these tables.
 
 func businessReportID() pgtype.UUID {
-	id, err := parseUUID(uuid.NewString())
+	id, err := parseUUID(ids.System{}.New())
 	if err != nil {
 		panic("report id must be a UUID")
 	}
@@ -136,6 +137,15 @@ func mapScheduleFields(id pgtype.UUID, name, kind, timezone, localTime string, a
 // CreateSchedule stores one cadence. The schedule row type name below
 // follows sqlc generation for business_report_schedules.
 func (d Devices) CreateSchedule(ctx context.Context, schedule businessreports.Schedule) error {
+	return d.CreateScheduleWithRecipients(ctx, schedule, nil)
+}
+
+// CreateScheduleWithRecipients validates recipient rows under lock and
+// persists the schedule plus every recipient link in ONE transaction:
+// any failure rolls back schedule, links, and the unique name claim.
+// Recipient rows are locked so a concurrent disable commits to one
+// deterministic outcome.
+func (d Devices) CreateScheduleWithRecipients(ctx context.Context, schedule businessreports.Schedule, recipientIDs []string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(schedule.ID)
@@ -153,7 +163,35 @@ func (d Devices) CreateSchedule(ctx context.Context, schedule businessreports.Sc
 	if !nextDate.Valid {
 		return apperr.New(apperr.InvalidInput, "invalid next run date")
 	}
-	if err := sqlcgen.New(d.pool).CreateSchedule(ctx, sqlcgen.CreateScheduleParams{
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	// Validate every recipient under row lock first: existence and
+	// enabled state are transaction-consistent, so a concurrent
+	// disable yields one deterministic outcome, never a link to an
+	// invalid recipient.
+	locked := make([]pgtype.UUID, 0, len(recipientIDs))
+	for _, recipientID := range recipientIDs {
+		recipient, err := parseUUID(recipientID)
+		if err != nil {
+			return apperr.New(apperr.InvalidInput, "invalid recipient id")
+		}
+		row, err := q.GetRecipientForUpdate(ctx, recipient)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return apperr.New(apperr.InvalidInput, "schedule recipient must exist and be enabled")
+			}
+			return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+		}
+		if !row.Enabled {
+			return apperr.New(apperr.InvalidInput, "schedule recipient must exist and be enabled")
+		}
+		locked = append(locked, recipient)
+	}
+	if err := q.CreateSchedule(ctx, sqlcgen.CreateScheduleParams{
 		ID: parsed, Name: schedule.Name, ReportKind: string(schedule.Kind),
 		Timezone: schedule.Timezone, LocalTime: schedule.LocalTime,
 		AnchorLocalDate: anchor, NextRunLocalDate: nextDate,
@@ -162,6 +200,16 @@ func (d Devices) CreateSchedule(ctx context.Context, schedule businessreports.Sc
 		if isUniqueViolation(err) {
 			return apperr.New(apperr.Conflict, "report schedule already exists")
 		}
+		return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+	}
+	for _, recipient := range locked {
+		if err := q.LinkScheduleRecipient(ctx, sqlcgen.LinkScheduleRecipientParams{
+			ScheduleID: parsed, RecipientID: recipient,
+		}); err != nil {
+			return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
 	}
 	return nil
@@ -225,6 +273,34 @@ func (d Devices) UpdateScheduleEnablement(ctx context.Context, id string, enable
 		return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
 	}
 	return nil
+}
+
+// EnableScheduleIfDisabled performs the disabled→enabled transition
+// atomically: exactly one concurrent caller wins; losers re-read the
+// winner's state. Returns applied=false when already enabled.
+func (d Devices) EnableScheduleIfDisabled(ctx context.Context, id string, nextDate string, nextAt time.Time) (businessreports.Schedule, bool, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	parsed, err := parseUUID(id)
+	if err != nil {
+		return businessreports.Schedule{}, false, apperr.New(apperr.InvalidInput, "invalid schedule id")
+	}
+	date := businessReportDate(nextDate)
+	if !date.Valid {
+		return businessreports.Schedule{}, false, apperr.New(apperr.InvalidInput, "invalid next run date")
+	}
+	row, err := sqlcgen.New(d.pool).EnableScheduleIfDisabled(ctx, sqlcgen.EnableScheduleIfDisabledParams{
+		ID: parsed, NextRunLocalDate: date, NextRunAt: pgTime(nextAt),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return businessreports.Schedule{}, false, nil
+		}
+		return businessreports.Schedule{}, false, apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+	}
+	return mapScheduleFields(row.ID, row.Name, row.ReportKind, row.Timezone, row.LocalTime,
+		row.AnchorLocalDate, row.Enabled, row.Revision,
+		row.NextRunLocalDate, row.NextRunAt), true, nil
 }
 
 // LinkScheduleRecipient attaches one recipient to a schedule.
@@ -375,11 +451,18 @@ func (d Devices) CreateManualRun(ctx context.Context, run businessreports.Run, d
 	}
 	want := map[string]string{}
 	for _, delivery := range deliveries {
-		want[delivery.RecipientID] = delivery.Locale + "\x00" + delivery.ProviderKey
+		// Full delivery semantics: recipient identity, address,
+		// provider, locale, and template. Labels and timestamps are
+		// not semantics and never conflict.
+		want[delivery.RecipientID] = strings.Join([]string{
+			delivery.Recipient, delivery.ProviderKey, delivery.Locale, delivery.TemplateKey,
+		}, "\x00")
 	}
 	for _, row := range stored {
 		got, ok := want[uuidString(row.RecipientID)]
-		if !ok || got != row.LocaleSnapshot+"\x00"+row.ProviderKey {
+		if !ok || got != strings.Join([]string{
+			row.RecipientSnapshot, row.ProviderKey, row.LocaleSnapshot, row.TemplateKey,
+		}, "\x00") {
 			_ = tx.Rollback(ctx)
 			return "", false, apperr.New(apperr.Conflict, "manual run key already used with different recipients")
 		}
@@ -699,9 +782,11 @@ func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID,
 	return affected == 1, nil
 }
 
-// FinishDeliveryEnqueued marks one delivery handed to Phase 7A. Only
-// pending rows transition: already-terminal rows report false.
-func (d Devices) FinishDeliveryEnqueued(ctx context.Context, deliveryID, notificationID string) (bool, error) {
+// FinishDeliveryEnqueued marks one delivery handed to Phase 7A. The
+// transition requires pending status plus the current run lease
+// (owner, generation, unexpired) on a non-terminal run: stale owners
+// affect zero rows and must treat that as no convergence.
+func (d Devices) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, owner string, generation int64, notificationID string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(deliveryID)
@@ -713,7 +798,8 @@ func (d Devices) FinishDeliveryEnqueued(ctx context.Context, deliveryID, notific
 		return false, apperr.New(apperr.InvalidInput, "invalid notification id")
 	}
 	affected, err := sqlcgen.New(d.pool).FinishDeliveryEnqueued(ctx, sqlcgen.FinishDeliveryEnqueuedParams{
-		ID: parsed, NotificationID: notification,
+		ID: parsed, NotificationID: notification, ID_2: mustReportID(runID),
+		LeaseOwner: pgText(owner), LeaseGeneration: generation,
 	})
 	if err != nil {
 		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
@@ -722,8 +808,9 @@ func (d Devices) FinishDeliveryEnqueued(ctx context.Context, deliveryID, notific
 }
 
 // FinishDeliveryBlocked marks one delivery permanently un-sendable.
-// Only pending rows transition.
-func (d Devices) FinishDeliveryBlocked(ctx context.Context, deliveryID, code string) (bool, error) {
+// Same run-lease fencing as enqueued finishes: stale owners affect
+// zero rows.
+func (d Devices) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, owner string, generation int64, code string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(deliveryID)
@@ -731,12 +818,70 @@ func (d Devices) FinishDeliveryBlocked(ctx context.Context, deliveryID, code str
 		return false, apperr.New(apperr.InvalidInput, "invalid delivery id")
 	}
 	affected, err := sqlcgen.New(d.pool).FinishDeliveryBlocked(ctx, sqlcgen.FinishDeliveryBlockedParams{
-		ID: parsed, LastErrorCode: pgText(code),
+		ID: parsed, LastErrorCode: pgText(code), ID_2: mustReportID(runID),
+		LeaseOwner: pgText(owner), LeaseGeneration: generation,
 	})
 	if err != nil {
 		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
 	}
 	return affected == 1, nil
+}
+
+// PersistRunDeliverySnapshots persists a complete missing-snapshot set
+// in ONE transaction under the current run lease: the run row is
+// locked first and ownership verified, then every delivery snapshot
+// persists conditionally. If any expected delivery already carries a
+// body (partial pre-existing state), the whole barrier rolls back and
+// reports incomplete: the runner blocks the run instead of mixing
+// canonical bases.
+func (d Devices) PersistRunDeliverySnapshots(ctx context.Context, runID, owner string, generation int64, snapshots map[string]businessreports.SnapshotBody) (bool, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	run, err := parseUUID(runID)
+	if err != nil {
+		return false, apperr.New(apperr.InvalidInput, "invalid run id")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	locked, err := q.GetRunForUpdate(ctx, run)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, apperr.New(apperr.NotFound, "report run not found")
+		}
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	if locked.LeaseOwner.String != owner || locked.LeaseGeneration != generation ||
+		(locked.Status != "pending" && locked.Status != "retry") {
+		_ = tx.Rollback(ctx)
+		return false, nil
+	}
+	for deliveryID, snapshot := range snapshots {
+		parsed, err := parseUUID(deliveryID)
+		if err != nil {
+			return false, apperr.New(apperr.InvalidInput, "invalid delivery id")
+		}
+		affected, err := q.PersistDeliverySnapshot(ctx, sqlcgen.PersistDeliverySnapshotParams{
+			ID: parsed, ReportBodySnapshot: pgText(snapshot.Body), ReportFingerprint: snapshot.Fingerprint,
+			ID_2: run, LeaseOwner: pgText(owner), LeaseGeneration: generation,
+		})
+		if err != nil {
+			return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+		}
+		if affected != 1 {
+			// Pre-existing body (partial legacy state or racing
+			// owner): all-or-nothing rollback, runner blocks safely.
+			_ = tx.Rollback(ctx)
+			return false, nil
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	return true, nil
 }
 
 // mustReportID converts a domain UUID string for fenced writes.

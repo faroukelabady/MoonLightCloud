@@ -42,6 +42,8 @@ type Schedule struct {
 // ScheduleStore is the durable schedule boundary.
 type ScheduleStore interface {
 	CreateSchedule(ctx context.Context, schedule Schedule) error
+	CreateScheduleWithRecipients(ctx context.Context, schedule Schedule, recipientIDs []string) error
+	EnableScheduleIfDisabled(ctx context.Context, id string, nextDate string, nextAt time.Time) (Schedule, bool, error)
 	GetSchedule(ctx context.Context, id string) (Schedule, bool, error)
 	ListSchedules(ctx context.Context) ([]Schedule, error)
 	UpdateScheduleEnablement(ctx context.Context, id string, enabled bool, revision int64, nextDate string, nextAt time.Time) error
@@ -104,6 +106,13 @@ type Delivery struct {
 	LastErrorCode              string
 }
 
+// SnapshotBody is one composed immutable delivery body with its
+// deterministic fingerprint, persisted atomically per run barrier.
+type SnapshotBody struct {
+	Body        string
+	Fingerprint []byte
+}
+
 // RunFinish reports whether a run completion took effect. Stale is a
 // safe no-op: another owner already controls the run.
 type RunFinish int
@@ -127,8 +136,9 @@ type RunStore interface {
 	FinishRunRetry(ctx context.Context, id, owner string, generation int64, next time.Time, code string) (RunFinish, error)
 	FinishRunBlocked(ctx context.Context, id, owner string, generation int64, code string) (RunFinish, error)
 	PersistDeliverySnapshot(ctx context.Context, runID, deliveryID, owner string, generation int64, body string, fingerprint []byte) (bool, error)
-	FinishDeliveryEnqueued(ctx context.Context, deliveryID, notificationID string) (bool, error)
-	FinishDeliveryBlocked(ctx context.Context, deliveryID, code string) (bool, error)
+	PersistRunDeliverySnapshots(ctx context.Context, runID, owner string, generation int64, snapshots map[string]SnapshotBody) (bool, error)
+	FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, owner string, generation int64, notificationID string) (bool, error)
+	FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, owner string, generation int64, code string) (bool, error)
 }
 
 // ReportStats is the operational scheduler summary.

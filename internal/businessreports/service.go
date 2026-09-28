@@ -7,7 +7,7 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
-	"github.com/google/uuid"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // Clock abstracts time for deterministic tests.
@@ -68,7 +68,7 @@ func (s *Service) AddRecipient(ctx context.Context, label, providerKey, recipien
 		return Recipient{}, err
 	}
 	record := Recipient{
-		ID: uuid.NewString(), Label: label, ProviderKey: string(key),
+		ID: ids.System{}.New(), Label: label, ProviderKey: string(key),
 		Recipient: recipient, Locale: locale, Enabled: true,
 	}
 	if err := s.recipients.CreateRecipient(ctx, record.ID, label, string(key), recipient, locale, true); err != nil {
@@ -118,29 +118,15 @@ func (s *Service) CreateSchedule(ctx context.Context, name, kind, localTime, anc
 		return Schedule{}, err
 	}
 	schedule := Schedule{
-		ID: uuid.NewString(), Name: name, Kind: reportKind,
+		ID: ids.System{}.New(), Name: name, Kind: reportKind,
 		Timezone: TimezoneCairo, LocalTime: localTime, AnchorLocalDate: anchor,
 		Enabled: true, Revision: 1, NextRunLocalDate: slotDate, NextRunAt: slotAt,
 	}
-	if err := s.schedules.CreateSchedule(ctx, schedule); err != nil {
+	// One atomic transaction validates recipients under lock and
+	// persists schedule plus links: creation never leaves orphans or
+	// partial links, and never consumes the unique name on failure.
+	if err := s.schedules.CreateScheduleWithRecipients(ctx, schedule, recipientIDs); err != nil {
 		return Schedule{}, err
-	}
-	linked := 0
-	for _, recipientID := range recipientIDs {
-		recipient, found, err := s.recipients.GetRecipient(ctx, recipientID)
-		if err != nil {
-			return Schedule{}, err
-		}
-		if !found || !recipient.Enabled {
-			return Schedule{}, apperr.New(apperr.InvalidInput, "schedule recipient must exist and be enabled")
-		}
-		if err := s.schedules.LinkScheduleRecipient(ctx, schedule.ID, recipientID); err != nil {
-			return Schedule{}, err
-		}
-		linked++
-	}
-	if linked == 0 {
-		return Schedule{}, apperr.New(apperr.InvalidInput, CodeNoRecipients)
 	}
 	s.logInfo("report schedule created", "schedule", schedule.ID, "kind", string(reportKind), "slot", slotDate)
 	return schedule, nil
@@ -160,8 +146,11 @@ func (s *Service) ListSchedules(ctx context.Context) ([]Schedule, error) {
 	return s.schedules.ListSchedules(ctx)
 }
 
-// EnableSchedule resumes a schedule at the first future slot from
-// now. The intentionally-disabled interval is never backfilled.
+// EnableSchedule resumes a schedule. Disabled→enabled computes the
+// first future slot from now, intentionally skipping the disabled
+// interval. Enabled→enabled is a strict no-op: the durable cursor
+// and overdue backlog are preserved exactly (same revision, same
+// next_run).
 func (s *Service) EnableSchedule(ctx context.Context, id string) (Schedule, error) {
 	schedule, found, err := s.schedules.GetSchedule(ctx, id)
 	if err != nil {
@@ -170,19 +159,31 @@ func (s *Service) EnableSchedule(ctx context.Context, id string) (Schedule, erro
 	if !found {
 		return Schedule{}, apperr.New(apperr.NotFound, "schedule not found")
 	}
+	if schedule.Enabled {
+		return schedule, nil
+	}
 	now := s.clock.Now()
 	slotDate, slotAt, err := s.firstFutureSlot(schedule.Kind, schedule.AnchorLocalDate, schedule.LocalTime, now)
 	if err != nil {
 		return Schedule{}, err
 	}
-	if err := s.schedules.UpdateScheduleEnablement(ctx, id, true, schedule.Revision+1, slotDate, slotAt); err != nil {
+	// Exactly-once transition: concurrent enablers converge on one
+	// winner; losers return the winner's state unchanged.
+	enabled, applied, err := s.schedules.EnableScheduleIfDisabled(ctx, id, slotDate, slotAt)
+	if err != nil {
 		return Schedule{}, err
 	}
-	schedule.Enabled = true
-	schedule.Revision++
-	schedule.NextRunLocalDate = slotDate
-	schedule.NextRunAt = slotAt
-	return schedule, nil
+	if !applied {
+		current, found, err := s.schedules.GetSchedule(ctx, id)
+		if err != nil {
+			return Schedule{}, err
+		}
+		if !found {
+			return Schedule{}, apperr.New(apperr.NotFound, "schedule not found")
+		}
+		return current, nil
+	}
+	return enabled, nil
 }
 
 // DisableSchedule stops future slot materialization. History,
@@ -233,7 +234,7 @@ func (s *Service) RunNow(ctx context.Context, scheduleID, manualKey string) (str
 		return "", false, err
 	}
 	run := Run{
-		ID: uuid.NewString(), ScheduleID: scheduleID, Kind: RunManual,
+		ID: ids.System{}.New(), ScheduleID: scheduleID, Kind: RunManual,
 		ManualIdempotencyKey: manualKey, ScheduledFor: now,
 		PeriodStart: start.UTC(), PeriodEnd: end.UTC(),
 		ScheduleRevision: schedule.Revision, Status: RunPending,
@@ -243,7 +244,7 @@ func (s *Service) RunNow(ctx context.Context, scheduleID, manualKey string) (str
 		if !recipient.Enabled {
 			continue
 		}
-		deliveryID := uuid.NewString()
+		deliveryID := ids.System{}.New()
 		deliveries = append(deliveries, Delivery{
 			ID: deliveryID, RecipientID: recipient.ID,
 			ProviderKey: recipient.ProviderKey, Recipient: recipient.Recipient,

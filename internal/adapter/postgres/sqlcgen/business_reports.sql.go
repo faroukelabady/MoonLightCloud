@@ -248,19 +248,79 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 	return err
 }
 
+const enableScheduleIfDisabled = `-- name: EnableScheduleIfDisabled :one
+UPDATE business_report_schedules
+SET enabled = TRUE, revision = revision + 1,
+    next_run_local_date = $2, next_run_at = $3, updated_at = now()
+WHERE id = $1 AND enabled = FALSE
+RETURNING id, name, report_kind, timezone, local_time, anchor_local_date,
+    enabled, revision, next_run_local_date, next_run_at
+`
+
+type EnableScheduleIfDisabledParams struct {
+	ID               pgtype.UUID        `json:"id"`
+	NextRunLocalDate pgtype.Date        `json:"next_run_local_date"`
+	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
+}
+
+type EnableScheduleIfDisabledRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	Name             string             `json:"name"`
+	ReportKind       string             `json:"report_kind"`
+	Timezone         string             `json:"timezone"`
+	LocalTime        string             `json:"local_time"`
+	AnchorLocalDate  pgtype.Date        `json:"anchor_local_date"`
+	Enabled          bool               `json:"enabled"`
+	Revision         int64              `json:"revision"`
+	NextRunLocalDate pgtype.Date        `json:"next_run_local_date"`
+	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
+}
+
+func (q *Queries) EnableScheduleIfDisabled(ctx context.Context, arg EnableScheduleIfDisabledParams) (EnableScheduleIfDisabledRow, error) {
+	row := q.db.QueryRow(ctx, enableScheduleIfDisabled, arg.ID, arg.NextRunLocalDate, arg.NextRunAt)
+	var i EnableScheduleIfDisabledRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ReportKind,
+		&i.Timezone,
+		&i.LocalTime,
+		&i.AnchorLocalDate,
+		&i.Enabled,
+		&i.Revision,
+		&i.NextRunLocalDate,
+		&i.NextRunAt,
+	)
+	return i, err
+}
+
 const finishDeliveryBlocked = `-- name: FinishDeliveryBlocked :execrows
-UPDATE business_report_deliveries
+UPDATE business_report_deliveries AS delivery
 SET status = 'blocked', last_error_code = $2, updated_at = now()
-WHERE id = $1 AND status = 'pending'
+FROM business_report_runs AS run
+WHERE delivery.id = $1 AND delivery.status = 'pending'
+  AND run.id = delivery.run_id AND run.id = $3
+  AND run.lease_owner = $4 AND run.lease_generation = $5
+  AND run.lease_until > now()
+  AND run.status IN ('pending', 'retry')
 `
 
 type FinishDeliveryBlockedParams struct {
-	ID            pgtype.UUID `json:"id"`
-	LastErrorCode pgtype.Text `json:"last_error_code"`
+	ID              pgtype.UUID `json:"id"`
+	LastErrorCode   pgtype.Text `json:"last_error_code"`
+	ID_2            pgtype.UUID `json:"id_2"`
+	LeaseOwner      pgtype.Text `json:"lease_owner"`
+	LeaseGeneration int64       `json:"lease_generation"`
 }
 
 func (q *Queries) FinishDeliveryBlocked(ctx context.Context, arg FinishDeliveryBlockedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, finishDeliveryBlocked, arg.ID, arg.LastErrorCode)
+	result, err := q.db.Exec(ctx, finishDeliveryBlocked,
+		arg.ID,
+		arg.LastErrorCode,
+		arg.ID_2,
+		arg.LeaseOwner,
+		arg.LeaseGeneration,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -268,19 +328,33 @@ func (q *Queries) FinishDeliveryBlocked(ctx context.Context, arg FinishDeliveryB
 }
 
 const finishDeliveryEnqueued = `-- name: FinishDeliveryEnqueued :execrows
-UPDATE business_report_deliveries
+UPDATE business_report_deliveries AS delivery
 SET status = 'enqueued', notification_id = $2, last_error_code = NULL,
     updated_at = now()
-WHERE id = $1 AND status = 'pending'
+FROM business_report_runs AS run
+WHERE delivery.id = $1 AND delivery.status = 'pending'
+  AND run.id = delivery.run_id AND run.id = $3
+  AND run.lease_owner = $4 AND run.lease_generation = $5
+  AND run.lease_until > now()
+  AND run.status IN ('pending', 'retry')
 `
 
 type FinishDeliveryEnqueuedParams struct {
-	ID             pgtype.UUID `json:"id"`
-	NotificationID pgtype.UUID `json:"notification_id"`
+	ID              pgtype.UUID `json:"id"`
+	NotificationID  pgtype.UUID `json:"notification_id"`
+	ID_2            pgtype.UUID `json:"id_2"`
+	LeaseOwner      pgtype.Text `json:"lease_owner"`
+	LeaseGeneration int64       `json:"lease_generation"`
 }
 
 func (q *Queries) FinishDeliveryEnqueued(ctx context.Context, arg FinishDeliveryEnqueuedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, finishDeliveryEnqueued, arg.ID, arg.NotificationID)
+	result, err := q.db.Exec(ctx, finishDeliveryEnqueued,
+		arg.ID,
+		arg.NotificationID,
+		arg.ID_2,
+		arg.LeaseOwner,
+		arg.LeaseGeneration,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -456,6 +530,36 @@ func (q *Queries) GetRecipient(ctx context.Context, id pgtype.UUID) (GetRecipien
 	return i, err
 }
 
+const getRecipientForUpdate = `-- name: GetRecipientForUpdate :one
+SELECT id, label, provider_key, recipient, locale, enabled
+FROM business_report_recipients
+WHERE id = $1
+FOR UPDATE
+`
+
+type GetRecipientForUpdateRow struct {
+	ID          pgtype.UUID `json:"id"`
+	Label       string      `json:"label"`
+	ProviderKey string      `json:"provider_key"`
+	Recipient   string      `json:"recipient"`
+	Locale      string      `json:"locale"`
+	Enabled     bool        `json:"enabled"`
+}
+
+func (q *Queries) GetRecipientForUpdate(ctx context.Context, id pgtype.UUID) (GetRecipientForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getRecipientForUpdate, id)
+	var i GetRecipientForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Label,
+		&i.ProviderKey,
+		&i.Recipient,
+		&i.Locale,
+		&i.Enabled,
+	)
+	return i, err
+}
+
 const getRun = `-- name: GetRun :one
 SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
@@ -487,6 +591,59 @@ type GetRunRow struct {
 func (q *Queries) GetRun(ctx context.Context, id pgtype.UUID) (GetRunRow, error) {
 	row := q.db.QueryRow(ctx, getRun, id)
 	var i GetRunRow
+	err := row.Scan(
+		&i.ID,
+		&i.ScheduleID,
+		&i.RunKind,
+		&i.SlotLocalDate,
+		&i.ManualIdempotencyKey,
+		&i.ScheduledFor,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.ScheduleRevision,
+		&i.Status,
+		&i.AttemptCount,
+		&i.NextAttemptAt,
+		&i.LeaseOwner,
+		&i.LeaseUntil,
+		&i.LeaseGeneration,
+		&i.LastErrorCode,
+	)
+	return i, err
+}
+
+const getRunForUpdate = `-- name: GetRunForUpdate :one
+SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+    scheduled_for, period_start, period_end, schedule_revision,
+    status, attempt_count, next_attempt_at,
+    lease_owner, lease_until, lease_generation, last_error_code
+FROM business_report_runs
+WHERE id = $1
+FOR UPDATE
+`
+
+type GetRunForUpdateRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ScheduleID           pgtype.UUID        `json:"schedule_id"`
+	RunKind              string             `json:"run_kind"`
+	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
+	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
+	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
+	PeriodStart          pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd            pgtype.Timestamptz `json:"period_end"`
+	ScheduleRevision     int64              `json:"schedule_revision"`
+	Status               string             `json:"status"`
+	AttemptCount         int32              `json:"attempt_count"`
+	NextAttemptAt        pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseOwner           pgtype.Text        `json:"lease_owner"`
+	LeaseUntil           pgtype.Timestamptz `json:"lease_until"`
+	LeaseGeneration      int64              `json:"lease_generation"`
+	LastErrorCode        pgtype.Text        `json:"last_error_code"`
+}
+
+func (q *Queries) GetRunForUpdate(ctx context.Context, id pgtype.UUID) (GetRunForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getRunForUpdate, id)
+	var i GetRunForUpdateRow
 	err := row.Scan(
 		&i.ID,
 		&i.ScheduleID,

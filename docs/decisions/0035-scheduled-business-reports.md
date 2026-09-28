@@ -60,6 +60,36 @@ any knowledge of WhatsApp, Meta templates, or provider transport.
   projection metadata, no alert rules. Report freshness lines use
   only the frozen report service's projection timestamps.
 
+## R1 remediation (run consistency, lease fencing, schedule lifecycle)
+
+The 7B freeze review found six material inconsistencies, closed
+without touching reporting math, provider code, or the schema:
+
+1. **Run-wide snapshot barrier.** Bodies were composed lazily per
+   delivery, so late data could reach unsent recipients. The runner
+   now snapshots every pending delivery from ONE canonical Summary
+   result in a single lease-fenced transaction before the first
+   enqueue; partial pre-existing snapshot sets block safely instead
+   of mixing bases.
+2. **Delivery lease fencing.** Every delivery mutation (snapshot,
+   enqueued, blocked) requires the current run lease
+   (owner+generation, unexpired) on a non-terminal run. Stale owners
+   affect zero rows; run verdicts re-read durable rows.
+3. **Arithmetic anchor resolution.** TEN_DAY slots resolve with O(1)
+   civil-date math instead of a bounded 400-slot scan, so old
+   anchors (e.g. 2000-01-01) work.
+4. **Idempotent enable.** Enabling an enabled schedule is a no-op
+   preserving cursor and backlog; only disabled→enabled skips ahead
+   (exactly-once under concurrency).
+5. **Manual semantic idempotency.** Replays compare kind, period,
+   recipient IDs, addresses, providers, locales, and templates
+   order-independently; labels never conflict.
+6. **Atomic creation.** Schedule plus links commit in one
+   recipient-locking transaction; failures leave nothing behind and
+   never consume the unique name.
+7. **UUIDv7 + batch parsing.** New 7B IDs use the repository UUIDv7
+   generator; batch size parses wide before narrowing.
+
 ## Consequences
 
 - 7B operator surface is CLI only (recipients, schedules, run-now,

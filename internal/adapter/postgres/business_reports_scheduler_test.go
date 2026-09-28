@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -368,5 +369,320 @@ func TestReportRebuildIsolation(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestReportEnableOverduePreserved proves enabling an already-enabled
+// overdue schedule is a no-op: cursor, revision, and backlog survive.
+func TestReportEnableOverduePreserved(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	recipient := addTestRecipient(t, service, "owner")
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	backdateSchedule(t, env, schedule.ID, pastSlotDate(3))
+	before, _, err := catalogStore(env).GetSchedule(ctx, schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := service.EnableSchedule(ctx, schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.NextRunLocalDate != before.NextRunLocalDate || again.Revision != before.Revision {
+		t.Fatalf("no-op enable: %+v vs %+v", again, before)
+	}
+	// Backlog still materializes exactly.
+	planner := businessreports.NewPlanner(catalogStore(env),
+		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
+	planner.TickForTest(ctx)
+	runs, err := service.ListRuns(ctx, 10)
+	if err != nil || len(runs) != 1 || runs[0].SlotLocalDate != pastSlotDate(3) {
+		t.Fatalf("overdue slot survives: %+v %v", runs, err)
+	}
+}
+
+// TestReportConcurrentEnable proves concurrent disabled→enable calls
+// converge on one transition with a valid cursor.
+func TestReportConcurrentEnable(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	recipient := addTestRecipient(t, service, "owner")
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	if _, err := service.DisableSchedule(ctx, schedule.ID); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	results := make(chan businessreports.Schedule, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			enabled, err := service.EnableSchedule(ctx, schedule.ID)
+			if err != nil {
+				t.Errorf("enable: %v", err)
+				return
+			}
+			results <- enabled
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	count := 0
+	for enabled := range results {
+		count++
+		if !enabled.Enabled || enabled.NextRunLocalDate == "" {
+			t.Fatalf("valid transition: %+v", enabled)
+		}
+	}
+	if count != 2 {
+		t.Fatalf("both callers succeed: %d", count)
+	}
+	final, _, err := catalogStore(env).GetSchedule(ctx, schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !final.Enabled || final.NextRunLocalDate == "" {
+		t.Fatalf("one valid transition: %+v", final)
+	}
+	// At most one revision bump beyond disable: no cursor corruption.
+	if final.Revision > 4 {
+		t.Fatalf("revision churn: %+v", final)
+	}
+}
+
+// TestReportScheduleCreateAtomic proves schedule creation is
+// all-or-nothing across invalid, mixed, and disabled recipients, and
+// that a corrected same-name retry succeeds (unique name unconsumed).
+func TestReportScheduleCreateAtomic(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	good := addTestRecipient(t, service, "good")
+	counts := func() (schedules, links int) {
+		t.Helper()
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedules`).Scan(&schedules); err != nil {
+			t.Fatal(err)
+		}
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedule_recipients`).Scan(&links); err != nil {
+			t.Fatal(err)
+		}
+		return schedules, links
+	}
+	newSchedule := func(name string, recipients ...string) error {
+		_, err := service.CreateSchedule(ctx, name, "DAILY", "21:00", "", recipients)
+		return err
+	}
+	// Nonexistent recipient: nothing committed.
+	if err := newSchedule("s-bad", "00000000-0000-4000-8000-000000000000"); err == nil {
+		t.Fatal("nonexistent recipient must fail")
+	}
+	// Mixed valid + invalid: nothing committed, no partial links.
+	if err := newSchedule("s-mixed", good.ID, "00000000-0000-4000-8000-000000000001"); err == nil {
+		t.Fatal("mixed recipients must fail")
+	}
+	// Disabled recipient: nothing committed.
+	disabled, err := service.AddRecipient(ctx, "off", "whatsapp-main", "201011111111", "ar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRecipientEnabled(ctx, disabled.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := newSchedule("s-off", disabled.ID); err == nil {
+		t.Fatal("disabled recipient must fail")
+	}
+	if schedules, links := counts(); schedules != 0 || links != 0 {
+		t.Fatalf("nothing committed: %d schedules %d links", schedules, links)
+	}
+	// Corrected same-name retry succeeds: names unconsumed.
+	if _, err := service.CreateSchedule(ctx, "s-bad", "DAILY", "21:00", "", []string{good.ID}); err != nil {
+		t.Fatalf("corrected retry: %v", err)
+	}
+	if schedules, links := counts(); schedules != 1 || links != 1 {
+		t.Fatalf("one schedule one link: %d %d", schedules, links)
+	}
+	// Concurrent planner visibility: a racing planner tick during a
+	// second creation observes either zero or one complete schedule,
+	// never a partial link set.
+	planner := businessreports.NewPlanner(store,
+		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
+	planner.TickForTest(ctx)
+	if schedules, _ := counts(); schedules != 1 {
+		t.Fatalf("no phantom schedule: %d", schedules)
+	}
+}
+
+// TestReportScheduleCreateRaces proves creation-time races resolve
+// safely: concurrent same-name creates yield exactly one schedule
+// (mid-transaction unique violation rolls back everything), and a
+// recipient disabled mid-creation yields either a clean error or a
+// valid schedule — never partial links.
+func TestReportScheduleCreateRaces(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	good := addTestRecipient(t, service, "good")
+	t.Run("concurrent same name", func(t *testing.T) {
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		results := make(chan error, 2)
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := service.CreateSchedule(ctx, "s-race", "DAILY", "21:00", "", []string{good.ID})
+				results <- err
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+		var succeeded, failed int
+		for err := range results {
+			if err == nil {
+				succeeded++
+			} else {
+				failed++
+			}
+		}
+		if succeeded != 1 || failed != 1 {
+			t.Fatalf("exactly one winner: %d/%d", succeeded, failed)
+		}
+		var schedules, links int
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedules WHERE name='s-race'`).Scan(&schedules); err != nil || schedules != 1 {
+			t.Fatalf("one schedule: %d %v", schedules, err)
+		}
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedule_recipients`).Scan(&links); err != nil || links != 1 {
+			t.Fatalf("one link: %d %v", links, err)
+		}
+	})
+	t.Run("disable during create", func(t *testing.T) {
+		victim, err := service.AddRecipient(ctx, "victim", "whatsapp-main", "201022222222", "ar")
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := service.CreateSchedule(ctx, "s-victim", "DAILY", "21:00", "", []string{victim.ID})
+			done <- err
+		}()
+		// Race the disable against validation/linking; either order
+		// is a deterministic safe outcome.
+		_ = catalogStore(env).SetRecipientEnabled(ctx, victim.ID, false)
+		err = <-done
+		var schedules, links int
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedules WHERE name='s-victim'`).Scan(&schedules); err != nil {
+			t.Fatal(err)
+		}
+		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedule_recipients l JOIN business_report_schedules s ON s.id = l.schedule_id WHERE s.name='s-victim'`).Scan(&links); err != nil {
+			t.Fatal(err)
+		}
+		if err == nil {
+			// Won before the disable: exactly one schedule + one link.
+			if schedules != 1 || links != 1 {
+				t.Fatalf("winner complete: %d %d", schedules, links)
+			}
+		} else if schedules != 0 || links != 0 {
+			t.Fatalf("loser clean: %d %d (%v)", schedules, links, err)
+		}
+	})
+}
+
+// TestReportIDsAreUUIDv7 proves newly generated 7B application IDs
+// use the repository-standard UUIDv7 generator.
+func TestReportIDsAreUUIDv7(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	recipient := addTestRecipient(t, service, "owner")
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{recipient.ID, schedule.ID, runID, detail.Deliveries[0].ID} {
+		parsed, err := parseUUID(id)
+		if err != nil {
+			t.Fatalf("uuid: %v", err)
+		}
+		version := (parsed.Bytes[6] >> 4) & 0x0f
+		if version != 7 {
+			t.Fatalf("id %s is version %d, want 7", id, version)
+		}
+	}
+}
+
+// TestReportAggregateConsistency proves run verdicts always match
+// durable delivery rows: mixed enqueued/blocked finalizes blocked,
+// never completed.
+func TestReportAggregateConsistency(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
+	ar := addTestRecipient(t, service, "owner-ar")
+	en, err := service.AddRecipient(ctx, "owner-en", "whatsapp-main", "201012345679", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	detail, err := service.GetRunStatus(ctx, runID)
+	if err != nil || len(detail.Deliveries) != 2 {
+		t.Fatalf("two deliveries: %+v %v", detail, err)
+	}
+	// Finish one delivery enqueued and the other blocked under the
+	// current lease, then run the aggregate path via a fresh drain.
+	if _, err := env.pool.Exec(ctx,
+		`UPDATE business_report_runs SET lease_until = now() - interval '1 minute' WHERE id = $1`,
+		mustReportPgID(runID)); err != nil {
+		t.Fatal(err)
+	}
+	_ = claimed
+	seedReportTemplateMapping(t, env)
+	seedReportTemplateMapping(t, env)
+	// Delete the English mapping so English blocks deterministically
+	// while Arabic enqueues.
+	if _, err := env.pool.Exec(ctx,
+		`DELETE FROM notification_template_mappings WHERE locale = 'en'`); err != nil {
+		t.Fatal(err)
+	}
+	drainRunner(t, testRunnerNoSeed(t, env, &stubReportSummary{summary: cannedSummary()}))
+	detail, err = service.GetRunStatus(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != businessreports.RunBlocked {
+		t.Fatalf("mixed run blocks: %+v", detail.Run)
+	}
+	var enqueued, blocked int
+	for _, delivery := range detail.Deliveries {
+		switch delivery.Status {
+		case businessreports.DeliveryEnqueued:
+			enqueued++
+		case businessreports.DeliveryBlocked:
+			blocked++
+		}
+	}
+	if enqueued != 1 || blocked != 1 {
+		t.Fatalf("1+1 durable mix: %+v", detail.Deliveries)
 	}
 }

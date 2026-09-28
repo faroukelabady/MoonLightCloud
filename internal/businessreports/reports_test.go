@@ -272,3 +272,63 @@ func TestComposerTooLarge(t *testing.T) {
 		t.Fatal("oversized body must block")
 	}
 }
+
+func TestNextTenDayOldAnchors(t *testing.T) {
+	loc := cairo(t)
+	reference := time.Date(2026, 9, 28, 15, 30, 0, 0, time.UTC)
+	for _, anchor := range []string{"2000-01-01", "1970-01-01", "2020-02-29"} {
+		slot, at, err := NextTenDaySlot(anchor, "21:00", reference, loc)
+		if err != nil {
+			t.Fatalf("anchor %s: %v", anchor, err)
+		}
+		anchorDate, _ := civilDate(anchor)
+		slotDate, _ := civilDate(slot)
+		if civilDayDifference(anchorDate, slotDate)%10 != 0 {
+			t.Fatalf("anchor %s slot %s misaligned", anchor, slot)
+		}
+		if !at.After(reference) {
+			t.Fatalf("anchor %s slot not future: %v", anchor, at)
+		}
+		// Previous aligned slot is at or before the reference.
+		previous := slotDate.AddDays(-10)
+		previousAt, err := SlotInstant(previous.String(), "21:00", loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if previousAt.After(reference) && compareCivilDate(anchorDate, slotDate) != 0 {
+			t.Fatalf("anchor %s: previous %v after reference", anchor, previousAt)
+		}
+		t.Logf("anchor %s -> slot %s", anchor, slot)
+	}
+}
+
+func TestNextTenDaySlotEdges(t *testing.T) {
+	loc := cairo(t)
+	// Reference before the anchor: anchor itself is next.
+	reference := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	slot, _, err := NextTenDaySlot("2026-10-01", "21:00", reference, loc)
+	if err != nil || slot != "2026-10-01" {
+		t.Fatalf("future anchor: %s %v", slot, err)
+	}
+	// Same aligned date before wall clock: today.
+	morning := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	slot, _, err = NextTenDaySlot("2026-10-01", "21:00", morning, loc)
+	if err != nil || slot != "2026-10-01" {
+		t.Fatalf("same date before time: %s %v", slot, err)
+	}
+	// Same aligned date after wall clock: +10.
+	evening := time.Date(2026, 10, 1, 20, 0, 0, 0, time.UTC)
+	slot, _, err = NextTenDaySlot("2026-10-01", "21:00", evening, loc)
+	if err != nil || slot != "2026-10-11" {
+		t.Fatalf("same date after time: %s %v", slot, err)
+	}
+	// DST crossing preserves civil alignment and wall clock.
+	slot, at, err := NextTenDaySlot("2026-04-20", "21:00",
+		time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC), loc)
+	if err != nil || slot != "2026-04-30" {
+		t.Fatalf("dst alignment: %s %v", slot, err)
+	}
+	if at.In(loc).Format("15:04") != "21:00" {
+		t.Fatalf("dst wall clock: %v", at.In(loc))
+	}
+}

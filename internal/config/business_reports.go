@@ -60,11 +60,14 @@ func loadBusinessReports() (BusinessReports, error) {
 		cfg.PollInterval = interval
 	}
 	if v := strings.TrimSpace(os.Getenv("BUSINESS_REPORTS_BATCH_SIZE")); v != "" {
-		batch, err := strconv.Atoi(v)
+		wide, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
 			return BusinessReports{}, fmt.Errorf("invalid BUSINESS_REPORTS_BATCH_SIZE: want an integer")
 		}
-		cfg.BatchSize = int32(batch)
+		if wide < MinBusinessReportsBatchSize || wide > MaxBusinessReportsBatchSize {
+			return BusinessReports{}, fmt.Errorf("invalid BUSINESS_REPORTS_BATCH_SIZE: want an integer")
+		}
+		cfg.BatchSize = int32(wide)
 	}
 	if v := strings.TrimSpace(os.Getenv("BUSINESS_REPORTS_LEASE_DURATION")); v != "" {
 		lease, err := time.ParseDuration(v)
