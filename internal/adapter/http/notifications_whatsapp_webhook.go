@@ -113,12 +113,13 @@ func printableRange(value string, min, max int) bool {
 // whatsAppStatusEntry is one outbound status callback. Timestamp
 // decodes tolerantly (JSON string or number) so one malformed entry
 // cannot poison valid siblings; per-entry parsing decides advancement.
+// The provider errors object is deliberately absent: error diagnostics
+// are untrusted and never cross this boundary (see applyStatus).
 type whatsAppStatusEntry struct {
 	ID          string          `json:"id"`
 	Status      string          `json:"status"`
 	Timestamp   statusTimestamp `json:"timestamp"`
 	RecipientID string          `json:"recipient_id"`
-	Errors      []whatsAppError `json:"errors"`
 }
 
 // statusTimestamp preserves the raw timestamp text for independent
@@ -143,12 +144,6 @@ func (t *statusTimestamp) UnmarshalJSON(raw []byte) error {
 	}
 	*t = statusTimestamp(trimmed)
 	return nil
-}
-
-// whatsAppError is one provider failure detail. Only the bounded
-// numeric code is ever persisted.
-type whatsAppError struct {
-	Code json.Number `json:"code"`
 }
 
 // StatusWhatsAppWebhook serves POST status callbacks: raw-body HMAC
@@ -253,7 +248,11 @@ func (h *WhatsAppWebhookHandlers) applyStatus(ctx context.Context, providerKey s
 		RawStatus:         boundStatusRaw(status.Status),
 		Canonical:         canonical,
 		ProviderTimestamp: timestamp,
-		ErrorCode:         statusErrorCode(status.Errors),
+		// ErrorCode stays empty by design: provider error
+		// diagnostics are untrusted and never cross this boundary.
+		// Retained event identity is message ID + status +
+		// timestamp only, so callbacks differing solely in
+		// discarded diagnostics deduplicate.
 	}
 	event.Fingerprint = notifications.DeliveryEventFingerprint(
 		providerKey, event.ProviderMessageID, event.RawStatus,
@@ -311,24 +310,6 @@ func parseStatusTimestamp(value string) (*time.Time, bool) {
 	}
 	at := time.Unix(seconds, 0).UTC()
 	return &at, false
-}
-
-// statusErrorCode keeps only the first bounded numeric provider error
-// code. Titles, details, and recipients are never persisted.
-func statusErrorCode(details []whatsAppError) string {
-	if len(details) == 0 {
-		return ""
-	}
-	code := strings.TrimSpace(details[0].Code.String())
-	if len(code) > 64 {
-		code = code[:64]
-	}
-	for i := 0; i < len(code); i++ {
-		if code[i] < 32 || code[i] == 127 {
-			return ""
-		}
-	}
-	return code
 }
 
 func (h *WhatsAppWebhookHandlers) logInfo(msg string, args ...any) {

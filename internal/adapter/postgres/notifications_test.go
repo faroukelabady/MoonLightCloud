@@ -870,3 +870,41 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 		t.Fatalf("restart correlation: %v %v %v", lookup, found, err)
 	}
 }
+
+// TestNotificationFailedErrorCodeNull proves failed delivery history
+// persists a NULL provider_error_code: the webhook boundary supplies
+// no diagnostics, and NULL (not empty string) is what lands in the row.
+func TestNotificationFailedErrorCodeNull(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "null-code-1"))
+	claimed := claimNotification(t, env, "worker-A")
+	if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.nulleode1"); err != nil || result != notifications.FinishApplied {
+		t.Fatalf("accept: %v %v", result, err)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	event := notifications.DeliveryEvent{
+		ProviderMessageID: "wamid.nulleode1", RawStatus: "failed",
+		Canonical: notifications.DeliveryFailed, ProviderTimestamp: &at,
+	}
+	event.Fingerprint = notifications.DeliveryEventFingerprint(
+		"whatsapp-main", event.ProviderMessageID, event.RawStatus,
+		event.Canonical, event.ProviderTimestamp, "")
+	outcome, err := store.ApplyDeliveryStatus(ctx, id, event)
+	if err != nil || !outcome.CurrentAdvanced {
+		t.Fatalf("failed advances: %+v %v", outcome, err)
+	}
+	var code *string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT provider_error_code FROM notification_delivery_status_history WHERE notification_id = $1`,
+		mustPgID(id)).Scan(&code); err != nil || code != nil {
+		t.Fatalf("provider_error_code NULL: %v %v", code, err)
+	}
+	var status string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT delivery_status FROM notification_messages WHERE id = $1`,
+		mustPgID(id)).Scan(&status); err != nil || status != "FAILED" {
+		t.Fatalf("current FAILED: %s %v", status, err)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -32,6 +33,7 @@ type fakeNotificationStatusStore struct {
 	history  map[string]int
 	current  map[string]notifications.DeliveryStatus
 	currentT map[string]*time.Time
+	codes    []string // every observed DeliveryEvent.ErrorCode
 	lookups  int
 	failNext bool
 }
@@ -60,6 +62,7 @@ func (s *fakeNotificationStatusStore) ApplyDeliveryStatus(_ context.Context, id 
 		return notifications.DeliveryOutcome{}, errFakeDB()
 	}
 	key := id + "\x00" + string(event.Fingerprint[:])
+	s.codes = append(s.codes, event.ErrorCode)
 	if s.history[key] > 0 {
 		return notifications.DeliveryOutcome{}, nil
 	}
@@ -473,4 +476,79 @@ func TestWhatsAppWebhookMalformedTimestampIsolation(t *testing.T) {
 			t.Fatal("zero writes without HMAC")
 		}
 	})
+}
+
+// TestWhatsAppWebhookErrorDiagnosticsDiscarded proves provider error
+// diagnostics never cross the webhook boundary: hostile errors[].code
+// values (quoted/bare recipient digits, numeric parameters, short and
+// oversized values, credentials) yield applied delivery state with
+// empty error codes, and malformed error shapes cannot poison valid
+// sibling statuses.
+func TestWhatsAppWebhookErrorDiagnosticsDiscarded(t *testing.T) {
+	hostile := []any{
+		map[string]any{"code": "155598765432109"},
+		map[string]any{"code": 155598765432109},
+		map[string]any{"code": "987654321012345"},
+		map[string]any{"code": "1234"},
+		map[string]any{"code": "9876543210987654"},
+		map[string]any{"code": "1234567890123456"},
+		map[string]any{"code": "123456789012345678901234567890"},
+		map[string]any{"code": "001234567890"},
+		map[string]any{
+			"code": "100", "error_subcode": "987654321012345",
+			"message": "user 201012345678 Moon Light", "title": "test-app-secret",
+			"details": "EAATestAccessToken", "error_user_msg": "مرحبا",
+		},
+		// Malformed shapes inside the discarded object.
+		map[string]any{"code": true},
+		map[string]any{"code": map[string]any{"nested": "x"}},
+		map[string]any{"code": nil},
+		map[string]any{"code": strings.Repeat("9", 5000)},
+	}
+	for i, errors := range hostile {
+		t.Run(fmt.Sprintf("case-%d", i), func(t *testing.T) {
+			store := newFakeNotificationStatusStore()
+			handler := testWhatsAppWebhookHandlers(store)
+			body := statusCallbackBody(t, map[string]any{
+				"id": "wamid.known1", "status": "failed",
+				"timestamp": "1750263900", "recipient_id": "16505551234",
+				"errors": []any{errors},
+			})
+			if recorder := postStatus(t, handler, body, validSigner); recorder.Code != http.StatusOK {
+				t.Fatalf("acknowledged: %d", recorder.Code)
+			}
+			if store.current["notif-1"] != notifications.DeliveryFailed {
+				t.Fatalf("legitimate FAILED applied: %+v", store.current)
+			}
+			for _, code := range store.codes {
+				if code != "" {
+					t.Fatalf("diagnostic crossed boundary: %q", code)
+				}
+			}
+		})
+	}
+}
+
+// TestWhatsAppWebhookErrorDeduplication proves callbacks differing
+// only in discarded diagnostics deduplicate: same message ID, status,
+// and timestamp produce one retained event.
+func TestWhatsAppWebhookErrorDeduplication(t *testing.T) {
+	store := newFakeNotificationStatusStore()
+	handler := testWhatsAppWebhookHandlers(store)
+	status := func(code any) map[string]any {
+		return map[string]any{"id": "wamid.known1", "status": "delivered",
+			"timestamp": "1750263750", "recipient_id": "16505551234",
+			"errors": []any{map[string]any{"code": code}}}
+	}
+	for _, code := range []any{"155598765432109", "999", nil} {
+		if recorder := postStatus(t, handler, statusCallbackBody(t, status(code)), validSigner); recorder.Code != http.StatusOK {
+			t.Fatalf("acknowledged: %d", recorder.Code)
+		}
+	}
+	if len(store.history) != 1 {
+		t.Fatalf("one retained event: %+v", store.history)
+	}
+	if store.current["notif-1"] != notifications.DeliveryDelivered {
+		t.Fatalf("current DELIVERED: %+v", store.current)
+	}
 }

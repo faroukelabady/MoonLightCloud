@@ -103,6 +103,16 @@ identifiers, numeric credentials) into any returned field.
 `NotificationError` therefore carries a fixed MoonLight-owned
 diagnostic per error kind; HTTP status classification and Retry-After
 (which come from protocol framing, not body content) are unchanged.
+
+## R4 remediation (webhook diagnostic privacy)
+
+The same principle applies to delivery callbacks: WhatsApp send and
+webhook error diagnostics (`code`, `error_subcode`, `message`,
+`title`, `details`, `error_user_msg`) are discarded at the webhook
+boundary and never persisted. Retained: provider message identity and
+delivery status/timestamp. Callbacks differing only in discarded
+diagnostics deduplicate. Existing history rows are immutable and are
+not rewritten or purged.
 Provider-controlled diagnostic values are not exposed unless
 transformed into a MoonLight-owned bounded semantic classification.
 

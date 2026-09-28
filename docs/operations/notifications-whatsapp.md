@@ -139,6 +139,13 @@ acknowledged without persistence; failed statuses never resend.
 If the database cannot persist, the webhook returns 5xx so Meta
 redelivers.
 
+Retained from each callback: provider message identity and delivery
+status/timestamp. Discarded at the boundary: provider-controlled
+error diagnostics (`code`, `error_subcode`, `message`, `title`,
+`details`, `error_user_msg`) — history `provider_error_code` stays
+NULL for webhook-applied events. Historical rows are never rewritten
+or purged by this policy.
+
 ## Secret rotation
 
 Update the corresponding variable and restart Cloud. No dynamic
