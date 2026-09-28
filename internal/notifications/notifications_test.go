@@ -287,3 +287,38 @@ func TestServiceEnqueue(t *testing.T) {
 		t.Fatal("short recipient must fail")
 	}
 }
+
+// TestAdvanceDeliveryAcceptedBaseline proves local ACCEPTED yields to
+// the first known provider callback regardless of clock skew, then
+// anchors normal provider ordering afterwards.
+func TestAdvanceDeliveryAcceptedBaseline(t *testing.T) {
+	local := time.Date(2026, 9, 28, 12, 0, 41, 50130000, time.UTC)
+	// Same-second provider callback advances despite trailing local microseconds.
+	second := time.Date(2026, 9, 28, 12, 0, 40, 0, time.UTC)
+	if !AdvanceDelivery(DeliveryAccepted, &local, DeliveryDelivered, &second) {
+		t.Fatal("same-second DELIVERED must advance past local ACCEPTED")
+	}
+	// Provider callback predating local persistence advances.
+	earlier := time.Date(2026, 9, 28, 12, 0, 40, 0, time.UTC)
+	if !AdvanceDelivery(DeliveryAccepted, &local, DeliverySent, &earlier) {
+		t.Fatal("earlier SENT must establish provider state")
+	}
+	// UNKNOWN against ACCEPTED still records history only.
+	if AdvanceDelivery(DeliveryAccepted, &local, DeliveryUnknown, &second) {
+		t.Fatal("UNKNOWN must not advance ACCEPTED")
+	}
+	// FAILED as first provider callback establishes FAILED.
+	if !AdvanceDelivery(DeliveryAccepted, &local, DeliveryFailed, &earlier) {
+		t.Fatal("first FAILED must advance")
+	}
+	// After the baseline yields, normal provider ordering resumes:
+	// older events stay history-only, precedence still deterministic.
+	providerBase := second
+	if !AdvanceDelivery(DeliverySent, &providerBase, DeliveryDelivered, &second) {
+		t.Fatal("ordering must resume after baseline")
+	}
+	older := time.Date(2026, 9, 28, 12, 0, 39, 0, time.UTC)
+	if AdvanceDelivery(DeliveryDelivered, &second, DeliverySent, &older) {
+		t.Fatal("older event must stay history-only")
+	}
+}

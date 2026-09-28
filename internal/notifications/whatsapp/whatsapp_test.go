@@ -184,43 +184,92 @@ func TestWhatsAppAmbiguousResponses(t *testing.T) {
 			t.Fatalf("malformed 2xx must be Ambiguous: %v", err)
 		}
 	})
-	t.Run("held for quality is not accepted", func(t *testing.T) {
-		harness := newGraphHarness(t)
-		provider := testGraphProvider(t, harness)
-		harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
-			return http.StatusOK, map[string]any{
-				"messages": []any{map[string]any{"id": "wamid.held1", "message_status": "held_for_quality_assessment"}},
-			}, nil
-		}
-		_, err := provider.SendTemplate(context.Background(), testSendRequest())
-		var notificationErr *notifications.NotificationError
-		if !notifications.AsNotificationError(err, &notificationErr) ||
-			notificationErr.Kind != notifications.ErrorValidation {
-			t.Fatalf("held message must block, not accept: %v", err)
-		}
-	})
+	for _, status := range []string{"held_for_quality_assessment", "paused", "future_pacing_state"} {
+		t.Run("paced status retained: "+status, func(t *testing.T) {
+			harness := newGraphHarness(t)
+			provider := testGraphProvider(t, harness)
+			harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+				return http.StatusOK, map[string]any{
+					"messages": []any{map[string]any{"id": "wamid.paced1", "message_status": status}},
+				}, nil
+			}
+			result, err := provider.SendTemplate(context.Background(), testSendRequest())
+			if err != nil {
+				t.Fatalf("paced ID must accept: %v", err)
+			}
+			if result.ProviderMessageID != "wamid.paced1" {
+				t.Fatalf("paced ID persisted: %q", result.ProviderMessageID)
+			}
+		})
+	}
 }
 
-// TestWhatsAppCredentialReflection proves reflected secrets are
-// scrubbed before diagnostic bounding: no prefix leak.
-func TestWhatsAppCredentialReflection(t *testing.T) {
+// TestWhatsAppProviderReflection proves machine-only diagnostics: a
+// hostile 400 body reflecting the recipient, English and Arabic
+// parameters, and all configured secrets yields an error carrying only
+// the numeric Meta code — no private content in any form.
+func TestWhatsAppProviderReflection(t *testing.T) {
 	harness := newGraphHarness(t)
 	provider := testGraphProvider(t, harness)
 	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
 		return http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"code":    "100",
+			"message": "user 201012345678 param Moon Light param \u0645\u0643\u062a\u0628\u0629 token EAATestAccessToken secret test-app-secret verify test-verify-token end",
+		}}, nil
+	}
+	request := testSendRequest()
+	request.Resolved.Parameters = map[string]string{"name": "Moon Light", "message": "\u0645\u0643\u062a\u0628\u0629"}
+	_, err := provider.SendTemplate(context.Background(), request)
+	text := err.Error()
+	if text != "validation: whatsapp error 100" {
+		t.Fatalf("machine-only error, got %q", text)
+	}
+	for _, private := range []string{"201012345678", "Moon Light", "\u0645\u0643\u062a\u0628\u0629", "EAATestAccessToken", "test-app-secret", "test-verify-token", "user", "param", "token"} {
+		if strings.Contains(text, private) {
+			t.Fatalf("reflected content leaked: %q in %q", private, text)
+		}
+	}
+}
+
+// TestWhatsAppErrorSubcode proves a numeric subcode is retained while
+// prose stays out.
+func TestWhatsAppErrorSubcode(t *testing.T) {
+	harness := newGraphHarness(t)
+	provider := testGraphProvider(t, harness)
+	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+		return http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"code": "100", "error_subcode": "33",
+			"message": "user 201012345678 should never surface",
+		}}, nil
+	}
+	_, err := provider.SendTemplate(context.Background(), testSendRequest())
+	if text := err.Error(); text != "validation: whatsapp error 100.33" {
+		t.Fatalf("got %q", text)
+	}
+}
+
+// TestWhatsAppLongSecretBoundary proves overlong reflected secrets
+// cannot survive as fragments: with machine-only diagnostics there is
+// no prose to truncate, so nothing private can leak at any boundary.
+func TestWhatsAppLongSecretBoundary(t *testing.T) {
+	harness := newGraphHarness(t)
+	provider := testGraphProvider(t, harness)
+	longToken := strings.Repeat("A", 300)
+	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+		return http.StatusBadRequest, map[string]any{"error": map[string]any{
 			"code":    "1",
-			"message": "token EAATestAccessToken secret test-app-secret verify test-verify-token leaked",
+			"message": "leaked " + longToken + " tail",
 		}}, nil
 	}
 	_, err := provider.SendTemplate(context.Background(), testSendRequest())
 	text := err.Error()
-	for _, secret := range []string{"EAATestAccessToken", "test-app-secret", "test-verify-token"} {
-		if strings.Contains(text, secret) {
-			t.Fatalf("reflected secret leaked: %q", text)
-		}
+	if text != "validation: whatsapp error 1" {
+		t.Fatalf("got %q", text)
 	}
-	if !strings.Contains(text, "[redacted]") {
-		t.Fatalf("redaction marker missing: %q", text)
+	for _, fragment := range []string{longToken[:50], longToken[100:200], longToken[200:]} {
+		if strings.Contains(text, fragment) {
+			t.Fatalf("secret fragment leaked: %.20q...", fragment)
+		}
 	}
 }
 
@@ -306,34 +355,5 @@ func TestWhatsAppNoSecretInURL(t *testing.T) {
 	}
 	if request.Path != "/v25.0/106540352242922/messages" {
 		t.Fatalf("path: %s", request.Path)
-	}
-}
-
-// TestWhatsAppLongSecretBoundary proves scrub-before-bound: a
-// reflected overlong secret is redacted in full (no surviving prefix
-// fragment) and diagnostics stay bounded.
-func TestWhatsAppLongSecretBoundary(t *testing.T) {
-	harness := newGraphHarness(t)
-	provider := testGraphProvider(t, harness)
-	longToken := strings.Repeat("A", 300)
-	provider.scrub = newSecretScrubber(longToken)
-	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
-		return http.StatusBadRequest, map[string]any{"error": map[string]any{
-			"code":    "1",
-			"message": "leaked " + longToken + " tail",
-		}}, nil
-	}
-	_, err := provider.SendTemplate(context.Background(), testSendRequest())
-	text := err.Error()
-	if strings.Contains(text, longToken) {
-		t.Fatal("full secret leaked")
-	}
-	for _, fragment := range []string{longToken[:50], longToken[100:200], longToken[200:]} {
-		if strings.Contains(text, fragment) {
-			t.Fatalf("secret fragment leaked: %.20q...", fragment)
-		}
-	}
-	if len(text) > 300 {
-		t.Fatalf("diagnostic unbounded: %d", len(text))
 	}
 }

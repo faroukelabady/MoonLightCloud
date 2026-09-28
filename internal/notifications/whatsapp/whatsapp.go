@@ -34,7 +34,6 @@ type Provider struct {
 	phoneNumberID string
 	accessToken   string
 	http          *http.Client
-	scrub         *secretScrubber
 }
 
 // NewProvider builds the adapter from validated configuration. A nil
@@ -63,7 +62,6 @@ func NewProvider(cfg config.WhatsAppNotificationConfig, httpClient *http.Client)
 		key: key, graphVersion: cfg.GraphVersion,
 		baseURL: cfg.NormalizedBaseURL(), phoneNumberID: cfg.PhoneNumberID,
 		accessToken: cfg.AccessToken, http: client,
-		scrub: newSecretScrubber(cfg.AccessToken, cfg.AppSecret, cfg.WebhookVerifyToken),
 	}, nil
 }
 
@@ -191,8 +189,11 @@ func (p *Provider) renderRequest(req notifications.TemplateSendRequest) ([]byte,
 }
 
 // acceptResponse enforces the strict single-ID success invariant: a 2xx
-// without exactly one accepted non-empty bounded message ID is
-// AMBIGUOUS, because Meta may already have accepted the send.
+// without exactly one valid message ID is AMBIGUOUS, because Meta may
+// already have accepted the send. A valid ID proves remote ownership
+// regardless of the informational message_status: held, paused, or
+// unfamiliar pacing states are accepted with the ID persisted so later
+// delivery callbacks correlate and the send is never repeated.
 func (p *Provider) acceptResponse(raw []byte) (notifications.SendResult, error) {
 	var parsed sendResponse
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -202,15 +203,10 @@ func (p *Provider) acceptResponse(raw []byte) (notifications.SendResult, error) 
 	if len(parsed.Messages) != 1 {
 		return notifications.SendResult{}, notifications.AmbiguousError("whatsapp success without exactly one message")
 	}
-	entry := parsed.Messages[0]
-	if entry.MessageStatus != "" && entry.MessageStatus != "accepted" {
-		return notifications.SendResult{}, notifications.ValidationError(
-			"whatsapp message not accepted")
-	}
-	if !validMessageID(entry.ID) {
+	if !validMessageID(parsed.Messages[0].ID) {
 		return notifications.SendResult{}, notifications.AmbiguousError("whatsapp success without provider message ID")
 	}
-	return notifications.SendResult{ProviderMessageID: entry.ID}, nil
+	return notifications.SendResult{ProviderMessageID: parsed.Messages[0].ID}, nil
 }
 
 // validMessageID bounds accepted provider IDs. No literal wamid prefix
@@ -231,13 +227,15 @@ func validMessageID(id string) bool {
 type graphError struct {
 	Error struct {
 		Code    json.Number `json:"code"`
+		Subcode json.Number `json:"error_subcode"`
 		Message string      `json:"message"`
 		Type    string      `json:"type"`
 	} `json:"error"`
 }
 
 // classifyStatus maps HTTP status to the notification taxonomy. The
-// safe message is scrubbed BEFORE bounding (Phase 6B lesson).
+// diagnostic message carries only the numeric Meta code: provider
+// prose never leaves the adapter.
 func (p *Provider) classifyStatus(status int, retryAfter string, raw []byte) *notifications.NotificationError {
 	message := p.safeGraphMessage(raw)
 	switch {
@@ -271,42 +269,42 @@ func classifyTransport(ctx context.Context, err error, wroteRequest bool) error 
 	return notifications.AmbiguousError("whatsapp request outcome unknown")
 }
 
-// safeGraphMessage extracts the bounded code/message pair with
-// credential scrubbing applied FIRST on the complete decoded field.
+// safeGraphMessage extracts machine-only diagnostics from a provider
+// error body: the bounded numeric Meta code (plus numeric subcode when
+// present). Provider prose (message, title, details, reflections) never
+// crosses the adapter boundary: it may echo recipient identity,
+// template parameters, or credentials in transformed, truncated, or
+// re-quoted forms that no scrubber can reliably match. Unparseable
+// bodies yield a generic failure with no provider content at all.
 func (p *Provider) safeGraphMessage(raw []byte) string {
 	var parsed graphError
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := decoder.Decode(&parsed); err != nil {
 		return "whatsapp request failed"
 	}
-	code := boundField(p.scrub.scrub(parsed.Error.Code.String()))
-	message := boundField(p.scrub.scrub(parsed.Error.Message))
-	var text string
-	if code == "" && message == "" {
-		text = "whatsapp request failed"
-	} else if code == "" {
-		text = "whatsapp error: " + message
-	} else {
-		text = "whatsapp error " + code + ": " + message
+	code := numericCode(parsed.Error.Code.String())
+	if code == "" {
+		return "whatsapp request failed"
 	}
-	return text
+	if subcode := numericCode(parsed.Error.Subcode.String()); subcode != "" {
+		return "whatsapp error " + code + "." + subcode
+	}
+	return "whatsapp error " + code
 }
 
-// boundField strips control content and truncates to the diagnostic
-// limit. Never called before scrubbing.
-func boundField(field string) string {
-	const limit = 200
-	field = strings.Map(func(r rune) rune {
-		if r < 32 || r == 127 {
-			return -1
-		}
-		return r
-	}, field)
-	field = strings.TrimSpace(field)
-	if len(field) > limit {
-		field = field[:limit]
+// numericCode keeps only short all-digit Meta codes. Anything else
+// (prose, reflections, injections) collapses to empty.
+func numericCode(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 16 {
+		return ""
 	}
-	return field
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return ""
+		}
+	}
+	return value
 }
 
 // parseRetryAfter bounds Retry-After metadata to the backoff ceiling.

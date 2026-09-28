@@ -63,6 +63,36 @@ API as the first adapter:
   separate Cloud-only runtime configuration, never persisted, never
   logged, scrubbed before diagnostic bounding.
 
+## R2 remediation (privacy, pacing, delivery ordering)
+
+The 7A freeze review found one HIGH plus three MEDIUM defects, closed
+without touching fencing, revisions, or the projection schema:
+
+1. **Value-free config errors.** A malformed timeout echoed raw
+   environment content into startup errors. All WhatsApp validation
+   errors are now value-free by construction (key + rule only); no
+   scrubbing layer is trusted with arbitrary config text.
+2. **Machine-only provider errors.** Provider prose could reflect
+   recipient and parameter values, so `NotificationError` now carries
+   only the numeric Meta code/subcode — prose never crosses the
+   adapter boundary. Dispatcher logs, CLI output, and persisted
+   `last_error_code` are machine codes by construction.
+3. **ACCEPTED-baseline ordering.** Local API-acceptance time no
+   longer participates in provider ordering: the first known provider
+   callback always establishes provider state, then anchors normal
+   timestamp ordering. Row locking from R1 is unchanged.
+4. **Paced identity retention.** A valid provider message ID with
+   `held_for_quality_assessment` (or any unfamiliar informational
+   status) is accepted with the ID persisted — never blocked,
+   retried, or discarded — so later delivery callbacks correlate and
+   the send is never repeated. Missing/empty/multiple IDs stay
+   ambiguous.
+5. **Malformed status isolation.** Timestamps decode per entry; a
+   non-numeric timestamp skips that entry without writes while valid
+   siblings persist; all-malformed envelopes ack 200.
+6. **Value-free CLI errors.** Malformed `--param` fails before flag
+   parsing (whose `invalid value %q` wrapper would echo content).
+
 ## Consequences
 
 - 7B calls `EnqueueTemplate` directly with logical template keys; no

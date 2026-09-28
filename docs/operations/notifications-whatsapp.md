@@ -13,6 +13,9 @@ in 7A — enqueue happens through explicit service calls or operator CLI.
 - Generate a long-lived **access token** (system user).
 - Note the app **App Secret** (POST HMAC key, not the verify token).
 - Choose a **verify token** (GET callback verification, not HMAC).
+- Operational assumption: the configured token is scoped so
+  `messaging_account_id` is not required (single-account sends).
+  Multi-account routing is out of scope for Phase 7A.
 
 MoonLight never manages template approval lifecycle.
 
@@ -100,13 +103,28 @@ notification with a NEW idempotency key).
 Safe retry happens only on explicit provider evidence (408, 429
 honoring Retry-After, 5xx, proven before-write transport failure)
 with 10s-doubling backoff capped at 1h. Anything unknown after send
-start is ambiguous, never retried.
+start is ambiguous, never retried. Provider diagnostics are
+machine-only (numeric Meta codes): provider prose never reaches
+errors, logs, CLI, or persisted codes, so reflected recipients or
+parameters cannot leak.
+
+## Paced sends
+
+Meta may accept a send but hold delivery
+(`held_for_quality_assessment`, `paused`, or future informational
+states). MoonLight persists the returned provider message ID and
+marks dispatch accepted: the send is never repeated, and later
+`sent`/`delivered`/`read`/`failed` callbacks correlate normally.
+A 2xx without exactly one valid ID stays ambiguous.
 
 ## Delivery statuses
 
-`ACCEPTED` (Meta acknowledged) → `SENT` → `DELIVERED` → `READ`, plus
+`ACCEPTED` (local API-acceptance baseline, not provider ordering
+evidence) → provider callbacks `SENT` → `DELIVERED` → `READ`, plus
 provider `FAILED` (delivery outcome only — never resends) and
-`UNKNOWN` (raw preserved, current state untouched). Out-of-order
+`UNKNOWN` (raw preserved, current state untouched). The first known
+provider callback always establishes provider ordering state even if
+its timestamp predates local acceptance; afterwards out-of-order
 callbacks resolve by provider timestamp; same-timestamp ties resolve
 ACCEPTED < SENT < DELIVERED < READ with FAILED conservative.
 

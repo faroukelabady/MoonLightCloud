@@ -190,3 +190,30 @@ func (s *memOutboxAdapter) EnqueueNotification(_ context.Context, intent notific
 	s.rows[key] = memOutboxRow{id: id, fingerprint: fingerprint}
 	return id, notifications.EnqueueInserted, nil
 }
+
+// TestNotificationEnqueueMalformedParam proves malformed --param input
+// fails value-free on stdout and stderr: neither the custom parser nor
+// the flag library may echo supplied private content.
+func TestNotificationEnqueueMalformedParam(t *testing.T) {
+	private := "VERY_PRIVATE_ARABIC_سري_AND_ENGLISH_CONTENT"
+	for _, args := range [][]string{
+		{"--provider", "whatsapp-main", "--to", "201012345678", "--template", "operator_test_v1",
+			"--locale", "ar", "--idempotency-key", "k", "--param", private},
+		{"--provider", "whatsapp-main", "--to", "201012345678", "--template", "operator_test_v1",
+			"--locale", "ar", "--idempotency-key", "k", "--param=" + private},
+	} {
+		var stdout, stderr bytes.Buffer
+		err := notificationEnqueueCmd(args, &stdout, &stderr)
+		if err == nil {
+			t.Fatalf("malformed param must fail: %v", args)
+		}
+		for _, output := range []string{stdout.String(), stderr.String(), err.Error()} {
+			if strings.Contains(output, private) {
+				t.Fatalf("private content leaked: %q", output)
+			}
+		}
+		if !strings.Contains(err.Error(), "name=value") {
+			t.Fatalf("helpful syntax error: %q", err.Error())
+		}
+	}
+}

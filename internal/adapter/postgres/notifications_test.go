@@ -710,3 +710,163 @@ func TestNotificationConcurrentStatusApplies(t *testing.T) {
 		t.Fatalf("one history per unique event: %d %v", history, err)
 	}
 }
+
+// TestNotificationAcceptedBaselineOrdering proves local ACCEPTED
+// yields to provider callbacks: same-second, earlier-than-persistence,
+// concurrent initial, same-second precedence, and FAILED-first.
+func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	apply := func(id, wamid, raw string, at time.Time) notifications.DeliveryOutcome {
+		t.Helper()
+		event := notifications.DeliveryEvent{
+			ProviderMessageID: wamid, RawStatus: raw,
+			Canonical:         notifications.MapProviderStatus(raw),
+			ProviderTimestamp: &at,
+		}
+		event.Fingerprint = notifications.DeliveryEventFingerprint(
+			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
+			event.Canonical, event.ProviderTimestamp, "")
+		outcome, err := store.ApplyDeliveryStatus(ctx, id, event)
+		if err != nil {
+			t.Fatalf("apply %s: %v", raw, err)
+		}
+		return outcome
+	}
+	current := func(id string) (string, time.Time) {
+		t.Helper()
+		var status string
+		var at time.Time
+		if err := env.pool.QueryRow(ctx,
+			`SELECT delivery_status, delivery_status_at FROM notification_messages WHERE id = $1`,
+			mustPgID(id)).Scan(&status, &at); err != nil {
+			t.Fatal(err)
+		}
+		return status, at
+	}
+	t.Run("same second advances", func(t *testing.T) {
+		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-1"))
+		claimed := claimNotification(t, env, "worker-A")
+		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base1"); err != nil || result != notifications.FinishApplied {
+			t.Fatalf("accept: %v %v", result, err)
+		}
+		// Provider second-granularity callback at/below local accept time.
+		var acceptedAt time.Time
+		if err := env.pool.QueryRow(ctx,
+			`SELECT delivery_status_at FROM notification_messages WHERE id = $1`,
+			mustPgID(id)).Scan(&acceptedAt); err != nil {
+			t.Fatal(err)
+		}
+		providerSecond := acceptedAt.Truncate(time.Second)
+		outcome := apply(id, "wamid.base1", "delivered", providerSecond)
+		if !outcome.CurrentAdvanced {
+			t.Fatal("same-second DELIVERED must advance")
+		}
+		status, at := current(id)
+		if status != "DELIVERED" || !at.Equal(providerSecond) {
+			t.Fatalf("DELIVERED at provider ts: %s %v", status, at)
+		}
+	})
+	t.Run("earlier provider timestamp advances", func(t *testing.T) {
+		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-2"))
+		claimed := claimNotification(t, env, "worker-A")
+		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base2"); err != nil || result != notifications.FinishApplied {
+			t.Fatalf("accept: %v %v", result, err)
+		}
+		earlier := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+		if outcome := apply(id, "wamid.base2", "sent", earlier); !outcome.CurrentAdvanced {
+			t.Fatal("predated SENT must establish provider state")
+		}
+		if status, _ := current(id); status != "SENT" {
+			t.Fatalf("SENT: %s", status)
+		}
+		// Normal ordering resumes after the baseline yields.
+		later := earlier.Add(time.Minute)
+		if outcome := apply(id, "wamid.base2", "delivered", later); !outcome.CurrentAdvanced {
+			t.Fatal("subsequent DELIVERED must advance")
+		}
+	})
+	t.Run("failed first advances without resend", func(t *testing.T) {
+		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-3"))
+		claimed := claimNotification(t, env, "worker-A")
+		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base3"); err != nil || result != notifications.FinishApplied {
+			t.Fatalf("accept: %v %v", result, err)
+		}
+		at := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+		if outcome := apply(id, "wamid.base3", "failed", at); !outcome.CurrentAdvanced {
+			t.Fatal("first FAILED must advance")
+		}
+		var dispatch string
+		if err := env.pool.QueryRow(ctx,
+			`SELECT dispatch_status FROM notification_messages WHERE id = $1`,
+			mustPgID(id)).Scan(&dispatch); err != nil || dispatch != "accepted" {
+			t.Fatalf("dispatch stays accepted: %s %v", dispatch, err)
+		}
+	})
+}
+
+// TestNotificationPacedLifecycle proves held-response identity flows
+// end to end: persisted ID correlates sent→delivered→read, failed
+// correlates without resend, and accepted dispatch never re-sends.
+func TestNotificationPacedLifecycle(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	store := catalogStore(env)
+	provider := &scriptNotificationProvider{key: "whatsapp-main", send: func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
+		// Adapter contract for held_for_quality_assessment: valid ID
+		// returned, dispatch accepted, no resend.
+		return notifications.SendResult{ProviderMessageID: "wamid.paced1"}, nil
+	}}
+	registry := notifications.NewRegistry()
+	if err := registry.Register("whatsapp-main", provider); err != nil {
+		t.Fatal(err)
+	}
+	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "paced-1"))
+	worker := notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "worker-A", nil)
+	worker.DrainForTest(ctx)
+	if provider.count() != 1 {
+		t.Fatalf("one send: %d", provider.count())
+	}
+	var dispatch, wamid string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT dispatch_status, provider_message_id FROM notification_messages WHERE id = $1`,
+		mustPgID(id)).Scan(&dispatch, &wamid); err != nil || dispatch != "accepted" || wamid != "wamid.paced1" {
+		t.Fatalf("paced accepted: %s %q %v", dispatch, wamid, err)
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	apply := func(raw string, offset int64) {
+		t.Helper()
+		at := base.Add(time.Duration(offset) * time.Second)
+		event := notifications.DeliveryEvent{
+			ProviderMessageID: "wamid.paced1", RawStatus: raw,
+			Canonical:         notifications.MapProviderStatus(raw),
+			ProviderTimestamp: &at,
+		}
+		event.Fingerprint = notifications.DeliveryEventFingerprint(
+			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
+			event.Canonical, event.ProviderTimestamp, "")
+		if _, err := store.ApplyDeliveryStatus(ctx, id, event); err != nil {
+			t.Fatalf("apply %s: %v", raw, err)
+		}
+	}
+	apply("sent", 10)
+	apply("delivered", 20)
+	apply("read", 30)
+	var delivery string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT delivery_status FROM notification_messages WHERE id = $1`,
+		mustPgID(id)).Scan(&delivery); err != nil || delivery != "READ" {
+		t.Fatalf("paced READ: %s %v", delivery, err)
+	}
+	// Accepted dispatch is terminal for sending: later drains send nothing.
+	worker.DrainForTest(ctx)
+	if provider.count() != 1 {
+		t.Fatalf("no second send: %d", provider.count())
+	}
+	// Correlation survives across store handles (restart equivalent).
+	lookup, found, err := catalogStore(env).LookupByProviderMessage(ctx, "whatsapp-main", "wamid.paced1")
+	if err != nil || !found || lookup != id {
+		t.Fatalf("restart correlation: %v %v %v", lookup, found, err)
+	}
+}

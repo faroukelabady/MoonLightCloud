@@ -158,6 +158,38 @@ func runTemplateMapList(ctx context.Context, store templateMappingStore, out io.
 	return nil
 }
 
+// checkParamArgs pre-validates --param shape value-free before flag
+// parsing: the flag library echoes malformed values as
+// `invalid value %q`, so malformed input must never reach it.
+func checkParamArgs(args []string) error {
+	validParam := func(value string) bool {
+		name, _, ok := strings.Cut(value, "=")
+		return ok && strings.TrimSpace(name) != ""
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if value, ok := strings.CutPrefix(arg, "--param="); ok {
+			if !validParam(value) {
+				return fmt.Errorf("invalid --param: want name=value")
+			}
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "-param="); ok {
+			if !validParam(value) {
+				return fmt.Errorf("invalid --param: want name=value")
+			}
+			continue
+		}
+		if arg == "--param" || arg == "-param" {
+			if i+1 >= len(args) || !validParam(args[i+1]) {
+				return fmt.Errorf("invalid --param: want name=value")
+			}
+			i++
+		}
+	}
+	return nil
+}
+
 // paramFlags collects repeatable --param name=value pairs.
 type paramFlags map[string]string
 
@@ -166,7 +198,7 @@ func (p paramFlags) String() string { return fmt.Sprint(map[string]string(p)) }
 func (p paramFlags) Set(value string) error {
 	name, val, ok := strings.Cut(value, "=")
 	if !ok || strings.TrimSpace(name) == "" {
-		return fmt.Errorf("invalid --param %q: want name=value", value)
+		return fmt.Errorf("invalid --param: want name=value")
 	}
 	p[strings.TrimSpace(name)] = val
 	return nil
@@ -182,6 +214,9 @@ func notificationEnqueueCmd(args []string, stdout, stderr io.Writer) error {
 	idempotencyKey := fs.String("idempotency-key", "", "deterministic caller key")
 	params := paramFlags{}
 	fs.Var(params, "param", "template parameter name=value (repeatable)")
+	if err := checkParamArgs(args); err != nil {
+		return err
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

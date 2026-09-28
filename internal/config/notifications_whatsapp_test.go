@@ -111,3 +111,49 @@ func TestWhatsAppNotificationConfig(t *testing.T) {
 		}
 	})
 }
+
+// TestWhatsAppConfigValuePrivacy proves every validation error is
+// value-free: distinctive secrets smuggled into any invalid field
+// never appear in the returned error.
+func TestWhatsAppConfigValuePrivacy(t *testing.T) {
+	const access, app, verify = "ACCESS_SECRET_aaa", "APP_SECRET_bbb", "VERIFY_SECRET_ccc"
+	combined := access + " " + app + " " + verify
+	t.Run("timeout leak", func(t *testing.T) {
+		setWhatsAppEnv(t, validWhatsAppEnv())
+		t.Setenv("NOTIFICATIONS_WHATSAPP_HTTP_TIMEOUT", combined)
+		_, err := loadWhatsAppNotificationConfig()
+		if err == nil {
+			t.Fatal("must fail")
+		}
+		text := err.Error()
+		if !strings.Contains(text, "NOTIFICATIONS_WHATSAPP_HTTP_TIMEOUT") {
+			t.Fatalf("must identify the key: %q", text)
+		}
+		for _, secret := range []string{access, app, verify, "ACCESS_SECRET", "APP_SECRET", "VERIFY_SECRET"} {
+			if strings.Contains(text, secret) {
+				t.Fatalf("leaked %q in %q", secret, text)
+			}
+		}
+	})
+	t.Run("field matrix", func(t *testing.T) {
+		cases := map[string]string{
+			"NOTIFICATIONS_WHATSAPP_PROVIDER_KEY":    "BAD KEY " + access,
+			"NOTIFICATIONS_WHATSAPP_GRAPH_VERSION":   "v9 " + access,
+			"NOTIFICATIONS_WHATSAPP_BASE_URL":        "https://graph.example.com/?t=" + access,
+			"NOTIFICATIONS_WHATSAPP_PHONE_NUMBER_ID": "abc " + access,
+			"NOTIFICATIONS_WHATSAPP_ENABLED":         "maybe " + access,
+		}
+		for key, value := range cases {
+			env := validWhatsAppEnv()
+			env[key] = value
+			setWhatsAppEnv(t, env)
+			_, err := loadWhatsAppNotificationConfig()
+			if err == nil {
+				t.Fatalf("%s must fail", key)
+			}
+			if strings.Contains(err.Error(), access) || strings.Contains(err.Error(), value) {
+				t.Fatalf("%s leaked raw value: %q", key, err.Error())
+			}
+		}
+	})
+}

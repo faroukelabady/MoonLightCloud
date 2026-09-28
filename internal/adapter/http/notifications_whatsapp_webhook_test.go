@@ -398,3 +398,79 @@ func TestNotificationWebhookCrossAuth(t *testing.T) {
 		t.Fatalf("hub signature must not authenticate woo route: %d", recorder2.Code)
 	}
 }
+
+// TestWhatsAppWebhookMalformedTimestampIsolation proves one malformed
+// status timestamp cannot poison valid siblings: the bad entry is
+// skipped with no writes, the sibling persists, envelope acks 200.
+func TestWhatsAppWebhookMalformedTimestampIsolation(t *testing.T) {
+	newHandler := func() (*WhatsAppWebhookHandlers, *fakeNotificationStatusStore) {
+		store := newFakeNotificationStatusStore()
+		return testWhatsAppWebhookHandlers(store), store
+	}
+	mixed := func() []byte {
+		return statusCallbackBody(t,
+			map[string]any{"id": "wamid.known1", "status": "sent", "timestamp": "not-a-number", "recipient_id": "16505551234"},
+			map[string]any{"id": "wamid.known1", "status": "delivered", "timestamp": "1750263750", "recipient_id": "16505551234"},
+		)
+	}
+	t.Run("mixed envelope", func(t *testing.T) {
+		handler, store := newHandler()
+		if recorder := postStatus(t, handler, mixed(), validSigner); recorder.Code != http.StatusOK {
+			t.Fatalf("mixed: %d", recorder.Code)
+		}
+		if len(store.history) != 1 {
+			t.Fatalf("only sibling persists: %+v", store.history)
+		}
+		if store.current["notif-1"] != notifications.DeliveryDelivered {
+			t.Fatalf("sibling applied: %+v", store.current)
+		}
+	})
+	t.Run("all malformed acknowledged without writes", func(t *testing.T) {
+		handler, store := newHandler()
+		body := statusCallbackBody(t, map[string]any{
+			"id": "wamid.known1", "status": "sent", "timestamp": "bad", "recipient_id": "1",
+		})
+		if recorder := postStatus(t, handler, body, validSigner); recorder.Code != http.StatusOK {
+			t.Fatalf("all-malformed: %d", recorder.Code)
+		}
+		if len(store.history) != 0 {
+			t.Fatalf("zero writes: %+v", store.history)
+		}
+	})
+	t.Run("numeric timestamp still decodes", func(t *testing.T) {
+		handler, store := newHandler()
+		var envelope map[string]any
+		if err := json.Unmarshal(statusCallbackBody(t, map[string]any{
+			"id": "wamid.known1", "status": "sent", "timestamp": "1750263700", "recipient_id": "1",
+		}), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Rewrite the timestamp as a bare JSON number.
+		raw = bytes.Replace(raw, []byte(`"timestamp":"1750263700"`), []byte(`"timestamp":1750263700`), 1)
+		if recorder := postStatus(t, handler, raw, validSigner); recorder.Code != http.StatusOK {
+			t.Fatalf("numeric: %d", recorder.Code)
+		}
+		if store.current["notif-1"] != notifications.DeliverySent {
+			t.Fatalf("numeric applied: %+v", store.current)
+		}
+	})
+	t.Run("structural garbage still 400", func(t *testing.T) {
+		handler, _ := newHandler()
+		if recorder := postStatus(t, handler, []byte(`{"object":`), validSigner); recorder.Code != http.StatusBadRequest {
+			t.Fatalf("structural: %d", recorder.Code)
+		}
+	})
+	t.Run("signature wins over malformed content", func(t *testing.T) {
+		handler, store := newHandler()
+		if recorder := postStatus(t, handler, mixed(), nil); recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("auth first: %d", recorder.Code)
+		}
+		if store.lookups != 0 {
+			t.Fatal("zero writes without HMAC")
+		}
+	})
+}

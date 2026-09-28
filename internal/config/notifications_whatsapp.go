@@ -54,9 +54,11 @@ var (
 
 // loadWhatsAppNotificationConfig reads NOTIFICATIONS_WHATSAPP_*
 // environment variables. Disabled (default) requires nothing and
-// ignores the rest.
+// ignores the rest. All validation errors are value-free by
+// construction: raw supplied values (which may contain secrets,
+// recipient data, or other sensitive text) are never echoed.
 func loadWhatsAppNotificationConfig() (WhatsAppNotificationConfig, error) {
-	enabled, err := parseBoolFlag("NOTIFICATIONS_WHATSAPP_ENABLED")
+	enabled, err := parseWhatsAppBoolFlag("NOTIFICATIONS_WHATSAPP_ENABLED")
 	if err != nil {
 		return WhatsAppNotificationConfig{}, err
 	}
@@ -75,7 +77,7 @@ func loadWhatsAppNotificationConfig() (WhatsAppNotificationConfig, error) {
 	if v := strings.TrimSpace(os.Getenv("NOTIFICATIONS_WHATSAPP_HTTP_TIMEOUT")); v != "" {
 		timeout, err := time.ParseDuration(v)
 		if err != nil {
-			return WhatsAppNotificationConfig{}, fmt.Errorf("invalid NOTIFICATIONS_WHATSAPP_HTTP_TIMEOUT: %v", err)
+			return WhatsAppNotificationConfig{}, fmt.Errorf("invalid NOTIFICATIONS_WHATSAPP_HTTP_TIMEOUT: want a valid duration")
 		}
 		cfg.HTTPTimeout = timeout
 	}
@@ -83,6 +85,23 @@ func loadWhatsAppNotificationConfig() (WhatsAppNotificationConfig, error) {
 		return WhatsAppNotificationConfig{}, err
 	}
 	return cfg, nil
+}
+
+// parseWhatsAppBoolFlag parses one WhatsApp boolean without echoing
+// the raw value: a malformed flag must not reflect arbitrary
+// environment content into startup errors.
+func parseWhatsAppBoolFlag(key string) (bool, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	switch {
+	case v == "":
+		return false, nil
+	case strings.EqualFold(v, "true") || v == "1":
+		return true, nil
+	case strings.EqualFold(v, "false") || v == "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid %s: want true|false|1|0", key)
+	}
 }
 
 // validate checks an enabled configuration eagerly so operator mistakes

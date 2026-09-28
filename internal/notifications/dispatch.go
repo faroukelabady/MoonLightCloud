@@ -251,12 +251,22 @@ func DeliveryEventFingerprint(providerKey, providerMessageID, rawStatus string, 
 // state. Provider timestamp is primary ordering evidence; UNKNOWN
 // records history only and never advances; equal timestamps resolve by
 // documented precedence with FAILED terminal-conservative.
+//
+// ACCEPTED is the local API-acceptance baseline, not provider
+// ordering evidence: the first known provider callback (SENT,
+// DELIVERED, READ, FAILED) always establishes provider ordering
+// state, even when its provider timestamp predates local persistence.
+// That callback's timestamp then anchors all subsequent provider
+// ordering. This never compares local and provider clocks as peers.
 func AdvanceDelivery(current DeliveryStatus, currentAt *time.Time, event DeliveryStatus, eventAt *time.Time) bool {
 	if event == DeliveryUnknown {
 		return false
 	}
 	if eventAt == nil {
 		return false
+	}
+	if current == DeliveryAccepted {
+		return true
 	}
 	if currentAt == nil {
 		return true

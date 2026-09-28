@@ -1,8 +1,11 @@
 package notifications
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -314,5 +317,37 @@ func TestDispatcherCancelledAfterStart(t *testing.T) {
 	dispatcher.drain(context.Background())
 	if row := store.rows["n1"]; row.dispatch != DispatchAmbiguous {
 		t.Fatalf("ambiguous: %+v", row)
+	}
+}
+
+// TestDispatcherLogsPrivateContent proves a provider validation
+// failure through the dispatcher logs only operational identity:
+// notification ID, provider, template, machine code — never recipient,
+// parameters, or provider prose.
+func TestDispatcherLogsPrivateContent(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	store := newFakeDispatchStore()
+	registry := NewRegistry()
+	provider := &stubProvider{key: "whatsapp-main", send: func(context.Context, TemplateSendRequest) (SendResult, error) {
+		return SendResult{}, ValidationError("whatsapp error 100")
+	}}
+	if err := registry.Register("whatsapp-main", provider); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := NewDispatcher(store, registry, SystemClock{}, "worker-A", logger)
+	store.add("n1", false)
+	// Distinctive private values in the claim.
+	store.rows["n1"].claimed.Recipient = "201099988877"
+	store.rows["n1"].claimed.Parameters = map[string]string{"name": "Secret Name سري", "message": "secret body"}
+	dispatcher.drain(context.Background())
+	if row := store.rows["n1"]; row.dispatch != DispatchBlocked || row.code != CodeProviderValidation {
+		t.Fatalf("blocked validation: %+v", row)
+	}
+	output := logs.String()
+	for _, private := range []string{"201099988877", "Secret Name", "سري", "secret body", "whatsapp error"} {
+		if strings.Contains(output, private) {
+			t.Fatalf("private content in logs: %q in %q", private, output)
+		}
 	}
 }

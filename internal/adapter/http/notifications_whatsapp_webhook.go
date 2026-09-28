@@ -110,14 +110,39 @@ func printableRange(value string, min, max int) bool {
 	return true
 }
 
-// whatsAppStatusEntry is one outbound status callback. Timestamp is
-// Unix seconds per current Meta behavior, decoded tolerantly.
+// whatsAppStatusEntry is one outbound status callback. Timestamp
+// decodes tolerantly (JSON string or number) so one malformed entry
+// cannot poison valid siblings; per-entry parsing decides advancement.
 type whatsAppStatusEntry struct {
 	ID          string          `json:"id"`
 	Status      string          `json:"status"`
-	Timestamp   json.Number     `json:"timestamp"`
+	Timestamp   statusTimestamp `json:"timestamp"`
 	RecipientID string          `json:"recipient_id"`
 	Errors      []whatsAppError `json:"errors"`
+}
+
+// statusTimestamp preserves the raw timestamp text for independent
+// per-entry parsing. JSON strings, numbers, and null decode without
+// failing the envelope; anything else is structural and rejected.
+type statusTimestamp string
+
+// UnmarshalJSON accepts string, number, or null timestamps verbatim.
+func (t *statusTimestamp) UnmarshalJSON(raw []byte) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		*t = ""
+		return nil
+	}
+	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+		var decoded string
+		if err := json.Unmarshal(trimmed, &decoded); err != nil {
+			return err
+		}
+		*t = statusTimestamp(decoded)
+		return nil
+	}
+	*t = statusTimestamp(trimmed)
+	return nil
 }
 
 // whatsAppError is one provider failure detail. Only the bounded
@@ -217,11 +242,17 @@ func (h *WhatsAppWebhookHandlers) applyStatus(ctx context.Context, providerKey s
 		return true
 	}
 	canonical := notifications.MapProviderStatus(status.Status)
+	timestamp, malformed := parseStatusTimestamp(string(status.Timestamp))
+	if malformed {
+		// One bad entry must not poison valid siblings: skip it
+		// entirely (no history, no state change) and acknowledge.
+		return true
+	}
 	event := notifications.DeliveryEvent{
 		ProviderMessageID: status.ID,
 		RawStatus:         boundStatusRaw(status.Status),
 		Canonical:         canonical,
-		ProviderTimestamp: parseStatusTimestamp(status.Timestamp.String()),
+		ProviderTimestamp: timestamp,
 		ErrorCode:         statusErrorCode(status.Errors),
 	}
 	event.Fingerprint = notifications.DeliveryEventFingerprint(
@@ -265,19 +296,21 @@ func boundStatusRaw(raw string) string {
 	return bounded.String()
 }
 
-// parseStatusTimestamp decodes Meta Unix-seconds timestamps. Impossible
-// values yield nil: history without current-state advancement.
-func parseStatusTimestamp(value string) *time.Time {
+// parseStatusTimestamp decodes Meta Unix-seconds timestamps. Empty
+// means absent (history without advancement); non-empty unparseable
+// means malformed (the entry is skipped entirely, never persisted).
+// Impossible values (non-positive, past 2100) are malformed.
+func parseStatusTimestamp(value string) (*time.Time, bool) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return nil
+		return nil, false
 	}
 	seconds, err := strconv.ParseInt(trimmed, 10, 64)
 	if err != nil || seconds <= 0 || seconds > 4102444800 {
-		return nil
+		return nil, true
 	}
 	at := time.Unix(seconds, 0).UTC()
-	return &at
+	return &at, false
 }
 
 // statusErrorCode keeps only the first bounded numeric provider error
