@@ -140,6 +140,10 @@ type Config struct {
 	// adapter configuration (Phase 7A). Disabled by default: no
 	// provider, no credentials, no network client.
 	WhatsAppNotifications WhatsAppNotificationConfig
+	// BusinessReports holds the scheduled business-report scheduler
+	// configuration (Phase 7B). Disabled by default: no planner, no
+	// worker, no provider network.
+	BusinessReports BusinessReports
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -221,6 +225,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.WhatsAppNotifications = whatsApp
+	reports, err := loadBusinessReports()
+	if err != nil {
+		return Config{}, err
+	}
+	c.BusinessReports = reports
 	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {

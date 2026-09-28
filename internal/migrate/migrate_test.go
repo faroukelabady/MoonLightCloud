@@ -527,3 +527,78 @@ func TestV14ToLatest(t *testing.T) {
 		}
 	}
 }
+
+// TestV15ToLatest proves the frozen Phase 7A schema upgrades to the
+// business-report domain cleanly: 00016 only adds report tables, and
+// representative 7A state (template mapping, notification, delivery
+// history, order fence) is preserved exactly. Report tables start
+// empty.
+func TestV15ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 15); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 15 {
+		t.Fatalf("want 15, got %d", v)
+	}
+	if _, err := conn.Exec(`INSERT INTO notification_template_mappings
+		(provider_key, template_key, locale, external_template_name, external_language_code, parameter_names, enabled)
+		VALUES ('whatsapp-main', 'operator_test_v1', 'ar', 'ext', 'ar', '{name}', TRUE)`); err != nil {
+		t.Fatalf("seed mapping at v15: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO notification_messages
+		(id, provider_key, idempotency_key, semantic_fingerprint, recipient, template_key, locale,
+		 ext_template_name, ext_language_code, dispatch_status, delivery_status)
+		VALUES ('11111111-1111-4111-8111-111111111111', 'whatsapp-main', 'k1', '\x01',
+			'201012345678', 'operator_test_v1', 'ar', 'ext', 'ar', 'accepted', 'READ')`); err != nil {
+		t.Fatalf("seed notification at v15: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO notification_delivery_status_history
+		(notification_id, provider_key, provider_message_id, provider_status_raw,
+		 canonical_status, event_fingerprint)
+		VALUES ('11111111-1111-4111-8111-111111111111', 'whatsapp-main', 'wamid.1',
+			'read', 'READ', '\x02')`); err != nil {
+		t.Fatalf("seed history at v15: %v", err)
+	}
+	if _, err := conn.Exec(`INSERT INTO commerce_online_order_reconcile_fences
+		(provider_key, external_order_id, generation)
+		VALUES ('website', '100', 3)`); err != nil {
+		t.Fatalf("seed fence at v15: %v", err)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var dispatch, delivery, recipient string
+	if err := conn.QueryRow(`SELECT dispatch_status, delivery_status, recipient FROM notification_messages
+		WHERE provider_key='whatsapp-main' AND idempotency_key='k1'`).Scan(&dispatch, &delivery, &recipient); err != nil ||
+		dispatch != "accepted" || delivery != "READ" || recipient != "201012345678" {
+		t.Fatalf("notification preserved: %s %s %s (%v)", dispatch, delivery, recipient, err)
+	}
+	var history int
+	if err := conn.QueryRow(`SELECT count(*) FROM notification_delivery_status_history
+		WHERE provider_message_id='wamid.1'`).Scan(&history); err != nil || history != 1 {
+		t.Fatalf("history preserved: %d (%v)", history, err)
+	}
+	var generation int64
+	if err := conn.QueryRow(`SELECT generation FROM commerce_online_order_reconcile_fences
+		WHERE provider_key='website' AND external_order_id='100'`).Scan(&generation); err != nil || generation != 3 {
+		t.Fatalf("fence preserved: %d (%v)", generation, err)
+	}
+	for _, table := range []string{
+		"business_report_recipients", "business_report_schedules",
+		"business_report_schedule_recipients", "business_report_runs",
+		"business_report_deliveries",
+	} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s missing (%v)", table, err)
+		}
+		var count int
+		if err := conn.QueryRow(`SELECT count(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("table %s starts empty (%d %v)", table, count, err)
+		}
+	}
+}

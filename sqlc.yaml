@@ -18,6 +18,7 @@ sql:
       - "db/migrations/00013_commerce_orders.sql"
       - "db/migrations/00014_order_concurrency_fences.sql"
       - "db/migrations/00015_notifications.sql"
+      - "db/migrations/00016_business_reports.sql"
     gen:
       go:
         package: "sqlcgen"

@@ -17,6 +17,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
@@ -70,6 +71,9 @@ type App struct {
 	OrderProcessor         *orders.Processor
 	NotificationRegistry   *notifications.Registry
 	NotificationDispatcher *notifications.Dispatcher
+	ReportService          *businessreports.Service
+	ReportPlanner          *businessreports.Planner
+	ReportRunner           *businessreports.Runner
 	Handler                http.Handler
 	Health                 adapterhttp.Health
 	Version                adapterhttp.Version
@@ -191,6 +195,25 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Log.Info("notification providers", "count", a.NotificationRegistry.Count(),
 		"whatsapp", cfg.WhatsAppNotifications.Enabled)
+	if cfg.BusinessReports.Enabled {
+		loc, err := businessreports.LoadCairo()
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+		notificationService := notifications.NewService(store, store, log)
+		a.ReportService = businessreports.NewService(store, store, store, store,
+			a.Reports, notificationService,
+			businessreports.SystemClock{}, loc,
+			cfg.BusinessReports.LeaseDuration, cfg.BusinessReports.BatchSize, log)
+		a.ReportPlanner = businessreports.NewPlanner(store,
+			businessreports.SystemClock{}, loc,
+			cfg.BusinessReports.PollInterval, cfg.BusinessReports.BatchSize, log)
+		a.ReportRunner = businessreports.NewRunner(store, store, a.Reports, notificationService,
+			businessreports.SystemClock{}, loc, cfg.BusinessReports.PollInterval, 25,
+			commerceOwner(), cfg.BusinessReports.LeaseDuration, log)
+	}
+	a.Log.Info("business reports", "enabled", cfg.BusinessReports.Enabled)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
 		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, cfg.DashboardAssetsDir)

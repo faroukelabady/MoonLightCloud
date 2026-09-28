@@ -8,6 +8,77 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BusinessReportDelivery struct {
+	ID                         pgtype.UUID        `json:"id"`
+	RunID                      pgtype.UUID        `json:"run_id"`
+	RecipientID                pgtype.UUID        `json:"recipient_id"`
+	ProviderKey                string             `json:"provider_key"`
+	RecipientSnapshot          string             `json:"recipient_snapshot"`
+	LocaleSnapshot             string             `json:"locale_snapshot"`
+	TemplateKey                string             `json:"template_key"`
+	ReportBodySnapshot         pgtype.Text        `json:"report_body_snapshot"`
+	ReportFingerprint          []byte             `json:"report_fingerprint"`
+	NotificationIdempotencyKey string             `json:"notification_idempotency_key"`
+	NotificationID             pgtype.UUID        `json:"notification_id"`
+	Status                     string             `json:"status"`
+	LastErrorCode              pgtype.Text        `json:"last_error_code"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BusinessReportRecipient struct {
+	ID          pgtype.UUID        `json:"id"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BusinessReportRun struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ScheduleID           pgtype.UUID        `json:"schedule_id"`
+	RunKind              string             `json:"run_kind"`
+	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
+	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
+	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
+	PeriodStart          pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd            pgtype.Timestamptz `json:"period_end"`
+	ScheduleRevision     int64              `json:"schedule_revision"`
+	Status               string             `json:"status"`
+	AttemptCount         int32              `json:"attempt_count"`
+	NextAttemptAt        pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseOwner           pgtype.Text        `json:"lease_owner"`
+	LeaseUntil           pgtype.Timestamptz `json:"lease_until"`
+	LeaseGeneration      int64              `json:"lease_generation"`
+	LastErrorCode        pgtype.Text        `json:"last_error_code"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BusinessReportSchedule struct {
+	ID               pgtype.UUID        `json:"id"`
+	Name             string             `json:"name"`
+	ReportKind       string             `json:"report_kind"`
+	Timezone         string             `json:"timezone"`
+	LocalTime        string             `json:"local_time"`
+	AnchorLocalDate  pgtype.Date        `json:"anchor_local_date"`
+	Enabled          bool               `json:"enabled"`
+	Revision         int64              `json:"revision"`
+	NextRunLocalDate pgtype.Date        `json:"next_run_local_date"`
+	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BusinessReportScheduleRecipient struct {
+	ScheduleID  pgtype.UUID        `json:"schedule_id"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type CatalogCategory struct {
 	CategoryID        pgtype.UUID        `json:"category_id"`
 	Status            string             `json:"status"`
