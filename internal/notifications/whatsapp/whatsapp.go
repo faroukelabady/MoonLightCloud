@@ -150,7 +150,7 @@ func (p *Provider) SendTemplate(ctx context.Context, req notifications.TemplateS
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return notifications.SendResult{}, p.classifyStatus(response.StatusCode,
-			response.Header.Get("Retry-After"), raw)
+			response.Header.Get("Retry-After"))
 	}
 	return p.acceptResponse(raw)
 }
@@ -223,21 +223,14 @@ func validMessageID(id string) bool {
 	return true
 }
 
-// graphError is Meta's standard error envelope, best-effort decoded.
-type graphError struct {
-	Error struct {
-		Code    json.Number `json:"code"`
-		Subcode json.Number `json:"error_subcode"`
-		Message string      `json:"message"`
-		Type    string      `json:"type"`
-	} `json:"error"`
-}
-
 // classifyStatus maps HTTP status to the notification taxonomy. The
-// diagnostic message carries only the numeric Meta code: provider
-// prose never leaves the adapter.
-func (p *Provider) classifyStatus(status int, retryAfter string, raw []byte) *notifications.NotificationError {
-	message := p.safeGraphMessage(raw)
+// diagnostic message is a fixed MoonLight-owned string: no provider
+// body content — prose, numeric code, or subcode — ever crosses the
+// adapter boundary, because any provider-controlled field can reflect
+// request-private values in transformed or truncated forms. HTTP status
+// and the Retry-After header (parsed separately) drive all behavior.
+func (p *Provider) classifyStatus(status int, retryAfter string) *notifications.NotificationError {
+	const message = "whatsapp provider rejected request"
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return notifications.AuthenticationError(message)
@@ -267,44 +260,6 @@ func classifyTransport(ctx context.Context, err error, wroteRequest bool) error 
 		return notifications.TemporaryError("whatsapp request never written")
 	}
 	return notifications.AmbiguousError("whatsapp request outcome unknown")
-}
-
-// safeGraphMessage extracts machine-only diagnostics from a provider
-// error body: the bounded numeric Meta code (plus numeric subcode when
-// present). Provider prose (message, title, details, reflections) never
-// crosses the adapter boundary: it may echo recipient identity,
-// template parameters, or credentials in transformed, truncated, or
-// re-quoted forms that no scrubber can reliably match. Unparseable
-// bodies yield a generic failure with no provider content at all.
-func (p *Provider) safeGraphMessage(raw []byte) string {
-	var parsed graphError
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if err := decoder.Decode(&parsed); err != nil {
-		return "whatsapp request failed"
-	}
-	code := numericCode(parsed.Error.Code.String())
-	if code == "" {
-		return "whatsapp request failed"
-	}
-	if subcode := numericCode(parsed.Error.Subcode.String()); subcode != "" {
-		return "whatsapp error " + code + "." + subcode
-	}
-	return "whatsapp error " + code
-}
-
-// numericCode keeps only short all-digit Meta codes. Anything else
-// (prose, reflections, injections) collapses to empty.
-func numericCode(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 16 {
-		return ""
-	}
-	for i := 0; i < len(value); i++ {
-		if value[i] < '0' || value[i] > '9' {
-			return ""
-		}
-	}
-	return value
 }
 
 // parseRetryAfter bounds Retry-After metadata to the backoff ceiling.

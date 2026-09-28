@@ -72,11 +72,12 @@ without touching fencing, revisions, or the projection schema:
    environment content into startup errors. All WhatsApp validation
    errors are now value-free by construction (key + rule only); no
    scrubbing layer is trusted with arbitrary config text.
-2. **Machine-only provider errors.** Provider prose could reflect
-   recipient and parameter values, so `NotificationError` now carries
-   only the numeric Meta code/subcode — prose never crosses the
-   adapter boundary. Dispatcher logs, CLI output, and persisted
-   `last_error_code` are machine codes by construction.
+2. **Machine-only provider errors.** Provider fields — prose AND
+   numeric code/subcode, which can also reflect request-private
+   values — never cross the adapter boundary. `NotificationError`
+   carries a fixed MoonLight-owned diagnostic plus kind; HTTP status
+   and Retry-After drive all behavior. Dispatcher logs, CLI output,
+   and persisted `last_error_code` are machine codes by construction.
 3. **ACCEPTED-baseline ordering.** Local API-acceptance time no
    longer participates in provider ordering: the first known provider
    callback always establishes provider state, then anchors normal
@@ -92,6 +93,18 @@ without touching fencing, revisions, or the projection schema:
    siblings persist; all-malformed envelopes ack 200.
 6. **Value-free CLI errors.** Malformed `--param` fails before flag
    parsing (whose `invalid value %q` wrapper would echo content).
+
+## R3 remediation (provider diagnostic privacy)
+
+Numeric-only validation of provider `code`/`error_subcode` is not a
+privacy guarantee: an adversarial provider can reflect
+request-private numeric values (recipient digits, report amounts,
+identifiers, numeric credentials) into any returned field.
+`NotificationError` therefore carries a fixed MoonLight-owned
+diagnostic per error kind; HTTP status classification and Retry-After
+(which come from protocol framing, not body content) are unchanged.
+Provider-controlled diagnostic values are not exposed unless
+transformed into a MoonLight-owned bounded semantic classification.
 
 ## Consequences
 
