@@ -288,20 +288,27 @@ func (d Devices) LookupByProviderMessage(ctx context.Context, providerKey, provi
 // a single transaction, so history and current state can never mix.
 // Duplicate callbacks dedupe via the event fingerprint; older or
 // UNKNOWN events record history without regressing current state.
+//
+// Concurrency: the notification row is locked FOR UPDATE inside this
+// same transaction before history insert and the ordering decision, so
+// concurrent callbacks serialize on the one row they share and the
+// decision always uses post-lock current state. Lock order is fixed:
+// notification row, then history insert, then current update. Different
+// notifications never block each other.
 func (d Devices) ApplyDeliveryStatus(ctx context.Context, notificationID string, event notifications.DeliveryEvent) (notifications.DeliveryOutcome, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
+	id, err := parseUUID(notificationID)
+	if err != nil {
+		return notifications.DeliveryOutcome{}, apperr.New(apperr.InvalidInput, "invalid notification id")
+	}
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return notifications.DeliveryOutcome{}, apperr.Wrap(apperr.Internal, "notification delivery", redact(err))
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
-	id, err := parseUUID(notificationID)
-	if err != nil {
-		return notifications.DeliveryOutcome{}, apperr.New(apperr.InvalidInput, "invalid notification id")
-	}
-	current, err := q.GetNotificationByID(ctx, id)
+	current, err := q.GetNotificationByIDForUpdate(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notifications.DeliveryOutcome{}, apperr.New(apperr.NotFound, "notification not found")

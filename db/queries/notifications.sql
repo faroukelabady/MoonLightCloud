@@ -55,6 +55,18 @@ SELECT id, provider_key, idempotency_key, semantic_fingerprint,
 FROM notification_messages
 WHERE id = $1;
 
+-- name: GetNotificationByIDForUpdate :one
+SELECT id, provider_key, idempotency_key, semantic_fingerprint,
+    recipient, template_key, locale, parameters,
+    ext_template_name, ext_language_code, ext_parameter_order,
+    dispatch_status, attempt_count, next_attempt_at,
+    lease_owner, lease_until, lease_generation, send_started_at,
+    provider_message_id, delivery_status, delivery_status_at,
+    last_error_code, created_at, updated_at
+FROM notification_messages
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetNotificationByProviderMessage :one
 SELECT id, provider_key, idempotency_key,
     dispatch_status, delivery_status, delivery_status_at

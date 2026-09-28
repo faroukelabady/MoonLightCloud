@@ -16,7 +16,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// TargetVersion is the schema version Phase 5B code requires.
+// TargetVersion is the required schema version: startup refuses to
+// boot on mismatch.
 const TargetVersion int64 = 15
 
 func provider(conn *sql.DB) (*goose.Provider, error) {

@@ -308,3 +308,32 @@ func TestWhatsAppNoSecretInURL(t *testing.T) {
 		t.Fatalf("path: %s", request.Path)
 	}
 }
+
+// TestWhatsAppLongSecretBoundary proves scrub-before-bound: a
+// reflected overlong secret is redacted in full (no surviving prefix
+// fragment) and diagnostics stay bounded.
+func TestWhatsAppLongSecretBoundary(t *testing.T) {
+	harness := newGraphHarness(t)
+	provider := testGraphProvider(t, harness)
+	longToken := strings.Repeat("A", 300)
+	provider.scrub = newSecretScrubber(longToken)
+	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+		return http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"code":    "1",
+			"message": "leaked " + longToken + " tail",
+		}}, nil
+	}
+	_, err := provider.SendTemplate(context.Background(), testSendRequest())
+	text := err.Error()
+	if strings.Contains(text, longToken) {
+		t.Fatal("full secret leaked")
+	}
+	for _, fragment := range []string{longToken[:50], longToken[100:200], longToken[200:]} {
+		if strings.Contains(text, fragment) {
+			t.Fatalf("secret fragment leaked: %.20q...", fragment)
+		}
+	}
+	if len(text) > 300 {
+		t.Fatalf("diagnostic unbounded: %d", len(text))
+	}
+}
