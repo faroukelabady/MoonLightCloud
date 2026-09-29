@@ -15,8 +15,8 @@ func TestFreshTo18(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 18 {
-		t.Fatalf("want 18, got %d", v)
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
 	}
 	var enforced bool
 	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'device_control_commands_pending_lease_null')`).Scan(&enforced); err != nil || !enforced {
@@ -67,8 +67,8 @@ func TestV17To18ValidUpgrade(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 18 {
-		t.Fatalf("want 18, got %d", v)
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
 	}
 	after := snapshotCommands(t, conn)
 	if before != after {

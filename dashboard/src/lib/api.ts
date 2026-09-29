@@ -285,6 +285,47 @@ export interface DeviceRow {
 	recent_commands?: DeviceCommandWire[];
 }
 
+export interface IncidentRow {
+	id: string;
+	rule: string;
+	subject_type: string;
+	subject_id: string;
+	severity: string;
+	state: string;
+	episode: number;
+	opened_at: string;
+	last_observed_at: string;
+	acknowledged_at?: string | null;
+	resolved_at?: string | null;
+	resolution_code?: string | null;
+}
+
+export interface IncidentDelivery {
+	id: string;
+	event: string;
+	provider_key: string;
+	recipient_masked: string;
+	locale: string;
+	template_key: string;
+	status: string;
+	has_notification: boolean;
+}
+
+export interface IncidentRecovery {
+	id: string;
+	action_type: string;
+	state: string;
+	target_entity_id?: string | null;
+	result_code?: string | null;
+	attempt_count: number;
+}
+
+export interface DeviceIncidentSummary {
+	device_id: string;
+	open_count: number;
+	max_severity: string;
+}
+
 export interface SyncRequestResponse {
 	command: DeviceCommandWire;
 	created: boolean;
@@ -376,6 +417,39 @@ export const dashboardApi = {
 	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s),
 	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
+	incidents: (params: { state?: string; severity?: string; rule?: string; limit?: number; cursor?: string | null }, s?: AbortSignal) => {
+		const q = new URLSearchParams();
+		if (params.state) q.set('state', params.state);
+		if (params.severity) q.set('severity', params.severity);
+		if (params.rule) q.set('rule', params.rule);
+		if (params.limit) q.set('limit', String(params.limit));
+		if (params.cursor) q.set('cursor', params.cursor);
+		return get<{ incidents: IncidentRow[]; next_cursor: string }>(`/api/v1/dashboard/operations/incidents?${q.toString()}`, s);
+	},
+	incidentDetail: (id: string, s?: AbortSignal) =>
+		get<{ incident: IncidentRow; deliveries: IncidentDelivery[]; recoveries: IncidentRecovery[] }>(
+			`/api/v1/dashboard/operations/incidents/${encodeURIComponent(id)}`, s
+		),
+	incidentAck: async (id: string): Promise<IncidentRow> => {
+		const res = await fetch(`/api/v1/dashboard/operations/incidents/${encodeURIComponent(id)}/acknowledge`, {
+			method: 'POST',
+			credentials: 'same-origin'
+		});
+		if (!res.ok) throw new ApiError(res.status, 'REQUEST_FAILED', `request failed (${res.status})`);
+		const body = (await res.json()) as { incident: IncidentRow };
+		return body.incident;
+	},
+	incidentResolve: async (id: string): Promise<IncidentRow> => {
+		const res = await fetch(`/api/v1/dashboard/operations/incidents/${encodeURIComponent(id)}/resolve`, {
+			method: 'POST',
+			credentials: 'same-origin'
+		});
+		if (!res.ok) throw new ApiError(res.status, 'REQUEST_FAILED', `request failed (${res.status})`);
+		const body = (await res.json()) as { incident: IncidentRow };
+		return body.incident;
+	},
+	operationsSummary: (s?: AbortSignal) =>
+		get<{ devices: DeviceIncidentSummary[] }>('/api/v1/dashboard/operations/summary', s),
 	syncRequest: async (deviceId: string, idempotencyKey: string): Promise<SyncRequestResponse> => {
 		const res = await fetch(`/api/v1/dashboard/devices/${encodeURIComponent(deviceId)}/sync-requests`, {
 			method: 'POST',

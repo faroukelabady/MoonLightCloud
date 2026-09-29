@@ -15,6 +15,7 @@
 	import LatestSalesCard from './components/LatestSalesCard.svelte';
 	import OrdersPage from './components/OrdersPage.svelte';
 	import DevicesPage from './components/DevicesPage.svelte';
+	import OperationsPage from './components/OperationsPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats } from './lib/api.js';
@@ -45,6 +46,7 @@
 			overview: 'overview',
 			orders: 'orders',
 			devices: 'devices',
+			operations: 'operations',
 			sales: 'sales',
 			daily: 'daily',
 			products: 'products',
@@ -529,6 +531,11 @@
 				{#if route === 'devices'}
 					<div class="cell a-orders">
 						<DevicesPage />
+					</div>
+				{/if}
+				{#if route === 'operations'}
+					<div class="cell a-orders">
+						<OperationsPage />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

@@ -29,6 +29,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/whatsapp"
+	"github.com/faroukelabady/MoonLightCloud/internal/operations"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/logging"
@@ -77,6 +78,9 @@ type App struct {
 	ReportPlanner          *businessreports.Planner
 	ReportRunner           *businessreports.Runner
 	DeviceControl          *devicecontrol.Service
+	OperationsService      *operations.Service
+	OperationsReader       *operations.OpsReader
+	OperationsEngine       *operations.Engine
 	Handler                http.Handler
 	Health                 adapterhttp.Health
 	Version                adapterhttp.Version
@@ -236,6 +240,15 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			commerceOwner(), cfg.BusinessReports.LeaseDuration, log)
 	}
 	a.Log.Info("business reports", "enabled", cfg.BusinessReports.Enabled)
+	opsStore := store
+	opsService := operations.NewService(opsStore, ids.System{}.New, time.Now)
+	opsMetrics := operations.NewMetrics()
+	opsReader := operations.NewOpsReader(opsStore, opsService, opsMetrics)
+	opsHandlers := &adapterhttp.OperationsHandlers{Svc: opsService, Ops: opsReader}
+	a.OperationsService = opsService
+	a.OperationsReader = opsReader
+	a.Log.Info("operations", "enabled", cfg.Operations.Enabled,
+		"auto_sync_on_reconnect", cfg.Operations.AutoSyncOnReconnect)
 	a.DeviceControl = devicecontrol.NewService(store, authDeviceStatus{svc: a.Devices},
 		ids.System{}.New, cfg.DeviceControl.LeaseDuration, time.Now)
 	var ctlHandlers *adapterhttp.DeviceControlHandlers
@@ -245,9 +258,24 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
 		Svc: a.DeviceControl, Auth: a.Devices, OnlineWindow: cfg.DeviceControl.OnlineWindow,
 	}
+	if cfg.Operations.Enabled {
+		opsNotify := notifications.NewService(opsStore, opsStore, log)
+		opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
+		opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
+			BatchSize: cfg.Operations.ScanBatchSize, OfflineAfter: cfg.Operations.DeviceOfflineAfter,
+			OnlineWindow: cfg.DeviceControl.OnlineWindow, SyncPendingStale: cfg.Operations.SyncPendingStaleAfter,
+			SyncRunningStale: cfg.Operations.SyncRunningStaleAfter, ReportStale: cfg.Operations.ReportStaleAfter,
+			NotificationStale:   cfg.Operations.NotificationRetryStaleAfter,
+			AutoSyncOnReconnect: cfg.Operations.AutoSyncOnReconnect,
+		}, ids.System{}.New, time.Now, opsMetrics)
+		opsReader.SetStillActive(opsDetector.StillActive)
+		opsRecovery := operations.NewRecoveryWorker(opsStore, operations.NewDeviceCommander(a.DeviceControl), time.Now, opsMetrics)
+		a.OperationsEngine = operations.NewEngine(opsDetector, opsAlerts, opsRecovery,
+			cfg.Operations.ScanInterval, cfg.Operations.ScanBatchSize, log)
+	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, ctlHandlers, dashDevices, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -86,6 +86,22 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.Devices)))
 		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.CreateSyncRequest)))
+	}
+	// Phase 7D operations incidents (dashboard session only; device
+	// credentials never valid here).
+	if ops != nil {
+		mux.Handle("GET /api/v1/dashboard/operations/incidents",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Incidents)))
+		mux.Handle("GET /api/v1/dashboard/operations/incidents/{id}",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.IncidentDetail)))
+		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/acknowledge",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Acknowledge)))
+		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/resolve",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Resolve)))
+		mux.Handle("GET /api/v1/dashboard/operations/summary",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Summary)))
+		mux.Handle("GET /api/v1/dashboard/operations/devices/summary",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.DeviceSummary)))
 	}
 	// Provider webhook ingestion is public-but-signed: HMAC authority
 	// only, never dashboard session or device tokens.

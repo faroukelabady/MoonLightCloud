@@ -393,6 +393,69 @@ type NotificationTemplateMapping struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OperationalAlertDelivery struct {
+	ID                         pgtype.UUID        `json:"id"`
+	IncidentID                 pgtype.UUID        `json:"incident_id"`
+	RecipientID                pgtype.UUID        `json:"recipient_id"`
+	EventType                  string             `json:"event_type"`
+	ProviderKeySnapshot        string             `json:"provider_key_snapshot"`
+	RecipientSnapshot          string             `json:"recipient_snapshot"`
+	LocaleSnapshot             string             `json:"locale_snapshot"`
+	TemplateKey                string             `json:"template_key"`
+	BodySnapshot               string             `json:"body_snapshot"`
+	BodyFingerprint            []byte             `json:"body_fingerprint"`
+	NotificationID             pgtype.UUID        `json:"notification_id"`
+	NotificationIdempotencyKey string             `json:"notification_idempotency_key"`
+	Status                     string             `json:"status"`
+	LastErrorCode              pgtype.Text        `json:"last_error_code"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OperationalAlertRecipient struct {
+	ID          pgtype.UUID        `json:"id"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OperationalIncident struct {
+	ID             pgtype.UUID        `json:"id"`
+	RuleKey        string             `json:"rule_key"`
+	SubjectType    string             `json:"subject_type"`
+	SubjectID      string             `json:"subject_id"`
+	Severity       string             `json:"severity"`
+	State          string             `json:"state"`
+	Episode        int32              `json:"episode"`
+	SourceEventKey pgtype.Text        `json:"source_event_key"`
+	OpenedAt       pgtype.Timestamptz `json:"opened_at"`
+	LastObservedAt pgtype.Timestamptz `json:"last_observed_at"`
+	AcknowledgedAt pgtype.Timestamptz `json:"acknowledged_at"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode pgtype.Text        `json:"resolution_code"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OperationalRecoveryAction struct {
+	ID             pgtype.UUID        `json:"id"`
+	IncidentID     pgtype.UUID        `json:"incident_id"`
+	ActionType     string             `json:"action_type"`
+	State          string             `json:"state"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	TargetEntityID pgtype.Text        `json:"target_entity_id"`
+	ResultCode     pgtype.Text        `json:"result_code"`
+	AttemptCount   int32              `json:"attempt_count"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorCode  pgtype.Text        `json:"last_error_code"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ReturnRefundLinesProjection struct {
 	ReturnRefundID     pgtype.UUID `json:"return_refund_id"`
 	SaleID             pgtype.UUID `json:"sale_id"`

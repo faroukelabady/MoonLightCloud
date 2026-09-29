@@ -5,13 +5,15 @@ import { dashboardApi } from '../lib/api.js';
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;
-	return { ...mod, dashboardApi: { devices: vi.fn(), syncRequest: vi.fn() } };
+	return { ...mod, dashboardApi: { devices: vi.fn(), syncRequest: vi.fn(), operationsSummary: vi.fn() } };
 });
 
 const api = dashboardApi as unknown as {
 	devices: ReturnType<typeof vi.fn>;
 	syncRequest: ReturnType<typeof vi.fn>;
+	operationsSummary: ReturnType<typeof vi.fn>;
 };
+
 
 afterEach(() => {
 	cleanup();
@@ -102,5 +104,21 @@ describe('DevicesPage', () => {
 		expect(items).toHaveLength(2);
 		expect(items[0].textContent).toContain('Completed');
 		expect(items[1].textContent).toContain('Failed');
+	});
+});
+
+
+describe('DevicesPage incident badges', () => {
+	it('shows the batched incident badge without extra per-device calls', async () => {
+		api.devices.mockResolvedValue({
+			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'ONLINE', active_command: null, recent_commands: [] }]
+		});
+		api.operationsSummary.mockResolvedValue({
+			devices: [{ device_id: 'd1', open_count: 2, max_severity: 'urgent' }]
+		});
+		render(DevicesPage);
+		expect(await screen.findByTestId('incident-badge')).toBeTruthy();
+		expect((await screen.findByTestId('incident-badge')).textContent).toContain('2 incident(s)');
+		expect(api.operationsSummary).toHaveBeenCalledOnce();
 	});
 });

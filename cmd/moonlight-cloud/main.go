@@ -92,6 +92,8 @@ func run(args []string) error {
 		return notificationsCmd(args, os.Stdout, os.Stderr)
 	case "business-reports":
 		return businessReportsCmd(args, os.Stdout, os.Stderr)
+	case "operations":
+		return operationsCmd(args, os.Stdout, os.Stderr)
 	case "dashboard":
 		return dashboardCmd(args)
 	case "probe":
@@ -102,7 +104,7 @@ func run(args []string) error {
 		fmt.Printf("moonlight-cloud version=%s commit=%s build_time=%s\n", version, commit, buildTime)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|commerce|notifications|business-reports|dashboard|probe|version", cmd)
+		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|commerce|notifications|business-reports|operations|dashboard|probe|version", cmd)
 	}
 }
 
@@ -165,6 +167,10 @@ func serve(args []string) error {
 	}
 	if a.ReportRunner != nil {
 		go a.ReportRunner.Run(projCtx)
+	}
+	if a.OperationsEngine != nil {
+		a.OperationsEngine.Start()
+		defer a.OperationsEngine.Stop()
 	}
 	if err := runServer(sigCtx, srv, cfg.ShutdownAfter, a.Log); err != nil {
 		return err

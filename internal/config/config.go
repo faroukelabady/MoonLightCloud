@@ -147,6 +147,9 @@ type Config struct {
 	// DeviceControl holds the Phase 7C control-plane configuration.
 	// Disabled by default.
 	DeviceControl DeviceControl
+	// Operations holds the Phase 7D incident/alert configuration.
+	// Disabled by default.
+	Operations Operations
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -238,6 +241,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.DeviceControl = devctl
+	ops, err := loadOperations()
+	if err != nil {
+		return Config{}, err
+	}
+	c.Operations = ops
 	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -300,6 +308,11 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.resolveReportingToken(); err != nil {
+		return err
+	}
+	// Never alert offline while 7C still reports ONLINE: the offline
+	// threshold must cover the connectivity freshness window.
+	if err := c.checkOpsThreshold(); err != nil {
 		return err
 	}
 	if err := c.resolveDashboardAuth(); err != nil {

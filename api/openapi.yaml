@@ -150,6 +150,201 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/incidents:
+    get:
+      summary: Bounded incident list with state/severity/rule filters
+      operationId: operationsIncidents
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, acknowledged, resolved]
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [warning, urgent]
+        - name: rule
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One bounded page plus next_cursor (empty when final).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsIncidentList'
+        '400':
+          description: Invalid filter, limit, or cursor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/incidents/{id}:
+    get:
+      summary: Incident detail with masked deliveries and recovery state
+      operationId: operationsIncidentDetail
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Incident with deliveries (recipients masked) and recoveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsIncidentDetail'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown incident.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/incidents/{id}/acknowledge:
+    post:
+      summary: Acknowledge an incident (idempotent, never resolves)
+      operationId: operationsAcknowledge
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current incident state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsIncidentResponse'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown incident.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/incidents/{id}/resolve:
+    post:
+      summary: Resolve an event incident, or a cleared stateful condition
+      operationId: operationsResolve
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current incident state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsIncidentResponse'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown incident.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Stateful condition still active (CONDITION_STILL_ACTIVE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/summary:
+    get:
+      summary: Aggregate counters and batched device incident rollup
+      operationId: operationsSummary
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Low-cardinality counters plus per-device aggregates.
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/operations/devices/summary:
+    get:
+      summary: Per-device active incident counts in one batched read
+      operationId: operationsDeviceSummary
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Device rollup array (never per-device queries).
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/devices:
     get:
       summary: Operator device connectivity + latest sync command
@@ -1708,6 +1903,119 @@ components:
           $ref: '#/components/schemas/DeviceControlCommand'
         created:
           type: boolean
+    OperationsIncident:
+      type: object
+      description: Durable operational incident. States open/acknowledged/resolved; severities warning/urgent (operator language only).
+      required: [id, rule, subject_type, subject_id, severity, state, episode, opened_at, last_observed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        rule:
+          type: string
+          enum: [DEVICE_OFFLINE, DEVICE_SYNC_FAILED, DEVICE_SYNC_STALE, BUSINESS_REPORT_BLOCKED, BUSINESS_REPORT_STALE, NOTIFICATION_BLOCKED, NOTIFICATION_AMBIGUOUS, NOTIFICATION_RETRY_STALE]
+        subject_type:
+          type: string
+          enum: [device, sync_command, report_run, notification]
+        subject_id:
+          type: string
+        severity:
+          type: string
+          enum: [warning, urgent]
+        state:
+          type: string
+          enum: [open, acknowledged, resolved]
+        episode:
+          type: integer
+          minimum: 1
+        opened_at:
+          type: string
+          format: date-time
+        last_observed_at:
+          type: string
+          format: date-time
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_code:
+          type: string
+          nullable: true
+          enum: [RECONNECT_RESOLVED, DEVICE_NO_LONGER_ACTIVE, CONDITION_CLEARED, TERMINAL_REACHED, OPERATOR_RESOLVED]
+    OperationsIncidentList:
+      type: object
+      required: [incidents, next_cursor]
+      properties:
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsIncident'
+        next_cursor:
+          type: string
+    OperationsIncidentDetail:
+      type: object
+      required: [incident, deliveries, recoveries]
+      properties:
+        incident:
+          $ref: '#/components/schemas/OperationsIncident'
+        deliveries:
+          type: array
+          items:
+            type: object
+            required: [id, event, provider_key, recipient_masked, locale, template_key, status, has_notification]
+            properties:
+              id:
+                type: string
+                format: uuid
+              event:
+                type: string
+                enum: [opened, resolved]
+              provider_key:
+                type: string
+              recipient_masked:
+                type: string
+                description: Last four characters only; full addresses never leave the database.
+              locale:
+                type: string
+                enum: [ar, en]
+              template_key:
+                type: string
+              status:
+                type: string
+                enum: [pending, sent, blocked]
+              has_notification:
+                type: boolean
+        recoveries:
+          type: array
+          items:
+            type: object
+            required: [id, action_type, state, attempt_count]
+            properties:
+              id:
+                type: string
+                format: uuid
+              action_type:
+                type: string
+                enum: [DEVICE_RECONNECT_SYNC]
+              state:
+                type: string
+                enum: [pending, completed, blocked]
+              target_entity_id:
+                type: string
+              result_code:
+                type: string
+              attempt_count:
+                type: integer
+    OperationsIncidentResponse:
+      type: object
+      required: [incident]
+      properties:
+        incident:
+          $ref: '#/components/schemas/OperationsIncident'
     ErrorEnvelope:
       type: object
       required: [error]

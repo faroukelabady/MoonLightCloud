@@ -4,6 +4,7 @@
 	import type { DeviceRow, DeviceCommandWire } from '../lib/api';
 
 	let devices: DeviceRow[] = [];
+	let incidentSummary: Record<string, { open_count: number; max_severity: string }> = {};
 	let loading = true;
 	let error: string | null = null;
 	let requesting: Record<string, boolean> = {};
@@ -60,6 +61,12 @@
 		try {
 			const res = await dashboardApi.devices(signal);
 			devices = res.devices ?? [];
+			try {
+				const sum = await dashboardApi.operationsSummary(signal);
+				incidentSummary = Object.fromEntries((sum.devices ?? []).map((d) => [d.device_id, d]));
+			} catch {
+				incidentSummary = {};
+			}
 		} catch (e) {
 			if (e instanceof ApiError) error = e.code;
 			else error = 'INTERNAL';
@@ -104,6 +111,9 @@
 				<li data-testid="device-row" data-device={d.device_id}>
 					<strong>{d.name || d.device_id}</strong>
 					<span data-testid="connectivity">{d.connectivity}</span>
+					{#if incidentSummary[d.device_id]}
+						<span data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
+					{/if}
 					<span title="last seen">{d.last_seen_at ?? 'never'}</span>
 					{#if active}
 						<span data-testid="command-status">{userFacing(active.status)}</span>
