@@ -205,7 +205,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DashboardSyncRequestResponse'
         '400':
-          description: Invalid device id or idempotency key, or revoked device (DEVICE_NOT_ACTIVE / DEVICE_COMMAND_INVALID_TRANSITION).
+          description: Invalid device id or idempotency key, or revoked device (DEVICE_NOT_ACTIVE / DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY).
           content:
             application/json:
               schema:
@@ -217,7 +217,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Contradictory reuse (DEVICE_COMMAND_CONFLICT) or another sync already active for this device (DEVICE_SYNC_ALREADY_ACTIVE, existing active command returned).
+          description: Contradictory reuse (DEVICE_COMMAND_CONFLICT) or another sync already active for this device (DEVICE_SYNC_ALREADY_ACTIVE). Returns only the error envelope; no command is returned.
           content:
             application/json:
               schema:
