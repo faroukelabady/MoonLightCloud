@@ -14,6 +14,7 @@
 	import ActivityCard from './components/ActivityCard.svelte';
 	import LatestSalesCard from './components/LatestSalesCard.svelte';
 	import OrdersPage from './components/OrdersPage.svelte';
+	import DevicesPage from './components/DevicesPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats } from './lib/api.js';
@@ -43,6 +44,7 @@
 			'': 'overview',
 			overview: 'overview',
 			orders: 'orders',
+			devices: 'devices',
 			sales: 'sales',
 			daily: 'daily',
 			products: 'products',
@@ -522,6 +524,11 @@
 							onselect={selectOrder}
 							onretry={() => void reloadOrders()}
 						/>
+					</div>
+				{/if}
+				{#if route === 'devices'}
+					<div class="cell a-orders">
+						<DevicesPage />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

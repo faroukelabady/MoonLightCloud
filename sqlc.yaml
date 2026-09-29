@@ -19,6 +19,7 @@ sql:
       - "db/migrations/00014_order_concurrency_fences.sql"
       - "db/migrations/00015_notifications.sql"
       - "db/migrations/00016_business_reports.sql"
+      - "db/migrations/00017_device_connectivity_control.sql"
     gen:
       go:
         package: "sqlcgen"

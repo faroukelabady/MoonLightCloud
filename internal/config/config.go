@@ -144,6 +144,9 @@ type Config struct {
 	// configuration (Phase 7B). Disabled by default: no planner, no
 	// worker, no provider network.
 	BusinessReports BusinessReports
+	// DeviceControl holds the Phase 7C control-plane configuration.
+	// Disabled by default.
+	DeviceControl DeviceControl
 	// DashboardAssetsDir serves the built Svelte SPA at /dashboard.
 	// Defaults to dashboard/dist (repo checkout); the OCI image overrides
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
@@ -230,6 +233,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.BusinessReports = reports
+	devctl, err := loadDeviceControl()
+	if err != nil {
+		return Config{}, err
+	}
+	c.DeviceControl = devctl
 	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {

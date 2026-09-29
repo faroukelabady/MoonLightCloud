@@ -262,6 +262,34 @@ export interface LatestSale {
 	cashier_name?: string | null;
 }
 
+export interface DeviceCommandWire {
+	id: string;
+	type: string;
+	version: number;
+	lease_generation: number;
+	requested_at: string;
+	status: string;
+	accepted_at?: string | null;
+	running_at?: string | null;
+	finished_at?: string | null;
+	result_code?: string | null;
+}
+
+export interface DeviceRow {
+	device_id: string;
+	name?: string;
+	lifecycle: string;
+	connectivity: string;
+	last_seen_at?: string | null;
+	active_command?: DeviceCommandWire | null;
+	recent_commands?: DeviceCommandWire[];
+}
+
+export interface SyncRequestResponse {
+	command: DeviceCommandWire;
+	created: boolean;
+}
+
 export interface SyncHealth {
 	freshness: Freshness;
 	queue_count: number;
@@ -346,5 +374,26 @@ export const dashboardApi = {
 			s
 		),
 	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
-		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s)
+		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s),
+	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
+	syncRequest: async (deviceId: string, idempotencyKey: string): Promise<SyncRequestResponse> => {
+		const res = await fetch(`/api/v1/dashboard/devices/${encodeURIComponent(deviceId)}/sync-requests`, {
+			method: 'POST',
+			headers: { 'Idempotency-Key': idempotencyKey },
+			credentials: 'same-origin'
+		});
+		if (res.status === 401) throw new ApiError(401, 'UNAUTHORIZED', 'session required');
+		if (!res.ok) {
+			let code = 'INTERNAL';
+			try {
+				const body = (await res.json()) as { error?: { code?: string; message?: string } };
+				if (body.error?.message) code = body.error.message;
+				else if (body.error?.code) code = body.error.code;
+			} catch {
+				/* keep generic */
+			}
+			throw new ApiError(res.status, code, `request failed (${res.status})`);
+		}
+		return (await res.json()) as SyncRequestResponse;
+	}
 };

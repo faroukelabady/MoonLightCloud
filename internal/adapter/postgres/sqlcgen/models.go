@@ -299,6 +299,35 @@ type Device struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 }
 
+type DeviceControlCommand struct {
+	ID              pgtype.UUID        `json:"id"`
+	DeviceID        pgtype.UUID        `json:"device_id"`
+	CommandType     string             `json:"command_type"`
+	CommandVersion  int32              `json:"command_version"`
+	IdempotencyKey  string             `json:"idempotency_key"`
+	Status          string             `json:"status"`
+	RequestedAt     pgtype.Timestamptz `json:"requested_at"`
+	LeasedAt        pgtype.Timestamptz `json:"leased_at"`
+	LeaseUntil      pgtype.Timestamptz `json:"lease_until"`
+	LeaseGeneration int64              `json:"lease_generation"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	RunningAt       pgtype.Timestamptz `json:"running_at"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+	ResultCode      pgtype.Text        `json:"result_code"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DeviceControlPresence struct {
+	DeviceID              pgtype.UUID        `json:"device_id"`
+	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
+	LastPollAt            pgtype.Timestamptz `json:"last_poll_at"`
+	LastCommandAcceptedAt pgtype.Timestamptz `json:"last_command_accepted_at"`
+	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DeviceCredential struct {
 	ID              pgtype.UUID        `json:"id"`
 	DeviceID        pgtype.UUID        `json:"device_id"`

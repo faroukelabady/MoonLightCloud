@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -39,6 +39,16 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		DeviceAuth(devices)(SyncCapabilities(syncSvc)))
 	mux.Handle("POST /api/v1/sync/batches",
 		DeviceAuth(devices)(SyncBatch(syncSvc, onSyncIngest)))
+	// Phase 7C device control plane (Retail-initiated polling only).
+	// Registered only when the control plane is enabled; otherwise 404.
+	if ctl != nil {
+		mux.Handle("POST /api/v1/device-control/poll",
+			DeviceAuth(devices)(http.HandlerFunc(ctl.Poll)))
+		mux.Handle("POST /api/v1/device-control/commands/{id}/accepted",
+			DeviceAuth(devices)(http.HandlerFunc(ctl.Accepted)))
+		mux.Handle("POST /api/v1/device-control/commands/{id}/status",
+			DeviceAuth(devices)(http.HandlerFunc(ctl.Status)))
+	}
 	mux.Handle("GET /api/v1/reports/sales/summary",
 		ReportAuth(reportingToken)(http.HandlerFunc(reports.SalesSummary)))
 	mux.Handle("GET /api/v1/reports/sales/daily",
@@ -71,6 +81,12 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		dashAuth.RequireDashboardSession(http.HandlerFunc(dashOrders.Orders)))
 	mux.Handle("GET /api/v1/dashboard/orders/{provider_key}/{external_order_id}",
 		dashAuth.RequireDashboardSession(http.HandlerFunc(dashOrders.OrderDetail)))
+	if dashDevices != nil {
+		mux.Handle("GET /api/v1/dashboard/devices",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.Devices)))
+		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.CreateSyncRequest)))
+	}
 	// Provider webhook ingestion is public-but-signed: HMAC authority
 	// only, never dashboard session or device tokens.
 	if commerceWebhooks != nil {

@@ -51,6 +51,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Version'
+  /api/v1/device-control/poll:
+    post:
+      summary: Retail control poll (lease at most one due command, refresh presence)
+      operationId: deviceControlPoll
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Server time plus optional command.
+        '401':
+          description: Missing, unknown, revoked, or invalid credential (presence untouched).
+  /api/v1/device-control/commands/{id}/accepted:
+    post:
+      summary: Report durable Retail receipt (idempotent)
+      operationId: deviceControlAccepted
+      security:
+        - deviceAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current command state.
+        '401':
+          description: Missing, unknown, revoked, or invalid credential.
+        '404':
+          description: Unknown command or cross-device lookup.
+  /api/v1/device-control/commands/{id}/status:
+    post:
+      summary: Report running/completed/failed (first terminal wins)
+      operationId: deviceControlStatus
+      security:
+        - deviceAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current command state.
+        '401':
+          description: Missing, unknown, revoked, or invalid credential.
+        '404':
+          description: Unknown command or cross-device lookup.
+        '409':
+          description: Contradictory terminal outcome.
+  /api/v1/dashboard/devices:
+    get:
+      summary: Operator device connectivity + latest sync command
+      operationId: dashboardDevices
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Devices with NEVER_SEEN/ONLINE/OFFLINE connectivity.
+        '401':
+          description: Missing or invalid operator session.
+  /api/v1/dashboard/devices/{device_id}/sync-requests:
+    post:
+      summary: Queue sync_now.v1 (Idempotency-Key required, one active per device)
+      operationId: dashboardSyncRequest
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Command created.
+        '200':
+          description: Existing command (idempotent retry or active command).
+        '401':
+          description: Missing or invalid operator session.
+        '409':
+          description: Contradictory reuse or another sync already active.
   /api/v1/device/ping:
     get:
       summary: Authenticated device ping (proves device auth end to end)

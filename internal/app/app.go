@@ -24,6 +24,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/woocommerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
+	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/whatsapp"
@@ -74,9 +75,25 @@ type App struct {
 	ReportService          *businessreports.Service
 	ReportPlanner          *businessreports.Planner
 	ReportRunner           *businessreports.Runner
+	DeviceControl          *devicecontrol.Service
 	Handler                http.Handler
 	Health                 adapterhttp.Health
 	Version                adapterhttp.Version
+}
+
+// authDeviceStatus adapts the existing device lifecycle to the control
+// plane: only active devices may receive Sync Now commands. Revocation
+// semantics stay owned by auth.
+type authDeviceStatus struct {
+	svc auth.Service
+}
+
+func (a authDeviceStatus) IsActive(ctx context.Context, deviceID string) (bool, error) {
+	dev, err := a.svc.Get(ctx, deviceID)
+	if err != nil {
+		return false, err
+	}
+	return dev.Status == auth.StatusActive, nil
 }
 
 // New builds the app in startup order.
@@ -214,9 +231,18 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			commerceOwner(), cfg.BusinessReports.LeaseDuration, log)
 	}
 	a.Log.Info("business reports", "enabled", cfg.BusinessReports.Enabled)
+	a.DeviceControl = devicecontrol.NewService(store, authDeviceStatus{svc: a.Devices},
+		ids.System{}.New, cfg.DeviceControl.LeaseDuration, time.Now)
+	var ctlHandlers *adapterhttp.DeviceControlHandlers
+	if cfg.DeviceControl.Enabled {
+		ctlHandlers = &adapterhttp.DeviceControlHandlers{Svc: a.DeviceControl, Log: log}
+	}
+	dashDevices := &adapterhttp.DashboardDeviceHandlers{
+		Svc: a.DeviceControl, Auth: a.Devices, OnlineWindow: cfg.DeviceControl.OnlineWindow,
+	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, ctlHandlers, dashDevices, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
