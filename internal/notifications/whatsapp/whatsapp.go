@@ -244,6 +244,12 @@ func (p *Provider) classifyStatus(status int, retryAfter string) *notifications.
 		return notifications.ValidationError(message)
 	case status >= 500:
 		return notifications.TemporaryError(message)
+	case status >= 400 && status < 500:
+		// Unclassified 4xx is a permanent provider rejection: the
+		// request was received and refused, so retrying the same
+		// payload cannot succeed. Explicitly retryable 4xx (408,
+		// 429) are classified above and never reach this fallback.
+		return notifications.ValidationError(message)
 	default:
 		return notifications.TemporaryError(message)
 	}

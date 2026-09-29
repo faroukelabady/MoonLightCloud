@@ -90,6 +90,27 @@ without touching reporting math, provider code, or the schema:
 7. **UUIDv7 + batch parsing.** New 7B IDs use the repository UUIDv7
    generator; batch size parses wide before narrowing.
 
+## R2 remediation (lease-fencing races)
+
+Review reproduced two races in the R1 fencing itself:
+
+- An expired, unreclaimed claim could still persist snapshots: the
+  ownership check did not enforce lease expiry.
+- A terminal write waiting on a child-row lock could apply after
+  another worker took over the run: statement-start timestamps go
+  stale across lock waits, so time-based guards must not rely on
+  them.
+
+Every worker-owned delivery mutation now runs in a short
+transaction that locks the parent run row first, validates owner,
+generation, and nonterminal status against the post-lock read, and
+performs the guarded child write whose lease-expiry predicate uses
+`clock_timestamp()` — evaluated after all locks are held, never at
+transaction start. One consistent parent-before-child lock order is
+used everywhere; no locks span report queries, formatting, enqueue,
+or provider work. Stale results remain safe no-ops: they never
+complete runs, never block deliveries, and never trigger sends.
+
 ## Consequences
 
 - 7B operator surface is CLI only (recipients, schedules, run-now,

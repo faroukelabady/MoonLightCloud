@@ -159,6 +159,15 @@ Run `completed` means every delivery is durably enqueued in Phase
 `READ`/`FAILED`) never rewrite report runs. A provider `FAILED`
 later is a 7A delivery outcome, not a reason to resend the report.
 
+## Delivery-write fencing
+
+Every delivery mutation (snapshot persistence, terminal transitions)
+runs inside a short transaction that locks the parent run row first
+and validates owner, generation, status, and live lease expiry after
+acquiring the lock. A worker whose lease expired — even while waiting
+on a row lock — applies zero rows; the current lease owner converges
+instead. Stale completions are safe no-ops, never errors.
+
 ## Backup requirements
 
 `business_report_recipients`, `business_report_schedules`,

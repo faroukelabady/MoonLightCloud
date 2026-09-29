@@ -451,3 +451,54 @@ func TestWhatsAppStatusEquivalence(t *testing.T) {
 		}
 	}
 }
+
+// TestWhatsAppUnclassified4xxPermanent proves unclassified permanent
+// HTTP 4xx responses classify as non-retryable Validation (never an
+// infinite Temporary retry), while explicitly retryable 408/429 keep
+// their retryable kinds regardless of body content.
+func TestWhatsAppUnclassified4xxPermanent(t *testing.T) {
+	permanent := []int{400, 402, 404, 405, 406, 410, 412, 413, 415, 421, 423, 424, 425, 426, 428, 431, 451}
+	for _, status := range permanent {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			harness := newGraphHarness(t)
+			provider := testGraphProvider(t, harness)
+			harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+				return status, map[string]any{"error": map[string]any{
+					"code": "99999", "message": "refused",
+				}}, nil
+			}
+			_, err := provider.SendTemplate(context.Background(), testSendRequest())
+			var notificationErr *notifications.NotificationError
+			if !notifications.AsNotificationError(err, &notificationErr) ||
+				notificationErr.Kind != notifications.ErrorValidation || notificationErr.Retryable() {
+				t.Fatalf("status %d must be non-retryable Validation: %v", status, err)
+			}
+		})
+	}
+	retryable := []struct {
+		status int
+		kind   notifications.ErrorKind
+	}{
+		{http.StatusRequestTimeout, notifications.ErrorTemporary},
+		{http.StatusTooManyRequests, notifications.ErrorRateLimited},
+	}
+	for _, tc := range retryable {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			harness := newGraphHarness(t)
+			provider := testGraphProvider(t, harness)
+			harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
+				// Body content must not override the explicit
+				// retryable classification.
+				return tc.status, map[string]any{"error": map[string]any{
+					"code": "99999", "message": "slow",
+				}}, map[string]string{"Retry-After": "5"}
+			}
+			_, err := provider.SendTemplate(context.Background(), testSendRequest())
+			var notificationErr *notifications.NotificationError
+			if !notifications.AsNotificationError(err, &notificationErr) ||
+				notificationErr.Kind != tc.kind || !notificationErr.Retryable() {
+				t.Fatalf("status %d must stay retryable %q: %v", tc.status, tc.kind, err)
+			}
+		})
+	}
+}

@@ -103,7 +103,9 @@ notification with a NEW idempotency key).
 Safe retry happens only on explicit provider evidence (408, 429
 honoring Retry-After, 5xx, proven before-write transport failure)
 with 10s-doubling backoff capped at 1h. Anything unknown after send
-start is ambiguous, never retried. Provider diagnostics are
+start is ambiguous, never retried. Unclassified permanent HTTP 4xx
+responses are terminal validation failures (blocked), never retried:
+only 408/429 among 4xx are retryable. Provider diagnostics are
 machine-only (fixed MoonLight-owned text per error kind — numeric
 Meta codes included, since any provider-controlled field can reflect
 request-private values): provider content never reaches errors, logs,

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -765,21 +766,90 @@ func (d Devices) fencedRunFinish(ctx context.Context, id, owner string, generati
 // PersistDeliverySnapshot stores the immutable localized body exactly
 // once and only under the current run lease. Deterministic content
 // makes first-writer-wins safe under owner races.
-func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID, owner string, generation int64, body string, fingerprint []byte) (bool, error) {
+// lockRunForDeliveryMutation begins a short transaction, locks the
+// parent run row first, and validates ownership against the
+// post-lock read. Every worker-owned delivery mutation goes through
+// here so run takeover can never race a delivery write: a concurrent
+// claim either happens-before (we observe the new generation and
+// refuse) or blocks behind our parent lock until we commit. Caller
+// must Rollback on any non-nil error path via the deferred call and
+// Commit explicitly. Time-based lease validity is enforced by the
+// guarded UPDATE itself using clock_timestamp(), which evaluates
+// after lock acquisition rather than at transaction start.
+func (d Devices) lockRunForDeliveryMutation(ctx context.Context, runID, owner string, generation int64) (context.Context, context.CancelFunc, pgx.Tx, error) {
 	ctx, cancel := d.ctx(ctx)
+	run, err := parseUUID(runID)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, apperr.New(apperr.InvalidInput, "invalid run id")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	locked, err := sqlcgen.New(tx).GetRunForUpdate(ctx, run)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		cancel()
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil, apperr.New(apperr.NotFound, "report run not found")
+		}
+		return nil, nil, nil, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	if locked.LeaseOwner.String != owner || locked.LeaseGeneration != generation ||
+		(locked.Status != "pending" && locked.Status != "retry") {
+		_ = tx.Rollback(ctx)
+		cancel()
+		return nil, nil, nil, errStaleRunLease
+	}
+	return ctx, cancel, tx, nil
+}
+
+// errStaleRunLease is the sentinel for a lost ownership race. Callers
+// map it to a stale/false result, never an error.
+var errStaleRunLease = errors.New("stale run lease")
+
+func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID, owner string, generation int64, body string, fingerprint []byte) (bool, error) {
+	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
+	if err != nil {
+		if errors.Is(err, errStaleRunLease) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	defer cancel()
 	parsed, err := parseUUID(deliveryID)
 	if err != nil {
 		return false, apperr.New(apperr.InvalidInput, "invalid delivery id")
 	}
-	affected, err := sqlcgen.New(d.pool).PersistDeliverySnapshot(ctx, sqlcgen.PersistDeliverySnapshotParams{
+	q := sqlcgen.New(tx)
+	// Acquire the child lock before the guarded write: the write then
+	// never waits, so its predicates (including the clock_timestamp()
+	// lease check) evaluate after all locks are held.
+	if _, err := q.GetDeliveryForUpdate(ctx, parsed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return false, nil
+		}
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	affected, err := q.PersistDeliverySnapshot(ctx, sqlcgen.PersistDeliverySnapshotParams{
 		ID: parsed, ReportBodySnapshot: pgText(body), ReportFingerprint: fingerprint,
 		ID_2: mustReportID(runID), LeaseOwner: pgText(owner), LeaseGeneration: generation,
 	})
 	if err != nil {
 		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
 	}
-	return affected == 1, nil
+	if affected != 1 {
+		_ = tx.Rollback(ctx)
+		return false, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	return true, nil
 }
 
 // FinishDeliveryEnqueued marks one delivery handed to Phase 7A. The
@@ -787,7 +857,14 @@ func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID,
 // (owner, generation, unexpired) on a non-terminal run: stale owners
 // affect zero rows and must treat that as no convergence.
 func (d Devices) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, owner string, generation int64, notificationID string) (bool, error) {
-	ctx, cancel := d.ctx(ctx)
+	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
+	if err != nil {
+		if errors.Is(err, errStaleRunLease) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	defer cancel()
 	parsed, err := parseUUID(deliveryID)
 	if err != nil {
@@ -797,34 +874,71 @@ func (d Devices) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, 
 	if err != nil {
 		return false, apperr.New(apperr.InvalidInput, "invalid notification id")
 	}
-	affected, err := sqlcgen.New(d.pool).FinishDeliveryEnqueued(ctx, sqlcgen.FinishDeliveryEnqueuedParams{
+	q := sqlcgen.New(tx)
+	if _, err := q.GetDeliveryForUpdate(ctx, parsed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return false, nil
+		}
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	affected, err := q.FinishDeliveryEnqueued(ctx, sqlcgen.FinishDeliveryEnqueuedParams{
 		ID: parsed, NotificationID: notification, ID_2: mustReportID(runID),
 		LeaseOwner: pgText(owner), LeaseGeneration: generation,
 	})
 	if err != nil {
 		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
 	}
-	return affected == 1, nil
+	if affected != 1 {
+		_ = tx.Rollback(ctx)
+		return false, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	return true, nil
 }
 
 // FinishDeliveryBlocked marks one delivery permanently un-sendable.
 // Same run-lease fencing as enqueued finishes: stale owners affect
 // zero rows.
 func (d Devices) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, owner string, generation int64, code string) (bool, error) {
-	ctx, cancel := d.ctx(ctx)
+	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
+	if err != nil {
+		if errors.Is(err, errStaleRunLease) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	defer cancel()
 	parsed, err := parseUUID(deliveryID)
 	if err != nil {
 		return false, apperr.New(apperr.InvalidInput, "invalid delivery id")
 	}
-	affected, err := sqlcgen.New(d.pool).FinishDeliveryBlocked(ctx, sqlcgen.FinishDeliveryBlockedParams{
+	q := sqlcgen.New(tx)
+	if _, err := q.GetDeliveryForUpdate(ctx, parsed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return false, nil
+		}
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	affected, err := q.FinishDeliveryBlocked(ctx, sqlcgen.FinishDeliveryBlockedParams{
 		ID: parsed, LastErrorCode: pgText(code), ID_2: mustReportID(runID),
 		LeaseOwner: pgText(owner), LeaseGeneration: generation,
 	})
 	if err != nil {
 		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
 	}
-	return affected == 1, nil
+	if affected != 1 {
+		_ = tx.Rollback(ctx)
+		return false, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	}
+	return true, nil
 }
 
 // PersistRunDeliverySnapshots persists a complete missing-snapshot set
@@ -835,34 +949,37 @@ func (d Devices) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, o
 // reports incomplete: the runner blocks the run instead of mixing
 // canonical bases.
 func (d Devices) PersistRunDeliverySnapshots(ctx context.Context, runID, owner string, generation int64, snapshots map[string]businessreports.SnapshotBody) (bool, error) {
-	ctx, cancel := d.ctx(ctx)
+	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
+	if err != nil {
+		if errors.Is(err, errStaleRunLease) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	defer cancel()
+	q := sqlcgen.New(tx)
 	run, err := parseUUID(runID)
 	if err != nil {
 		return false, apperr.New(apperr.InvalidInput, "invalid run id")
 	}
-	tx, err := d.pool.Begin(ctx)
-	if err != nil {
-		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
+	ids := make([]string, 0, len(snapshots))
+	for deliveryID := range snapshots {
+		ids = append(ids, deliveryID)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := sqlcgen.New(tx)
-	locked, err := q.GetRunForUpdate(ctx, run)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, apperr.New(apperr.NotFound, "report run not found")
-		}
-		return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
-	}
-	if locked.LeaseOwner.String != owner || locked.LeaseGeneration != generation ||
-		(locked.Status != "pending" && locked.Status != "retry") {
-		_ = tx.Rollback(ctx)
-		return false, nil
-	}
-	for deliveryID, snapshot := range snapshots {
+	sort.Strings(ids)
+	for _, deliveryID := range ids {
+		snapshot := snapshots[deliveryID]
 		parsed, err := parseUUID(deliveryID)
 		if err != nil {
 			return false, apperr.New(apperr.InvalidInput, "invalid delivery id")
+		}
+		if _, err := q.GetDeliveryForUpdate(ctx, parsed); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				_ = tx.Rollback(ctx)
+				return false, nil
+			}
+			return false, apperr.Wrap(apperr.Internal, "report delivery", redact(err))
 		}
 		affected, err := q.PersistDeliverySnapshot(ctx, sqlcgen.PersistDeliverySnapshotParams{
 			ID: parsed, ReportBodySnapshot: pgText(snapshot.Body), ReportFingerprint: snapshot.Fingerprint,

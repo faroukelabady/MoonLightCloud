@@ -301,7 +301,7 @@ FROM business_report_runs AS run
 WHERE delivery.id = $1 AND delivery.status = 'pending'
   AND run.id = delivery.run_id AND run.id = $3
   AND run.lease_owner = $4 AND run.lease_generation = $5
-  AND run.lease_until > now()
+  AND run.lease_until > clock_timestamp()
   AND run.status IN ('pending', 'retry')
 `
 
@@ -335,7 +335,7 @@ FROM business_report_runs AS run
 WHERE delivery.id = $1 AND delivery.status = 'pending'
   AND run.id = delivery.run_id AND run.id = $3
   AND run.lease_owner = $4 AND run.lease_generation = $5
-  AND run.lease_until > now()
+  AND run.lease_until > clock_timestamp()
   AND run.status IN ('pending', 'retry')
 `
 
@@ -442,6 +442,52 @@ func (q *Queries) FinishRunRetry(ctx context.Context, arg FinishRunRetryParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getDeliveryForUpdate = `-- name: GetDeliveryForUpdate :one
+SELECT id, run_id, recipient_id, provider_key, recipient_snapshot,
+    locale_snapshot, template_key, report_body_snapshot, report_fingerprint,
+    notification_idempotency_key, notification_id, status, last_error_code
+FROM business_report_deliveries
+WHERE id = $1
+FOR UPDATE
+`
+
+type GetDeliveryForUpdateRow struct {
+	ID                         pgtype.UUID `json:"id"`
+	RunID                      pgtype.UUID `json:"run_id"`
+	RecipientID                pgtype.UUID `json:"recipient_id"`
+	ProviderKey                string      `json:"provider_key"`
+	RecipientSnapshot          string      `json:"recipient_snapshot"`
+	LocaleSnapshot             string      `json:"locale_snapshot"`
+	TemplateKey                string      `json:"template_key"`
+	ReportBodySnapshot         pgtype.Text `json:"report_body_snapshot"`
+	ReportFingerprint          []byte      `json:"report_fingerprint"`
+	NotificationIdempotencyKey string      `json:"notification_idempotency_key"`
+	NotificationID             pgtype.UUID `json:"notification_id"`
+	Status                     string      `json:"status"`
+	LastErrorCode              pgtype.Text `json:"last_error_code"`
+}
+
+func (q *Queries) GetDeliveryForUpdate(ctx context.Context, id pgtype.UUID) (GetDeliveryForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getDeliveryForUpdate, id)
+	var i GetDeliveryForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.RecipientID,
+		&i.ProviderKey,
+		&i.RecipientSnapshot,
+		&i.LocaleSnapshot,
+		&i.TemplateKey,
+		&i.ReportBodySnapshot,
+		&i.ReportFingerprint,
+		&i.NotificationIdempotencyKey,
+		&i.NotificationID,
+		&i.Status,
+		&i.LastErrorCode,
+	)
+	return i, err
 }
 
 const getManualRun = `-- name: GetManualRun :one
@@ -1185,7 +1231,8 @@ WHERE delivery.id = $1 AND delivery.report_body_snapshot IS NULL
   AND EXISTS (SELECT 1 FROM business_report_runs AS run
     WHERE run.id = delivery.run_id AND run.id = $4
       AND run.lease_owner = $5 AND run.lease_generation = $6
-      AND run.status IN ('pending', 'retry'))
+      AND run.status IN ('pending', 'retry')
+      AND run.lease_until > clock_timestamp())
 `
 
 type PersistDeliverySnapshotParams struct {

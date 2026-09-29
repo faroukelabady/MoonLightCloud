@@ -215,7 +215,8 @@ WHERE delivery.id = $1 AND delivery.report_body_snapshot IS NULL
   AND EXISTS (SELECT 1 FROM business_report_runs AS run
     WHERE run.id = delivery.run_id AND run.id = $4
       AND run.lease_owner = $5 AND run.lease_generation = $6
-      AND run.status IN ('pending', 'retry'));
+      AND run.status IN ('pending', 'retry')
+      AND run.lease_until > clock_timestamp());
 
 -- name: GetRunForUpdate :one
 SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
@@ -223,6 +224,14 @@ SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
 FROM business_report_runs
+WHERE id = $1
+FOR UPDATE;
+
+-- name: GetDeliveryForUpdate :one
+SELECT id, run_id, recipient_id, provider_key, recipient_snapshot,
+    locale_snapshot, template_key, report_body_snapshot, report_fingerprint,
+    notification_idempotency_key, notification_id, status, last_error_code
+FROM business_report_deliveries
 WHERE id = $1
 FOR UPDATE;
 
@@ -234,7 +243,7 @@ FROM business_report_runs AS run
 WHERE delivery.id = $1 AND delivery.status = 'pending'
   AND run.id = delivery.run_id AND run.id = $3
   AND run.lease_owner = $4 AND run.lease_generation = $5
-  AND run.lease_until > now()
+  AND run.lease_until > clock_timestamp()
   AND run.status IN ('pending', 'retry');
 
 -- name: FinishDeliveryBlocked :execrows
@@ -244,7 +253,7 @@ FROM business_report_runs AS run
 WHERE delivery.id = $1 AND delivery.status = 'pending'
   AND run.id = delivery.run_id AND run.id = $3
   AND run.lease_owner = $4 AND run.lease_generation = $5
-  AND run.lease_until > now()
+  AND run.lease_until > clock_timestamp()
   AND run.status IN ('pending', 'retry');
 
 -- name: BusinessReportStats :one
