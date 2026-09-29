@@ -99,6 +99,9 @@ func (s *Service) Accept(ctx context.Context, deviceID, commandID string) (Comma
 		return Command{}, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND")
 	}
 	if IsTerminal(cmd.Status) {
+		// Late accepted after terminal: no-op on the command, but the
+		// authorized contact is fresh presence evidence.
+		_ = s.store.TouchSeen(ctx, deviceID, s.now().UTC(), false)
 		return cmd, nil
 	}
 	updated, ok, err := s.store.Accept(ctx, commandID, deviceID, now)
@@ -124,6 +127,9 @@ func (s *Service) ReportRunning(ctx context.Context, deviceID, commandID string)
 		return Command{}, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND")
 	}
 	if IsTerminal(cmd.Status) {
+		// Late running after terminal: no-op on the command, but the
+		// authorized contact is fresh presence evidence.
+		_ = s.store.TouchSeen(ctx, deviceID, s.now().UTC(), false)
 		return cmd, nil
 	}
 	updated, ok, err := s.store.MarkRunning(ctx, commandID, deviceID, now)
@@ -161,6 +167,10 @@ func (s *Service) ReportTerminal(ctx context.Context, deviceID, commandID, statu
 		if cmd.Status != status {
 			return Command{}, apperr.New(apperr.Conflict, "DEVICE_COMMAND_CONFLICT")
 		}
+		// Valid replay: outcome immutable, but the authorized contact is
+		// fresh — refresh presence from server time.
+		_ = s.store.TouchFinished(ctx, deviceID, s.now().UTC())
+		_ = s.store.TouchSeen(ctx, deviceID, s.now().UTC(), false)
 		return cmd, nil
 	}
 	updated, ok, err := s.store.Finish(ctx, commandID, deviceID, status, resultCode, now)
@@ -168,7 +178,40 @@ func (s *Service) ReportTerminal(ctx context.Context, deviceID, commandID, statu
 		return Command{}, err
 	}
 	if !ok {
-		return s.storeGet(ctx, commandID, deviceID)
+		// Lost a concurrent terminal race: apply the same replay rules
+		// against authoritative durable state. First terminal wins;
+		// contradiction conflicts; identical replay succeeds.
+		current, cerr := s.storeGet(ctx, commandID, deviceID)
+		if cerr != nil {
+			return Command{}, cerr
+		}
+		if IsTerminal(current.Status) {
+			if current.Status != status {
+				return Command{}, apperr.New(apperr.Conflict, "DEVICE_COMMAND_CONFLICT")
+			}
+			_ = s.store.TouchFinished(ctx, deviceID, s.now().UTC())
+			_ = s.store.TouchSeen(ctx, deviceID, s.now().UTC(), false)
+			return current, nil
+		}
+		// State moved non-terminally under us (e.g. accept landed first):
+		// retry once against the fresh state.
+		retry, rok, rerr := s.store.Finish(ctx, commandID, deviceID, status, resultCode, s.now().UTC())
+		if rerr != nil {
+			return Command{}, rerr
+		}
+		if !rok {
+			current, cerr := s.storeGet(ctx, commandID, deviceID)
+			if cerr != nil {
+				return Command{}, cerr
+			}
+			if IsTerminal(current.Status) && current.Status != status {
+				return Command{}, apperr.New(apperr.Conflict, "DEVICE_COMMAND_CONFLICT")
+			}
+			return current, nil
+		}
+		_ = s.store.TouchFinished(ctx, deviceID, s.now().UTC())
+		_ = s.store.TouchSeen(ctx, deviceID, s.now().UTC(), false)
+		return retry, nil
 	}
 	_ = s.store.TouchFinished(ctx, deviceID, now)
 	_ = s.store.TouchSeen(ctx, deviceID, now, false)

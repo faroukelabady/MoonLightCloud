@@ -58,7 +58,10 @@ polls are rejected and never refresh presence.
 - `completed` / `failed`: terminal, with a bounded machine result code
   (`SYNC_COMPLETED`, `SYNC_FAILED_NETWORK`, `SYNC_FAILED_AUTH`,
   `SYNC_FAILED_CONFLICT`, `SYNC_FAILED_INTERNAL`). First terminal wins;
-  contradictory rewrites return Conflict.
+  contradictory rewrites return Conflict. A valid identical terminal
+  replay succeeds idempotently and refreshes presence (the outcome stays
+  immutable); contradictory, cross-device, revoked, and malformed requests
+  leave presence unchanged.
 
 ## Stuck in accepted
 

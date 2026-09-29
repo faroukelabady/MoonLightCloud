@@ -358,3 +358,209 @@ func TestControlActiveUniquenessRace(t *testing.T) {
 	_ = active
 	_ = auth.StatusActive
 }
+
+// F03: synchronized concurrent completed/failed → one terminal outcome,
+// one 409, one durable record, no regression. Twenty-five pairs make the
+// interleaving (both read non-terminal before either finishes)
+// deterministic in aggregate: every pair must split exactly one success /
+// one DEVICE_COMMAND_CONFLICT regardless of scheduling.
+func TestControlConcurrentContradictoryTerminal(t *testing.T) {
+	pool, svc := openTestRepo(t)
+	store := NewDevices(pool, 5*time.Second)
+	ctx := context.Background()
+	const pairs = 25
+	devs := make([]string, 0, pairs)
+	active := map[string]bool{}
+	for i := 0; i < pairs; i++ {
+		prov, err := svc.Create(ctx, "race-dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		devs = append(devs, prov.Device.ID)
+		active[prov.Device.ID] = true
+	}
+	ctl := devicecontrol.NewService(store, activeDevices{active: active}, ids.System{}.New, 60*time.Second, time.Now)
+	cmds := make([]string, 0, pairs)
+	for i, dev := range devs {
+		if _, _, err := ctl.CreateSyncRequest(ctx, dev, "race-term"); err != nil {
+			t.Fatal(err)
+		}
+		claimed, ok, err := ctl.Poll(ctx, dev)
+		if err != nil || !ok {
+			t.Fatalf("poll %d: %v %v", i, ok, err)
+		}
+		if _, err := ctl.Accept(ctx, dev, claimed.ID); err != nil {
+			t.Fatal(err)
+		}
+		cmds = append(cmds, claimed.ID)
+	}
+	start := make(chan struct{})
+	type res struct {
+		status string
+		err    error
+	}
+	out := make(chan res, 2*pairs)
+	for i, id := range cmds {
+		dev := devs[i]
+		go func(dev, id string) {
+			<-start
+			cmd, err := ctl.ReportTerminal(ctx, dev, id, devicecontrol.StatusCompleted, "SYNC_COMPLETED")
+			if err != nil {
+				out <- res{"", err}
+				return
+			}
+			out <- res{cmd.Status, nil}
+		}(dev, id)
+		go func(dev, id string) {
+			<-start
+			cmd, err := ctl.ReportTerminal(ctx, dev, id, devicecontrol.StatusFailed, "SYNC_FAILED_NETWORK")
+			if err != nil {
+				out <- res{"", err}
+				return
+			}
+			out <- res{cmd.Status, nil}
+		}(dev, id)
+	}
+	close(start)
+	conflicts := 0
+	for i := 0; i < 2*pairs; i++ {
+		r := <-out
+		if r.err != nil {
+			if ctlKind(t, r.err) != apperr.Conflict {
+				t.Fatalf("loser kind: %v", r.err)
+			}
+			if msg := r.err.(*apperr.Error).Message; msg != "DEVICE_COMMAND_CONFLICT" {
+				t.Fatalf("machine code: %q", msg)
+			}
+			conflicts++
+		} else if r.status != devicecontrol.StatusCompleted && r.status != devicecontrol.StatusFailed {
+			t.Fatalf("winner: %+v", r)
+		}
+	}
+	if conflicts != pairs {
+		t.Fatalf("exactly one 409 per pair: %d/%d", conflicts, pairs)
+	}
+}
+
+// F03: identical concurrent retries both succeed idempotently.
+func TestControlConcurrentIdenticalTerminal(t *testing.T) {
+	_, ctl, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	if _, _, err := ctl.CreateSyncRequest(ctx, dev, "race-same"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := ctl.Poll(ctx, dev)
+	if !ok {
+		t.Fatal("poll")
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			_, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED")
+			errs <- err
+		}()
+	}
+	close(start)
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("identical retry must succeed: %v", err)
+		}
+	}
+}
+
+// F06: age presence, replay the same valid terminal → fresh/ONLINE with the
+// outcome unchanged.
+func TestControlTerminalReplayRefreshesPresence(t *testing.T) {
+	store, ctl, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	if _, _, err := ctl.CreateSyncRequest(ctx, dev, "pres-replay"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := ctl.Poll(ctx, dev)
+	if !ok {
+		t.Fatal("poll")
+	}
+	first, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Age presence by one hour behind the back of the store.
+	old := time.Now().UTC().Add(-time.Hour)
+	uid, err := parseUUID(dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = $2, updated_at = $2 WHERE device_id = $1`,
+		uid, pgTime(old)); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ := store.GetPresence(ctx, dev)
+	if got := devicecontrol.DeriveConnectivity(p.LastSeenAt, time.Now().UTC(), time.Minute); got != devicecontrol.ConnectivityOffline {
+		t.Fatalf("aged must be OFFLINE: %q", got)
+	}
+	replay, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED")
+	if err != nil {
+		t.Fatalf("valid replay must succeed: %v", err)
+	}
+	if replay.Status != devicecontrol.StatusCompleted || replay.ResultCode == nil || *replay.ResultCode != "SYNC_COMPLETED" {
+		t.Fatalf("outcome immutable: %+v", replay)
+	}
+	_ = first
+	p2, _, _ := store.GetPresence(ctx, dev)
+	if got := devicecontrol.DeriveConnectivity(p2.LastSeenAt, time.Now().UTC(), time.Minute); got != devicecontrol.ConnectivityOnline {
+		t.Fatalf("replay must refresh to ONLINE: %+v", p2.LastSeenAt)
+	}
+	if !p2.LastSeenAt.After(*p.LastSeenAt) {
+		t.Fatal("last_seen monotonic forward")
+	}
+}
+
+// F06: rejected requests leave presence unchanged.
+func TestControlRejectedLeavesPresence(t *testing.T) {
+	store, ctl, devA, devB := ctlFixture(t)
+	ctx := context.Background()
+	if _, _, err := ctl.CreateSyncRequest(ctx, devA, "pres-neg"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := ctl.Poll(ctx, devA)
+	if !ok {
+		t.Fatal("poll")
+	}
+	if _, err := ctl.ReportTerminal(ctx, devA, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	snap := func() time.Time {
+		p, _, _ := store.GetPresence(ctx, devA)
+		return p.LastSeenAt.UTC()
+	}
+	before := snap()
+	// Wrong device.
+	if _, err := ctl.ReportTerminal(ctx, devB, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED"); err == nil {
+		t.Fatal("cross-device must fail")
+	}
+	// Contradictory terminal.
+	if _, err := ctl.ReportTerminal(ctx, devA, claimed.ID, devicecontrol.StatusFailed, "SYNC_FAILED_NETWORK"); err == nil {
+		t.Fatal("contradiction must fail")
+	}
+	// Malformed result.
+	if _, err := ctl.ReportTerminal(ctx, devA, claimed.ID, devicecontrol.StatusCompleted, "BOGUS_CODE"); err == nil {
+		t.Fatal("bogus code must fail")
+	}
+	// Late accepted/running replays DO refresh (authorized contact).
+	if _, err := ctl.Accept(ctx, devA, claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	mid := snap()
+	if !mid.After(before) {
+		t.Fatal("late accept replay refreshes presence")
+	}
+	if _, err := ctl.ReportRunning(ctx, devA, claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	after := snap()
+	if after.Before(mid) {
+		t.Fatal("presence monotonic")
+	}
+}

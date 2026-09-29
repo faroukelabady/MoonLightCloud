@@ -59,9 +59,17 @@ paths:
         - deviceAuth: []
       responses:
         '200':
-          description: Server time plus optional command.
+          description: Server time plus at most one leased command.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceControlPollResponse'
         '401':
           description: Missing, unknown, revoked, or invalid credential (presence untouched).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device-control/commands/{id}/accepted:
     post:
       summary: Report durable Retail receipt (idempotent)
@@ -76,11 +84,23 @@ paths:
             type: string
       responses:
         '200':
-          description: Current command state.
+          description: Current command state after accepted receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceControlCommandResponse'
         '401':
           description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown command or cross-device lookup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device-control/commands/{id}/status:
     post:
       summary: Report running/completed/failed (first terminal wins)
@@ -93,15 +113,43 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceControlStatusReport'
       responses:
         '200':
-          description: Current command state.
+          description: Current command state after the report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceControlCommandResponse'
+        '400':
+          description: Malformed body, unknown status, or invalid result code (DEVICE_COMMAND_INVALID_TRANSITION).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown command or cross-device lookup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Contradictory terminal outcome.
+          description: Contradictory terminal outcome (DEVICE_COMMAND_CONFLICT).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/devices:
     get:
       summary: Operator device connectivity + latest sync command
@@ -111,8 +159,16 @@ paths:
       responses:
         '200':
           description: Devices with NEVER_SEEN/ONLINE/OFFLINE connectivity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardDeviceList'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/devices/{device_id}/sync-requests:
     post:
       summary: Queue sync_now.v1 (Idempotency-Key required, one active per device)
@@ -125,15 +181,46 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Caller-generated idempotency key, unique per device (bounded ASCII).
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
       responses:
         '201':
-          description: Command created.
+          description: Command created (pending).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSyncRequestResponse'
         '200':
-          description: Existing command (idempotent retry or active command).
+          description: Existing command (idempotent retry returns it; active command conflict returns it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSyncRequestResponse'
+        '400':
+          description: Invalid device id or idempotency key, or revoked device (DEVICE_NOT_ACTIVE / DEVICE_COMMAND_INVALID_TRANSITION).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Contradictory reuse or another sync already active.
+          description: Contradictory reuse or another sync already active (DEVICE_COMMAND_CONFLICT / DEVICE_SYNC_ALREADY_ACTIVE).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device/ping:
     get:
       summary: Authenticated device ping (proves device auth end to end)
@@ -1501,6 +1588,119 @@ components:
               status:
                 type: string
                 enum: [accepted, already_accepted]
+    DeviceControlCommand:
+      type: object
+      description: Durable sync_now.v1 command. Only command_type sync_now and command_version 1 exist.
+      required: [id, type, version, lease_generation, requested_at, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [sync_now]
+        version:
+          type: integer
+          enum: [1]
+        lease_generation:
+          type: integer
+          minimum: 0
+          description: Increments on every poll lease; diagnostics only.
+        requested_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, leased, accepted, running, completed, failed]
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        running_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        result_code:
+          type: string
+          nullable: true
+          enum: [SYNC_COMPLETED, SYNC_FAILED_NETWORK, SYNC_FAILED_AUTH, SYNC_FAILED_CONFLICT, SYNC_FAILED_INTERNAL]
+    DeviceControlPollResponse:
+      type: object
+      description: Poll is bodyless; the response carries server time and at most one leased command.
+      required: [server_time]
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          description: Cloud server time; Retail clocks are never trusted.
+        command:
+          $ref: '#/components/schemas/DeviceControlCommand'
+    DeviceControlCommandResponse:
+      type: object
+      required: [command]
+      properties:
+        command:
+          $ref: '#/components/schemas/DeviceControlCommand'
+    DeviceControlStatusReport:
+      type: object
+      description: Retail status report. Terminal reports require the matching result code.
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [running, completed, failed]
+        result_code:
+          type: string
+          description: Required for completed/failed; must match the status.
+          enum: [SYNC_COMPLETED, SYNC_FAILED_NETWORK, SYNC_FAILED_AUTH, SYNC_FAILED_CONFLICT, SYNC_FAILED_INTERNAL]
+    DashboardDeviceList:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardDevice'
+    DashboardDevice:
+      type: object
+      description: Operator device row. Connectivity derives from server-observed last_seen_at; active_command is null unless a non-terminal command exists; recent_commands holds up to 5 newest commands of any state.
+      required: [device_id, lifecycle, connectivity]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        lifecycle:
+          type: string
+          description: Canonical device lifecycle (active or revoked).
+        connectivity:
+          type: string
+          enum: [NEVER_SEEN, ONLINE, OFFLINE]
+          description: ONLINE means the control plane heard from the Retail app within the freshness window; never proof of data freshness.
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        active_command:
+          $ref: '#/components/schemas/DeviceControlCommand'
+          nullable: true
+        recent_commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceControlCommand'
+    DashboardSyncRequestResponse:
+      type: object
+      required: [command, created]
+      properties:
+        command:
+          $ref: '#/components/schemas/DeviceControlCommand'
+        created:
+          type: boolean
     ErrorEnvelope:
       type: object
       required: [error]

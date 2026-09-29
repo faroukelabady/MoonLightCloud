@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
-	import type { DeviceRow } from '../lib/api';
+	import type { DeviceRow, DeviceCommandWire } from '../lib/api';
 
 	let devices: DeviceRow[] = [];
 	let loading = true;
@@ -28,12 +28,34 @@
 		}
 	}
 
+	function isTerminal(status: string): boolean {
+		return status === 'completed' || status === 'failed';
+	}
+
+	// Latest terminal outcome from the actual API shape: active_command is
+	// never terminal (one-active invariant covers non-terminal only), so
+	// history comes from recent_commands, newest first, excluding the row
+	// already shown as active.
+	function lastTerminal(d: DeviceRow): DeviceCommandWire | null {
+		const activeId = d.active_command?.id ?? null;
+		for (const c of d.recent_commands ?? []) {
+			if (c.id !== activeId && isTerminal(c.status)) return c;
+		}
+		return null;
+	}
+
+	function history(d: DeviceRow): DeviceCommandWire[] {
+		const activeId = d.active_command?.id ?? null;
+		return (d.recent_commands ?? []).filter((c) => c.id !== activeId).slice(0, 5);
+	}
+
 	function newKey(): string {
 		if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
 		return `key-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 	}
 
-	export async function refresh(signal?: AbortSignal) {		loading = true;
+	export async function refresh(signal?: AbortSignal) {
+		loading = true;
 		error = null;
 		try {
 			const res = await dashboardApi.devices(signal);
@@ -50,7 +72,8 @@
 		void refresh();
 	});
 
-	async function syncNow(deviceId: string, hasActive: boolean) {		if (hasActive || requesting[deviceId]) return;
+	async function syncNow(deviceId: string, hasActive: boolean) {
+		if (hasActive || requesting[deviceId]) return;
 		requesting[deviceId] = true;
 		notice = null;
 		try {
@@ -76,6 +99,8 @@
 		<ul>
 			{#each devices as d (d.device_id)}
 				{@const active = d.active_command ?? null}
+				{@const terminal = lastTerminal(d)}
+				{@const past = history(d)}
 				<li data-testid="device-row" data-device={d.device_id}>
 					<strong>{d.name || d.device_id}</strong>
 					<span data-testid="connectivity">{d.connectivity}</span>
@@ -84,8 +109,19 @@
 						<span data-testid="command-status">{userFacing(active.status)}</span>
 						<button disabled title="A sync request is already active">Sync Now</button>
 					{:else}
-						<span data-testid="command-status">idle</span>
+						{#if terminal}
+							<span data-testid="last-sync">Last sync: {userFacing(terminal.status)}</span>
+						{:else}
+							<span data-testid="command-status">idle</span>
+						{/if}
 						<button data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
+						{#if past.length > 0}
+							<ul data-testid="sync-history">
+								{#each past as c (c.id)}
+									<li>{userFacing(c.status)} — {c.requested_at}</li>
+								{/each}
+							</ul>
+						{/if}
 					{/if}
 				</li>
 			{/each}

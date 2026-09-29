@@ -54,9 +54,24 @@ SCHEMA_KEYS = {
     "xml", "externalDocs", "deprecated", "discriminator",
 }
 
+SCHEMA_TYPES = {"object", "array", "string", "integer", "number", "boolean"}
+
+def is_schema(node):
+    # A Schema Object's "type" is always a type-name string. A properties
+    # mapping merely *contains* a field that may itself be named "type"
+    # (e.g. our command's "type": {"type": "string", ...}), whose value is
+    # a dict — never confuse the two.
+    if "$ref" in node or "properties" in node:
+        return True
+    if isinstance(node.get("type"), str) and node["type"] in SCHEMA_TYPES:
+        return True
+    if "enum" in node and "type" not in node:
+        return True
+    return False
+
 def check_schema(node, where):
     if isinstance(node, dict):
-        if "type" in node or "properties" in node or "$ref" in node or "enum" in node:
+        if is_schema(node):
             for k in node:
                 if k not in SCHEMA_KEYS and not str(k).startswith("x-"):
                     raise SystemExit(f"FAIL: unknown schema key {k!r} at {where}")

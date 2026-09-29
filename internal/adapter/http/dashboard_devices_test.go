@@ -137,3 +137,45 @@ func TestDashboardSyncRequestOfflineQueued(t *testing.T) {
 		t.Fatalf("queued while never seen: %s", rec2.Body.String())
 	}
 }
+
+// F07: dashboard list/create shapes match the documented contract.
+func TestDashboardContractShapes(t *testing.T) {
+	h := dashSetup([]auth.Device{{ID: "dev-A", Name: "shop", Status: "active"}})
+	ctx := context.Background()
+	if _, _, err := h.Svc.CreateSyncRequest(ctx, "dev-A", "shape-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.Svc.Poll(ctx, "dev-A"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	rec := httptest.NewRecorder()
+	h.Devices(rec, req)
+	var list struct {
+		Devices []struct {
+			DeviceID     string  `json:"device_id"`
+			Lifecycle    string  `json:"lifecycle"`
+			Connectivity string  `json:"connectivity"`
+			LastSeenAt   *string `json:"last_seen_at"`
+			Active       *struct {
+				ID     string `json:"id"`
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			} `json:"active_command"`
+			Recent []any `json:"recent_commands"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Devices) != 1 || list.Devices[0].Connectivity == "" || list.Devices[0].Active == nil {
+		t.Fatalf("device list shape: %s", rec.Body.String())
+	}
+	// Missing Idempotency-Key is rejected, not defaulted.
+	bad := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+	brec := httptest.NewRecorder()
+	h.CreateSyncRequest(brec, bad)
+	if brec.Code != 400 {
+		t.Fatalf("missing key must be 400: %d", brec.Code)
+	}
+}

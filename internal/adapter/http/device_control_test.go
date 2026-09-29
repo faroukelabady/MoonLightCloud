@@ -319,3 +319,53 @@ func TestControlResultPrivacy(t *testing.T) {
 		t.Fatal("oversize/free-form result must be rejected")
 	}
 }
+
+// F07: wire shapes match the documented OpenAPI contract.
+func TestControlContractShapes(t *testing.T) {
+	h, svc, _ := ctlTestSetup()
+	ctx := context.Background()
+	created, _, err := svc.CreateSyncRequest(ctx, "dev-A", "contract-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withDevice(httptest.NewRequest("POST", "/api/v1/device-control/poll", nil), "dev-A")
+	rec := httptest.NewRecorder()
+	h.Poll(rec, req)
+	var poll struct {
+		ServerTime string `json:"server_time"`
+		Command    *struct {
+			ID              string `json:"id"`
+			Type            string `json:"type"`
+			Version         int    `json:"version"`
+			LeaseGeneration int64  `json:"lease_generation"`
+			RequestedAt     string `json:"requested_at"`
+			Status          string `json:"status"`
+		} `json:"command"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &poll); err != nil {
+		t.Fatal(err)
+	}
+	if poll.ServerTime == "" || poll.Command == nil {
+		t.Fatalf("poll shape: %s", rec.Body.String())
+	}
+	if poll.Command.ID != created.ID || poll.Command.Type != "sync_now" || poll.Command.Version != 1 {
+		t.Fatalf("command shape: %s", rec.Body.String())
+	}
+	// Status report round-trips the documented envelope.
+	body := bytes.NewReader([]byte(`{"status":"completed","result_code":"SYNC_COMPLETED"}`))
+	sreq := withDevice(httptest.NewRequest("POST", "/api/v1/device-control/commands/"+created.ID+"/status", body), "dev-A")
+	srec := httptest.NewRecorder()
+	h.Status(srec, sreq)
+	var status struct {
+		Command *struct {
+			Status     string  `json:"status"`
+			ResultCode *string `json:"result_code"`
+		} `json:"command"`
+	}
+	if err := json.Unmarshal(srec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Command == nil || status.Command.Status != "completed" || status.Command.ResultCode == nil {
+		t.Fatalf("status shape: %s", srec.Body.String())
+	}
+}
