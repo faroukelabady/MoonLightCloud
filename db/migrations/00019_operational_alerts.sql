@@ -102,3 +102,5 @@ DROP TABLE IF EXISTS operational_recovery_actions;
 DROP TABLE IF EXISTS operational_alert_deliveries;
 DROP TABLE IF EXISTS operational_incidents;
 DROP TABLE IF EXISTS operational_alert_recipients;
+DROP INDEX IF EXISTS idx_operations_commands_failed;
+DROP INDEX IF EXISTS idx_operations_commands_stale;

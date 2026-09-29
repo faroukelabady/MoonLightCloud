@@ -400,7 +400,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DashboardSyncRequestResponse'
         '400':
-          description: Invalid device id or idempotency key, or revoked device (DEVICE_NOT_ACTIVE / DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY).
+          description: Invalid idempotency key or inactive device (DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY / DEVICE_NOT_ACTIVE).
           content:
             application/json:
               schema:
@@ -418,7 +418,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: Unknown device id (DEVICE_COMMAND_NOT_FOUND).
+          description: Malformed or unknown device id (DEVICE_COMMAND_NOT_FOUND).
           content:
             application/json:
               schema:

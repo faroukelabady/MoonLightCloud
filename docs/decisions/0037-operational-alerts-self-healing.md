@@ -48,3 +48,24 @@ engine.
 - Alerting and healing are independently gated (`OPERATIONS_ENABLED`,
   `OPERATIONS_AUTO_SYNC_ON_RECONNECT`, both default false).
 - Phase 8 owns fleet scale, retention, and any broader healing.
+
+## Amendment (7D-R1 freeze-blocker remediation)
+
+- **Atomic intents:** each incident transition commits together with its
+  event deliveries (and optional reconnect recovery) in one transaction;
+  only the committing scanner proceeds, losers create nothing. A
+  `(incident_id, event_type, recipient_id)` unique constraint backstops
+  convergence. Per-incident `open/resolved_intent_materialized` flags
+  distinguish intentionally empty snapshots from missing intents; the
+  detector repairs missing intents oldest-first without touching
+  existing snapshots or minting new alert keys.
+- **Progressive scans:** event scans exclude already-represented source
+  keys and stateful open scans exclude actively-incidented subjects via
+  indexed anti-joins; resolution scans start from active incidents with
+  least-recently-checked ordering, so bounded batches cannot starve
+  later rows.
+- **Migration 00020** adds the flags, the delivery-identity constraint,
+  and the leased-covering stale index (Cloud target 20). Rollback to 18
+  leaves no Phase 7D tables or indexes.
+- Leased commands join the overall-age stale predicate; the manual
+  resolve guard stays enforced with the engine disabled (fail closed).

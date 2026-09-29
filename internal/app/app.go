@@ -258,18 +258,22 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
 		Svc: a.DeviceControl, Auth: a.Devices, OnlineWindow: cfg.DeviceControl.OnlineWindow,
 	}
+	opsNotify := notifications.NewService(opsStore, opsStore, log)
+	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
+	opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
+		BatchSize: cfg.Operations.ScanBatchSize, OfflineAfter: cfg.Operations.DeviceOfflineAfter,
+		OnlineWindow: cfg.DeviceControl.OnlineWindow, SyncPendingStale: cfg.Operations.SyncPendingStaleAfter,
+		SyncRunningStale: cfg.Operations.SyncRunningStaleAfter, ReportStale: cfg.Operations.ReportStaleAfter,
+		NotificationStale:   cfg.Operations.NotificationRetryStaleAfter,
+		AutoSyncOnReconnect: cfg.Operations.AutoSyncOnReconnect,
+	}, ids.System{}.New, time.Now, opsMetrics)
+	opsReader.SetStillActive(opsDetector.StillActive)
+	opsRecovery := operations.NewRecoveryWorker(opsStore, operations.NewDeviceCommander(a.DeviceControl), time.Now, opsMetrics)
+	// The detector, alert processor, and recovery worker are always
+	// constructed so dashboard predicate checks (manual resolve guard)
+	// work even with the engine disabled; only the background loops are
+	// gated on OPERATIONS_ENABLED.
 	if cfg.Operations.Enabled {
-		opsNotify := notifications.NewService(opsStore, opsStore, log)
-		opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
-		opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
-			BatchSize: cfg.Operations.ScanBatchSize, OfflineAfter: cfg.Operations.DeviceOfflineAfter,
-			OnlineWindow: cfg.DeviceControl.OnlineWindow, SyncPendingStale: cfg.Operations.SyncPendingStaleAfter,
-			SyncRunningStale: cfg.Operations.SyncRunningStaleAfter, ReportStale: cfg.Operations.ReportStaleAfter,
-			NotificationStale:   cfg.Operations.NotificationRetryStaleAfter,
-			AutoSyncOnReconnect: cfg.Operations.AutoSyncOnReconnect,
-		}, ids.System{}.New, time.Now, opsMetrics)
-		opsReader.SetStillActive(opsDetector.StillActive)
-		opsRecovery := operations.NewRecoveryWorker(opsStore, operations.NewDeviceCommander(a.DeviceControl), time.Now, opsMetrics)
 		a.OperationsEngine = operations.NewEngine(opsDetector, opsAlerts, opsRecovery,
 			cfg.Operations.ScanInterval, cfg.Operations.ScanBatchSize, log)
 	}

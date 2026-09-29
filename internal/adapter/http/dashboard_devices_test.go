@@ -5,12 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func apperrNewNotFound() error { return apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND") }
@@ -303,4 +308,75 @@ func TestDashboardNoCredentialExposure(t *testing.T) {
 	if len(list.Devices) != 2 {
 		t.Fatalf("revoked device stays visible: %s", body)
 	}
+}
+
+// L01: Sync Now error contract. Malformed and unknown device IDs return
+// 404; missing/invalid/oversized keys return 400 with the specific
+// diagnostic; revoked devices keep 400 DEVICE_NOT_ACTIVE.
+func TestDashboardSyncRequestErrorContract(t *testing.T) {
+	url := testutil.Isolated(t)
+	pool, err := pgxpool.New(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	store := postgres.NewDevices(pool, 5*time.Second)
+	svc := devicecontrol.NewService(store, lifecycleStub{active: map[string]bool{"dev-A": true}}, ids.System{}.New, time.Minute, time.Now)
+	h := &DashboardDeviceHandlers{Svc: svc, Auth: stubLister{}, OnlineWindow: time.Minute}
+	post := func(path, key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", path, nil)
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		rec := httptest.NewRecorder()
+		h.CreateSyncRequest(rec, req)
+		return rec
+	}
+	cases := []struct {
+		name string
+		path string
+		key  string
+		want int
+		msg  string
+	}{
+		{"missing key", "/api/v1/dashboard/devices/dev-A/sync-requests", "", 400, "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY"},
+		{"invalid chars", "/api/v1/dashboard/devices/dev-A/sync-requests", "bad key!", 400, "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY"},
+		{"oversized key", "/api/v1/dashboard/devices/dev-A/sync-requests", strings.Repeat("k", 129), 400, "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY"},
+		{"malformed device id", "/api/v1/dashboard/devices/!!!/sync-requests", "k1", 404, "DEVICE_COMMAND_NOT_FOUND"},
+		{"unknown device", "/api/v1/dashboard/devices/11111111-1111-4111-8111-111111111111/sync-requests", "k1", 404, "DEVICE_COMMAND_NOT_FOUND"},
+		{"revoked device", "/api/v1/dashboard/devices/dev-B/sync-requests", "k1", 400, "DEVICE_NOT_ACTIVE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := post(tc.path, tc.key)
+			if rec.Code != tc.want {
+				t.Fatalf("want %d, got %d (%s)", tc.want, rec.Code, rec.Body.String())
+			}
+			var env struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			_ = json.Unmarshal(rec.Body.Bytes(), &env)
+			if env.Error.Message != tc.msg {
+				t.Fatalf("diagnostic: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+type lifecycleStub struct {
+	active map[string]bool
+}
+
+func (s lifecycleStub) IsActive(_ context.Context, id string) (bool, error) {
+	if s.active[id] {
+		return true, nil
+	}
+	if id == "dev-B" {
+		// Revoked device: known but inactive.
+		return false, nil
+	}
+	// Unknown or malformed IDs behave like the auth lookup: not found.
+	return false, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND")
 }

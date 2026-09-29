@@ -24,18 +24,18 @@ INSERT INTO operational_incidents (id, rule_key, subject_type, subject_id, sever
 VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, $8, $8, $8, $8)
 ON CONFLICT (rule_key, subject_type, subject_id) WHERE state IN ('open', 'acknowledged') DO NOTHING
 RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at;
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
 
 -- name: OpenEventIncident :one
 INSERT INTO operational_incidents (id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key, opened_at, last_observed_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 'open', 1, $6, $7, $7, $7, $7)
 ON CONFLICT (source_event_key) WHERE source_event_key IS NOT NULL DO NOTHING
 RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at;
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
 
 -- name: GetActiveIncident :one
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 FROM operational_incidents
 WHERE rule_key = $1 AND subject_type = $2 AND subject_id = $3
   AND state IN ('open', 'acknowledged')
@@ -44,7 +44,7 @@ LIMIT 1;
 
 -- name: GetIncidentByEventKey :one
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 FROM operational_incidents
 WHERE source_event_key = $1
 ORDER BY opened_at DESC, id DESC
@@ -52,7 +52,7 @@ LIMIT 1;
 
 -- name: GetIncident :one
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 FROM operational_incidents
 WHERE id = $1;
 
@@ -65,14 +65,14 @@ UPDATE operational_incidents
 SET state = 'acknowledged', acknowledged_at = COALESCE(acknowledged_at, $2), updated_at = $2
 WHERE id = $1 AND state = 'open'
 RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at;
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
 
 -- name: ResolveIncident :one
 UPDATE operational_incidents
 SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
 WHERE id = $1 AND state IN ('open', 'acknowledged')
 RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at;
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
 
 -- name: MaxEpisodeForSubject :one
 SELECT COALESCE(MAX(episode), 0)::INTEGER AS max_episode
@@ -81,7 +81,7 @@ WHERE rule_key = $1 AND subject_type = $2 AND subject_id = $3;
 
 -- name: ListIncidentsPage :many
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 FROM operational_incidents
 WHERE ($1::text = '' OR state = $1::text)
   AND ($2::text = '' OR severity = $2::text)
@@ -188,54 +188,55 @@ JOIN device_control_presence p ON p.device_id = d.id
 WHERE d.status = 'active'
   AND p.last_seen_at IS NOT NULL
   AND p.last_seen_at < $1
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.rule_key = 'DEVICE_OFFLINE' AND i.subject_type = 'device'
+      AND i.subject_id = d.id::text AND i.state IN ('open', 'acknowledged'))
 ORDER BY p.last_seen_at, d.id
 LIMIT $2;
-
--- name: ScanReconnectedDevices :many
-SELECT d.id, d.name, d.status, p.last_seen_at
-FROM devices d
-JOIN device_control_presence p ON p.device_id = d.id
-WHERE d.status = 'active'
-  AND p.last_seen_at IS NOT NULL
-  AND p.last_seen_at >= $1
-ORDER BY p.last_seen_at, d.id
-LIMIT $2;
-
--- name: ScanRevokedDevices :many
-SELECT d.id, d.name, d.status
-FROM devices d
-WHERE d.status <> 'active'
-ORDER BY d.id
-LIMIT $1;
 
 -- name: ScanFailedCommands :many
 SELECT id, device_id, command_type, command_version, result_code, finished_at
 FROM device_control_commands
 WHERE status = 'failed'
-ORDER BY finished_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.source_event_key = 'sync-command:' || device_control_commands.id::text)
+ORDER BY device_control_commands.finished_at, device_control_commands.id
 LIMIT $1;
 
 -- name: ScanStaleCommands :many
 SELECT id, device_id, command_type, command_version, status, requested_at
 FROM device_control_commands
-WHERE status IN ('pending', 'accepted', 'running')
+WHERE status IN ('pending', 'leased', 'accepted', 'running')
   AND requested_at < $1
-ORDER BY requested_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.rule_key = 'DEVICE_SYNC_STALE' AND i.subject_type = 'sync_command'
+      AND i.subject_id = device_control_commands.id::text AND i.state IN ('open', 'acknowledged'))
+ORDER BY device_control_commands.requested_at, device_control_commands.id
 LIMIT $2;
 
 -- name: ScanBlockedRuns :many
 SELECT id, schedule_id, run_kind, slot_local_date, created_at
 FROM business_report_runs
 WHERE status = 'blocked'
-ORDER BY created_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.source_event_key = 'report-blocked:' || business_report_runs.id::text)
+ORDER BY business_report_runs.created_at, business_report_runs.id
 LIMIT $1;
 
 -- name: ScanStaleRuns :many
 SELECT id, schedule_id, run_kind, slot_local_date, status, created_at
 FROM business_report_runs
 WHERE status IN ('pending', 'retry')
-  AND created_at < $1
-ORDER BY created_at, id
+  AND business_report_runs.created_at < $1
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.rule_key = 'BUSINESS_REPORT_STALE' AND i.subject_type = 'report_run'
+      AND i.subject_id = business_report_runs.id::text AND i.state IN ('open', 'acknowledged'))
+ORDER BY business_report_runs.created_at, business_report_runs.id
 LIMIT $2;
 
 -- name: ScanBlockedNotifications :many
@@ -244,7 +245,10 @@ FROM notification_messages
 WHERE dispatch_status = 'blocked'
   AND idempotency_key NOT LIKE 'ops-alert:%'
   AND template_key NOT LIKE 'operational\_alert\_%'
-ORDER BY created_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.source_event_key = 'notification-blocked:' || notification_messages.id::text)
+ORDER BY notification_messages.created_at, notification_messages.id
 LIMIT $1;
 
 -- name: ScanAmbiguousNotifications :many
@@ -253,17 +257,24 @@ FROM notification_messages
 WHERE dispatch_status = 'ambiguous'
   AND idempotency_key NOT LIKE 'ops-alert:%'
   AND template_key NOT LIKE 'operational\_alert\_%'
-ORDER BY created_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.source_event_key = 'notification-ambiguous:' || notification_messages.id::text)
+ORDER BY notification_messages.created_at, notification_messages.id
 LIMIT $1;
 
 -- name: ScanRetryStaleNotifications :many
 SELECT id, template_key, locale, created_at
 FROM notification_messages
 WHERE dispatch_status = 'retry'
-  AND created_at < $1
+  AND notification_messages.created_at < $1
   AND idempotency_key NOT LIKE 'ops-alert:%'
   AND template_key NOT LIKE 'operational\_alert\_%'
-ORDER BY created_at, id
+  AND NOT EXISTS (
+    SELECT 1 FROM operational_incidents i
+    WHERE i.rule_key = 'NOTIFICATION_RETRY_STALE' AND i.subject_type = 'notification'
+      AND i.subject_id = notification_messages.id::text AND i.state IN ('open', 'acknowledged'))
+ORDER BY notification_messages.created_at, notification_messages.id
 LIMIT $2;
 
 -- name: GetCommandTerminal :one
@@ -293,8 +304,53 @@ WHERE device_id = $1;
 
 -- name: ListActiveByRule :many
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 FROM operational_incidents
 WHERE rule_key = $1 AND state IN ('open', 'acknowledged')
-ORDER BY opened_at, id
+-- Least-recently-checked first: resolution loops touch every checked
+-- row, so no head-of-line batch can starve later rows indefinitely.
+ORDER BY last_observed_at, id
 LIMIT $2;
+
+-- M01 materialization repair: rows whose transition committed without its
+-- durable event intent (open/resolved deliveries, reconnect recovery).
+-- Bounded, oldest first; each is repaired idempotently without touching
+-- existing snapshots.
+
+-- name: ScanUnmaterializedOpened :many
+SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+FROM operational_incidents
+WHERE state IN ('open', 'acknowledged') AND NOT open_intent_materialized
+ORDER BY opened_at, id
+LIMIT $1;
+
+-- name: ScanUnmaterializedResolved :many
+SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+FROM operational_incidents
+WHERE state = 'resolved' AND NOT resolved_intent_materialized
+ORDER BY resolved_at, id
+LIMIT $1;
+
+-- name: MarkOpenIntentMaterialized :execrows
+UPDATE operational_incidents SET open_intent_materialized = TRUE, updated_at = $2 WHERE id = $1;
+
+-- name: MarkResolvedIntentMaterialized :execrows
+UPDATE operational_incidents SET resolved_intent_materialized = TRUE, updated_at = $2 WHERE id = $1;
+
+-- name: GetDeliveryByIdentity :one
+SELECT id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot,
+    locale_snapshot, template_key, body_snapshot, body_fingerprint, notification_id, notification_idempotency_key,
+    status, last_error_code, created_at, updated_at
+FROM operational_alert_deliveries
+WHERE incident_id = $1 AND event_type = $2 AND recipient_id = $3;
+
+-- name: CreateAlertDeliveryIdempotent :one
+INSERT INTO operational_alert_deliveries (id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot,
+    locale_snapshot, template_key, body_snapshot, body_fingerprint, notification_idempotency_key, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $12)
+ON CONFLICT (incident_id, event_type, recipient_id) DO NOTHING
+RETURNING id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot,
+    locale_snapshot, template_key, body_snapshot, body_fingerprint, notification_id, notification_idempotency_key,
+    status, last_error_code, created_at, updated_at;

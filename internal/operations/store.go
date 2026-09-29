@@ -122,6 +122,25 @@ type Store interface {
 	MaxEpisode(ctx context.Context, rule, subjectType, subjectID string) (int, error)
 	ActiveByRule(ctx context.Context, rule string, limit int) ([]Incident, error)
 	ListPage(ctx context.Context, state, severity, rule string, cursorAt *time.Time, cursorID string, limit int) ([]Incident, error)
+	// Atomic open: incident insert/adopt plus its opened-event deliveries
+	// plus the open-intent flag commit in a single transaction. adopted
+	// rows with a missing intent are repaired inline without touching
+	// existing snapshots.
+	OpenStatefulAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, episode int, deliveries []Delivery, at time.Time) (Incident, bool, error)
+	OpenEventAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, deliveries []Delivery, at time.Time) (Incident, bool, error)
+	// Atomic resolve: conditional resolve plus resolved-event deliveries
+	// plus the resolved-intent flag plus optional reconnect recovery in a
+	// single transaction. Only the committing scanner gets won=true and
+	// may proceed to metrics and further work; losers create nothing.
+	ResolveAtomic(ctx context.Context, id, code string, deliveries []Delivery, recovery *RecoveryIntent, at time.Time) (Incident, bool, error)
+	// Repair paths for rows whose transition committed without its intent
+	// (pre-atomic writers): fill only missing deliveries, never mint new
+	// keys for existing snapshots, then set the flag.
+	MaterializeOpen(ctx context.Context, id string, deliveries []Delivery, at time.Time) error
+	MaterializeResolved(ctx context.Context, id string, deliveries []Delivery, recovery *RecoveryIntent, at time.Time) error
+	ScanUnmaterializedOpened(ctx context.Context, limit int) ([]Incident, error)
+	ScanUnmaterializedResolved(ctx context.Context, limit int) ([]Incident, error)
+	DeliveryByIdentity(ctx context.Context, incidentID, event, recipientID string) (Delivery, bool, error)
 	DeviceSummary(ctx context.Context) ([]DeviceSummary, error)
 	// Deliveries.
 	CreateDelivery(ctx context.Context, d Delivery, at time.Time) (Delivery, error)
@@ -139,8 +158,6 @@ type Store interface {
 	RecoveriesForIncident(ctx context.Context, incidentID string) ([]Recovery, error)
 	// Detector scans (bounded, server-time).
 	ScanOffline(ctx context.Context, olderThan time.Time, limit int) ([]OfflineCandidate, error)
-	ScanReconnected(ctx context.Context, newerThan time.Time, limit int) ([]OfflineCandidate, error)
-	ScanRevoked(ctx context.Context, limit int) ([]string, error)
 	ScanFailedCommands(ctx context.Context, limit int) ([]FailedCommand, error)
 	ScanStaleCommands(ctx context.Context, olderThan time.Time, limit int) ([]StaleCommand, error)
 	ScanBlockedRuns(ctx context.Context, limit int) ([]BlockedRun, error)

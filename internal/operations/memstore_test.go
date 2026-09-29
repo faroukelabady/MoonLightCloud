@@ -450,39 +450,10 @@ func (m *memStore) ScanOffline(_ context.Context, olderThan time.Time, limit int
 		if !d.active || d.lastSeen == nil || !d.lastSeen.Before(olderThan) {
 			continue
 		}
-		out = append(out, OfflineCandidate{DeviceID: d.id, Name: d.name, LastSeen: *d.lastSeen})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (m *memStore) ScanReconnected(_ context.Context, newerThan time.Time, limit int) ([]OfflineCandidate, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []OfflineCandidate
-	for _, d := range m.devices {
-		if !d.active || d.lastSeen == nil || d.lastSeen.Before(newerThan) {
+		if m.activeFor(RuleDeviceOffline, SubjectDevice, d.id) != nil {
 			continue
 		}
 		out = append(out, OfflineCandidate{DeviceID: d.id, Name: d.name, LastSeen: *d.lastSeen})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (m *memStore) ScanRevoked(_ context.Context, limit int) ([]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []string
-	for _, d := range m.devices {
-		if d.active {
-			continue
-		}
-		out = append(out, d.id)
 		if len(out) >= limit {
 			break
 		}
@@ -495,7 +466,7 @@ func (m *memStore) ScanFailedCommands(_ context.Context, limit int) ([]FailedCom
 	defer m.mu.Unlock()
 	var out []FailedCommand
 	for _, c := range m.commands {
-		if c.status == "failed" {
+		if c.status == "failed" && !m.hasEvent("sync-command:"+c.id) {
 			out = append(out, FailedCommand{CommandID: c.id, DeviceID: c.device})
 		}
 		if len(out) >= limit {
@@ -510,7 +481,8 @@ func (m *memStore) ScanStaleCommands(_ context.Context, olderThan time.Time, lim
 	defer m.mu.Unlock()
 	var out []StaleCommand
 	for _, c := range m.commands {
-		if (c.status == "pending" || c.status == "accepted" || c.status == "running") && c.requested.Before(olderThan) {
+		if (c.status == "pending" || c.status == "leased" || c.status == "accepted" || c.status == "running") && c.requested.Before(olderThan) &&
+			m.activeFor(RuleDeviceSyncStale, SubjectSyncCommand, c.id) == nil {
 			out = append(out, StaleCommand{CommandID: c.id, DeviceID: c.device, Status: c.status, RequestedAt: c.requested})
 		}
 		if len(out) >= limit {
@@ -525,7 +497,7 @@ func (m *memStore) ScanBlockedRuns(_ context.Context, limit int) ([]BlockedRun, 
 	defer m.mu.Unlock()
 	var out []BlockedRun
 	for _, r := range m.runs {
-		if r.status == "blocked" {
+		if r.status == "blocked" && !m.hasEvent("report-blocked:"+r.id) {
 			out = append(out, BlockedRun{RunID: r.id, CreatedAt: r.created})
 		}
 		if len(out) >= limit {
@@ -540,7 +512,8 @@ func (m *memStore) ScanStaleRuns(_ context.Context, olderThan time.Time, limit i
 	defer m.mu.Unlock()
 	var out []StaleRun
 	for _, r := range m.runs {
-		if (r.status == "pending" || r.status == "retry") && r.created.Before(olderThan) {
+		if (r.status == "pending" || r.status == "retry") && r.created.Before(olderThan) &&
+			m.activeFor(RuleReportStale, SubjectReportRun, r.id) == nil {
 			out = append(out, StaleRun{RunID: r.id, Status: r.status, CreatedAt: r.created})
 		}
 		if len(out) >= limit {
@@ -550,13 +523,19 @@ func (m *memStore) ScanStaleRuns(_ context.Context, olderThan time.Time, limit i
 	return out, nil
 }
 
-func (m *memStore) scanBad(status string, older *time.Time, limit int) []BadNotification {
+func (m *memStore) scanBad(status string, older *time.Time, limit int, eventPrefix, staleRule string) []BadNotification {
 	var out []BadNotification
 	for _, n := range m.notifications {
 		if n.status != status || n.opsOwned {
 			continue
 		}
 		if older != nil && !n.created.Before(*older) {
+			continue
+		}
+		if eventPrefix != "" && m.hasEvent(eventPrefix+n.id) {
+			continue
+		}
+		if staleRule != "" && m.activeFor(staleRule, SubjectNotification, n.id) != nil {
 			continue
 		}
 		out = append(out, BadNotification{NotificationID: n.id, CreatedAt: n.created})
@@ -567,22 +546,31 @@ func (m *memStore) scanBad(status string, older *time.Time, limit int) []BadNoti
 	return out
 }
 
+func (m *memStore) hasEvent(key string) bool {
+	for _, in := range m.incidents {
+		if in.SourceEventKey != nil && *in.SourceEventKey == key {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *memStore) ScanBlockedNotifications(_ context.Context, limit int) ([]BadNotification, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.scanBad("blocked", nil, limit), nil
+	return m.scanBad("blocked", nil, limit, "notification-blocked:", ""), nil
 }
 
 func (m *memStore) ScanAmbiguousNotifications(_ context.Context, limit int) ([]BadNotification, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.scanBad("ambiguous", nil, limit), nil
+	return m.scanBad("ambiguous", nil, limit, "notification-ambiguous:", ""), nil
 }
 
 func (m *memStore) ScanRetryStaleNotifications(_ context.Context, olderThan time.Time, limit int) ([]BadNotification, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.scanBad("retry", &olderThan, limit), nil
+	return m.scanBad("retry", &olderThan, limit, "", RuleNotificationStale), nil
 }
 
 func (m *memStore) CommandTerminal(_ context.Context, id string) (string, bool, error) {
@@ -646,9 +634,173 @@ func (m *memStore) ActiveByRule(_ context.Context, rule string, limit int) ([]In
 		if in.Rule == rule && (in.State == StateOpen || in.State == StateAcknowledged) {
 			out = append(out, *in)
 		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastObservedAt.Equal(out[j].LastObservedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].LastObservedAt.Before(out[j].LastObservedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *memStore) deliveryIdentityExists(incidentID, event, recipientID string) bool {
+	for _, d := range m.deliveries {
+		if d.IncidentID == incidentID && d.Event == event && d.RecipientID == recipientID {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *memStore) insertMissingLocked(deliveries []Delivery) {
+	for _, del := range deliveries {
+		if m.deliveryIdentityExists(del.IncidentID, del.Event, del.RecipientID) {
+			continue
+		}
+		cp := del
+		if cp.Status == "" {
+			cp.Status = "pending"
+		}
+		m.deliveries[cp.ID] = &cp
+	}
+}
+
+func (m *memStore) OpenStatefulAtomic(_ context.Context, id, rule, stype, sid, severity, _ string, episode int, deliveries []Delivery, at time.Time) (Incident, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing := m.activeFor(rule, stype, sid); existing != nil {
+		if !existing.OpenIntentMaterialized {
+			m.insertMissingLocked(deliveries)
+			existing.OpenIntentMaterialized = true
+		}
+		return *existing, false, nil
+	}
+	in := &Incident{ID: id, Rule: rule, SubjectType: stype, SubjectID: sid, Severity: severity,
+		State: StateOpen, Episode: episode, OpenedAt: at, LastObservedAt: at, OpenIntentMaterialized: true}
+	m.incidents[id] = in
+	m.insertMissingLocked(deliveries)
+	return *in, true, nil
+}
+
+func (m *memStore) OpenEventAtomic(_ context.Context, id, rule, stype, sid, severity, key string, deliveries []Delivery, at time.Time) (Incident, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, in := range m.incidents {
+		if in.SourceEventKey != nil && *in.SourceEventKey == key {
+			if !in.OpenIntentMaterialized {
+				m.insertMissingLocked(deliveries)
+				in.OpenIntentMaterialized = true
+			}
+			return *in, false, nil
+		}
+	}
+	in := &Incident{ID: id, Rule: rule, SubjectType: stype, SubjectID: sid, Severity: severity,
+		State: StateOpen, Episode: 1, SourceEventKey: &key, OpenedAt: at, LastObservedAt: at,
+		OpenIntentMaterialized: true}
+	m.incidents[id] = in
+	m.insertMissingLocked(deliveries)
+	return *in, true, nil
+}
+
+func (m *memStore) ResolveAtomic(_ context.Context, id, code string, deliveries []Delivery, recovery *RecoveryIntent, at time.Time) (Incident, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	in, ok := m.incidents[id]
+	if !ok {
+		return Incident{}, false, nil
+	}
+	if in.State != StateOpen && in.State != StateAcknowledged {
+		return *in, false, nil
+	}
+	in.State = StateResolved
+	in.ResolvedAt = &at
+	in.ResolutionCode = &code
+	m.insertMissingLocked(deliveries)
+	in.ResolvedIntentMaterialized = true
+	if recovery != nil {
+		if d, ok := m.devices[recovery.DeviceID]; ok && d.active {
+			if _, exists := m.recovery[in.ID]; !exists {
+				m.recovery[in.ID] = &Recovery{IncidentID: in.ID, ActionType: ActionReconnectSync,
+					State: "pending", IdempotencyKey: recovery.Key}
+			}
+		}
+	}
+	return *in, true, nil
+}
+
+func (m *memStore) MaterializeOpen(_ context.Context, id string, deliveries []Delivery, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	in, ok := m.incidents[id]
+	if !ok {
+		return nil
+	}
+	m.insertMissingLocked(deliveries)
+	in.OpenIntentMaterialized = true
+	return nil
+}
+
+func (m *memStore) MaterializeResolved(_ context.Context, id string, deliveries []Delivery, recovery *RecoveryIntent, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	in, ok := m.incidents[id]
+	if !ok {
+		return nil
+	}
+	m.insertMissingLocked(deliveries)
+	if recovery != nil {
+		if d, ok := m.devices[recovery.DeviceID]; ok && d.active {
+			if _, exists := m.recovery[in.ID]; !exists {
+				m.recovery[in.ID] = &Recovery{IncidentID: in.ID, ActionType: ActionReconnectSync,
+					State: "pending", IdempotencyKey: recovery.Key}
+			}
+		}
+	}
+	in.ResolvedIntentMaterialized = true
+	return nil
+}
+
+func (m *memStore) ScanUnmaterializedOpened(_ context.Context, limit int) ([]Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Incident
+	for _, in := range m.incidents {
+		if (in.State == StateOpen || in.State == StateAcknowledged) && !in.OpenIntentMaterialized {
+			out = append(out, *in)
+		}
 		if len(out) >= limit {
 			break
 		}
 	}
 	return out, nil
+}
+
+func (m *memStore) ScanUnmaterializedResolved(_ context.Context, limit int) ([]Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Incident
+	for _, in := range m.incidents {
+		if in.State == StateResolved && !in.ResolvedIntentMaterialized {
+			out = append(out, *in)
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) DeliveryByIdentity(_ context.Context, incidentID, event, recipientID string) (Delivery, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, d := range m.deliveries {
+		if d.IncidentID == incidentID && d.Event == event && d.RecipientID == recipientID {
+			return *d, true, nil
+		}
+	}
+	return Delivery{}, false, nil
 }

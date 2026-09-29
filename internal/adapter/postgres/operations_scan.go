@@ -37,40 +37,6 @@ func (d Devices) ScanOffline(ctx context.Context, olderThan time.Time, limit int
 	return out, nil
 }
 
-// ScanReconnected scans active devices seen since the threshold.
-func (d Devices) ScanReconnected(ctx context.Context, newerThan time.Time, limit int) ([]operations.OfflineCandidate, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	rows, err := sqlcgen.New(d.pool).ScanReconnectedDevices(ctx, sqlcgen.ScanReconnectedDevicesParams{
-		LastSeenAt: pgTime(newerThan.UTC()), Limit: opsLimit(limit),
-	})
-	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "scan reconnected", redact(err))
-	}
-	out := make([]operations.OfflineCandidate, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, operations.OfflineCandidate{
-			DeviceID: uuidString(r.ID), Name: r.Name, LastSeen: r.LastSeenAt.Time.UTC(),
-		})
-	}
-	return out, nil
-}
-
-// ScanRevoked lists non-active device IDs (bounded).
-func (d Devices) ScanRevoked(ctx context.Context, limit int) ([]string, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	rows, err := sqlcgen.New(d.pool).ScanRevokedDevices(ctx, opsLimit(limit))
-	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "scan revoked", redact(err))
-	}
-	out := make([]string, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, uuidString(r.ID))
-	}
-	return out, nil
-}
-
 // ScanFailedCommands lists failed sync commands (bounded, oldest first).
 func (d Devices) ScanFailedCommands(ctx context.Context, limit int) ([]operations.FailedCommand, error) {
 	ctx, cancel := d.ctx(ctx)

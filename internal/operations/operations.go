@@ -108,6 +108,18 @@ type Incident struct {
 	AcknowledgedAt *time.Time
 	ResolvedAt     *time.Time
 	ResolutionCode *string
+	// OpenIntentMaterialized distinguishes an intentionally empty opened
+	// snapshot (true, zero deliveries) from a missing one (false, repair).
+	OpenIntentMaterialized bool
+	// ResolvedIntentMaterialized is the same distinction for the resolved event.
+	ResolvedIntentMaterialized bool
+}
+
+// RecoveryIntent carries an optional reconnect-recovery request into an
+// atomic resolve transaction.
+type RecoveryIntent struct {
+	DeviceID string
+	Key      string
 }
 
 // IsStateful reports rules whose condition can naturally clear.

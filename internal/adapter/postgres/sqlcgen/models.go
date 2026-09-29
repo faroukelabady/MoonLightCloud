@@ -424,21 +424,23 @@ type OperationalAlertRecipient struct {
 }
 
 type OperationalIncident struct {
-	ID             pgtype.UUID        `json:"id"`
-	RuleKey        string             `json:"rule_key"`
-	SubjectType    string             `json:"subject_type"`
-	SubjectID      string             `json:"subject_id"`
-	Severity       string             `json:"severity"`
-	State          string             `json:"state"`
-	Episode        int32              `json:"episode"`
-	SourceEventKey pgtype.Text        `json:"source_event_key"`
-	OpenedAt       pgtype.Timestamptz `json:"opened_at"`
-	LastObservedAt pgtype.Timestamptz `json:"last_observed_at"`
-	AcknowledgedAt pgtype.Timestamptz `json:"acknowledged_at"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolutionCode pgtype.Text        `json:"resolution_code"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                         pgtype.UUID        `json:"id"`
+	RuleKey                    string             `json:"rule_key"`
+	SubjectType                string             `json:"subject_type"`
+	SubjectID                  string             `json:"subject_id"`
+	Severity                   string             `json:"severity"`
+	State                      string             `json:"state"`
+	Episode                    int32              `json:"episode"`
+	SourceEventKey             pgtype.Text        `json:"source_event_key"`
+	OpenedAt                   pgtype.Timestamptz `json:"opened_at"`
+	LastObservedAt             pgtype.Timestamptz `json:"last_observed_at"`
+	AcknowledgedAt             pgtype.Timestamptz `json:"acknowledged_at"`
+	ResolvedAt                 pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode             pgtype.Text        `json:"resolution_code"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	OpenIntentMaterialized     bool               `json:"open_intent_materialized"`
+	ResolvedIntentMaterialized bool               `json:"resolved_intent_materialized"`
 }
 
 type OperationalRecoveryAction struct {

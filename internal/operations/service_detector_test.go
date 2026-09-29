@@ -322,9 +322,11 @@ func TestAlertMissingMappingMem(t *testing.T) {
 	ctx := context.Background()
 	seedRecipient(t, store, "ar")
 	opened, _, _ := svc.OpenStateful(ctx, RuleReportBlocked, SubjectReportRun, "run-1", "")
-	d := testDetector(store, svc, alerts, false)
-	_ = d
-	if err := alerts.CreateDeliveries(ctx, opened, EventOpened); err != nil {
+	built, err := alerts.BuildDeliveries(ctx, opened, EventOpened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.OpenStatefulAtomic(ctx, opened.ID, opened.Rule, opened.SubjectType, opened.SubjectID, opened.Severity, "", 1, built, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	more, err := alerts.ProcessOne(ctx)
@@ -351,7 +353,11 @@ func TestZeroRecipientsMem(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("incident exists regardless: %+v %v", opened, err)
 	}
-	if err := alerts.CreateDeliveries(ctx, opened, EventOpened); err != nil {
+	built, err := alerts.BuildDeliveries(ctx, opened, EventOpened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.OpenStatefulAtomic(ctx, opened.ID, opened.Rule, opened.SubjectType, opened.SubjectID, opened.Severity, "", 1, built, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	dels, _ := store.DeliveriesForIncident(ctx, opened.ID)

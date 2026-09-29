@@ -36,6 +36,8 @@ func toOpsIncident(r sqlcgen.OperationalIncident) operations.Incident {
 		s := r.ResolutionCode.String
 		in.ResolutionCode = &s
 	}
+	in.OpenIntentMaterialized = r.OpenIntentMaterialized
+	in.ResolvedIntentMaterialized = r.ResolvedIntentMaterialized
 	return in
 }
 

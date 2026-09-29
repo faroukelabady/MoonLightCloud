@@ -34,75 +34,49 @@ func NewAlertProcessor(store Store, service *Service, notify Notifier, newID fun
 	return &AlertProcessor{store: store, service: service, notify: notify, newID: newID, now: now, metrics: metrics}
 }
 
-// CreateDeliveries snapshots currently-enabled recipients for one incident
-// event. Incident existence never depends on notification success; with
-// zero recipients the incident simply has no deliveries.
-func (p *AlertProcessor) CreateDeliveries(ctx context.Context, incident Incident, event string) error {
+// BuildDeliveries composes immutable per-recipient delivery snapshots for
+// one incident event without writing anything. Entries whose body cannot
+// be built carry LastErrorCode preset so the atomic commit records them
+// blocked in the same transaction. Zero recipients yields zero
+// deliveries; callers distinguish that from a missing intent via the
+// materialization flags.
+func (p *AlertProcessor) BuildDeliveries(ctx context.Context, incident Incident, event string) ([]Delivery, error) {
 	recipients, err := p.store.ListEnabledOpsRecipients(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	now := p.now().UTC()
+	out := make([]Delivery, 0, len(recipients))
 	for _, r := range recipients {
-		body, berr := AlertBody(r.Locale, event, incident.Rule, SafeSubject(incident.SubjectID, ""), incident.OpenedAt, "")
-		if berr != nil {
-			// Body too large by construction: record a blocked delivery so
-			// the dashboard shows the configuration problem explicitly.
-			if err := p.blockDelivery(ctx, incident, r, event, CodeBodyTooLarge, now); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := ValidateLabel(r.Label); err != nil {
-			if berr := p.blockDelivery(ctx, incident, r, event, CodeBodyTooLarge, now); berr != nil {
-				return berr
-			}
-			continue
-		}
-		deliveryID := p.newID()
 		template := TemplateOpen
 		if event == EventResolved {
 			template = TemplateResolved
 		}
-		_, err := p.store.CreateDelivery(ctx, Delivery{
+		body, berr := AlertBody(r.Locale, event, incident.Rule, SafeSubject(incident.SubjectID, ""), incident.OpenedAt, "")
+		if berr != nil || ValidateLabel(r.Label) != nil {
+			deliveryID := p.newID()
+			out = append(out, Delivery{
+				ID: deliveryID, IncidentID: incident.ID, RecipientID: r.ID, Event: event,
+				ProviderKey: r.ProviderKey, RecipientSnapshot: r.Recipient,
+				Locale: r.Locale, TemplateKey: template, Body: "(withheld: too large)",
+				Fingerprint:     Fingerprint(incident.Rule, incident.ID, event, r.Locale, "(withheld)"),
+				NotificationKey: AlertIdempotencyKey(incident.ID, event, deliveryID),
+				LastErrorCode:   strptr(CodeBodyTooLarge),
+			})
+			continue
+		}
+		deliveryID := p.newID()
+		out = append(out, Delivery{
 			ID: deliveryID, IncidentID: incident.ID, RecipientID: r.ID, Event: event,
 			ProviderKey: r.ProviderKey, RecipientSnapshot: r.Recipient,
 			Locale: r.Locale, TemplateKey: template, Body: body,
 			Fingerprint:     Fingerprint(incident.Rule, incident.ID, event, r.Locale, body),
 			NotificationKey: AlertIdempotencyKey(incident.ID, event, deliveryID),
-		}, now)
-		if err != nil {
-			if isConflict(err) {
-				continue
-			}
-			return err
-		}
+		})
 	}
-	return nil
+	return out, nil
 }
 
-func (p *AlertProcessor) blockDelivery(ctx context.Context, incident Incident, r Recipient, event, code string, now time.Time) error {
-	deliveryID := p.newID()
-	template := TemplateOpen
-	if event == EventResolved {
-		template = TemplateResolved
-	}
-	del, err := p.store.CreateDelivery(ctx, Delivery{
-		ID: deliveryID, IncidentID: incident.ID, RecipientID: r.ID, Event: event,
-		ProviderKey: r.ProviderKey, RecipientSnapshot: r.Recipient,
-		Locale: r.Locale, TemplateKey: template, Body: "(withheld: too large)",
-		Fingerprint:     Fingerprint(incident.Rule, incident.ID, event, r.Locale, "(withheld)"),
-		NotificationKey: AlertIdempotencyKey(incident.ID, event, deliveryID),
-	}, now)
-	if err != nil {
-		if isConflict(err) {
-			return nil
-		}
-		return err
-	}
-	p.metrics.deliveriesBlocked.Add(1)
-	return p.store.FinishOpsDeliveryBlocked(ctx, del.ID, code, now)
-}
+func strptr(s string) *string { return &s }
 
 // ProcessOne claims the oldest pending delivery and enqueues it. Missing
 // template mappings block the delivery (dashboard-visible config problem)

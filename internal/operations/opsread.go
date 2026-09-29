@@ -2,6 +2,8 @@ package operations
 
 import (
 	"context"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
 
 // OpsReader serves dashboard/CLI reads over incidents, deliveries,
@@ -55,13 +57,16 @@ func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incid
 		code = ResolutionOperator
 	}
 	if IsStateful(incident.Rule) {
-		still := false
-		if r.stillActiveFn != nil {
-			var err error
-			still, err = r.stillActiveFn(ctx, incident)
-			if err != nil {
-				return Incident{}, err
-			}
+		still := true
+		if r.stillActiveFn == nil {
+			// No predicate checker wired (e.g. engine disabled): fail
+			// closed rather than assuming a clear condition.
+			return Incident{}, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
+		}
+		var err error
+		still, err = r.stillActiveFn(ctx, incident)
+		if err != nil {
+			return Incident{}, err
 		}
 		return r.service.ResolveIfClear(ctx, id, code, still)
 	}

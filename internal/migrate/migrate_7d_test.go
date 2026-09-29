@@ -8,15 +8,15 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 )
 
-// Fresh database reaches 19 with operations tables and the carried
+// Fresh database reaches 20 with operations tables and the carried
 // pending/lease constraint enforced.
 func TestFreshTo19(t *testing.T) {
 	conn, ctx := openRaw(t)
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 19 {
-		t.Fatalf("want 19, got %d", v)
+	if v := version(t, conn, ctx); v != 20 {
+		t.Fatalf("want 20, got %d", v)
 	}
 	for _, table := range []string{
 		"operational_alert_recipients", "operational_incidents",
@@ -86,8 +86,15 @@ func TestV18To19Preservation(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 19 {
-		t.Fatalf("want 19, got %d", v)
+	if v := version(t, conn, ctx); v != 20 {
+		t.Fatalf("want 20, got %d", v)
+	}
+	var enforced bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='operational_deliveries_identity_unique')`).Scan(&enforced); err != nil || !enforced {
+		t.Fatalf("delivery identity unique present (%v)", err)
+	}
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname='idx_operations_incidents_resolve')`).Scan(&enforced); err != nil || !enforced {
+		t.Fatalf("resolve index present (%v)", err)
 	}
 	if got := dumpTable(t, conn, `SELECT id, device_id, status, result_code FROM device_control_commands ORDER BY id`); got != beforeCmds {
 		t.Fatalf("commands preserved:\n%s\nvs\n%s", beforeCmds, got)
@@ -137,4 +144,56 @@ func dumpTable(t *testing.T, conn *sql.DB, q string) string {
 		t.Fatal(err)
 	}
 	return sb.String()
+}
+
+// Rollback 20 → 18 leaves no Phase 7D indexes or tables, preserves frozen
+// rows, and re-upgrade restores full behavior.
+func TestRollback20To18Clean(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO devices (id, name, status, created_at, updated_at)
+		VALUES ('11111111-1111-4111-8111-111111111111', 'shop-pc', 'active', now(), now())`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.DownTo(ctx, conn, 18); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 18 {
+		t.Fatalf("want 18, got %d", v)
+	}
+	for _, table := range []string{
+		"operational_alert_recipients", "operational_incidents",
+		"operational_alert_deliveries", "operational_recovery_actions",
+	} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table).Scan(&exists); err != nil || exists {
+			t.Fatalf("table %s gone (%v)", table, err)
+		}
+	}
+	for _, idx := range []string{
+		"idx_operations_commands_failed", "idx_operations_commands_stale",
+		"idx_operations_incidents_resolve",
+	} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname=$1)`, idx).Scan(&exists); err != nil || exists {
+			t.Fatalf("index %s gone (%v)", idx, err)
+		}
+	}
+	var devices int
+	if err := conn.QueryRow(`SELECT count(*) FROM devices`).Scan(&devices); err != nil || devices != 1 {
+		t.Fatalf("frozen rows preserved: %d (%v)", devices, err)
+	}
+	// Re-upgrade restores everything including the replacement stale index.
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 20 {
+		t.Fatalf("want 20, got %d", v)
+	}
+	var enforced bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname='idx_operations_commands_stale')`).Scan(&enforced); err != nil || !enforced {
+		t.Fatalf("stale index restored (%v)", err)
+	}
 }

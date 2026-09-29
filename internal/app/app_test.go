@@ -130,3 +130,61 @@ func TestBlockedProjectionKeepsHealth(t *testing.T) {
 		t.Fatalf("liveness must stay 200: %d", live.Code)
 	}
 }
+
+// M03: with OPERATIONS_ENABLED=false no engine runs, yet manual
+// resolution of an active stateful condition still returns 409 with the
+// incident active; genuinely cleared conditions resolve.
+func TestDisabledOperationsManualResolveGuard(t *testing.T) {
+	url := testutil.Isolated(t)
+	a, err := New(context.Background(), testConfig(t, url))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.OperationsEngine != nil {
+		t.Fatal("engine must not start when disabled")
+	}
+	if a.OperationsService == nil || a.OperationsReader == nil {
+		t.Fatal("operations reads stay available when disabled")
+	}
+	ctx := context.Background()
+	prov, err := a.Devices.Create(ctx, "m03-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := prov.Device.ID
+	if _, err := a.Pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, dev); err != nil {
+		t.Fatal(err)
+	}
+	incident, created, err := a.OperationsService.OpenStateful(ctx, "DEVICE_OFFLINE", "device", dev, "")
+	if err != nil || !created {
+		t.Fatalf("open: %v %v", incident, err)
+	}
+	if _, err := a.OperationsReader.ResolveOperator(ctx, incident.ID, ""); err == nil {
+		t.Fatal("active condition must conflict even with engine disabled")
+	} else if got := err.Error(); got == "" || !containsCode(got, "CONDITION_STILL_ACTIVE") {
+		t.Fatalf("code: %v", err)
+	}
+	active, err := a.OperationsService.Get(ctx, incident.ID)
+	if err != nil || active.State != "open" {
+		t.Fatalf("incident still active: %+v %v", active, err)
+	}
+	// Genuinely cleared (fresh contact): resolution succeeds.
+	if _, err := a.Pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = now(), last_poll_at = now() WHERE device_id = $1`, dev); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := a.OperationsReader.ResolveOperator(ctx, incident.ID, "")
+	if err != nil || resolved.State != "resolved" {
+		t.Fatalf("cleared resolves: %+v %v", resolved, err)
+	}
+}
+
+func containsCode(s, code string) bool {
+	for i := 0; i+len(code) <= len(s); i++ {
+		if s[i:i+len(code)] == code {
+			return true
+		}
+	}
+	return false
+}

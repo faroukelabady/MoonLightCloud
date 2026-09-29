@@ -55,6 +55,61 @@ func (s *Service) OpenEvent(ctx context.Context, rule, subjectType, subjectID, s
 	return s.store.OpenEvent(ctx, s.newID(), rule, subjectType, subjectID, SeverityFor(rule), sourceKey, s.now().UTC())
 }
 
+// OpenStatefulAtomic opens (or adopts) the stateful incident and commits
+// its opened-event deliveries atomically. Only the opener proceeds.
+func (s *Service) OpenStatefulAtomic(ctx context.Context, id, rule, subjectType, subjectID, sourceKey string, deliveries []Delivery) (Incident, bool, error) {
+	if err := ValidateRule(rule); err != nil {
+		return Incident{}, false, err
+	}
+	now := s.now().UTC()
+	episode, err := s.store.MaxEpisode(ctx, rule, subjectType, subjectID)
+	if err != nil {
+		return Incident{}, false, err
+	}
+	incident, created, err := s.store.OpenStatefulAtomic(ctx, id, rule, subjectType, subjectID, SeverityFor(rule), sourceKey, episode+1, deliveries, now)
+	if err != nil {
+		return Incident{}, false, err
+	}
+	if !created {
+		incident.LastObservedAt = now
+	}
+	return incident, created, nil
+}
+
+// OpenEventAtomic opens (or adopts) the terminal-event incident and
+// commits its opened-event deliveries atomically.
+func (s *Service) OpenEventAtomic(ctx context.Context, id, rule, subjectType, subjectID, sourceKey string, deliveries []Delivery) (Incident, bool, error) {
+	if err := ValidateRule(rule); err != nil {
+		return Incident{}, false, err
+	}
+	if sourceKey == "" {
+		return Incident{}, false, apperr.New(apperr.InvalidInput, "event incident requires a source key")
+	}
+	return s.store.OpenEventAtomic(ctx, id, rule, subjectType, subjectID, SeverityFor(rule), sourceKey, deliveries, s.now().UTC())
+}
+
+// ResolveAtomic commits the resolution plus its resolved-event deliveries
+// (and optional reconnect recovery) atomically. Only the committing
+// caller gets won=true; losers create nothing.
+func (s *Service) ResolveAtomic(ctx context.Context, id, code string, deliveries []Delivery, recovery *RecoveryIntent) (Incident, bool, error) {
+	if code == "" {
+		return Incident{}, false, apperr.New(apperr.InvalidInput, "resolution code required")
+	}
+	return s.store.ResolveAtomic(ctx, id, code, deliveries, recovery, s.now().UTC())
+}
+
+// MaterializeOpen repairs an open/active incident whose opened intent is
+// missing: fill only missing deliveries, then set the flag.
+func (s *Service) MaterializeOpen(ctx context.Context, id string, deliveries []Delivery) error {
+	return s.store.MaterializeOpen(ctx, id, deliveries, s.now().UTC())
+}
+
+// MaterializeResolved repairs a resolved incident whose resolved intent
+// is missing, optionally arming reconnect recovery for active devices.
+func (s *Service) MaterializeResolved(ctx context.Context, id string, deliveries []Delivery, recovery *RecoveryIntent) error {
+	return s.store.MaterializeResolved(ctx, id, deliveries, recovery, s.now().UTC())
+}
+
 // Acknowledge is idempotent and never resolves.
 func (s *Service) Acknowledge(ctx context.Context, id string) (Incident, error) {
 	incident, ok, err := s.store.Acknowledge(ctx, id, s.now().UTC())

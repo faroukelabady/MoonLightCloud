@@ -71,12 +71,28 @@ without failing the incident or touching Phase 7A.
 device is back, the sync succeeded, or ambiguity disappeared. `Resolve`
 closes event incidents; stateful incidents resolve automatically when
 their condition clears, and manual resolve while active returns 409
-`CONDITION_STILL_ACTIVE`.
+`CONDITION_STILL_ACTIVE`. The guard is evaluated inside the resolve
+transaction against live state, and stays enforced even with the engine
+disabled (a missing checker fails closed).
 
 ```bash
 moonlight-cloud operations incidents list --state open
 moonlight-cloud operations incidents status --id <uuid>
 ```
+
+## Atomic intents and crash repair
+
+Each incident transition commits together with its durable event intent
+in one transaction: opening writes the incident plus its per-recipient
+opened deliveries; resolution writes the resolved state plus its
+resolved deliveries plus the reconnect recovery action. Concurrent
+scanners converge on database uniqueness — exactly one delivery per
+(incident, event, recipient) — and only the committing scanner proceeds.
+Two boolean flags per incident (`open_intent_materialized`,
+`resolved_intent_materialized`) distinguish an intentionally empty
+snapshot (zero recipients) from a missing intent; the detector repairs
+missing intents oldest-first without touching existing snapshots or
+minting new alert keys.
 
 ## Reconnect Sync Now behavior
 

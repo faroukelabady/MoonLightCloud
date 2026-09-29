@@ -537,3 +537,177 @@ func TestDetectorManualResolveConflict(t *testing.T) {
 		t.Fatalf("code: %v", err)
 	}
 }
+
+// M01: crash after incident insert (incident durable, no deliveries, flag
+// false) converges on restart: repair materializes exactly the missing
+// opened deliveries and sets the flag.
+func TestRepairOpenAfterInsertCrash(t *testing.T) {
+	env := newOpsDetectorEnv(t, false)
+	ctx := context.Background()
+	opsSeedRecipient(t, env.store, "ar")
+	opsSeedRecipient(t, env.store, "en")
+	dev := env.device(t, "repair-dev")
+	// Simulate the crash artifact with the legacy non-atomic open: row
+	// exists, zero deliveries, flag false.
+	opened, created, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil || !created {
+		t.Fatalf("open: %v %v", opened, err)
+	}
+	if opened.OpenIntentMaterialized {
+		t.Fatal("legacy open leaves intent unmaterialized")
+	}
+	env.scan(t)
+	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dels) != 2 {
+		t.Fatalf("repair fills both recipients: %+v", dels)
+	}
+	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if !fixed.OpenIntentMaterialized {
+		t.Fatal("flag set after repair")
+	}
+	// Repair is stable: another scan changes nothing.
+	env.scan(t)
+	again, _ := env.store.DeliveriesForIncident(ctx, opened.ID)
+	if len(again) != 2 {
+		t.Fatalf("repair stable: %+v", again)
+	}
+}
+
+// M01: crash after the first delivery write (one of two deliveries
+// durable, flag false) converges keeping the existing snapshot and key.
+func TestRepairOpenAfterFirstDeliveryCrash(t *testing.T) {
+	env := newOpsDetectorEnv(t, false)
+	ctx := context.Background()
+	opsSeedRecipient(t, env.store, "ar")
+	opsSeedRecipient(t, env.store, "en")
+	dev := env.device(t, "repair-dev")
+	opened, _, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := env.alerts.BuildDeliveries(ctx, opened, operations.EventOpened)
+	if err != nil || len(built) != 2 {
+		t.Fatalf("build: %+v %v", built, err)
+	}
+	// Simulate the crash: only the first delivery committed.
+	if _, err := env.store.CreateDelivery(ctx, built[0], time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	env.scan(t)
+	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dels) != 2 {
+		t.Fatalf("exactly two deliveries: %+v", dels)
+	}
+	byRecipient := map[string]operations.Delivery{}
+	for _, d := range dels {
+		byRecipient[d.RecipientID] = d
+	}
+	// Existing snapshot untouched: same ID and notification key.
+	found, ok, err := env.store.DeliveryByIdentity(ctx, opened.ID, operations.EventOpened, built[0].RecipientID)
+	if err != nil || !ok || found.ID != built[0].ID || found.NotificationKey != built[0].NotificationKey {
+		t.Fatalf("existing snapshot preserved: %+v %v %v", found, ok, err)
+	}
+	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if !fixed.OpenIntentMaterialized {
+		t.Fatal("flag set after repair")
+	}
+}
+
+// M01: crash after resolution (resolved row, no deliveries, flag false)
+// converges on restart without re-resolving or touching the outcome.
+func TestRepairResolvedAfterResolveCrash(t *testing.T) {
+	env := newOpsDetectorEnv(t, false)
+	ctx := context.Background()
+	opsSeedRecipient(t, env.store, "ar")
+	dev := env.device(t, "repair-dev")
+	opened, _, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := env.svc.Resolve(ctx, opened.ID, operations.ResolutionOperator)
+	if err != nil || resolved.State != "resolved" {
+		t.Fatalf("resolve: %+v %v", resolved, err)
+	}
+	if resolved.ResolvedIntentMaterialized {
+		t.Fatal("legacy resolve leaves intent unmaterialized")
+	}
+	env.scan(t)
+	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resolvedDels int
+	for _, d := range dels {
+		if d.Event == operations.EventResolved {
+			resolvedDels++
+		}
+	}
+	if resolvedDels != 1 {
+		t.Fatalf("resolved intent materialized: %+v", dels)
+	}
+	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if fixed.State != "resolved" || !fixed.ResolvedIntentMaterialized {
+		t.Fatalf("outcome untouched, flag set: %+v", fixed)
+	}
+}
+
+// M01: crash between reconnect resolution and recovery creation converges:
+// repair arms the action, the worker adopts the deterministic command.
+func TestRepairReconnectRecoveryCrash(t *testing.T) {
+	env := newOpsDetectorEnv(t, true)
+	ctx := context.Background()
+	opsSeedRecipient(t, env.store, "ar")
+	dev := env.device(t, "repair-dev")
+	opened, _, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Legacy resolve path: resolution durable, no deliveries, no recovery.
+	resolved, err := env.svc.Resolve(ctx, opened.ID, operations.ResolutionReconnect)
+	if err != nil || resolved.State != "resolved" {
+		t.Fatalf("resolve: %+v %v", resolved, err)
+	}
+	if _, ok, _ := env.store.RecoveryForIncident(ctx, opened.ID); ok {
+		t.Fatal("no recovery before repair")
+	}
+	env.scan(t)
+	rec, ok, err := env.store.RecoveryForIncident(ctx, opened.ID)
+	if err != nil || !ok || rec.State != "pending" {
+		t.Fatalf("recovery armed by repair: %+v %v %v", rec, ok, err)
+	}
+	if rec.IdempotencyKey != operations.ReconnectIdempotencyKey(opened.ID) {
+		t.Fatalf("deterministic key: %q", rec.IdempotencyKey)
+	}
+	env.drainRecovery(t)
+	done, _, _ := env.store.RecoveryForIncident(ctx, opened.ID)
+	if done.State != "completed" || done.TargetEntityID == nil {
+		t.Fatalf("worker converges: %+v", done)
+	}
+}
+
+// M01: intentionally empty snapshot (zero recipients) is repaired to
+// flag-true with zero deliveries — distinguishable from missing intent.
+func TestRepairZeroRecipientsIntentional(t *testing.T) {
+	env := newOpsDetectorEnv(t, false)
+	ctx := context.Background()
+	dev := env.device(t, "repair-dev")
+	opened, _, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.scan(t)
+	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if !fixed.OpenIntentMaterialized {
+		t.Fatal("empty intent marked materialized")
+	}
+	dels, _ := env.store.DeliveriesForIncident(ctx, opened.ID)
+	if len(dels) != 0 {
+		t.Fatalf("intentionally empty: %+v", dels)
+	}
+}
