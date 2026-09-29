@@ -369,3 +369,50 @@ func TestControlContractShapes(t *testing.T) {
 		t.Fatalf("status shape: %s", srec.Body.String())
 	}
 }
+
+func (m *memCtlStore) ListActiveAll(_ context.Context) ([]devicecontrol.Command, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []devicecontrol.Command
+	for _, c := range m.cmds {
+		if devicecontrol.IsActive(c.Status) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (m *memCtlStore) ListRecentBounded(_ context.Context, ids []string, per int) ([]devicecontrol.Command, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	if per <= 0 {
+		per = 5
+	}
+	byDev := map[string][]devicecontrol.Command{}
+	for _, c := range m.cmds {
+		if want[c.DeviceID] {
+			byDev[c.DeviceID] = append(byDev[c.DeviceID], c)
+		}
+	}
+	var out []devicecontrol.Command
+	for _, list := range byDev {
+		for i := 0; i < len(list) && i < per; i++ {
+			out = append(out, list[i])
+		}
+	}
+	return out, nil
+}
+
+func (m *memCtlStore) ListPresenceAll() []devicecontrol.Presence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]devicecontrol.Presence, 0, len(m.presence))
+	for _, p := range m.presence {
+		out = append(out, p)
+	}
+	return out
+}

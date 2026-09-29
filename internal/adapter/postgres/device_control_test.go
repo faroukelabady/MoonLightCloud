@@ -564,3 +564,360 @@ func TestControlRejectedLeavesPresence(t *testing.T) {
 		t.Fatal("presence monotonic")
 	}
 }
+
+// F10: first non-poll contact populates last_seen, leaves last_poll NULL.
+func TestPresenceFirstNonPollContact(t *testing.T) {
+	store, _, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	at := time.Now().UTC()
+	if err := store.TouchAccepted(ctx, dev, at); err != nil {
+		t.Fatal(err)
+	}
+	p, ok, err := store.GetPresence(ctx, dev)
+	if err != nil || !ok {
+		t.Fatalf("row created: %+v %v", p, err)
+	}
+	if p.LastSeenAt == nil {
+		t.Fatal("last_seen populated")
+	}
+	if p.LastPollAt != nil {
+		t.Fatalf("last_poll stays NULL: %+v", p.LastPollAt)
+	}
+	if p.LastAcceptedAt == nil {
+		t.Fatal("accepted marker recorded")
+	}
+}
+
+// F10: first poll populates both columns.
+func TestPresenceFirstPoll(t *testing.T) {
+	store, _, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	if err := store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+		t.Fatal(err)
+	}
+	p, ok, _ := store.GetPresence(ctx, dev)
+	if !ok || p.LastSeenAt == nil || p.LastPollAt == nil {
+		t.Fatalf("both populated: %+v", p)
+	}
+}
+
+// F10: accepted/running/terminal contact never moves last_poll_at.
+func TestPresenceNonPollPreservesLastPoll(t *testing.T) {
+	store, ctl, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	pollAt := time.Now().UTC().Add(-time.Minute)
+	if err := store.TouchSeen(ctx, dev, pollAt, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ctl.CreateSyncRequest(ctx, dev, "f10-k"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := ctl.Poll(ctx, dev)
+	if !ok {
+		t.Fatal("poll")
+	}
+	// The claim poll above refreshed last_poll; pin it back to prove the
+	// later non-poll contacts preserve it.
+	pinAt := time.Now().UTC().Add(-time.Minute)
+	uid, _ := parseUUID(dev)
+	if _, err := store.pool.Exec(ctx, `UPDATE device_control_presence SET last_poll_at = $2, updated_at = $2 WHERE device_id = $1`,
+		uid, pgTime(pinAt)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctl.Accept(ctx, dev, claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctl.ReportRunning(ctx, dev, claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	// Valid terminal replay refreshes seen, still preserves poll.
+	if _, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ := store.GetPresence(ctx, dev)
+	if p.LastPollAt == nil || p.LastPollAt.UTC().Unix() != pinAt.Unix() {
+		t.Fatalf("last_poll preserved: %+v", p.LastPollAt)
+	}
+	if p.LastSeenAt == nil || time.Since(p.LastSeenAt.UTC()) > 5*time.Minute {
+		t.Fatalf("last_seen fresh: %+v", p.LastSeenAt)
+	}
+}
+
+// F10: older polls never regress either column.
+func TestPresenceOlderPollNoRegression(t *testing.T) {
+	store, _, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	fresh := time.Now().UTC()
+	if err := store.TouchSeen(ctx, dev, fresh, true); err != nil {
+		t.Fatal(err)
+	}
+	stale := fresh.Add(-time.Hour)
+	if err := store.TouchSeen(ctx, dev, stale, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TouchSeen(ctx, dev, stale, false); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ := store.GetPresence(ctx, dev)
+	if p.LastSeenAt.UTC().Unix() != fresh.Unix() || p.LastPollAt.UTC().Unix() != fresh.Unix() {
+		t.Fatalf("no regression: seen=%v poll=%v want %v", p.LastSeenAt, p.LastPollAt, fresh)
+	}
+}
+
+// F10: concurrent poll/non-poll updates converge on monotonic maxima.
+func TestPresenceConcurrentMonotonic(t *testing.T) {
+	store, _, dev, _ := ctlFixture(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour)
+	if err := store.TouchSeen(ctx, dev, base, true); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			at := base.Add(time.Duration(i) * time.Minute)
+			if i%2 == 0 {
+				_ = store.TouchSeen(ctx, dev, at, true)
+			} else {
+				_ = store.TouchSeen(ctx, dev, at, false)
+			}
+		}(i)
+	}
+	wg.Wait()
+	top := base.Add(11 * time.Minute)
+	// Even minutes carry polls (max even i=10), odd minutes non-poll.
+	p, _, _ := store.GetPresence(ctx, dev)
+	if p.LastSeenAt.UTC().Unix() != top.Unix() {
+		t.Fatalf("seen converges on max: %v want %v", p.LastSeenAt, top)
+	}
+	if p.LastPollAt.UTC().Unix() != base.Add(10*time.Minute).Unix() {
+		t.Fatalf("poll converges on max poll: %v", p.LastPollAt)
+	}
+}
+
+// F10: invalid device ids and wrong-device access mutate nothing.
+func TestPresenceRejectionMutatesNothing(t *testing.T) {
+	store, ctl, devA, devB := ctlFixture(t)
+	ctx := context.Background()
+	if err := store.TouchSeen(ctx, "not-a-uuid", time.Now().UTC(), true); err == nil {
+		t.Fatal("invalid id rejected")
+	}
+	if _, ok, _ := store.GetPresence(ctx, devB); ok {
+		t.Fatal("no row for untouched device")
+	}
+	if _, _, err := ctl.CreateSyncRequest(ctx, devA, "f10-neg"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := ctl.Poll(ctx, devA)
+	if !ok {
+		t.Fatal("poll")
+	}
+	if _, err := ctl.ReportRunning(ctx, devB, claimed.ID); err == nil {
+		t.Fatal("cross-device rejected")
+	}
+	if _, ok, _ := store.GetPresence(ctx, devB); ok {
+		t.Fatal("wrong-device access creates no presence")
+	}
+}
+
+// countingStore instruments batch-read counts around the real store.
+type countingStore struct {
+	Devices
+	presence int
+	active   int
+	recent   int
+}
+
+func (c *countingStore) ListPresence(ctx context.Context) ([]devicecontrol.Presence, error) {
+	c.presence++
+	return c.Devices.ListPresence(ctx)
+}
+
+func (c *countingStore) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, error) {
+	c.active++
+	return c.Devices.ListActiveAll(ctx)
+}
+
+func (c *countingStore) ListRecentBounded(ctx context.Context, ids []string, per int) ([]devicecontrol.Command, error) {
+	c.recent++
+	return c.Devices.ListRecentBounded(ctx, ids, per)
+}
+
+func (c *countingStore) total() int { return c.presence + c.active + c.recent }
+
+// F11 fixture: devices spanning no presence, ONLINE, OFFLINE, every
+// command state, >5 history rows, and revoked lifecycle.
+func overviewFixture(t *testing.T, n int) (Devices, []string) {
+	t.Helper()
+	pool, svc := openTestRepo(t)
+	store := NewDevices(pool, 5*time.Second)
+	ctx := context.Background()
+	devIDs := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		prov, err := svc.Create(ctx, "ov-dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		devIDs = append(devIDs, prov.Device.ID)
+	}
+	devices := activeDevices{active: map[string]bool{}}
+	for _, id := range devIDs {
+		devices.active[id] = true
+	}
+	ctl := devicecontrol.NewService(store, devices, ids.System{}.New, 60*time.Second, time.Now)
+	// Device 0: no presence, no commands (never seen).
+	// Device 1: ONLINE via poll, pending command.
+	if _, _, err := ctl.CreateSyncRequest(ctx, devIDs[1], "ov-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ctl.Poll(ctx, devIDs[1]); err != nil {
+		t.Fatal(err)
+	}
+	// Device 2: accepted/running command (poll then accept then running).
+	if n > 2 {
+		if _, _, err := ctl.CreateSyncRequest(ctx, devIDs[2], "ov-2"); err != nil {
+			t.Fatal(err)
+		}
+		claimed, ok, _ := ctl.Poll(ctx, devIDs[2])
+		if !ok {
+			t.Fatal("poll 2")
+		}
+		if _, err := ctl.Accept(ctx, devIDs[2], claimed.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ctl.ReportRunning(ctx, devIDs[2], claimed.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Device 3: completed history (terminal, then stays visible).
+	if n > 3 {
+		if _, _, err := ctl.CreateSyncRequest(ctx, devIDs[3], "ov-3"); err != nil {
+			t.Fatal(err)
+		}
+		claimed, ok, _ := ctl.Poll(ctx, devIDs[3])
+		if !ok {
+			t.Fatal("poll 3")
+		}
+		if _, err := ctl.ReportTerminal(ctx, devIDs[3], claimed.ID, devicecontrol.StatusFailed, "SYNC_FAILED_AUTH"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Remaining devices: aged presence (OFFLINE), no commands.
+	for i, id := range devIDs {
+		if i < 4 {
+			continue
+		}
+		old := time.Now().UTC().Add(-time.Hour)
+		if err := store.TouchSeen(ctx, id, old, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return store, devIDs
+}
+
+// F11: overview query count is constant (3 batch reads) for 2 and 9
+// devices, with identical per-device semantics.
+func TestOverviewBoundedQueries(t *testing.T) {
+	for _, n := range []int{2, 9} {
+		store, devIDs := overviewFixture(t, n)
+		ctx := context.Background()
+		counted := &countingStore{Devices: store}
+		svc := devicecontrol.NewService(counted, activeDevices{active: map[string]bool{}}, ids.System{}.New, 60*time.Second, time.Now)
+		ov, err := svc.Overview(ctx, devIDs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if counted.total() != 3 {
+			t.Fatalf("n=%d: exactly 3 batch reads, got %d", n, counted.total())
+		}
+		if len(ov) != n {
+			t.Fatalf("n=%d: overview per device: %d", n, len(ov))
+		}
+	}
+}
+
+// F11: history bound 5 per device with deterministic newest-first ordering
+// (requested_at DESC, id DESC tiebreak).
+func TestOverviewHistoryBoundAndOrder(t *testing.T) {
+	store, devIDs := overviewFixture(t, 2)
+	ctx := context.Background()
+	dev := devIDs[1]
+	// Finish the pending command, then create+finish 6 more terminals
+	// sequentially (one active at a time) for 7 total history rows.
+	for i := 0; i < 7; i++ {
+		active, ok, err := store.GetActive(ctx, dev)
+		if err != nil || !ok {
+			t.Fatalf("iter %d active: %v %v", i, ok, err)
+		}
+		if _, _, err := store.Finish(ctx, active.ID, dev, devicecontrol.StatusCompleted, "SYNC_COMPLETED", time.Now().UTC()); err != nil {
+			t.Fatalf("iter %d finish: %v", i, err)
+		}
+		if i < 6 {
+			if _, err := store.CreateCommand(ctx, ids.System{}.New(), dev, "hist-"+string(rune('a'+i)), time.Now().UTC()); err != nil {
+				t.Fatalf("iter %d create: %v", i, err)
+			}
+		}
+	}
+	svc := devicecontrol.NewService(store, activeDevices{active: map[string]bool{}}, ids.System{}.New, 60*time.Second, time.Now)
+	ov, err := svc.Overview(ctx, []string{dev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recent := ov[dev].Recent
+	if len(recent) != 5 {
+		t.Fatalf("bound 5: %d", len(recent))
+	}
+	for i := 1; i < len(recent); i++ {
+		a, b := recent[i-1], recent[i]
+		if a.RequestedAt.Before(b.RequestedAt) {
+			t.Fatalf("newest-first violated: %+v before %+v", a, b)
+		}
+		if a.RequestedAt.Equal(b.RequestedAt) && a.ID < b.ID {
+			t.Fatalf("id tiebreak violated: %q before %q", a.ID, b.ID)
+		}
+	}
+	if ov[dev].Active != nil {
+		t.Fatal("no active after all-terminal history")
+	}
+}
+
+// F11: revoked devices remain visible with history; overview never carries
+// credential material.
+func TestOverviewRevokedVisible(t *testing.T) {
+	pool, svc := openTestRepo(t)
+	store := NewDevices(pool, 5*time.Second)
+	ctx := context.Background()
+	prov, err := svc.Create(ctx, "rev-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := prov.Device.ID
+	if err := svc.RevokeDevice(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+	// History created before revocation stays visible.
+	admin := devicecontrol.NewService(store, activeDevices{active: map[string]bool{dev: true}}, ids.System{}.New, 60*time.Second, time.Now)
+	if _, _, err := admin.CreateSyncRequest(ctx, dev, "rev-hist"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, _ := admin.Poll(ctx, dev)
+	if !ok {
+		t.Fatal("poll")
+	}
+	if _, err := admin.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := admin.Overview(ctx, []string{dev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ov := got[dev]
+	if len(ov.Recent) != 1 || ov.Active != nil {
+		t.Fatalf("revoked history visible: %+v", ov)
+	}
+}

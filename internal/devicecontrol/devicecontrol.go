@@ -71,9 +71,10 @@ type Presence struct {
 }
 
 // ValidateIdempotencyKey enforces bounded ASCII per existing conventions.
+// Failures carry a specific bounded machine code (never the key itself).
 func ValidateIdempotencyKey(key string) error {
 	if len(key) == 0 || len(key) > MaxIdempotencyLen {
-		return apperr.New(apperr.InvalidInput, "invalid idempotency key")
+		return apperr.New(apperr.InvalidInput, "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY")
 	}
 	for i := 0; i < len(key); i++ {
 		c := key[i]
@@ -81,7 +82,7 @@ func ValidateIdempotencyKey(key string) error {
 			c == '_' || c == ':' || c == '.' || c == '~' || c == '-' {
 			continue
 		}
-		return apperr.New(apperr.InvalidInput, "invalid idempotency key")
+		return apperr.New(apperr.InvalidInput, "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY")
 	}
 	return nil
 }

@@ -13,8 +13,10 @@ import (
 )
 
 // DeviceLister abstracts operator device enumeration for the dashboard.
+// It is metadata-only by design: dashboard output never uses credentials,
+// so listing must not load or enumerate them (see auth.Service.ListMetadata).
 type DeviceLister interface {
-	List(ctx context.Context) ([]auth.Device, map[string][]auth.Credential, error)
+	ListMetadata(ctx context.Context) ([]auth.Device, error)
 }
 
 // DashboardDeviceHandlers serves operator device connectivity + Sync Now.
@@ -41,7 +43,18 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
 		return
 	}
-	devices, _, err := h.Auth.List(r.Context())
+	devices, err := h.Auth.ListMetadata(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	ids := make([]string, 0, len(devices))
+	for _, d := range devices {
+		ids = append(ids, d.ID)
+	}
+	// Fixed batched reads regardless of device count: metadata (above),
+	// presence + active commands + bounded history (below).
+	overviews, err := h.Svc.Overview(r.Context(), ids)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -50,30 +63,18 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 	rows := make([]deviceRow, 0, len(devices))
 	for _, d := range devices {
 		row := deviceRow{DeviceID: d.ID, Name: d.Name, Lifecycle: string(d.Status)}
-		presence, ok, perr := h.Svc.Presence(r.Context(), d.ID)
-		if perr != nil {
-			WriteError(w, r, perr)
-			return
-		}
-		if ok {
-			row.LastSeenAt = presence.LastSeenAt
-			row.Connectivity = devicecontrol.DeriveConnectivity(presence.LastSeenAt, now, h.OnlineWindow)
+		ov := overviews[d.ID]
+		if ov.Presence != nil {
+			row.LastSeenAt = ov.Presence.LastSeenAt
+			row.Connectivity = devicecontrol.DeriveConnectivity(ov.Presence.LastSeenAt, now, h.OnlineWindow)
 		} else {
 			row.Connectivity = devicecontrol.ConnectivityNeverSeen
 		}
-		if active, ok, aerr := h.Svc.Active(r.Context(), d.ID); aerr != nil {
-			WriteError(w, r, aerr)
-			return
-		} else if ok {
-			row.ActiveCommand = toWire(active)
+		if ov.Active != nil {
+			row.ActiveCommand = toWire(*ov.Active)
 		}
-		if recent, rerr := h.Svc.Recent(r.Context(), d.ID, 5); rerr != nil {
-			WriteError(w, r, rerr)
-			return
-		} else {
-			for _, c := range recent {
-				row.RecentCommands = append(row.RecentCommands, *toWire(c))
-			}
+		for _, c := range ov.Recent {
+			row.RecentCommands = append(row.RecentCommands, *toWire(c))
 		}
 		rows = append(rows, row)
 	}
@@ -93,7 +94,7 @@ func (h *DashboardDeviceHandlers) CreateSyncRequest(w http.ResponseWriter, r *ht
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if err := devicecontrol.ValidateIdempotencyKey(key); err != nil {
-		WriteError(w, r, apperr.New(apperr.InvalidInput, "DEVICE_COMMAND_INVALID_TRANSITION"))
+		WriteError(w, r, err)
 		return
 	}
 	cmd, created, err := h.Svc.CreateSyncRequest(r.Context(), deviceID, key)

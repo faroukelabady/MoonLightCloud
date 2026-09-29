@@ -9,9 +9,12 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TouchSeen refreshes last_seen monotonically (server time authority).
+// Poll contact additionally refreshes last_poll_at monotonically;
+// non-poll contact preserves it (NULL until the first poll).
 func (d Devices) TouchSeen(ctx context.Context, deviceID string, at time.Time, isPoll bool) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -20,15 +23,20 @@ func (d Devices) TouchSeen(ctx context.Context, deviceID string, at time.Time, i
 		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 	}
 	at = at.UTC()
+	poll := pgtype.Timestamptz{}
+	if isPoll {
+		poll = pgTime(at)
+	}
 	if err := sqlcgen.New(d.pool).UpsertPresenceSeen(ctx, sqlcgen.UpsertPresenceSeenParams{
-		DeviceID: uid, LastSeenAt: pgTime(at), LastPollAt: pgTime(at),
+		DeviceID: uid, LastSeenAt: pgTime(at), LastPollAt: poll, CreatedAt: pgTime(at),
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
 	return nil
 }
 
-// TouchAccepted records accepted contact.
+// TouchAccepted records accepted contact, creating the presence row when
+// this is the first contact (last_poll_at stays NULL until a real poll).
 func (d Devices) TouchAccepted(ctx context.Context, deviceID string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -36,15 +44,16 @@ func (d Devices) TouchAccepted(ctx context.Context, deviceID string, at time.Tim
 	if err != nil {
 		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 	}
-	if err := sqlcgen.New(d.pool).TouchPresenceAccepted(ctx, sqlcgen.TouchPresenceAcceptedParams{
-		DeviceID: uid, LastCommandAcceptedAt: pgTime(at.UTC()),
+	if err := sqlcgen.New(d.pool).UpsertPresenceAccepted(ctx, sqlcgen.UpsertPresenceAcceptedParams{
+		DeviceID: uid, LastSeenAt: pgTime(at.UTC()),
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
 	return nil
 }
 
-// TouchFinished records terminal contact.
+// TouchFinished records terminal contact, creating the presence row when
+// this is the first contact (last_poll_at stays NULL until a real poll).
 func (d Devices) TouchFinished(ctx context.Context, deviceID string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -52,8 +61,8 @@ func (d Devices) TouchFinished(ctx context.Context, deviceID string, at time.Tim
 	if err != nil {
 		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 	}
-	if err := sqlcgen.New(d.pool).TouchPresenceFinished(ctx, sqlcgen.TouchPresenceFinishedParams{
-		DeviceID: uid, LastCommandFinishedAt: pgTime(at.UTC()),
+	if err := sqlcgen.New(d.pool).UpsertPresenceFinished(ctx, sqlcgen.UpsertPresenceFinishedParams{
+		DeviceID: uid, LastSeenAt: pgTime(at.UTC()),
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
@@ -311,6 +320,54 @@ func (d Devices) Recent(ctx context.Context, deviceID string, limit int) ([]devi
 	})
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Internal, "list commands", redact(err))
+	}
+	out := make([]devicecontrol.Command, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toCommand(r))
+	}
+	return out, nil
+}
+
+// ListActiveAll returns every non-terminal command in one batched read for
+// dashboard overviews. No per-device round trips.
+func (d Devices) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ListActiveControlCommands(ctx)
+	if err != nil {
+		return nil, apperr.Wrap(apperr.Internal, "list active commands", redact(err))
+	}
+	out := make([]devicecontrol.Command, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toCommand(r))
+	}
+	return out, nil
+}
+
+// ListRecentBounded returns at most perDevice newest commands per device in
+// one LATERAL-join read, ordered by (device, requested_at DESC, id DESC).
+func (d Devices) ListRecentBounded(ctx context.Context, deviceIDs []string, perDevice int) ([]devicecontrol.Command, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+	if perDevice <= 0 || perDevice > 20 {
+		perDevice = 5
+	}
+	ids := make([]pgtype.UUID, 0, len(deviceIDs))
+	for _, id := range deviceIDs {
+		uid, err := parseUUID(id)
+		if err != nil {
+			return nil, apperr.New(apperr.InvalidInput, "device id must be a UUID")
+		}
+		ids = append(ids, uid)
+	}
+	rows, err := sqlcgen.New(d.pool).ListRecentBounded(ctx, sqlcgen.ListRecentBoundedParams{
+		Column1: ids, Limit: int32(perDevice),
+	})
+	if err != nil {
+		return nil, apperr.Wrap(apperr.Internal, "list recent commands", redact(err))
 	}
 	out := make([]devicecontrol.Command, 0, len(rows))
 	for _, r := range rows {

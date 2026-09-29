@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -91,6 +92,10 @@ type authDeviceStatus struct {
 func (a authDeviceStatus) IsActive(ctx context.Context, deviceID string) (bool, error) {
 	dev, err := a.svc.Get(ctx, deviceID)
 	if err != nil {
+		var ae *apperr.Error
+		if errors.As(err, &ae) && ae.Kind == apperr.NotFound {
+			return false, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND")
+		}
 		return false, err
 	}
 	return dev.Status == auth.StatusActive, nil

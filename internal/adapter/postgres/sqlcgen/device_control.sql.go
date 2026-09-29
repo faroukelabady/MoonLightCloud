@@ -393,6 +393,52 @@ func (q *Queries) LeaseControlCommand(ctx context.Context, arg LeaseControlComma
 	return i, err
 }
 
+const listActiveControlCommands = `-- name: ListActiveControlCommands :many
+SELECT id, device_id, command_type, command_version, idempotency_key, status,
+    requested_at, leased_at, lease_until, lease_generation,
+    accepted_at, running_at, finished_at, result_code, created_at, updated_at
+FROM device_control_commands
+WHERE status IN ('pending','leased','accepted','running')
+ORDER BY device_id, requested_at, id
+`
+
+func (q *Queries) ListActiveControlCommands(ctx context.Context) ([]DeviceControlCommand, error) {
+	rows, err := q.db.Query(ctx, listActiveControlCommands)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeviceControlCommand{}
+	for rows.Next() {
+		var i DeviceControlCommand
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeviceID,
+			&i.CommandType,
+			&i.CommandVersion,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.RequestedAt,
+			&i.LeasedAt,
+			&i.LeaseUntil,
+			&i.LeaseGeneration,
+			&i.AcceptedAt,
+			&i.RunningAt,
+			&i.FinishedAt,
+			&i.ResultCode,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPresence = `-- name: ListPresence :many
 SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
     last_command_finished_at, created_at, updated_at
@@ -415,6 +461,65 @@ func (q *Queries) ListPresence(ctx context.Context) ([]DeviceControlPresence, er
 			&i.LastPollAt,
 			&i.LastCommandAcceptedAt,
 			&i.LastCommandFinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentBounded = `-- name: ListRecentBounded :many
+SELECT c.id, c.device_id, c.command_type, c.command_version, c.idempotency_key, c.status,
+    c.requested_at, c.leased_at, c.lease_until, c.lease_generation,
+    c.accepted_at, c.running_at, c.finished_at, c.result_code, c.created_at, c.updated_at
+FROM unnest($1::uuid[]) AS d(device_id)
+CROSS JOIN LATERAL (
+    SELECT id, device_id, command_type, command_version, idempotency_key, status,
+        requested_at, leased_at, lease_until, lease_generation,
+        accepted_at, running_at, finished_at, result_code, created_at, updated_at
+    FROM device_control_commands
+    WHERE device_control_commands.device_id = d.device_id
+    ORDER BY requested_at DESC, id DESC
+    LIMIT $2
+) AS c
+ORDER BY c.device_id, c.requested_at DESC, c.id DESC
+`
+
+type ListRecentBoundedParams struct {
+	Column1 []pgtype.UUID `json:"column_1"`
+	Limit   int32         `json:"limit"`
+}
+
+func (q *Queries) ListRecentBounded(ctx context.Context, arg ListRecentBoundedParams) ([]DeviceControlCommand, error) {
+	rows, err := q.db.Query(ctx, listRecentBounded, arg.Column1, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeviceControlCommand{}
+	for rows.Next() {
+		var i DeviceControlCommand
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeviceID,
+			&i.CommandType,
+			&i.CommandVersion,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.RequestedAt,
+			&i.LeasedAt,
+			&i.LeaseUntil,
+			&i.LeaseGeneration,
+			&i.AcceptedAt,
+			&i.RunningAt,
+			&i.FinishedAt,
+			&i.ResultCode,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -520,60 +625,71 @@ func (q *Queries) MarkControlRunning(ctx context.Context, arg MarkControlRunning
 	return i, err
 }
 
-const touchPresenceAccepted = `-- name: TouchPresenceAccepted :exec
-UPDATE device_control_presence
-SET last_seen_at = GREATEST(last_seen_at, $2),
-    last_command_accepted_at = $2,
-    updated_at = $2
-WHERE device_id = $1
+const upsertPresenceAccepted = `-- name: UpsertPresenceAccepted :exec
+INSERT INTO device_control_presence (device_id, last_seen_at, last_command_accepted_at, created_at, updated_at)
+VALUES ($1, $2, $2, $2, $2)
+ON CONFLICT (device_id) DO UPDATE SET
+    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
+    last_command_accepted_at = EXCLUDED.last_command_accepted_at,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at)
 `
 
-type TouchPresenceAcceptedParams struct {
-	DeviceID              pgtype.UUID        `json:"device_id"`
-	LastCommandAcceptedAt pgtype.Timestamptz `json:"last_command_accepted_at"`
+type UpsertPresenceAcceptedParams struct {
+	DeviceID   pgtype.UUID        `json:"device_id"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 }
 
-func (q *Queries) TouchPresenceAccepted(ctx context.Context, arg TouchPresenceAcceptedParams) error {
-	_, err := q.db.Exec(ctx, touchPresenceAccepted, arg.DeviceID, arg.LastCommandAcceptedAt)
+func (q *Queries) UpsertPresenceAccepted(ctx context.Context, arg UpsertPresenceAcceptedParams) error {
+	_, err := q.db.Exec(ctx, upsertPresenceAccepted, arg.DeviceID, arg.LastSeenAt)
 	return err
 }
 
-const touchPresenceFinished = `-- name: TouchPresenceFinished :exec
-UPDATE device_control_presence
-SET last_seen_at = GREATEST(last_seen_at, $2),
-    last_command_finished_at = $2,
-    updated_at = $2
-WHERE device_id = $1
+const upsertPresenceFinished = `-- name: UpsertPresenceFinished :exec
+INSERT INTO device_control_presence (device_id, last_seen_at, last_command_finished_at, created_at, updated_at)
+VALUES ($1, $2, $2, $2, $2)
+ON CONFLICT (device_id) DO UPDATE SET
+    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
+    last_command_finished_at = EXCLUDED.last_command_finished_at,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at)
 `
 
-type TouchPresenceFinishedParams struct {
-	DeviceID              pgtype.UUID        `json:"device_id"`
-	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
+type UpsertPresenceFinishedParams struct {
+	DeviceID   pgtype.UUID        `json:"device_id"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 }
 
-func (q *Queries) TouchPresenceFinished(ctx context.Context, arg TouchPresenceFinishedParams) error {
-	_, err := q.db.Exec(ctx, touchPresenceFinished, arg.DeviceID, arg.LastCommandFinishedAt)
+func (q *Queries) UpsertPresenceFinished(ctx context.Context, arg UpsertPresenceFinishedParams) error {
+	_, err := q.db.Exec(ctx, upsertPresenceFinished, arg.DeviceID, arg.LastSeenAt)
 	return err
 }
 
 const upsertPresenceSeen = `-- name: UpsertPresenceSeen :exec
 
 INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-VALUES ($1, $2, $3, $2, $2)
+VALUES ($1, $2, $3, $4, $4)
 ON CONFLICT (device_id) DO UPDATE SET
     last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
-    last_poll_at = EXCLUDED.last_poll_at,
-    updated_at = EXCLUDED.updated_at
+    last_poll_at = CASE
+        WHEN EXCLUDED.last_poll_at IS NULL THEN device_control_presence.last_poll_at
+        ELSE GREATEST(COALESCE(device_control_presence.last_poll_at, EXCLUDED.last_poll_at), EXCLUDED.last_poll_at)
+    END,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at)
 `
 
 type UpsertPresenceSeenParams struct {
 	DeviceID   pgtype.UUID        `json:"device_id"`
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 	LastPollAt pgtype.Timestamptz `json:"last_poll_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 // Phase 7C device control plane: presence + durable sync_now commands.
 func (q *Queries) UpsertPresenceSeen(ctx context.Context, arg UpsertPresenceSeenParams) error {
-	_, err := q.db.Exec(ctx, upsertPresenceSeen, arg.DeviceID, arg.LastSeenAt, arg.LastPollAt)
+	_, err := q.db.Exec(ctx, upsertPresenceSeen,
+		arg.DeviceID,
+		arg.LastSeenAt,
+		arg.LastPollAt,
+		arg.CreatedAt,
+	)
 	return err
 }

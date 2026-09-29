@@ -243,3 +243,53 @@ func (s *Service) storeGet(ctx context.Context, id, deviceID string) (Command, e
 	}
 	return cmd, nil
 }
+
+// DeviceOverview aggregates one device's control-plane read model.
+type DeviceOverview struct {
+	Presence *Presence
+	Active   *Command
+	Recent   []Command
+}
+
+// Overview serves dashboard listings with a fixed number of batched reads
+// (presence, active commands, bounded history) regardless of device count.
+// No credentials are involved at any step.
+func (s *Service) Overview(ctx context.Context, deviceIDs []string) (map[string]DeviceOverview, error) {
+	out := make(map[string]DeviceOverview, len(deviceIDs))
+	for _, id := range deviceIDs {
+		out[id] = DeviceOverview{}
+	}
+	presences, err := s.store.ListPresence(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range presences {
+		if ov, ok := out[p.DeviceID]; ok {
+			p := p
+			ov.Presence = &p
+			out[p.DeviceID] = ov
+		}
+	}
+	actives, err := s.store.ListActiveAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range actives {
+		if ov, ok := out[c.DeviceID]; ok {
+			c := c
+			ov.Active = &c
+			out[c.DeviceID] = ov
+		}
+	}
+	recent, err := s.store.ListRecentBounded(ctx, deviceIDs, 5)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range recent {
+		if ov, ok := out[c.DeviceID]; ok {
+			ov.Recent = append(ov.Recent, c)
+			out[c.DeviceID] = ov
+		}
+	}
+	return out, nil
+}

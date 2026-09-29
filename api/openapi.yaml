@@ -185,11 +185,12 @@ paths:
         - name: Idempotency-Key
           in: header
           required: true
-          description: Caller-generated idempotency key, unique per device (bounded ASCII).
+          description: Caller-generated idempotency key, unique per device. Missing or invalid keys are rejected with 400 DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY.
           schema:
             type: string
             minLength: 1
             maxLength: 128
+            pattern: ^[A-Za-z0-9_:.~-]{1,128}$
       responses:
         '201':
           description: Command created (pending).
@@ -198,7 +199,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DashboardSyncRequestResponse'
         '200':
-          description: Existing command (idempotent retry returns it; active command conflict returns it).
+          description: Same-key idempotent replay returns the existing command with created=false.
           content:
             application/json:
               schema:
@@ -216,7 +217,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Contradictory reuse or another sync already active (DEVICE_COMMAND_CONFLICT / DEVICE_SYNC_ALREADY_ACTIVE).
+          description: Contradictory reuse (DEVICE_COMMAND_CONFLICT) or another sync already active for this device (DEVICE_SYNC_ALREADY_ACTIVE, existing active command returned).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown device id (DEVICE_COMMAND_NOT_FOUND).
           content:
             application/json:
               schema:

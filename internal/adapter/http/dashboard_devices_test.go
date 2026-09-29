@@ -1,22 +1,26 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 )
+
+func apperrNewNotFound() error { return apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND") }
 
 type stubLister struct {
 	devices []auth.Device
 }
 
-func (s stubLister) List(context.Context) ([]auth.Device, map[string][]auth.Credential, error) {
-	return s.devices, nil, nil
+func (s stubLister) ListMetadata(context.Context) ([]auth.Device, error) {
+	return s.devices, nil
 }
 
 func dashSetup(devices []auth.Device) *DashboardDeviceHandlers {
@@ -177,5 +181,126 @@ func TestDashboardContractShapes(t *testing.T) {
 	h.CreateSyncRequest(brec, bad)
 	if brec.Code != 400 {
 		t.Fatalf("missing key must be 400: %d", brec.Code)
+	}
+}
+
+type errDeviceStatus struct{ err error }
+
+func (e errDeviceStatus) IsActive(context.Context, string) (bool, error) {
+	return false, e.err
+}
+
+// F07 key matrix: missing/invalid/oversized → 400 with the specific
+// bounded diagnostic (never the key); valid accepted.
+func TestDashboardIdempotencyKeyMatrix(t *testing.T) {
+	h := dashSetup([]auth.Device{{ID: "dev-A", Status: "active"}})
+	cases := []struct {
+		name   string
+		key    string
+		setKey bool
+		want   int
+	}{
+		{"missing key", "", false, 400},
+		{"empty key", "", true, 400},
+		{"invalid characters", "key with spaces!", true, 400},
+		{"oversized key", string(make([]byte, 0)) + string(bytes.Repeat([]byte("k"), 129)), true, 400},
+		{"valid key", "r1-001_valid:key.~", true, 201},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+			if tc.setKey {
+				req.Header.Set("Idempotency-Key", tc.key)
+			}
+			rec := httptest.NewRecorder()
+			h.CreateSyncRequest(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("want %d, got %d (%s)", tc.want, rec.Code, rec.Body.String())
+			}
+			if tc.want == 400 {
+				var env Envelope
+				_ = json.Unmarshal(rec.Body.Bytes(), &env)
+				if env.Error.Message != "DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY" {
+					t.Fatalf("diagnostic: %s", rec.Body.String())
+				}
+				if bytes.Contains(rec.Body.Bytes(), []byte(tc.key)) && tc.key != "" {
+					t.Fatal("key must never be echoed")
+				}
+			}
+		})
+	}
+}
+
+// F07: unknown device → 404; revoked device keeps existing refusal.
+func TestDashboardUnknownAndRevokedDevice(t *testing.T) {
+	store := newMemCtlStore()
+	n := 0
+	unknown := devicecontrol.NewService(store, errDeviceStatus{err: apperrNewNotFound()}, func() string {
+		n++
+		return "k-cmd"
+	}, time.Minute, time.Now)
+	h := &DashboardDeviceHandlers{Svc: unknown, Auth: stubLister{}, OnlineWindow: time.Minute}
+	req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-ghost/sync-requests", nil)
+	req.Header.Set("Idempotency-Key", "k1")
+	rec := httptest.NewRecorder()
+	h.CreateSyncRequest(rec, req)
+	if rec.Code != 404 {
+		t.Fatalf("unknown device must be 404: %d %s", rec.Code, rec.Body.String())
+	}
+	var env Envelope
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env.Error.Message != "DEVICE_COMMAND_NOT_FOUND" {
+		t.Fatalf("diagnostic: %s", rec.Body.String())
+	}
+
+	revoked := dashSetup([]auth.Device{{ID: "dev-R", Status: "revoked"}})
+	rreq := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-R/sync-requests", nil)
+	rreq.Header.Set("Idempotency-Key", "k1")
+	rrec := httptest.NewRecorder()
+	revoked.CreateSyncRequest(rrec, rreq)
+	if rrec.Code != 400 {
+		t.Fatalf("revoked keeps refusal: %d", rrec.Code)
+	}
+	var renv Envelope
+	_ = json.Unmarshal(rrec.Body.Bytes(), &renv)
+	if renv.Error.Message != "DEVICE_NOT_ACTIVE" {
+		t.Fatalf("diagnostic: %s", rrec.Body.String())
+	}
+}
+
+// F11: dashboard JSON exposes no credential material of any kind.
+func TestDashboardNoCredentialExposure(t *testing.T) {
+	h := dashSetup([]auth.Device{
+		{ID: "dev-A", Name: "shop", Status: "active"},
+		{ID: "dev-R", Name: "old", Status: "revoked"},
+	})
+	ctx := context.Background()
+	if _, _, err := h.Svc.CreateSyncRequest(ctx, "dev-A", "exp-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.Svc.Poll(ctx, "dev-A"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	rec := httptest.NewRecorder()
+	h.Devices(rec, req)
+	body := rec.Body.String()
+	for _, leak := range []string{"credential", "verifier", "secret", "hash", "Bearer", "pepper", "salt"} {
+		if bytes.Contains(bytes.ToLower([]byte(body)), []byte(leak)) {
+			t.Fatalf("credential material %q in dashboard output", leak)
+		}
+	}
+	var list struct {
+		Devices []struct {
+			DeviceID     string `json:"device_id"`
+			Lifecycle    string `json:"lifecycle"`
+			Connectivity string `json:"connectivity"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Devices) != 2 {
+		t.Fatalf("revoked device stays visible: %s", body)
 	}
 }

@@ -22,6 +22,8 @@ type Store interface {
 	MarkRunning(ctx context.Context, id, deviceID string, at time.Time) (Command, bool, error)
 	Finish(ctx context.Context, id, deviceID, status, resultCode string, at time.Time) (Command, bool, error)
 	Recent(ctx context.Context, deviceID string, limit int) ([]Command, error)
+	ListActiveAll(ctx context.Context) ([]Command, error)
+	ListRecentBounded(ctx context.Context, deviceIDs []string, perDevice int) ([]Command, error)
 }
 
 // DeviceStatus abstracts the existing lifecycle check (active vs revoked).

@@ -47,3 +47,17 @@ sides plus idempotent redelivery, not from persistent connections.
 - One Cloud migration (00017), one Retail SQLite migration (000006).
 - 7D owns alerts/self-healing; 7C provides primitives only. No retention
   purge; no multi-store generalization (Phase 8).
+
+## L1 remediation notes
+
+- **Contract accuracy:** Sync Now documents unknown-device 404, same-key
+  200 wording, active-conflict 409, and the exact Idempotency-Key pattern
+  `^[A-Za-z0-9_:.~-]{1,128}$` with the specific `DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY` diagnostic.
+- **Schema 18:** the vacuous 00017 pending/lease CHECK (tautology) stays
+  frozen; forward migration 00018 adds the named enforcing constraint
+  with fail-closed validation on pre-existing rows.
+- **Poll truth:** `last_poll_at` advances only on real polls
+  (monotonic); other contact preserves it. No persisted online flags;
+  server time remains the sole connectivity authority.
+- **Dashboard scale:** metadata-only device listing (no credential
+  loads) plus three batched reads; history stays five per device.

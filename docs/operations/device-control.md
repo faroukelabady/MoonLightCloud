@@ -11,6 +11,9 @@ DEVICE_COMMAND_LEASE_DURATION=60s   # 10s..10m
 DEVICE_ONLINE_WINDOW=60s            # 10s..10m
 ```
 
+Cloud schema is 18 (migration 00018 enforces the pending/lease
+invariant; see below). Migrations 00009–00017 are frozen.
+
 Disabled (default): device-control poll/accept/status routes are 404; the
 dashboard device list still reads (all `NEVER_SEEN` until enabled).
 
@@ -30,6 +33,11 @@ usable offline regardless of Cloud reachability.
 
 `last_seen_at` is Cloud server time from the last authenticated
 poll/ack/report. Failed or revoked authentication never updates it.
+
+`last_poll_at` is separate: only real polls refresh it (monotonically);
+accepted/running/terminal contact preserves it, and it stays NULL until
+the first poll. Dashboards derive connectivity from `last_seen_at` only;
+`last_poll_at` is auxiliary poll history.
 
 - `NEVER_SEEN`: no successful control contact ever.
 - `ONLINE`: contact within `DEVICE_ONLINE_WINDOW`.
@@ -95,3 +103,23 @@ SQL, and customer data are never persisted, logged, or returned.
 operational state: back them up. No rebuild deletes them; no retention
 purge exists. The Retail `cloud_control_commands` inbox is durable until
 its terminal result is acknowledged by Cloud.
+
+## Pending/lease integrity (schema 18)
+
+A `pending` command never carries `lease_until`: the lease is set at
+claim time when the row becomes `leased`. Migration 00018 adds the named
+constraint `device_control_commands_pending_lease_null` enforcing this.
+If the upgrade aborts naming that constraint, legacy pending rows with
+leases exist: reconcile them first (let leases expire and converge, or
+drive the commands terminal), then re-run the upgrade. The failed
+upgrade rolls back; no rows are deleted and terminal history is never
+rewritten.
+
+## Dashboard reads
+
+The device list uses a fixed number of batched reads (metadata without
+credentials, presence, active commands, five newest commands per device)
+regardless of device count. History per device is bounded to five newest
+(`requested_at` DESC, command ID tiebreak). Missing/invalid
+Idempotency-Key values are rejected with 400
+`DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY`; unknown devices answer 404.

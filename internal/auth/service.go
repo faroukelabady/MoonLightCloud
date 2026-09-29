@@ -178,6 +178,14 @@ func (s Service) Get(ctx context.Context, id string) (Device, error) {
 	return s.store.DeviceByID(ctx, id)
 }
 
+// ListMetadata returns devices without credential material for operator
+// listing surfaces that must not enumerate credentials (e.g. dashboard
+// device connectivity). Callers that intentionally need credentials use
+// List. Revocation semantics are unchanged: status is authoritative.
+func (s Service) ListMetadata(ctx context.Context) ([]Device, error) {
+	return s.store.ListDevices(ctx)
+}
+
 // List returns devices with their credentials for operator visibility.
 func (s Service) List(ctx context.Context) ([]Device, map[string][]Credential, error) {
 	devs, err := s.store.ListDevices(ctx)

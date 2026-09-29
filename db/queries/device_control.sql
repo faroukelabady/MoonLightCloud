@@ -2,25 +2,30 @@
 
 -- name: UpsertPresenceSeen :exec
 INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-VALUES ($1, $2, $3, $2, $2)
+VALUES ($1, $2, $3, $4, $4)
 ON CONFLICT (device_id) DO UPDATE SET
     last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
-    last_poll_at = EXCLUDED.last_poll_at,
-    updated_at = EXCLUDED.updated_at;
+    last_poll_at = CASE
+        WHEN EXCLUDED.last_poll_at IS NULL THEN device_control_presence.last_poll_at
+        ELSE GREATEST(COALESCE(device_control_presence.last_poll_at, EXCLUDED.last_poll_at), EXCLUDED.last_poll_at)
+    END,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
--- name: TouchPresenceAccepted :exec
-UPDATE device_control_presence
-SET last_seen_at = GREATEST(last_seen_at, $2),
-    last_command_accepted_at = $2,
-    updated_at = $2
-WHERE device_id = $1;
+-- name: UpsertPresenceAccepted :exec
+INSERT INTO device_control_presence (device_id, last_seen_at, last_command_accepted_at, created_at, updated_at)
+VALUES ($1, $2, $2, $2, $2)
+ON CONFLICT (device_id) DO UPDATE SET
+    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
+    last_command_accepted_at = EXCLUDED.last_command_accepted_at,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
--- name: TouchPresenceFinished :exec
-UPDATE device_control_presence
-SET last_seen_at = GREATEST(last_seen_at, $2),
-    last_command_finished_at = $2,
-    updated_at = $2
-WHERE device_id = $1;
+-- name: UpsertPresenceFinished :exec
+INSERT INTO device_control_presence (device_id, last_seen_at, last_command_finished_at, created_at, updated_at)
+VALUES ($1, $2, $2, $2, $2)
+ON CONFLICT (device_id) DO UPDATE SET
+    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
+    last_command_finished_at = EXCLUDED.last_command_finished_at,
+    updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
 -- name: GetPresence :one
 SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
@@ -118,6 +123,30 @@ WHERE id = $1 AND device_id = $2
 RETURNING id, device_id, command_type, command_version, idempotency_key, status,
     requested_at, leased_at, lease_until, lease_generation,
     accepted_at, running_at, finished_at, result_code, created_at, updated_at;
+
+-- name: ListActiveControlCommands :many
+SELECT id, device_id, command_type, command_version, idempotency_key, status,
+    requested_at, leased_at, lease_until, lease_generation,
+    accepted_at, running_at, finished_at, result_code, created_at, updated_at
+FROM device_control_commands
+WHERE status IN ('pending','leased','accepted','running')
+ORDER BY device_id, requested_at, id;
+
+-- name: ListRecentBounded :many
+SELECT c.id, c.device_id, c.command_type, c.command_version, c.idempotency_key, c.status,
+    c.requested_at, c.leased_at, c.lease_until, c.lease_generation,
+    c.accepted_at, c.running_at, c.finished_at, c.result_code, c.created_at, c.updated_at
+FROM unnest($1::uuid[]) AS d(device_id)
+CROSS JOIN LATERAL (
+    SELECT id, device_id, command_type, command_version, idempotency_key, status,
+        requested_at, leased_at, lease_until, lease_generation,
+        accepted_at, running_at, finished_at, result_code, created_at, updated_at
+    FROM device_control_commands
+    WHERE device_control_commands.device_id = d.device_id
+    ORDER BY requested_at DESC, id DESC
+    LIMIT $2
+) AS c
+ORDER BY c.device_id, c.requested_at DESC, c.id DESC;
 
 -- name: ListRecentControlCommands :many
 SELECT id, device_id, command_type, command_version, idempotency_key, status,
