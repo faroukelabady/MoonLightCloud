@@ -297,6 +297,9 @@ SELECT status
 FROM devices
 WHERE id = $1;
 
+-- name: LockDeviceLifecycle :one
+SELECT status FROM devices WHERE id = $1 FOR UPDATE;
+
 -- name: OpsPresence :one
 SELECT last_seen_at
 FROM device_control_presence

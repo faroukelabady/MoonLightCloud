@@ -285,6 +285,33 @@ func (d Devices) ResolveAtomic(ctx context.Context, id, code string, deliveries 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
+	// DEVICE_OFFLINE resolves against lifecycle state held stable through
+	// commit. Incident then device is the shared lock order with manual
+	// resolution; revocation updates only the device row. A revocation
+	// committed before this lock therefore wins over cached scan state.
+	if code == operations.ResolutionReconnect || code == operations.ResolutionNoActive {
+		locked, lerr := q.LockIncidentRow(ctx, uid)
+		if lerr != nil {
+			if errors.Is(lerr, pgx.ErrNoRows) {
+				return operations.Incident{}, false, nil
+			}
+			return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "resolve incident", redact(lerr))
+		}
+		if locked.RuleKey == operations.RuleDeviceOffline && (locked.State == operations.StateOpen || locked.State == operations.StateAcknowledged) {
+			deviceID, derr := opsUUID(locked.SubjectID)
+			if derr != nil {
+				return operations.Incident{}, false, apperr.New(apperr.Internal, "invalid offline subject")
+			}
+			status, derr := q.LockDeviceLifecycle(ctx, deviceID)
+			if derr != nil && !errors.Is(derr, pgx.ErrNoRows) {
+				return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "resolve incident", redact(derr))
+			}
+			if status != "active" {
+				code = operations.ResolutionNoActive
+				recovery = nil
+			}
+		}
+	}
 	row, err := q.ResolveIncident(ctx, sqlcgen.ResolveIncidentParams{
 		ID: uid, ResolvedAt: pgTime(at.UTC()), ResolutionCode: pgText(code),
 	})
@@ -464,7 +491,7 @@ func mustParseOpsUUID(id string) pgtype.UUID {
 // means the row did not transition; callers re-read to distinguish
 // already-resolved (no-op success) from still-active (409). Unknown
 // rules and non-UUID subjects fail closed.
-func (d Devices) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, offlineEdge, at time.Time) (operations.Incident, bool, error) {
+func (d Devices) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, deliveries []operations.Delivery, offlineEdge, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -539,8 +566,16 @@ func (d Devices) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID
 		}
 		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(qerr))
 	}
+	if err := insertMissingDeliveries(ctx, q, deliveries, at); err != nil {
+		return operations.Incident{}, false, err
+	}
+	if err := markResolvedFlag(ctx, q, uid, at); err != nil {
+		return operations.Incident{}, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(err))
 	}
-	return toOpsIncident(row), true, nil
+	incident := toOpsIncident(row)
+	incident.ResolvedIntentMaterialized = true
+	return incident, true, nil
 }

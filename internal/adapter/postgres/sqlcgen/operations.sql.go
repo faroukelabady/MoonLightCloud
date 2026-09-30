@@ -999,6 +999,17 @@ func (q *Queries) LockCommandRow(ctx context.Context, id pgtype.UUID) (pgtype.UU
 	return id_2, err
 }
 
+const lockDeviceLifecycle = `-- name: LockDeviceLifecycle :one
+SELECT status FROM devices WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockDeviceLifecycle(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, lockDeviceLifecycle, id)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
 const lockIncidentRow = `-- name: LockIncidentRow :one
 
 SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,

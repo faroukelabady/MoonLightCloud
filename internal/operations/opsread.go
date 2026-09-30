@@ -13,6 +13,7 @@ type OpsReader struct {
 	store   Store
 	service *Service
 	metrics *Metrics
+	alerts  *AlertProcessor
 	// offlineAfter bounds the transactional manual-resolve guard for
 	// offline incidents. Unset means the guard is unwired: stateful
 	// manual resolution fails closed rather than assuming clear.
@@ -21,7 +22,10 @@ type OpsReader struct {
 }
 
 func NewOpsReader(store Store, service *Service, metrics *Metrics) *OpsReader {
-	return &OpsReader{store: store, service: service, metrics: metrics}
+	// The same provider-neutral composer used by detector transitions
+	// prepares manual event intent. No notification is enqueued here.
+	return &OpsReader{store: store, service: service, metrics: metrics,
+		alerts: NewAlertProcessor(store, service, nil, service.newID, service.now, metrics)}
 }
 
 // SetManualGuard wires the offline-age threshold for the transactional
@@ -63,6 +67,10 @@ func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incid
 	if code == "" {
 		code = ResolutionOperator
 	}
+	deliveries, err := r.alerts.BuildDeliveries(ctx, incident, EventResolved)
+	if err != nil {
+		return Incident{}, err
+	}
 	if IsStateful(incident.Rule) {
 		if !r.guardWired {
 			// No guard threshold wired (e.g. engine disabled): fail
@@ -70,7 +78,7 @@ func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incid
 			return Incident{}, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
 		}
 		now := time.Now().UTC()
-		resolved, applied, err := r.store.ResolveStatefulIfClear(ctx, id, incident.Rule, incident.SubjectID, code, now.Add(-r.offlineAfter), now)
+		resolved, applied, err := r.store.ResolveStatefulIfClear(ctx, id, incident.Rule, incident.SubjectID, code, deliveries, now.Add(-r.offlineAfter), now)
 		if err != nil {
 			return Incident{}, err
 		}
@@ -84,9 +92,19 @@ func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incid
 			}
 			return Incident{}, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
 		}
+		r.metrics.resolved(incident.Rule)
+		r.metrics.deliveriesBlocked.Add(int64(countBlocked(deliveries)))
 		return resolved, nil
 	}
-	return r.service.Resolve(ctx, id, code)
+	resolved, won, err := r.service.ResolveAtomic(ctx, id, code, deliveries, nil)
+	if err != nil {
+		return Incident{}, err
+	}
+	if won {
+		r.metrics.resolved(incident.Rule)
+		r.metrics.deliveriesBlocked.Add(int64(countBlocked(deliveries)))
+	}
+	return resolved, nil
 }
 
 // Summary aggregates counters, open state, and device rollups.

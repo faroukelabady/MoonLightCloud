@@ -777,7 +777,7 @@ func (m *memStore) DeliveryByIdentity(_ context.Context, incidentID, event, reci
 	return Delivery{}, false, nil
 }
 
-func (m *memStore) ResolveStatefulIfClear(_ context.Context, id, rule, subjectID, code string, offlineEdge, at time.Time) (Incident, bool, error) {
+func (m *memStore) ResolveStatefulIfClear(_ context.Context, id, rule, subjectID, code string, deliveries []Delivery, offlineEdge, at time.Time) (Incident, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	in, ok := m.incidents[id]
@@ -814,5 +814,10 @@ func (m *memStore) ResolveStatefulIfClear(_ context.Context, id, rule, subjectID
 	in.State = StateResolved
 	in.ResolvedAt = &at
 	in.ResolutionCode = &code
+	for _, delivery := range deliveries {
+		copy := delivery
+		m.deliveries[copy.ID] = &copy
+	}
+	in.ResolvedIntentMaterialized = true
 	return *in, true, nil
 }

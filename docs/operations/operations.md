@@ -78,6 +78,12 @@ concurrent predicate writers block on that lock until commit, so a
 condition turning active mid-flight is always observed rather than
 resolved. The guard stays enforced even with the engine disabled (a
 missing checker fails closed).
+Both manual event resolution and guarded manual stateful resolution
+commit the resolved state, complete recipient delivery snapshots, and
+`resolved_intent_materialized=true` together. An enabled-recipient set
+of zero is intentionally materialized with no deliveries. Notification
+enqueue happens later, outside the resolution transaction. Manual
+resolution never arms reconnect healing.
 
 ```bash
 moonlight-cloud operations incidents list --state open
@@ -100,6 +106,15 @@ operator reconciliation (`operations incidents reconcile --id <uuid>`)
 declares their current durable state complete, setting the applicable
 flag with zero new deliveries, zero sends, and zero healing, preserving
 existing snapshots byte-for-byte.
+
+For automatic DEVICE_OFFLINE resolution, the transaction locks the
+incident row and then the device lifecycle row before choosing the
+resolution code and recovery eligibility. If revocation commits before
+the device lock is acquired, the outcome is `DEVICE_NO_LONGER_ACTIVE`
+with no reconnect recovery. If reconnect resolution commits first, its
+outcome stands and revocation follows. The device lock is released at
+transaction commit; notification enqueue and provider calls never run
+under it.
 
 Historical note: detector builds predating this rule used to fill
 missing intents automatically from then-current configuration. Any

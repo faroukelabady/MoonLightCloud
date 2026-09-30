@@ -86,15 +86,19 @@ describe('OperationsPage intent review badge', () => {
 		api.incidents.mockResolvedValue({
 			incidents: [
 				{ ...row('legacy', 'DEVICE_OFFLINE', 'open'), open_intent_materialized: false },
-				row('fresh', 'DEVICE_OFFLINE', 'open')
+				row('fresh', 'DEVICE_OFFLINE', 'open'),
+				{ ...row('legacy-resolved', 'DEVICE_OFFLINE', 'resolved'), resolved_intent_materialized: false },
+				row('manual-resolved', 'DEVICE_OFFLINE', 'resolved')
 			],
 			next_cursor: ''
 		});
 		render(OperationsPage);
-		const badge = await screen.findByTestId('intent-review');
-		expect(badge.textContent).toContain('needs review');
+		const badges = await screen.findAllByTestId('intent-review');
+		expect(badges).toHaveLength(2);
+		expect(badges[0].textContent).toContain('needs review');
 		const rows = screen.getAllByTestId('incident-row');
-		expect(rows).toHaveLength(2);
+		expect(rows).toHaveLength(4);
 		expect(within(rows[1] as HTMLElement).queryByTestId('intent-review')).toBeNull();
+		expect(within(rows[3] as HTMLElement).queryByTestId('intent-review')).toBeNull();
 	});
 });
