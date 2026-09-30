@@ -182,6 +182,46 @@ func (q *Queries) PendingSaleEvents(ctx context.Context, arg PendingSaleEventsPa
 	return items, nil
 }
 
+const pendingSaleV2Events = `-- name: PendingSaleV2Events :many
+SELECT e.event_id
+FROM sync_events e
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = $1
+WHERE e.event_type = 'sale.finalized.v2'
+  AND (p.event_id IS NULL
+       OR p.status = 'pending'
+       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
+ORDER BY e.received_at
+LIMIT $2
+`
+
+type PendingSaleV2EventsParams struct {
+	Processor string `json:"processor"`
+	Limit     int32  `json:"limit"`
+}
+
+// Durable discovery for sale.finalized.v2 under the v2 processor. v1 rows
+// are never returned here; the v1 processor owns them independently.
+func (q *Queries) PendingSaleV2Events(ctx context.Context, arg PendingSaleV2EventsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, pendingSaleV2Events, arg.Processor, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var event_id pgtype.UUID
+		if err := rows.Scan(&event_id); err != nil {
+			return nil, err
+		}
+		items = append(items, event_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const processingStatus = `-- name: ProcessingStatus :many
 SELECT status, count(*)::bigint AS total,
     COALESCE(max(last_error_code), '')::text AS err, max(updated_at)::timestamptz AS at

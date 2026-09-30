@@ -51,3 +51,14 @@ INSERT INTO sale_line_classifications_projection (
     name_ar, name_en, position
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (sale_id, sale_item_id, classification_kind, classification_id) DO NOTHING;
+
+-- name: InsertSaleItemTag :exec
+INSERT INTO sale_item_tag_snapshots (
+    sale_id, sale_item_id, tag_id, slug, name_ar, name_en
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT DO NOTHING;
+
+-- name: MarkSaleTagCaptured :exec
+UPDATE sales_projection SET tag_capture = TRUE WHERE sale_id = $1;

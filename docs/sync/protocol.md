@@ -50,10 +50,14 @@ Field rules:
   server accepts any well-formed UUID so future clients are never pointlessly
   rejected). Same logical event keeps its ID across retries — this is the
   foundation of idempotency.
-- `event_type`: `name.version` (`sale.finalized.v1` shape), immutable once
+- `event_type`: `name.version` (`sale.finalized.v1` shape, `sale.finalized.v2`
+  adds per-line historical tag snapshots), immutable once
   released. The suffix carries payload semantics; no separate global protocol
   integer (`/api/v1` = envelope semantics, suffix = payload semantics).
-  Supported business events: `sale.finalized.v1`,
+  Supported business events: `sale.finalized.v1`, `sale.finalized.v2`
+  (v1 stays accepted with unknown tag capture; v2 projects historical
+  tags idempotently under a separate processor with shared sale-id
+  arbitration),
   `sale.return_refund.finalized.v1` (one immutable event per finalized
   Retail return/refund transaction; see `docs/sync/returns.md`).
 - `occurred_at`: RFC3339 business timestamp. Recorded, never authority for

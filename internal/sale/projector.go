@@ -59,7 +59,9 @@ type Stats struct {
 // adapter. One ProjectSale call is one atomic claim+project transaction.
 type Store interface {
 	PendingSaleEvents(ctx context.Context, processor string, limit int) ([]string, error)
+	PendingSaleV2Events(ctx context.Context, limit int) ([]string, error)
 	ProjectSale(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectSaleV2(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadSaleEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -139,7 +141,8 @@ func (p *Projector) Run(ctx context.Context) {
 	}
 }
 
-// drain projects due events until none remain or ctx ends.
+// drain projects due v1 and v2 events until none remain or ctx ends.
+// Versions drain under independent processors; dispatch is by event type.
 func (p *Projector) drain(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
@@ -150,6 +153,12 @@ func (p *Projector) drain(ctx context.Context) {
 			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV1, "err", err.Error())
 			return
 		}
+		v2ids, err := p.store.PendingSaleV2Events(ctx, p.batchSize)
+		if err != nil {
+			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV2, "err", err.Error())
+			return
+		}
+		ids = append(ids, v2ids...)
 		if len(ids) == 0 {
 			return
 		}
@@ -176,7 +185,12 @@ func (p *Projector) projectOnce(ctx context.Context, eventID string) {
 		p.log.Error("projection event missing", "event_id", eventID)
 		return
 	}
-	res, err := p.store.ProjectSale(ctx, rec, p.clock.Now())
+	var res ProjectResult
+	if rec.EventType == EventSaleFinalizedV2 {
+		res, err = p.store.ProjectSaleV2(ctx, rec, p.clock.Now())
+	} else {
+		res, err = p.store.ProjectSale(ctx, rec, p.clock.Now())
+	}
 	if err != nil {
 		p.log.Error("projection attempt failed",
 			"event_id", eventID, "err", err.Error(),

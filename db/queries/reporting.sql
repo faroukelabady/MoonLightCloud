@@ -240,3 +240,29 @@ SELECT (SELECT max(received_at)::timestamptz FROM sync_events WHERE event_type =
  (SELECT max(occurred_at)::timestamptz FROM return_refund_projection) AS latest_occurred,
  (SELECT count(*) FROM sync_events e WHERE e.event_type = 'sale.return_refund.finalized.v1' AND NOT EXISTS (SELECT 1 FROM sync_event_processing p WHERE p.event_id = e.event_id AND p.processor = 'return_refund_projection.v1' AND p.status IN ('processed', 'blocked'))) AS backlog,
  (SELECT count(*) FROM sync_event_processing WHERE processor = 'return_refund_projection.v1' AND status = 'blocked') AS blocked;
+
+-- name: ReportSalesByTag :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
+FROM sale_item_tag_snapshots t
+JOIN sale_lines_projection l
+  ON l.sale_id = t.sale_id AND l.sale_item_id = t.sale_item_id
+JOIN sales_projection s ON s.sale_id = t.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.line_currency;
+
+-- name: ReportRefundsByTag :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
+ l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM sale_item_tag_snapshots t
+JOIN return_refund_lines_projection l
+  ON l.sale_id = t.sale_id AND l.original_sale_line_id = t.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency;

@@ -281,6 +281,66 @@ func (q *Queries) ReportRefundsByProduct(ctx context.Context, arg ReportRefundsB
 	return items, nil
 }
 
+const reportRefundsByTag = `-- name: ReportRefundsByTag :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
+ l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM sale_item_tag_snapshots t
+JOIN return_refund_lines_projection l
+  ON l.sale_id = t.sale_id AND l.original_sale_line_id = t.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR l.refund_currency = $3::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency
+`
+
+type ReportRefundsByTagParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByTagRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Slug         string      `json:"slug"`
+	NameAr       string      `json:"name_ar"`
+	NameEn       string      `json:"name_en"`
+	Currency     string      `json:"currency"`
+	Units        int64       `json:"units"`
+	Refund       int64       `json:"refund"`
+	ReturnedCost int64       `json:"returned_cost"`
+}
+
+func (q *Queries) ReportRefundsByTag(ctx context.Context, arg ReportRefundsByTagParams) ([]ReportRefundsByTagRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByTag, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByTagRow{}
+	for rows.Next() {
+		var i ReportRefundsByTagRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.NameAr,
+			&i.NameEn,
+			&i.Currency,
+			&i.Units,
+			&i.Refund,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportRefundsDaily = `-- name: ReportRefundsDaily :many
 SELECT ((r.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
  r.currency, count(*)::bigint AS transactions,
@@ -691,6 +751,66 @@ func (q *Queries) ReportSalesByProduct(ctx context.Context, arg ReportSalesByPro
 			&i.Units,
 			&i.LineSales,
 			&i.LineCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportSalesByTag = `-- name: ReportSalesByTag :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
+FROM sale_item_tag_snapshots t
+JOIN sale_lines_projection l
+  ON l.sale_id = t.sale_id AND l.sale_item_id = t.sale_item_id
+JOIN sales_projection s ON s.sale_id = t.sale_id
+WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+  AND ($3::text = '' OR l.line_currency = $3::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.line_currency
+`
+
+type ReportSalesByTagParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportSalesByTagRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Slug     string      `json:"slug"`
+	NameAr   string      `json:"name_ar"`
+	NameEn   string      `json:"name_en"`
+	Currency string      `json:"currency"`
+	Units    int64       `json:"units"`
+	Sales    int64       `json:"sales"`
+	Cost     int64       `json:"cost"`
+}
+
+func (q *Queries) ReportSalesByTag(ctx context.Context, arg ReportSalesByTagParams) ([]ReportSalesByTagRow, error) {
+	rows, err := q.db.Query(ctx, reportSalesByTag, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportSalesByTagRow{}
+	for rows.Next() {
+		var i ReportSalesByTagRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.NameAr,
+			&i.NameEn,
+			&i.Currency,
+			&i.Units,
+			&i.Sales,
+			&i.Cost,
 		); err != nil {
 			return nil, err
 		}

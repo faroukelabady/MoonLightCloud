@@ -15,6 +15,7 @@ const (
 	DimensionProduct      = "product"
 	DimensionRootCategory = "root_category"
 	DimensionSubcategory  = "subcategory"
+	DimensionTag          = "tag"
 	DimensionCashier      = "cashier"
 	DimensionChannel      = "channel"
 )
@@ -172,6 +173,9 @@ type BreakdownRow struct {
 	ClassificationID   *string `json:"classification_id,omitempty"`
 	NameAR             *string `json:"name_ar,omitempty"`
 	NameEN             *string `json:"name_en,omitempty"`
+	// Tag fields (dimension=tag only).
+	TagID   *string `json:"tag_id,omitempty"`
+	TagSlug *string `json:"tag_slug,omitempty"`
 	// Cashier fields (explicit null bucket when unattributed).
 	CashierID   *string `json:"cashier_id,omitempty"`
 	CashierName *string `json:"cashier_name,omitempty"`
@@ -263,6 +267,16 @@ type (
 		Sales    int64
 		Cost     int64
 	}
+	TagRow struct {
+		ID       string
+		Slug     string
+		NameAR   string
+		NameEN   string
+		Units    int64
+		Currency string
+		Sales    int64
+		Cost     int64
+	}
 	CashierRow struct {
 		CashierID   *string
 		CashierName *string
@@ -332,6 +346,16 @@ type (
 		Refund       int64
 		ReturnedCost int64
 	}
+	RefundTagRow struct {
+		ID           string
+		Slug         string
+		NameAR       string
+		NameEN       string
+		Units        int64
+		Currency     string
+		Refund       int64
+		ReturnedCost int64
+	}
 	RefundCashierRow struct {
 		// Cashier attribution follows the ORIGINAL sale (net performance);
 		// the Return-processing actor is retained historically for
@@ -370,6 +394,7 @@ type Repository interface {
 	SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
 	SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
+	SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
 	SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CashierRow, error)
 	SalesByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ChannelRow, error)
 	SalesProjectionFreshness(ctx context.Context) (FreshnessRow, error)
@@ -378,6 +403,7 @@ type Repository interface {
 	RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
 	RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
+	RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
 	RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCashierRow, error)
 	RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundChannelRow, error)
 	ReturnProjectionFreshness(ctx context.Context) (ReturnFreshnessRow, error)
@@ -423,7 +449,7 @@ func (s Service) ParseRequest(kind, fromDate, toDate, currency string) (Request,
 // callers switch on the returned constant).
 func ParseDimension(d string) (string, error) {
 	switch d {
-	case DimensionProduct, DimensionRootCategory, DimensionSubcategory, DimensionCashier, DimensionChannel:
+	case DimensionProduct, DimensionRootCategory, DimensionSubcategory, DimensionTag, DimensionCashier, DimensionChannel:
 		return d, nil
 	default:
 		return "", apperr.New(apperr.InvalidInput,
@@ -753,6 +779,67 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			kind, id, ar, en := r.Kind, r.ID, r.NameAR, r.NameEN
 			row := getRow(key, func(row *BreakdownRow) {
 				row.ClassificationKind, row.ClassificationID = &kind, &id
+				row.NameAR, row.NameEN = &ar, &en
+			})
+			row.UnitsReturned += r.Units
+			ei, ok := lineEntry[key][r.Currency]
+			if !ok {
+				row.LineSales = append(row.LineSales, LineSaleTotal{Currency: r.Currency})
+				ei = len(row.LineSales) - 1
+				lineEntry[key][r.Currency] = ei
+			}
+			row.LineSales[ei].LineRefundMinor = r.Refund
+			row.LineSales[ei].LineReturnedCostMinor = r.ReturnedCost
+		}
+		for _, row := range byKey {
+			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
+		}
+		out.Rows = sortCategoryRows(byKey, order, req.Currency)
+	case DimensionTag:
+		rows, err := s.repo.SalesByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		refundRows, err := s.repo.RefundsByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		byKey := map[string]*BreakdownRow{}
+		order := []string{}
+		lineEntry := map[string]map[string]int{}
+		getRow := func(key string, fill func(*BreakdownRow)) *BreakdownRow {
+			row, ok := byKey[key]
+			if !ok {
+				row = &BreakdownRow{Dimension: dimension, LineSales: []LineSaleTotal{}}
+				fill(row)
+				byKey[key] = row
+				order = append(order, key)
+				lineEntry[key] = map[string]int{}
+			}
+			return row
+		}
+		for _, r := range rows {
+			// Snapshot identity: id + slug + both historical names.
+			// Renamed snapshots of one tag stay separate rows; buckets
+			// merge only within exact snapshot identity. Tag groups
+			// overlap by design (one line may carry many tags), so group
+			// totals are not additive to the overall total.
+			key := r.ID + "\x00" + r.Slug + "\x00" + r.NameAR + "\x00" + r.NameEN
+			id, slug, ar, en := r.ID, r.Slug, r.NameAR, r.NameEN
+			row := getRow(key, func(row *BreakdownRow) {
+				row.TagID, row.TagSlug = &id, &slug
+				row.NameAR, row.NameEN = &ar, &en
+			})
+			row.Units += r.Units
+			row.LineSales = append(row.LineSales, LineSaleTotal{
+				Currency: r.Currency, LineSalesMinor: r.Sales, LineCostMinor: r.Cost})
+			lineEntry[key][r.Currency] = len(row.LineSales) - 1
+		}
+		for _, r := range refundRows {
+			key := r.ID + "\x00" + r.Slug + "\x00" + r.NameAR + "\x00" + r.NameEN
+			id, slug, ar, en := r.ID, r.Slug, r.NameAR, r.NameEN
+			row := getRow(key, func(row *BreakdownRow) {
+				row.TagID, row.TagSlug = &id, &slug
 				row.NameAR, row.NameEN = &ar, &en
 			})
 			row.UnitsReturned += r.Units

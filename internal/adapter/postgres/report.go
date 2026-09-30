@@ -138,6 +138,44 @@ func (d Devices) SalesBySubcategory(ctx context.Context, startUTC, endUTC time.T
 	return categoryRows("subcategory", ctx, d, startUTC, endUTC, currency)
 }
 
+func (d Devices) SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.TagRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportSalesByTag(ctx, sqlcgen.ReportSalesByTagParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("sales by tag", err)
+	}
+	out := make([]report.TagRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.TagRow{
+			ID: uuidString(r.ID), Slug: r.Slug, NameAR: r.NameAr, NameEN: r.NameEn,
+			Units: r.Units, Currency: r.Currency, Sales: r.Sales, Cost: r.Cost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundTagRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByTag(ctx, sqlcgen.ReportRefundsByTagParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by tag", err)
+	}
+	out := make([]report.RefundTagRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundTagRow{
+			ID: uuidString(r.ID), Slug: r.Slug, NameAR: r.NameAr, NameEN: r.NameEn,
+			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
 func (d Devices) SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()

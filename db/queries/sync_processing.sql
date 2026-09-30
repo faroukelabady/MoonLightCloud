@@ -56,3 +56,17 @@ WHERE e.event_type = 'sale.finalized.v1'
        OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
 ORDER BY e.received_at
 LIMIT $2;
+
+-- name: PendingSaleV2Events :many
+-- Durable discovery for sale.finalized.v2 under the v2 processor. v1 rows
+-- are never returned here; the v1 processor owns them independently.
+SELECT e.event_id
+FROM sync_events e
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = $1
+WHERE e.event_type = 'sale.finalized.v2'
+  AND (p.event_id IS NULL
+       OR p.status = 'pending'
+       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
+ORDER BY e.received_at
+LIMIT $2;

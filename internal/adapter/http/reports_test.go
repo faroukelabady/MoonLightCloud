@@ -45,6 +45,12 @@ func (s stubReportRepo) SalesByCashier(context.Context, time.Time, time.Time, st
 func (s stubReportRepo) SalesByChannel(context.Context, time.Time, time.Time, string) ([]report.ChannelRow, error) {
 	return nil, nil
 }
+func (s stubReportRepo) SalesByTag(context.Context, time.Time, time.Time, string) ([]report.TagRow, error) {
+	return nil, nil
+}
+func (s stubReportRepo) RefundsByTag(context.Context, time.Time, time.Time, string) ([]report.RefundTagRow, error) {
+	return nil, nil
+}
 func (s stubReportRepo) SalesProjectionFreshness(context.Context) (report.FreshnessRow, error) {
 	return report.FreshnessRow{}, nil
 }
@@ -208,6 +214,11 @@ func (s shapeRepo) SalesByProduct(context.Context, time.Time, time.Time, string)
 		Units: 2, Currency: "EGP", LineSales: 200000, LineCost: 20000}}, nil
 }
 
+func (s shapeRepo) SalesByTag(context.Context, time.Time, time.Time, string) ([]report.TagRow, error) {
+	return []report.TagRow{{ID: "aaaaaaaa-0000-4000-8000-000000000001", Slug: "horse",
+		NameAR: "حصان", NameEN: "Horse", Units: 2, Currency: "EGP", Sales: 200000, Cost: 20000}}, nil
+}
+
 // TestBreakdownDTOShapesMatchOpenAPI proves runtime JSON matches the
 // documented split contract: header rows carry currency_totals (never
 // line_sales); line rows carry line_sales (never currency_totals).
@@ -267,7 +278,8 @@ func TestBreakdownNegativeRowContract(t *testing.T) {
 
 	lineKeys := map[string]bool{"dimension": true, "units": true, "units_returned": true, "line_sales": true,
 		"product_id": true, "sku": true, "product_name": true,
-		"classification_kind": true, "classification_id": true, "name_ar": true, "name_en": true}
+		"classification_kind": true, "classification_id": true, "name_ar": true, "name_en": true,
+		"tag_id": true, "tag_slug": true}
 	headerKeys := map[string]bool{"dimension": true, "units": true, "units_returned": true, "transactions": true,
 		"return_transactions": true,
 		"currency_totals":     true, "cashier_id": true, "cashier_name": true, "channel": true}
@@ -332,6 +344,7 @@ func TestBreakdownNegativeRowContract(t *testing.T) {
 		}
 	}
 	check("product", true)
+	check("tag", true)
 	check("cashier", false)
 }
 

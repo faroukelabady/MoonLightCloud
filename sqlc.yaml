@@ -23,6 +23,7 @@ sql:
       - "db/migrations/00018_device_control_pending_lease_constraint.sql"
       - "db/migrations/00019_operational_alerts.sql"
       - "db/migrations/00020_operational_integrity.sql"
+      - "db/migrations/00021_sale_historical_tags.sql"
     gen:
       go:
         package: "sqlcgen"

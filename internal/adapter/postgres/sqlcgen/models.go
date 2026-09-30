@@ -536,6 +536,15 @@ type SaleEventOwnership struct {
 	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
 }
 
+type SaleItemTagSnapshot struct {
+	SaleID     pgtype.UUID `json:"sale_id"`
+	SaleItemID pgtype.UUID `json:"sale_item_id"`
+	TagID      pgtype.UUID `json:"tag_id"`
+	Slug       string      `json:"slug"`
+	NameAr     string      `json:"name_ar"`
+	NameEn     string      `json:"name_en"`
+}
+
 type SaleLineClassificationsProjection struct {
 	SaleID             pgtype.UUID `json:"sale_id"`
 	SaleItemID         pgtype.UUID `json:"sale_item_id"`
@@ -604,6 +613,7 @@ type SalesProjection struct {
 	FxRateMicrorate     pgtype.Int8        `json:"fx_rate_microrate"`
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 	ProjectedAt         pgtype.Timestamptz `json:"projected_at"`
+	TagCapture          pgtype.Bool        `json:"tag_capture"`
 }
 
 type SyncEvent struct {

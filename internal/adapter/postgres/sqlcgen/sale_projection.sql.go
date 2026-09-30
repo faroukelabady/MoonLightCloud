@@ -42,6 +42,36 @@ func (q *Queries) InsertSaleClassification(ctx context.Context, arg InsertSaleCl
 	return err
 }
 
+const insertSaleItemTag = `-- name: InsertSaleItemTag :exec
+INSERT INTO sale_item_tag_snapshots (
+    sale_id, sale_item_id, tag_id, slug, name_ar, name_en
+) VALUES (
+    $1, $2, $3, $4, $5, $6
+)
+ON CONFLICT DO NOTHING
+`
+
+type InsertSaleItemTagParams struct {
+	SaleID     pgtype.UUID `json:"sale_id"`
+	SaleItemID pgtype.UUID `json:"sale_item_id"`
+	TagID      pgtype.UUID `json:"tag_id"`
+	Slug       string      `json:"slug"`
+	NameAr     string      `json:"name_ar"`
+	NameEn     string      `json:"name_en"`
+}
+
+func (q *Queries) InsertSaleItemTag(ctx context.Context, arg InsertSaleItemTagParams) error {
+	_, err := q.db.Exec(ctx, insertSaleItemTag,
+		arg.SaleID,
+		arg.SaleItemID,
+		arg.TagID,
+		arg.Slug,
+		arg.NameAr,
+		arg.NameEn,
+	)
+	return err
+}
+
 const insertSaleLine = `-- name: InsertSaleLine :exec
 INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
@@ -216,6 +246,15 @@ func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjec
 	var i InsertSaleProjectionRow
 	err := row.Scan(&i.SaleID, &i.SourceEventID)
 	return i, err
+}
+
+const markSaleTagCaptured = `-- name: MarkSaleTagCaptured :exec
+UPDATE sales_projection SET tag_capture = TRUE WHERE sale_id = $1
+`
+
+func (q *Queries) MarkSaleTagCaptured(ctx context.Context, saleID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markSaleTagCaptured, saleID)
+	return err
 }
 
 const saleProjectionByEventID = `-- name: SaleProjectionByEventID :one

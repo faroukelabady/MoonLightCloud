@@ -125,6 +125,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	)
 	a.Sync = sync.NewService(store, clock.System{})
 	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
+	sync.RegisterEventType(sale.EventSaleFinalizedV2, ValidateSaleV2Payload)
 	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
 	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
 	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
@@ -304,6 +305,18 @@ func ValidateSalePayload(raw json.RawMessage) error {
 		return err
 	}
 	_, err = sale.Validate(p)
+	return err
+}
+
+// ValidateSaleV2Payload is the ingestion-time sale.finalized.v2 gate.
+// v1 events keep flowing through ValidateSalePayload with unknown tag
+// capture; v2 additionally freezes historical tag snapshots.
+func ValidateSaleV2Payload(raw json.RawMessage) error {
+	p, err := sale.DecodeV2(raw)
+	if err != nil {
+		return err
+	}
+	_, err = sale.ValidateV2(p)
 	return err
 }
 

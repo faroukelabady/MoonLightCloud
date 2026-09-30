@@ -1358,8 +1358,9 @@ paths:
       security:
         - reportAuth: []
       description: >-
-        Fixed dimensions only (product, root_category, subcategory, cashier,
-        channel). Historical snapshots only. Root-category rows are additive;
+        Fixed dimensions only (product, root_category, subcategory, tag, cashier,
+        channel). Historical snapshots only. Tag groups overlap by design
+        (one line may carry many tags) and are not additive to the total. Root-category rows are additive;
         subcategory rows are facet-style and may sum above the line total.
         Product line_sales_minor excludes Sale-level discount/tax (no
         allocation). Unattributed sales form an explicit null cashier bucket.
@@ -1373,7 +1374,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [product, root_category, subcategory, cashier, channel]
+            enum: [product, root_category, subcategory, tag, cashier, channel]
       responses:
         '200':
           description: Dimension rows, units descending with identity tie-break.
@@ -1514,7 +1515,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -1544,6 +1545,7 @@ components:
     SyncEvent:
       oneOf:
         - $ref: '#/components/schemas/SaleFinalizedV1Event'
+        - $ref: '#/components/schemas/SaleFinalizedV2Event'
         - $ref: '#/components/schemas/ReturnRefundFinalizedV1Event'
         - $ref: '#/components/schemas/CatalogCategorySnapshotV1Event'
         - $ref: '#/components/schemas/CatalogTagSnapshotV1Event'
@@ -1555,6 +1557,7 @@ components:
         propertyName: event_type
         mapping:
           sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
+          sale.finalized.v2: '#/components/schemas/SaleFinalizedV2Event'
           sale.return_refund.finalized.v1: '#/components/schemas/ReturnRefundFinalizedV1Event'
           catalog.category.snapshot.v1: '#/components/schemas/CatalogCategorySnapshotV1Event'
           catalog.tag.snapshot.v1: '#/components/schemas/CatalogTagSnapshotV1Event'
@@ -2170,9 +2173,79 @@ components:
           minItems: 1
           items: {$ref: '#/components/schemas/EventPayment'}
       description: >-
-        sale.finalized.v1 — the first business event. No v2
+        sale.finalized.v1 — the first business event. Frozen: no tag
         fields exist. Integer money throughout; subtotal = Σ lines;
         total = max(0, subtotal + tax − discount).
+    SaleFinalizedV2Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [sale.finalized.v2]
+            payload:
+              $ref: '#/components/schemas/SaleFinalizedV2'
+    SaleLineTag:
+      type: object
+      required: [tag_id, slug, name_ar, name_en]
+      properties:
+        tag_id: {type: string, format: uuid}
+        slug: {type: string, minLength: 1, maxLength: 64}
+        name_ar: {type: string, minLength: 1}
+        name_en: {type: string, minLength: 1}
+      description: >-
+        Frozen sale-time tag snapshot. Historical identity only; never
+        resolved against current catalog tags.
+    SaleLineV2:
+      type: object
+      required: [sale_item_id, sku, product_name, quantity, unit_price, line_total, classifications, tags]
+      properties:
+        sale_item_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        variant_id: {type: string, format: uuid, nullable: true}
+        sku: {type: string}
+        product_name: {type: string}
+        width_cm: {type: integer, nullable: true}
+        height_cm: {type: integer, nullable: true}
+        quantity: {type: integer, minimum: 1, maximum: 2147483647}
+        unit_price: {$ref: '#/components/schemas/Money'}
+        cost: {$ref: '#/components/schemas/Money'}
+        line_total: {$ref: '#/components/schemas/Money'}
+        classifications: {$ref: '#/components/schemas/LineClassifications'}
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/SaleLineTag'}
+          description: >-
+            Always present; empty means capture occurred with zero tags.
+            Sorted by tag_id.
+    SaleFinalizedV2:
+      type: object
+      required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]
+      properties:
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string}
+        channel: {type: string, enum: [STORE]}
+        occurred_at: {type: string, format: date-time}
+        paid_at: {type: string, format: date-time}
+        shop: {$ref: '#/components/schemas/ShopSnapshot'}
+        actor: {$ref: '#/components/schemas/ActorSnapshot'}
+        currency: {type: string, enum: [EGP, USD]}
+        fx:
+          $ref: '#/components/schemas/FxSnapshot'
+        totals: {$ref: '#/components/schemas/SaleTotals'}
+        lines:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/SaleLineV2'}
+        payments:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/EventPayment'}
+      description: >-
+        sale.finalized.v2 — v1 shape plus per-line historical tag
+        snapshots. v1 remains accepted with unknown tag capture.
     ReturnActorSnapshot:
       type: object
       properties:
@@ -2412,17 +2485,19 @@ components:
       additionalProperties: false
       required: [dimension, units, units_returned, line_sales]
       description: >-
-        Line-level dimension row (product, root_category, subcategory).
+        Line-level dimension row (product, root_category, subcategory, tag).
         line_sales carries pre-adjustment historical line amounts plus
         reversal amounts; Sale-level discount/tax are never allocated.
         Never carries currency_totals.
       properties:
-        dimension: {type: string, enum: [product, root_category, subcategory]}
+        dimension: {type: string, enum: [product, root_category, subcategory, tag]}
         product_id: {type: string, format: uuid, nullable: true}
         sku: {type: string, nullable: true}
         product_name: {type: string, nullable: true}
         classification_kind: {type: string, enum: [root, subcategory]}
         classification_id: {type: string, format: uuid}
+        tag_id: {type: string, format: uuid}
+        tag_slug: {type: string}
         name_ar: {type: string}
         name_en: {type: string}
         units: {type: integer}

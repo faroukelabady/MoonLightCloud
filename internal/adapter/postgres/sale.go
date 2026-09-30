@@ -97,19 +97,19 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 	// never ownership (invalid events own nothing).
 	raw, derr := sale.Decode(event.Payload)
 	if derr != nil {
-		return d.markBlocked(ctx, euid, now, ErrValidation, safeErr(derr))
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrValidation, safeErr(derr))
 	}
 	valid, verr := sale.Validate(raw)
 	if verr != nil {
-		return d.markBlocked(ctx, euid, now, ErrValidation, safeErr(verr))
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrValidation, safeErr(verr))
 	}
 	saleUID, err := parseUUID(valid.SaleID)
 	if err != nil {
-		return d.markBlocked(ctx, euid, now, ErrValidation, "sale_id must be a UUID")
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrValidation, "sale_id must be a UUID")
 	}
 	duid, err := parseUUID(event.DeviceID)
 	if err != nil {
-		return d.markBlocked(ctx, euid, now, ErrValidation, "device_id must be a UUID")
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrValidation, "device_id must be a UUID")
 	}
 	// Durable arbitration first: permanent winner before any projection row.
 	winner, err := d.arbitrate(ctx, saleUID, euid, duid, now)
@@ -118,13 +118,13 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 		if errors.As(err, &ierr) {
 			// Impossible invariant (winner bound to another sale): blocked
 			// deterministically, never transient, never normal replay.
-			return d.markBlocked(ctx, euid, now, ErrOwnershipIntegrity, ierr.msg)
+			return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrOwnershipIntegrity, ierr.msg)
 		}
-		return d.persistRetry(ctx, euid, now, ErrProjection, "ownership arbitration failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "ownership arbitration failed")
 	}
 	if winner != event.EventID {
 		// Another event permanently owns this sale_id: ZERO children.
-		return d.markBlocked(ctx, euid, now, ErrSaleIDConflict,
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrSaleIDConflict,
 			"sale_id already owned by another event")
 	}
 	tx, err := d.pool.Begin(ctx)
@@ -137,14 +137,14 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "claim failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "claim failed")
 	}
 	claim, err := q.LockProcessing(ctx, sqlcgen.LockProcessingParams{
 		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "lock failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "lock failed")
 	}
 	mark := func(status string, attempt int32, next *time.Time, processed *time.Time, code, msg string) (sale.ProjectResult, error) {
 		if err := q.MarkProcessing(ctx, sqlcgen.MarkProcessingParams{
@@ -155,10 +155,10 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 			LastErrorCode: pgText(code), LastErrorMessage: pgText(boundMsg(msg)),
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistRetry(ctx, euid, now, ErrProjection, "mark failed")
+			return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "mark failed")
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
+			return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "commit failed")
 		}
 		res := sale.ProjectResult{ErrorCode: code}
 		switch status {
@@ -186,11 +186,11 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 	owner, err := q.SaleOwnershipBySaleID(ctx, saleUID)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "ownership verify failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "ownership verify failed")
 	}
 	if uuidString(owner.WinningEventID) != event.EventID {
 		_ = tx.Rollback(ctx)
-		return d.markBlocked(ctx, euid, now, ErrSaleIDConflict,
+		return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrSaleIDConflict,
 			"sale_id already owned by another event")
 	}
 	// Winner only: populate header, then children. Same-event replay uses
@@ -201,27 +201,27 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 			existing, ferr := q.SaleProjectionBySaleID(ctx, saleUID)
 			if ferr != nil {
 				_ = tx.Rollback(ctx)
-				return d.persistRetry(ctx, euid, now, ErrProjection, "header race with rollback")
+				return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "header race with rollback")
 			}
 			if uuidString(existing.SourceEventID) != event.EventID {
 				// Header from another event despite durable ownership:
 				// projection/ownership integrity failure — never overwrite.
 				_ = tx.Rollback(ctx)
-				return d.markBlocked(ctx, euid, now, ErrProjection,
+				return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection,
 					"projection source differs from durable ownership")
 			}
 			if err := insertProjectionChildren(ctx, q, saleUID, valid); err != nil {
 				_ = tx.Rollback(ctx)
-				return d.persistRetry(ctx, euid, now, ErrProjection, "replay insert failed")
+				return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "replay insert failed")
 			}
 			return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "projection insert failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "projection insert failed")
 	}
 	if err := insertProjectionChildren(ctx, q, saleUID, valid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "projection insert failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "projection insert failed")
 	}
 	return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 }
@@ -306,7 +306,7 @@ func (d Devices) arbitrate(ctx context.Context, saleUID, euid, duid pgtype.UUID,
 
 // markBlocked records a deterministic blocked outcome (validation or
 // conflict) in one short transaction. Zero projection writes precede it.
-func (d Devices) markBlocked(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
+func (d Devices) markBlocked(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -316,36 +316,36 @@ func (d Devices) markBlocked(ctx context.Context, euid pgtype.UUID, now time.Tim
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
 	if err := q.ClaimProcessing(ctx, sqlcgen.ClaimProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "claim failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "claim failed")
 	}
 	claim, err := q.LockProcessing(ctx, sqlcgen.LockProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "lock failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "lock failed")
 	}
 	if claim.Status == sale.ProcProcessed {
 		if err := tx.Commit(ctx); err != nil {
-			return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
+			return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "commit failed")
 		}
 		return sale.ProjectResult{Outcome: sale.OutcomeProcessed}, nil
 	}
 	if err := q.MarkProcessing(ctx, sqlcgen.MarkProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 		Status: sale.ProcBlocked, AttemptCount: claim.AttemptCount + 1,
 		LastAttemptAt: pgTime(now), NextAttemptAt: pgtype.Timestamptz{},
 		ProcessedAt:   pgtype.Timestamptz{},
 		LastErrorCode: pgText(code), LastErrorMessage: pgText(boundMsg(msg)),
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, euid, now, ErrProjection, "mark failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "mark failed")
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return d.persistRetry(ctx, euid, now, ErrProjection, "commit failed")
+		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "commit failed")
 	}
 	return sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: code}, nil
 }
@@ -357,7 +357,7 @@ func (d Devices) markBlocked(ctx context.Context, euid pgtype.UUID, now time.Tim
 // restarts. Deterministic conflicts never reach here (they commit blocked).
 // The returned error stays non-nil so callers observe the failed attempt;
 // the retry state is already committed when it does.
-func (d Devices) persistRetry(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
+func (d Devices) persistRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (sale.ProjectResult, error) {
 	fail := func() (sale.ProjectResult, error) {
 		return sale.ProjectResult{Outcome: sale.OutcomeRetryable, ErrorCode: code},
 			transient(errors.New("projection transient failure"))
@@ -371,12 +371,12 @@ func (d Devices) persistRetry(ctx context.Context, euid pgtype.UUID, now time.Ti
 	defer func() { _ = tx.Rollback(ctx2) }()
 	q := sqlcgen.New(tx)
 	if err := q.ClaimProcessing(ctx2, sqlcgen.ClaimProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 	}); err != nil {
 		return fail()
 	}
 	claim, err := q.LockProcessing(ctx2, sqlcgen.LockProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 	})
 	if err != nil {
 		return fail()
@@ -392,7 +392,7 @@ func (d Devices) persistRetry(ctx context.Context, euid pgtype.UUID, now time.Ti
 	}
 	next := now.Add(sale.Backoff(int(claim.AttemptCount)))
 	if err := q.MarkProcessing(ctx2, sqlcgen.MarkProcessingParams{
-		EventID: euid, Processor: sale.ProcessorSaleProjectionV1,
+		EventID: euid, Processor: processor,
 		Status: sale.ProcRetry, AttemptCount: claim.AttemptCount + 1,
 		LastAttemptAt: pgTime(now), NextAttemptAt: pgTime(next),
 		ProcessedAt:   pgtype.Timestamptz{},

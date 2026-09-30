@@ -28,6 +28,14 @@ func TestMain(m *testing.M) {
 		_, err = sale.Validate(p)
 		return err
 	})
+	isync.RegisterEventType(sale.EventSaleFinalizedV2, func(raw json.RawMessage) error {
+		p, err := sale.DecodeV2(raw)
+		if err != nil {
+			return err
+		}
+		_, err = sale.ValidateV2(p)
+		return err
+	})
 	isync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, func(raw json.RawMessage) error {
 		p, err := returnrefund.Decode(raw)
 		if err != nil {
