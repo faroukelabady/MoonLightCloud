@@ -423,36 +423,6 @@ func (d Devices) MaterializeResolved(ctx context.Context, id string, deliveries 
 	return nil
 }
 
-// ScanUnmaterializedOpened lists active incidents missing opened intents.
-func (d Devices) ScanUnmaterializedOpened(ctx context.Context, limit int) ([]operations.Incident, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	rows, err := sqlcgen.New(d.pool).ScanUnmaterializedOpened(ctx, opsLimit(limit))
-	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "scan unmaterialized", redact(err))
-	}
-	out := make([]operations.Incident, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, toOpsIncident(r))
-	}
-	return out, nil
-}
-
-// ScanUnmaterializedResolved lists resolved incidents missing resolved intents.
-func (d Devices) ScanUnmaterializedResolved(ctx context.Context, limit int) ([]operations.Incident, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	rows, err := sqlcgen.New(d.pool).ScanUnmaterializedResolved(ctx, opsLimit(limit))
-	if err != nil {
-		return nil, apperr.Wrap(apperr.Internal, "scan unmaterialized", redact(err))
-	}
-	out := make([]operations.Incident, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, toOpsIncident(r))
-	}
-	return out, nil
-}
-
 // DeliveryByIdentity loads one delivery by its natural identity.
 func (d Devices) DeliveryByIdentity(ctx context.Context, incidentID, event, recipientID string) (operations.Delivery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
@@ -483,4 +453,94 @@ func mustParseOpsUUID(id string) pgtype.UUID {
 		panic(err)
 	}
 	return uid
+}
+
+// ResolveStatefulIfClear commits manual resolution only when the stateful
+// predicate currently reads clear, with no check/write race. One
+// transaction takes locks in a fixed global order — incident row, then
+// predicate subject row — so concurrent resolvers serialize with exactly
+// one winner and concurrent predicate writers block until commit; a
+// condition turning active mid-flight is always observed. applied=false
+// means the row did not transition; callers re-read to distinguish
+// already-resolved (no-op success) from still-active (409). Unknown
+// rules and non-UUID subjects fail closed.
+func (d Devices) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, offlineEdge, at time.Time) (operations.Incident, bool, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := opsUUID(id)
+	if err != nil {
+		return operations.Incident{}, false, apperr.New(apperr.NotFound, "incident not found")
+	}
+	suid, err := opsUUID(subjectID)
+	if err != nil {
+		return operations.Incident{}, false, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	// Lock the incident row first: concurrent resolvers pile up here, and
+	// later waiters observe whatever the winner committed.
+	if _, err := q.LockIncidentRow(ctx, uid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return operations.Incident{}, false, nil
+		}
+		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(err))
+	}
+	// Lock the predicate source second (fixed global order: incident,
+	// then predicate; no other path holds these in reverse, so this
+	// cannot deadlock): concurrent writers of the same subject block
+	// here until commit, so the guarded UPDATE below observes a stable
+	// predicate. Missing subjects lock nothing, which matches StillActive
+	// (absent reads as clear).
+	var lockErr error
+	switch rule {
+	case operations.RuleDeviceOffline:
+		_, lockErr = q.LockPresenceRow(ctx, suid)
+	case operations.RuleDeviceSyncStale:
+		_, lockErr = q.LockCommandRow(ctx, suid)
+	case operations.RuleReportStale:
+		_, lockErr = q.LockRunRow(ctx, suid)
+	case operations.RuleNotificationStale:
+		_, lockErr = q.LockNotificationRow(ctx, suid)
+	default:
+		return operations.Incident{}, false, apperr.New(apperr.InvalidInput, "unknown operations rule")
+	}
+	if lockErr != nil && !errors.Is(lockErr, pgx.ErrNoRows) {
+		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(lockErr))
+	}
+	var row sqlcgen.OperationalIncident
+	var qerr error
+	switch rule {
+	case operations.RuleDeviceOffline:
+		row, qerr = q.ResolveIfOfflineClear(ctx, sqlcgen.ResolveIfOfflineClearParams{
+			ID: uid, LastSeenAt: pgTime(offlineEdge.UTC()), ResolvedAt: pgTime(at.UTC()), ResolutionCode: pgText(code),
+		})
+	case operations.RuleDeviceSyncStale:
+		row, qerr = q.ResolveIfSyncClear(ctx, sqlcgen.ResolveIfSyncClearParams{
+			ID: uid, ResolvedAt: pgTime(at.UTC()), ResolutionCode: pgText(code),
+		})
+	case operations.RuleReportStale:
+		row, qerr = q.ResolveIfReportClear(ctx, sqlcgen.ResolveIfReportClearParams{
+			ID: uid, ResolvedAt: pgTime(at.UTC()), ResolutionCode: pgText(code),
+		})
+	case operations.RuleNotificationStale:
+		row, qerr = q.ResolveIfNotificationClear(ctx, sqlcgen.ResolveIfNotificationClearParams{
+			ID: uid, ResolvedAt: pgTime(at.UTC()), ResolutionCode: pgText(code),
+		})
+	}
+	if qerr != nil {
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return operations.Incident{}, false, nil
+		}
+		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(qerr))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return operations.Incident{}, false, apperr.Wrap(apperr.Internal, "guarded resolve", redact(err))
+	}
+	return toOpsIncident(row), true, nil
 }

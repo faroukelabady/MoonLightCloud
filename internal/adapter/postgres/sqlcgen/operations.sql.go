@@ -988,6 +988,96 @@ func (q *Queries) ListRecoveryForIncident(ctx context.Context, incidentID pgtype
 	return items, nil
 }
 
+const lockCommandRow = `-- name: LockCommandRow :one
+SELECT id FROM device_control_commands WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockCommandRow(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCommandRow, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockIncidentRow = `-- name: LockIncidentRow :one
+
+SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+FROM operational_incidents
+WHERE id = $1 FOR UPDATE
+`
+
+// Incident-row lock for guarded manual resolution. Lock ordering across
+// the codebase is incident row first, predicate row second; no other
+// path holds these locks in reverse order, so this cannot deadlock.
+func (q *Queries) LockIncidentRow(ctx context.Context, id pgtype.UUID) (OperationalIncident, error) {
+	row := q.db.QueryRow(ctx, lockIncidentRow, id)
+	var i OperationalIncident
+	err := row.Scan(
+		&i.ID,
+		&i.RuleKey,
+		&i.SubjectType,
+		&i.SubjectID,
+		&i.Severity,
+		&i.State,
+		&i.Episode,
+		&i.SourceEventKey,
+		&i.OpenedAt,
+		&i.LastObservedAt,
+		&i.AcknowledgedAt,
+		&i.ResolvedAt,
+		&i.ResolutionCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OpenIntentMaterialized,
+		&i.ResolvedIntentMaterialized,
+	)
+	return i, err
+}
+
+const lockNotificationRow = `-- name: LockNotificationRow :one
+SELECT id FROM notification_messages WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockNotificationRow(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockNotificationRow, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockPresenceRow = `-- name: LockPresenceRow :one
+
+SELECT device_id FROM device_control_presence WHERE device_id = $1 FOR UPDATE
+`
+
+// Manual-resolution predicate locks: held for the duration of the
+// guarded-resolve transaction so a concurrent predicate write cannot
+// commit between validation and resolution. EvalPlanQual only rechecks
+// when the incident row itself changes, so without these locks a
+// predicate flip landing mid-flight would be invisible. Missing subject
+// rows lock nothing (matching StillActive: absent reads as clear).
+// Writers always touch these same rows, so lock ordering is consistent
+// (predicate row, then incident row) and cannot deadlock against
+// detector paths, which never take explicit row locks.
+func (q *Queries) LockPresenceRow(ctx context.Context, deviceID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockPresenceRow, deviceID)
+	var device_id pgtype.UUID
+	err := row.Scan(&device_id)
+	return device_id, err
+}
+
+const lockRunRow = `-- name: LockRunRow :one
+SELECT id FROM business_report_runs WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockRunRow(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockRunRow, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const markOpenIntentMaterialized = `-- name: MarkOpenIntentMaterialized :execrows
 UPDATE operational_incidents SET open_intent_materialized = TRUE, updated_at = $2 WHERE id = $1
 `
@@ -1156,6 +1246,186 @@ func (q *Queries) OpsPresence(ctx context.Context, deviceID pgtype.UUID) (pgtype
 	var last_seen_at pgtype.Timestamptz
 	err := row.Scan(&last_seen_at)
 	return last_seen_at, err
+}
+
+const resolveIfNotificationClear = `-- name: ResolveIfNotificationClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM notification_messages n
+    WHERE n.id = i.subject_id::uuid AND n.dispatch_status IN ('pending', 'retry'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+`
+
+type ResolveIfNotificationClearParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode pgtype.Text        `json:"resolution_code"`
+}
+
+func (q *Queries) ResolveIfNotificationClear(ctx context.Context, arg ResolveIfNotificationClearParams) (OperationalIncident, error) {
+	row := q.db.QueryRow(ctx, resolveIfNotificationClear, arg.ID, arg.ResolvedAt, arg.ResolutionCode)
+	var i OperationalIncident
+	err := row.Scan(
+		&i.ID,
+		&i.RuleKey,
+		&i.SubjectType,
+		&i.SubjectID,
+		&i.Severity,
+		&i.State,
+		&i.Episode,
+		&i.SourceEventKey,
+		&i.OpenedAt,
+		&i.LastObservedAt,
+		&i.AcknowledgedAt,
+		&i.ResolvedAt,
+		&i.ResolutionCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OpenIntentMaterialized,
+		&i.ResolvedIntentMaterialized,
+	)
+	return i, err
+}
+
+const resolveIfOfflineClear = `-- name: ResolveIfOfflineClear :one
+
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $3, resolution_code = $4, updated_at = $3
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM device_control_presence p
+    WHERE p.device_id = i.subject_id::uuid AND p.last_seen_at <= $2)
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+`
+
+type ResolveIfOfflineClearParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode pgtype.Text        `json:"resolution_code"`
+}
+
+// Manual-resolution guarded transitions (single statement each): the
+// resolve commits only when the stateful predicate currently reads
+// clear, closing the check/write race. Callers distinguish "already
+// resolved" (no-op success) from "still active" (409) by re-reading.
+// Subject IDs are UUIDs; callers pre-validate and fail closed otherwise.
+func (q *Queries) ResolveIfOfflineClear(ctx context.Context, arg ResolveIfOfflineClearParams) (OperationalIncident, error) {
+	row := q.db.QueryRow(ctx, resolveIfOfflineClear,
+		arg.ID,
+		arg.LastSeenAt,
+		arg.ResolvedAt,
+		arg.ResolutionCode,
+	)
+	var i OperationalIncident
+	err := row.Scan(
+		&i.ID,
+		&i.RuleKey,
+		&i.SubjectType,
+		&i.SubjectID,
+		&i.Severity,
+		&i.State,
+		&i.Episode,
+		&i.SourceEventKey,
+		&i.OpenedAt,
+		&i.LastObservedAt,
+		&i.AcknowledgedAt,
+		&i.ResolvedAt,
+		&i.ResolutionCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OpenIntentMaterialized,
+		&i.ResolvedIntentMaterialized,
+	)
+	return i, err
+}
+
+const resolveIfReportClear = `-- name: ResolveIfReportClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM business_report_runs r
+    WHERE r.id = i.subject_id::uuid AND r.status IN ('pending', 'retry'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+`
+
+type ResolveIfReportClearParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode pgtype.Text        `json:"resolution_code"`
+}
+
+func (q *Queries) ResolveIfReportClear(ctx context.Context, arg ResolveIfReportClearParams) (OperationalIncident, error) {
+	row := q.db.QueryRow(ctx, resolveIfReportClear, arg.ID, arg.ResolvedAt, arg.ResolutionCode)
+	var i OperationalIncident
+	err := row.Scan(
+		&i.ID,
+		&i.RuleKey,
+		&i.SubjectType,
+		&i.SubjectID,
+		&i.Severity,
+		&i.State,
+		&i.Episode,
+		&i.SourceEventKey,
+		&i.OpenedAt,
+		&i.LastObservedAt,
+		&i.AcknowledgedAt,
+		&i.ResolvedAt,
+		&i.ResolutionCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OpenIntentMaterialized,
+		&i.ResolvedIntentMaterialized,
+	)
+	return i, err
+}
+
+const resolveIfSyncClear = `-- name: ResolveIfSyncClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM device_control_commands c
+    WHERE c.id = i.subject_id::uuid AND c.status NOT IN ('completed', 'failed'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+`
+
+type ResolveIfSyncClearParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolutionCode pgtype.Text        `json:"resolution_code"`
+}
+
+func (q *Queries) ResolveIfSyncClear(ctx context.Context, arg ResolveIfSyncClearParams) (OperationalIncident, error) {
+	row := q.db.QueryRow(ctx, resolveIfSyncClear, arg.ID, arg.ResolvedAt, arg.ResolutionCode)
+	var i OperationalIncident
+	err := row.Scan(
+		&i.ID,
+		&i.RuleKey,
+		&i.SubjectType,
+		&i.SubjectID,
+		&i.Severity,
+		&i.State,
+		&i.Episode,
+		&i.SourceEventKey,
+		&i.OpenedAt,
+		&i.LastObservedAt,
+		&i.AcknowledgedAt,
+		&i.ResolvedAt,
+		&i.ResolutionCode,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OpenIntentMaterialized,
+		&i.ResolvedIntentMaterialized,
+	)
+	return i, err
 }
 
 const resolveIncident = `-- name: ResolveIncident :one
@@ -1514,19 +1784,20 @@ func (q *Queries) ScanRetryStaleNotifications(ctx context.Context, arg ScanRetry
 const scanStaleCommands = `-- name: ScanStaleCommands :many
 SELECT id, device_id, command_type, command_version, status, requested_at
 FROM device_control_commands
-WHERE status IN ('pending', 'leased', 'accepted', 'running')
-  AND requested_at < $1
+WHERE ((status = 'pending' AND requested_at < $1)
+   OR (status IN ('leased', 'accepted', 'running') AND requested_at < $2))
   AND NOT EXISTS (
     SELECT 1 FROM operational_incidents i
     WHERE i.rule_key = 'DEVICE_SYNC_STALE' AND i.subject_type = 'sync_command'
       AND i.subject_id = device_control_commands.id::text AND i.state IN ('open', 'acknowledged'))
 ORDER BY device_control_commands.requested_at, device_control_commands.id
-LIMIT $2
+LIMIT $3
 `
 
 type ScanStaleCommandsParams struct {
-	RequestedAt pgtype.Timestamptz `json:"requested_at"`
-	Limit       int32              `json:"limit"`
+	RequestedAt   pgtype.Timestamptz `json:"requested_at"`
+	RequestedAt_2 pgtype.Timestamptz `json:"requested_at_2"`
+	Limit         int32              `json:"limit"`
 }
 
 type ScanStaleCommandsRow struct {
@@ -1539,7 +1810,7 @@ type ScanStaleCommandsRow struct {
 }
 
 func (q *Queries) ScanStaleCommands(ctx context.Context, arg ScanStaleCommandsParams) ([]ScanStaleCommandsRow, error) {
-	rows, err := q.db.Query(ctx, scanStaleCommands, arg.RequestedAt, arg.Limit)
+	rows, err := q.db.Query(ctx, scanStaleCommands, arg.RequestedAt, arg.RequestedAt_2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1608,105 +1879,6 @@ func (q *Queries) ScanStaleRuns(ctx context.Context, arg ScanStaleRunsParams) ([
 			&i.SlotLocalDate,
 			&i.Status,
 			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const scanUnmaterializedOpened = `-- name: ScanUnmaterializedOpened :many
-
-SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
-FROM operational_incidents
-WHERE state IN ('open', 'acknowledged') AND NOT open_intent_materialized
-ORDER BY opened_at, id
-LIMIT $1
-`
-
-// M01 materialization repair: rows whose transition committed without its
-// durable event intent (open/resolved deliveries, reconnect recovery).
-// Bounded, oldest first; each is repaired idempotently without touching
-// existing snapshots.
-func (q *Queries) ScanUnmaterializedOpened(ctx context.Context, limit int32) ([]OperationalIncident, error) {
-	rows, err := q.db.Query(ctx, scanUnmaterializedOpened, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []OperationalIncident{}
-	for rows.Next() {
-		var i OperationalIncident
-		if err := rows.Scan(
-			&i.ID,
-			&i.RuleKey,
-			&i.SubjectType,
-			&i.SubjectID,
-			&i.Severity,
-			&i.State,
-			&i.Episode,
-			&i.SourceEventKey,
-			&i.OpenedAt,
-			&i.LastObservedAt,
-			&i.AcknowledgedAt,
-			&i.ResolvedAt,
-			&i.ResolutionCode,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.OpenIntentMaterialized,
-			&i.ResolvedIntentMaterialized,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const scanUnmaterializedResolved = `-- name: ScanUnmaterializedResolved :many
-SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
-FROM operational_incidents
-WHERE state = 'resolved' AND NOT resolved_intent_materialized
-ORDER BY resolved_at, id
-LIMIT $1
-`
-
-func (q *Queries) ScanUnmaterializedResolved(ctx context.Context, limit int32) ([]OperationalIncident, error) {
-	rows, err := q.db.Query(ctx, scanUnmaterializedResolved, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []OperationalIncident{}
-	for rows.Next() {
-		var i OperationalIncident
-		if err := rows.Scan(
-			&i.ID,
-			&i.RuleKey,
-			&i.SubjectType,
-			&i.SubjectID,
-			&i.Severity,
-			&i.State,
-			&i.Episode,
-			&i.SourceEventKey,
-			&i.OpenedAt,
-			&i.LastObservedAt,
-			&i.AcknowledgedAt,
-			&i.ResolvedAt,
-			&i.ResolutionCode,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.OpenIntentMaterialized,
-			&i.ResolvedIntentMaterialized,
 		); err != nil {
 			return nil, err
 		}

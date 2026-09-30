@@ -62,11 +62,11 @@ func (d Devices) ScanFailedCommands(ctx context.Context, limit int) ([]operation
 }
 
 // ScanStaleCommands lists non-terminal commands older than the threshold.
-func (d Devices) ScanStaleCommands(ctx context.Context, olderThan time.Time, limit int) ([]operations.StaleCommand, error) {
+func (d Devices) ScanStaleCommands(ctx context.Context, pendingEdge, runningEdge time.Time, limit int) ([]operations.StaleCommand, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanStaleCommands(ctx, sqlcgen.ScanStaleCommandsParams{
-		RequestedAt: pgTime(olderThan.UTC()), Limit: opsLimit(limit),
+		RequestedAt: pgTime(pendingEdge.UTC()), RequestedAt_2: pgTime(runningEdge.UTC()), Limit: opsLimit(limit),
 	})
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Internal, "scan stale commands", redact(err))

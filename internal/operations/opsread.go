@@ -2,6 +2,7 @@ package operations
 
 import (
 	"context"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
@@ -12,18 +13,22 @@ type OpsReader struct {
 	store   Store
 	service *Service
 	metrics *Metrics
-	// stillActive re-evaluates stateful predicates for the manual-resolve
-	// guard. Wired to the detector; nil means "condition assumed clear".
-	stillActiveFn func(ctx context.Context, incident Incident) (bool, error)
+	// offlineAfter bounds the transactional manual-resolve guard for
+	// offline incidents. Unset means the guard is unwired: stateful
+	// manual resolution fails closed rather than assuming clear.
+	offlineAfter time.Duration
+	guardWired   bool
 }
 
 func NewOpsReader(store Store, service *Service, metrics *Metrics) *OpsReader {
 	return &OpsReader{store: store, service: service, metrics: metrics}
 }
 
-// SetStillActive wires the detector predicate after construction.
-func (r *OpsReader) SetStillActive(fn func(ctx context.Context, incident Incident) (bool, error)) {
-	r.stillActiveFn = fn
+// SetManualGuard wires the offline-age threshold for the transactional
+// manual-resolve guard.
+func (r *OpsReader) SetManualGuard(offlineAfter time.Duration) {
+	r.offlineAfter = offlineAfter
+	r.guardWired = true
 }
 
 // Deliveries lists an incident's alert deliveries (recipient snapshots
@@ -44,7 +49,9 @@ func (r *OpsReader) Recoveries(ctx context.Context, incidentID string) ([]Recove
 }
 
 // ResolveOperator resolves event incidents directly; stateful incidents
-// require the condition to have cleared (else CONDITION_STILL_ACTIVE).
+// resolve through a single predicate-guarded transaction (else
+// CONDITION_STILL_ACTIVE), so a condition turning active mid-call
+// cannot be falsely resolved.
 func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incident, error) {
 	incident, err := r.service.Get(ctx, id)
 	if err != nil {
@@ -57,18 +64,27 @@ func (r *OpsReader) ResolveOperator(ctx context.Context, id, code string) (Incid
 		code = ResolutionOperator
 	}
 	if IsStateful(incident.Rule) {
-		still := true
-		if r.stillActiveFn == nil {
-			// No predicate checker wired (e.g. engine disabled): fail
+		if !r.guardWired {
+			// No guard threshold wired (e.g. engine disabled): fail
 			// closed rather than assuming a clear condition.
 			return Incident{}, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
 		}
-		var err error
-		still, err = r.stillActiveFn(ctx, incident)
+		now := time.Now().UTC()
+		resolved, applied, err := r.store.ResolveStatefulIfClear(ctx, id, incident.Rule, incident.SubjectID, code, now.Add(-r.offlineAfter), now)
 		if err != nil {
 			return Incident{}, err
 		}
-		return r.service.ResolveIfClear(ctx, id, code, still)
+		if !applied {
+			current, cerr := r.service.Get(ctx, id)
+			if cerr != nil {
+				return Incident{}, cerr
+			}
+			if current.State == StateResolved {
+				return current, nil
+			}
+			return Incident{}, apperr.New(apperr.Conflict, "CONDITION_STILL_ACTIVE")
+		}
+		return resolved, nil
 	}
 	return r.service.Resolve(ctx, id, code)
 }

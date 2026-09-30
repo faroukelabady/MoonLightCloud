@@ -133,13 +133,16 @@ type Store interface {
 	// single transaction. Only the committing scanner gets won=true and
 	// may proceed to metrics and further work; losers create nothing.
 	ResolveAtomic(ctx context.Context, id, code string, deliveries []Delivery, recovery *RecoveryIntent, at time.Time) (Incident, bool, error)
+	// ResolveStatefulIfClear commits manual resolution only when the
+	// stateful predicate currently reads clear, in a single statement.
+	// Returns applied=false when the row did not transition (already
+	// resolved, or still active); callers re-read to distinguish.
+	ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, offlineEdge, at time.Time) (Incident, bool, error)
 	// Repair paths for rows whose transition committed without its intent
 	// (pre-atomic writers): fill only missing deliveries, never mint new
 	// keys for existing snapshots, then set the flag.
 	MaterializeOpen(ctx context.Context, id string, deliveries []Delivery, at time.Time) error
 	MaterializeResolved(ctx context.Context, id string, deliveries []Delivery, recovery *RecoveryIntent, at time.Time) error
-	ScanUnmaterializedOpened(ctx context.Context, limit int) ([]Incident, error)
-	ScanUnmaterializedResolved(ctx context.Context, limit int) ([]Incident, error)
 	DeliveryByIdentity(ctx context.Context, incidentID, event, recipientID string) (Delivery, bool, error)
 	DeviceSummary(ctx context.Context) ([]DeviceSummary, error)
 	// Deliveries.
@@ -159,7 +162,7 @@ type Store interface {
 	// Detector scans (bounded, server-time).
 	ScanOffline(ctx context.Context, olderThan time.Time, limit int) ([]OfflineCandidate, error)
 	ScanFailedCommands(ctx context.Context, limit int) ([]FailedCommand, error)
-	ScanStaleCommands(ctx context.Context, olderThan time.Time, limit int) ([]StaleCommand, error)
+	ScanStaleCommands(ctx context.Context, pendingEdge, runningEdge time.Time, limit int) ([]StaleCommand, error)
 	ScanBlockedRuns(ctx context.Context, limit int) ([]BlockedRun, error)
 	ScanStaleRuns(ctx context.Context, olderThan time.Time, limit int) ([]StaleRun, error)
 	ScanBlockedNotifications(ctx context.Context, limit int) ([]BadNotification, error)

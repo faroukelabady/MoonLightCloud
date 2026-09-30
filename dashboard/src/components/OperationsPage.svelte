@@ -119,6 +119,9 @@
 					<span data-testid="incident-state">{i.state}</span>
 					<span title="subject">{i.subject_type}:{i.subject_id.slice(0, 8)}</span>
 					<span title="opened">{i.opened_at}</span>
+					{#if (i.state !== 'resolved' && !i.open_intent_materialized) || (i.state === 'resolved' && !i.resolved_intent_materialized)}
+						<span data-testid="intent-review" title="Alert intent predates atomic writes; reconcile explicitly if review warrants it">needs review</span>
+					{/if}
 					{#if i.state === 'open'}
 						<button data-testid="ack" disabled={!!acting[i.id]} on:click={() => ack(i.id)}>Acknowledge</button>
 					{/if}

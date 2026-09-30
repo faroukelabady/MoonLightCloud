@@ -690,3 +690,167 @@ func TestDetectorScanPlansIndexed(t *testing.T) {
 	_ = store
 	_ = dev
 }
+
+// deliverySnapshot renders an incident's deliveries deterministically for
+// byte-for-byte stability assertions.
+func deliverySnapshot(t *testing.T, store Devices, ctx context.Context, incidentID string) string {
+	t.Helper()
+	dels, err := store.DeliveriesForIncident(ctx, incidentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	for _, d := range dels {
+		nid := ""
+		if d.NotificationID != nil {
+			nid = *d.NotificationID
+		}
+		code := ""
+		if d.LastErrorCode != nil {
+			code = *d.LastErrorCode
+		}
+		sb.WriteString(d.ID + "|" + d.IncidentID + "|" + d.RecipientID + "|" + d.Event + "|" + d.ProviderKey +
+			"|" + d.RecipientSnapshot + "|" + d.Locale + "|" + d.TemplateKey + "|" + d.Body +
+			"|" + string(d.Fingerprint) + "|" + nid + "|" + d.NotificationKey + "|" + d.Status + "|" + code + "\n")
+	}
+	return sb.String()
+}
+
+// TestManualResolveRaceGuarded proves the manual-resolution predicate is
+// evaluated atomically with the resolve, not before. A holder transaction
+// parks the resolver on the incident-row lock while presence flips
+// underneath; the outcome always matches the committed state.
+func TestManualResolveRaceGuarded(t *testing.T) {
+	cases := []struct {
+		name      string
+		flipFresh bool
+		wantState string
+		wantErr   bool
+	}{
+		// Fresh throughout: parked resolve applies on release.
+		{"fresh-stays-fresh-resolves", true, "resolved", false},
+		// Flipped stale mid-flight: predicate lock serializes the flip
+		// first, so the guarded UPDATE observes it and 409s.
+		{"fresh-becomes-stale-conflicts", false, "open", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, pool := openOpsStore(t)
+			ctx := context.Background()
+			svc := opsService(store)
+			dev := opsSeedDevice(t, pool, "guard-race-dev")
+			if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
+				VALUES ($1, now(), now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
+				t.Fatal(err)
+			}
+			opened, _, err := svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader := operations.NewOpsReader(store, svc, operations.NewMetrics())
+			reader.SetManualGuard(5 * time.Minute)
+			holder, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = holder.Rollback(ctx) }()
+			var one int
+			if err := holder.QueryRow(ctx, `SELECT 1 FROM operational_incidents WHERE id = $1 FOR UPDATE`, mustOpsUUID(t, opened.ID)).Scan(&one); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := reader.ResolveOperator(ctx, opened.ID, "")
+				done <- err
+			}()
+			// Self-validating barrier: the resolver must be parked on
+			// the incident-row lock before the flip; otherwise the
+			// test would prove nothing about mid-flight races.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				var parked int
+				if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND query LIKE '%LockIncidentRow%'`).Scan(&parked); err != nil {
+					t.Fatal(err)
+				}
+				if parked >= 1 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("resolver never parked on the incident lock")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			// Parked on the row lock; flip presence underneath.
+			flipAgo := 10 * time.Second
+			if !tc.flipFresh {
+				flipAgo = 10 * time.Minute
+			}
+			if _, err := pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = $1 WHERE device_id = $2`,
+				time.Now().UTC().Add(-flipAgo), mustOpsUUID(t, dev)); err != nil {
+				t.Fatal(err)
+			}
+			if err := holder.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			err = <-done
+			final, _ := svc.Get(ctx, opened.ID)
+			if tc.wantErr {
+				if err == nil || final.State != "open" {
+					t.Fatalf("conflict, still open: %+v %v", final, err)
+				}
+			} else {
+				if err != nil || final.State != "resolved" {
+					t.Fatalf("resolved: %+v %v", final, err)
+				}
+			}
+		})
+	}
+}
+
+// TestManualResolveConcurrentPair proves two simultaneous manual resolves
+// converge: exactly one applies, the other is a safe no-op success.
+func TestManualResolveConcurrentPair(t *testing.T) {
+	store, pool := openOpsStore(t)
+	ctx := context.Background()
+	svc := opsService(store)
+	dev := opsSeedDevice(t, pool, "guard-pair-dev")
+	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
+		VALUES ($1, now(), now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
+		t.Fatal(err)
+	}
+	opened, _, err := svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := operations.NewOpsReader(store, svc, operations.NewMetrics())
+	reader.SetManualGuard(5 * time.Minute)
+	holder, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	var one int
+	if err := holder.QueryRow(ctx, `SELECT 1 FROM operational_incidents WHERE id = $1 FOR UPDATE`, mustOpsUUID(t, opened.ID)).Scan(&one); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := reader.ResolveOperator(ctx, opened.ID, "")
+			done <- err
+		}()
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("both must succeed: %v", err)
+		}
+	}
+	final, _ := svc.Get(ctx, opened.ID)
+	if final.State != "resolved" {
+		t.Fatalf("resolved: %+v", final)
+	}
+}

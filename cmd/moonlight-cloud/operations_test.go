@@ -13,6 +13,7 @@ func TestOperationsCLIUsage(t *testing.T) {
 		{"recipients", "add"},
 		{"incidents"},
 		{"incidents", "list", "--state", "bogus"},
+		{"incidents", "reconcile"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if err := operationsCmd(args, &stdout, &stderr); err == nil {

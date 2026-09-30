@@ -154,15 +154,17 @@ func opsRecipientDisableCmd(args []string, stdout, stderr io.Writer) error {
 
 func opsIncidentsCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: moonlight-cloud operations incidents list|status ...")
+		return fmt.Errorf("usage: moonlight-cloud operations incidents list|status|reconcile ...")
 	}
 	switch args[0] {
 	case "list":
 		return opsIncidentsListCmd(args[1:], stdout, stderr)
 	case "status":
 		return opsIncidentStatusCmd(args[1:], stdout, stderr)
+	case "reconcile":
+		return opsIncidentReconcileCmd(args[1:], stdout, stderr)
 	default:
-		return fmt.Errorf("usage: moonlight-cloud operations incidents list|status ...")
+		return fmt.Errorf("usage: moonlight-cloud operations incidents list|status|reconcile ...")
 	}
 }
 
@@ -212,9 +214,10 @@ func opsIncidentStatusCmd(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "id=%s rule=%s subject=%s:%s severity=%s state=%s episode=%d\n",
+	fmt.Fprintf(stdout, "id=%s rule=%s subject=%s:%s severity=%s state=%s episode=%d open_intent=%v resolved_intent=%v\n",
 		incident.ID, incident.Rule, incident.SubjectType, incident.SubjectID,
-		incident.Severity, incident.State, incident.Episode)
+		incident.Severity, incident.State, incident.Episode,
+		incident.OpenIntentMaterialized, incident.ResolvedIntentMaterialized)
 	deliveries, err := env.reader.Deliveries(ctx, incident.ID)
 	if err != nil {
 		return err
@@ -231,5 +234,34 @@ func opsIncidentStatusCmd(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "recovery=%s action=%s state=%s result=%v target=%v\n",
 			rc.ID, rc.ActionType, rc.State, rc.ResultCode != nil, rc.TargetEntityID != nil)
 	}
+	return nil
+}
+
+// opsIncidentReconcileCmd declares an ambiguous legacy incident's current
+// durable state complete after operator review. It sets the applicable
+// intent flag with zero new deliveries, zero sends, and zero healing;
+// existing snapshots, notification IDs, keys, and recovery rows are
+// preserved byte-for-byte.
+func opsIncidentReconcileCmd(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("operations incidents reconcile", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	id := fs.String("id", "", "incident id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*id) == "" {
+		return fmt.Errorf("usage: moonlight-cloud operations incidents reconcile --id <uuid>")
+	}
+	env, err := openOpsEnv(stderr)
+	if err != nil {
+		return err
+	}
+	defer env.close()
+	incident, err := env.service.Reconcile(context.Background(), strings.TrimSpace(*id))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "id=%s state=%s open_intent=%v resolved_intent=%v\n",
+		incident.ID, incident.State, incident.OpenIntentMaterialized, incident.ResolvedIntentMaterialized)
 	return nil
 }

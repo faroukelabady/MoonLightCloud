@@ -39,12 +39,10 @@ func NewDetector(store Store, service *Service, alerts *AlertProcessor, cfg Dete
 
 // Scan runs every rule once, oldest-first in bounded batches. A transient
 // failure aborts the scan with a safe error; next tick retries. No
-// incident state corrupts on failure. Unmaterialized intents from
-// pre-atomic writers are repaired first so crashes never strand work.
+// incident state corrupts on failure. All detector writes are atomic,
+// so crashes cannot strand intents; ambiguous legacy rows are left for
+// explicit operator reconciliation (never auto-fabricated).
 func (d *Detector) Scan(ctx context.Context) error {
-	if err := d.repairIntents(ctx); err != nil {
-		return err
-	}
 	now := d.now().UTC()
 	if err := d.scanOffline(ctx, now); err != nil {
 		return err
@@ -90,8 +88,9 @@ func (d *Detector) openStateful(ctx context.Context, rule, subjectType, subjectI
 	if err != nil {
 		return Incident{}, false, err
 	}
+	// N04: opened counting lives at call sites only; blocked-delivery
+	// counting lives here only. Exactly one increment per new incident.
 	if created {
-		d.metrics.opened(rule)
 		d.metrics.deliveriesBlocked.Add(int64(countBlocked(deliveries)))
 	}
 	return incident, created, nil
@@ -108,8 +107,9 @@ func (d *Detector) openEvent(ctx context.Context, rule, subjectType, subjectID, 
 	if err != nil {
 		return Incident{}, false, err
 	}
+	// N04: opened counting lives at call sites only; blocked-delivery
+	// counting lives here only. Exactly one increment per new incident.
 	if created {
-		d.metrics.opened(rule)
 		d.metrics.deliveriesBlocked.Add(int64(countBlocked(deliveries)))
 	}
 	return incident, created, nil
@@ -153,6 +153,19 @@ func (d *Detector) resolveOffline(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for _, incident := range active {
+		// Lifecycle takes precedence over presence: a revoked device
+		// resolves as no-longer-active even with recent contact, and
+		// never heals.
+		status, ok, err := d.store.DeviceStatus(ctx, incident.SubjectID)
+		if err != nil {
+			return err
+		}
+		if ok && status != "active" {
+			if _, err := d.resolveIncident(ctx, incident, ResolutionNoActive); err != nil {
+				return err
+			}
+			continue
+		}
 		seen, ok, err := d.store.Presence(ctx, incident.SubjectID)
 		if err != nil {
 			return err
@@ -170,15 +183,9 @@ func (d *Detector) resolveOffline(ctx context.Context, now time.Time) error {
 			}
 			continue
 		}
-		status, ok, err := d.store.DeviceStatus(ctx, incident.SubjectID)
-		if err != nil {
-			return err
-		}
-		if ok && status != "active" {
-			if _, err := d.resolveIncident(ctx, incident, ResolutionNoActive); err != nil {
-				return err
-			}
-		}
+		// Still offline and active: touch so the least-recently-checked
+		// ordering round-robins and no batch starves later rows.
+		_ = d.store.TouchObserved(ctx, incident.ID, now)
 	}
 	return nil
 }
@@ -226,46 +233,6 @@ func (d *Detector) resolveIncident(ctx context.Context, incident Incident, code 
 	return resolved, nil
 }
 
-// repairIntents converges rows whose transition committed without its
-// durable intent (pre-atomic writers or a crash inside legacy paths):
-// materialize only missing deliveries, never mint new keys for existing
-// snapshots, arm recovery only for reconnect resolutions on active
-// devices. Bounded oldest-first; unrelated fresh rows never consume it.
-func (d *Detector) repairIntents(ctx context.Context) error {
-	opened, err := d.store.ScanUnmaterializedOpened(ctx, d.cfg.BatchSize)
-	if err != nil {
-		return err
-	}
-	for _, incident := range opened {
-		deliveries, err := d.alerts.BuildDeliveries(ctx, incident, EventOpened)
-		if err != nil {
-			return err
-		}
-		if err := d.service.MaterializeOpen(ctx, incident.ID, deliveries); err != nil {
-			return err
-		}
-	}
-	resolvedRows, err := d.store.ScanUnmaterializedResolved(ctx, d.cfg.BatchSize)
-	if err != nil {
-		return err
-	}
-	for _, incident := range resolvedRows {
-		deliveries, err := d.alerts.BuildDeliveries(ctx, incident, EventResolved)
-		if err != nil {
-			return err
-		}
-		var recovery *RecoveryIntent
-		if incident.Rule == RuleDeviceOffline && d.cfg.AutoSyncOnReconnect &&
-			incident.ResolutionCode != nil && *incident.ResolutionCode == ResolutionReconnect {
-			recovery = &RecoveryIntent{DeviceID: incident.SubjectID, Key: ReconnectIdempotencyKey(incident.ID)}
-		}
-		if err := d.service.MaterializeResolved(ctx, incident.ID, deliveries, recovery); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // scanSyncFailed opens one event incident per failed command (stable key).
 func (d *Detector) scanSyncFailed(ctx context.Context, now time.Time) error {
 	_ = now
@@ -290,11 +257,11 @@ func (d *Detector) scanSyncFailed(ctx context.Context, now time.Time) error {
 // individual lease); single-expiry leases never alert alone.
 func (d *Detector) scanSyncStale(ctx context.Context, now time.Time) error {
 	pendingEdge := now.Add(-d.cfg.SyncPendingStale)
-	rows, err := d.store.ScanStaleCommands(ctx, pendingEdge, d.cfg.BatchSize)
+	runningEdge := now.Add(-d.cfg.SyncRunningStale)
+	rows, err := d.store.ScanStaleCommands(ctx, pendingEdge, runningEdge, d.cfg.BatchSize)
 	if err != nil {
 		return err
 	}
-	runningEdge := now.Add(-d.cfg.SyncRunningStale)
 	for _, r := range rows {
 		if (r.Status == "accepted" || r.Status == "running" || r.Status == "leased") && r.RequestedAt.After(runningEdge) {
 			continue
@@ -458,40 +425,4 @@ func (d *Detector) resolveNotificationStale(ctx context.Context, now time.Time) 
 		}
 	}
 	return nil
-}
-
-// StillActive re-evaluates a stateful subject predicate for manual
-// resolution guard (409 while the condition holds).
-func (d *Detector) StillActive(ctx context.Context, incident Incident) (bool, error) {
-	now := d.now().UTC()
-	switch incident.Rule {
-	case RuleDeviceOffline:
-		seen, ok, err := d.store.Presence(ctx, incident.SubjectID)
-		if err != nil {
-			return false, err
-		}
-		if !ok || seen == nil {
-			return false, nil
-		}
-		return now.Sub(seen.UTC()) >= d.cfg.OfflineAfter, nil
-	case RuleDeviceSyncStale:
-		status, ok, err := d.store.CommandTerminal(ctx, incident.SubjectID)
-		if err != nil {
-			return false, err
-		}
-		return ok && status != "completed" && status != "failed", nil
-	case RuleReportStale:
-		status, ok, err := d.store.RunStatus(ctx, incident.SubjectID)
-		if err != nil {
-			return false, err
-		}
-		return ok && (status == "pending" || status == "retry"), nil
-	case RuleNotificationStale:
-		status, ok, err := d.store.NotificationDispatch(ctx, incident.SubjectID)
-		if err != nil {
-			return false, err
-		}
-		return ok && (status == "pending" || status == "retry"), nil
-	}
-	return false, nil
 }

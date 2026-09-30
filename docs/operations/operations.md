@@ -71,9 +71,13 @@ without failing the incident or touching Phase 7A.
 device is back, the sync succeeded, or ambiguity disappeared. `Resolve`
 closes event incidents; stateful incidents resolve automatically when
 their condition clears, and manual resolve while active returns 409
-`CONDITION_STILL_ACTIVE`. The guard is evaluated inside the resolve
-transaction against live state, and stays enforced even with the engine
-disabled (a missing checker fails closed).
+`CONDITION_STILL_ACTIVE`. The guard runs in one transaction that locks
+the incident row, then the predicate subject row (presence, command,
+run, or notification), then applies a predicate-guarded UPDATE:
+concurrent predicate writers block on that lock until commit, so a
+condition turning active mid-flight is always observed rather than
+resolved. The guard stays enforced even with the engine disabled (a
+missing checker fails closed).
 
 ```bash
 moonlight-cloud operations incidents list --state open
@@ -90,9 +94,19 @@ scanners converge on database uniqueness — exactly one delivery per
 (incident, event, recipient) — and only the committing scanner proceeds.
 Two boolean flags per incident (`open_intent_materialized`,
 `resolved_intent_materialized`) distinguish an intentionally empty
-snapshot (zero recipients) from a missing intent; the detector repairs
-missing intents oldest-first without touching existing snapshots or
-minting new alert keys.
+snapshot (zero recipients) from a missing intent. Rows predating atomic
+writes keep `FALSE` flags and are never auto-fabricated: an explicit
+operator reconciliation (`operations incidents reconcile --id <uuid>`)
+declares their current durable state complete, setting the applicable
+flag with zero new deliveries, zero sends, and zero healing, preserving
+existing snapshots byte-for-byte.
+
+Historical note: detector builds predating this rule used to fill
+missing intents automatically from then-current configuration. Any
+deliveries or recovery rows created that way remain valid durable
+state — adopted as-is, never deleted or rewritten. Only rows that are
+still unmaterialized need explicit reconciliation; reconcile never
+touches already-materialized snapshots.
 
 ## Reconnect Sync Now behavior
 

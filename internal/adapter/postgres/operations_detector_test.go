@@ -527,28 +527,24 @@ func TestDetectorManualResolveConflict(t *testing.T) {
 	if !ok {
 		t.Fatal("open")
 	}
-	still, err := env.detector.StillActive(ctx, first)
-	if err != nil || !still {
-		t.Fatalf("still active: %v %v", still, err)
-	}
-	if _, err := env.svc.ResolveIfClear(ctx, first.ID, operations.ResolutionOperator, still); err == nil {
+	resolveReader := operations.NewOpsReader(env.store, env.svc, operations.NewMetrics())
+	resolveReader.SetManualGuard(5 * time.Minute)
+	if _, err := resolveReader.ResolveOperator(ctx, first.ID, ""); err == nil {
 		t.Fatal("must conflict while active")
 	} else if !strings.Contains(err.Error(), "CONDITION_STILL_ACTIVE") {
 		t.Fatalf("code: %v", err)
 	}
 }
 
-// M01: crash after incident insert (incident durable, no deliveries, flag
-// false) converges on restart: repair materializes exactly the missing
-// opened deliveries and sets the flag.
+// N01: crash artifact (incident durable, no deliveries, flag false) is
+// left untouched by scans: no fabrication. Explicit operator reconcile
+// then marks the intent complete with zero new rows.
 func TestRepairOpenAfterInsertCrash(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
 	opsSeedRecipient(t, env.store, "ar")
 	opsSeedRecipient(t, env.store, "en")
 	dev := env.device(t, "repair-dev")
-	// Simulate the crash artifact with the legacy non-atomic open: row
-	// exists, zero deliveries, flag false.
 	opened, created, err := env.svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
 	if err != nil || !created {
 		t.Fatalf("open: %v %v", opened, err)
@@ -556,28 +552,35 @@ func TestRepairOpenAfterInsertCrash(t *testing.T) {
 	if opened.OpenIntentMaterialized {
 		t.Fatal("legacy open leaves intent unmaterialized")
 	}
-	env.scan(t)
+	for i := 0; i < 3; i++ {
+		env.scan(t)
+	}
 	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dels) != 2 {
-		t.Fatalf("repair fills both recipients: %+v", dels)
+	if len(dels) != 0 {
+		t.Fatalf("no fabrication: %+v", dels)
 	}
 	fixed, _ := env.svc.Get(ctx, opened.ID)
-	if !fixed.OpenIntentMaterialized {
-		t.Fatal("flag set after repair")
+	if fixed.OpenIntentMaterialized {
+		t.Fatal("flag stays false without review")
 	}
-	// Repair is stable: another scan changes nothing.
-	env.scan(t)
+	reconciled, err := env.svc.Reconcile(ctx, opened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconciled.OpenIntentMaterialized {
+		t.Fatal("reconcile marks the flag")
+	}
 	again, _ := env.store.DeliveriesForIncident(ctx, opened.ID)
-	if len(again) != 2 {
-		t.Fatalf("repair stable: %+v", again)
+	if len(again) != 0 {
+		t.Fatalf("reconcile sends nothing: %+v", again)
 	}
 }
 
-// M01: crash after the first delivery write (one of two deliveries
-// durable, flag false) converges keeping the existing snapshot and key.
+// N01: partial crash artifact (one delivery durable, flag false) is
+// preserved byte-for-byte; scans add nothing; reconcile only flips flags.
 func TestRepairOpenAfterFirstDeliveryCrash(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
@@ -592,35 +595,41 @@ func TestRepairOpenAfterFirstDeliveryCrash(t *testing.T) {
 	if err != nil || len(built) != 2 {
 		t.Fatalf("build: %+v %v", built, err)
 	}
-	// Simulate the crash: only the first delivery committed.
 	if _, err := env.store.CreateDelivery(ctx, built[0], time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	env.scan(t)
+	before := deliverySnapshot(t, env.store, ctx, opened.ID)
+	for i := 0; i < 3; i++ {
+		env.scan(t)
+	}
 	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dels) != 2 {
-		t.Fatalf("exactly two deliveries: %+v", dels)
+	if len(dels) != 1 {
+		t.Fatalf("exactly the original delivery: %+v", dels)
 	}
-	byRecipient := map[string]operations.Delivery{}
-	for _, d := range dels {
-		byRecipient[d.RecipientID] = d
-	}
-	// Existing snapshot untouched: same ID and notification key.
-	found, ok, err := env.store.DeliveryByIdentity(ctx, opened.ID, operations.EventOpened, built[0].RecipientID)
-	if err != nil || !ok || found.ID != built[0].ID || found.NotificationKey != built[0].NotificationKey {
-		t.Fatalf("existing snapshot preserved: %+v %v %v", found, ok, err)
+	if got := deliverySnapshot(t, env.store, ctx, opened.ID); got != before {
+		t.Fatalf("byte-for-byte stable:\n%s\nvs\n%s", before, got)
 	}
 	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if fixed.OpenIntentMaterialized {
+		t.Fatal("flag stays false without review")
+	}
+	if _, err := env.svc.Reconcile(ctx, opened.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixed, _ = env.svc.Get(ctx, opened.ID)
 	if !fixed.OpenIntentMaterialized {
-		t.Fatal("flag set after repair")
+		t.Fatal("reconcile marks the flag")
+	}
+	if got := deliverySnapshot(t, env.store, ctx, opened.ID); got != before {
+		t.Fatalf("reconcile preserves snapshots:\n%s\nvs\n%s", before, got)
 	}
 }
 
-// M01: crash after resolution (resolved row, no deliveries, flag false)
-// converges on restart without re-resolving or touching the outcome.
+// N01: resolved crash artifact converges without re-resolving or
+// touching the outcome; reconcile marks the flag without deliveries.
 func TestRepairResolvedAfterResolveCrash(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
@@ -637,28 +646,33 @@ func TestRepairResolvedAfterResolveCrash(t *testing.T) {
 	if resolved.ResolvedIntentMaterialized {
 		t.Fatal("legacy resolve leaves intent unmaterialized")
 	}
-	env.scan(t)
+	for i := 0; i < 3; i++ {
+		env.scan(t)
+	}
 	dels, err := env.store.DeliveriesForIncident(ctx, opened.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var resolvedDels int
 	for _, d := range dels {
 		if d.Event == operations.EventResolved {
-			resolvedDels++
+			t.Fatalf("no retroactive resolved delivery: %+v", dels)
 		}
 	}
-	if resolvedDels != 1 {
-		t.Fatalf("resolved intent materialized: %+v", dels)
-	}
 	fixed, _ := env.svc.Get(ctx, opened.ID)
-	if fixed.State != "resolved" || !fixed.ResolvedIntentMaterialized {
-		t.Fatalf("outcome untouched, flag set: %+v", fixed)
+	if fixed.State != "resolved" || fixed.ResolvedIntentMaterialized {
+		t.Fatalf("outcome untouched, flag false: %+v", fixed)
+	}
+	if _, err := env.svc.Reconcile(ctx, opened.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixed, _ = env.svc.Get(ctx, opened.ID)
+	if !fixed.ResolvedIntentMaterialized {
+		t.Fatal("reconcile marks the flag")
 	}
 }
 
-// M01: crash between reconnect resolution and recovery creation converges:
-// repair arms the action, the worker adopts the deterministic command.
+// N01: resolved reconnect artifact never heals historically, even with
+// healing enabled; reconcile arms nothing and heals nothing.
 func TestRepairReconnectRecoveryCrash(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
@@ -668,31 +682,34 @@ func TestRepairReconnectRecoveryCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Legacy resolve path: resolution durable, no deliveries, no recovery.
 	resolved, err := env.svc.Resolve(ctx, opened.ID, operations.ResolutionReconnect)
 	if err != nil || resolved.State != "resolved" {
 		t.Fatalf("resolve: %+v %v", resolved, err)
 	}
+	for i := 0; i < 3; i++ {
+		env.scan(t)
+	}
 	if _, ok, _ := env.store.RecoveryForIncident(ctx, opened.ID); ok {
-		t.Fatal("no recovery before repair")
+		t.Fatal("no historical recovery")
 	}
-	env.scan(t)
-	rec, ok, err := env.store.RecoveryForIncident(ctx, opened.ID)
-	if err != nil || !ok || rec.State != "pending" {
-		t.Fatalf("recovery armed by repair: %+v %v %v", rec, ok, err)
+	var cmds int
+	if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM device_control_commands WHERE device_id=$1`, mustOpsUUID(t, dev)).Scan(&cmds); err != nil || cmds != 0 {
+		t.Fatalf("no commands: %d (%v)", cmds, err)
 	}
-	if rec.IdempotencyKey != operations.ReconnectIdempotencyKey(opened.ID) {
-		t.Fatalf("deterministic key: %q", rec.IdempotencyKey)
+	if _, err := env.svc.Reconcile(ctx, opened.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := env.store.RecoveryForIncident(ctx, opened.ID); ok {
+		t.Fatal("reconcile heals nothing")
 	}
 	env.drainRecovery(t)
-	done, _, _ := env.store.RecoveryForIncident(ctx, opened.ID)
-	if done.State != "completed" || done.TargetEntityID == nil {
-		t.Fatalf("worker converges: %+v", done)
+	if done, _, _ := env.store.RecoveryForIncident(ctx, opened.ID); done.State == "completed" {
+		t.Fatal("nothing to converge")
 	}
 }
 
-// M01: intentionally empty snapshot (zero recipients) is repaired to
-// flag-true with zero deliveries — distinguishable from missing intent.
+// N01: zero-recipient ambiguity stays ambiguous until reviewed: flag
+// FALSE (not "intentional") after scans, TRUE only after reconcile.
 func TestRepairZeroRecipientsIntentional(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
@@ -701,13 +718,22 @@ func TestRepairZeroRecipientsIntentional(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.scan(t)
+	for i := 0; i < 3; i++ {
+		env.scan(t)
+	}
 	fixed, _ := env.svc.Get(ctx, opened.ID)
+	if fixed.OpenIntentMaterialized {
+		t.Fatal("unknown intent is not intentional")
+	}
+	if _, err := env.svc.Reconcile(ctx, opened.ID); err != nil {
+		t.Fatal(err)
+	}
+	fixed, _ = env.svc.Get(ctx, opened.ID)
 	if !fixed.OpenIntentMaterialized {
-		t.Fatal("empty intent marked materialized")
+		t.Fatal("reconcile marks the flag")
 	}
 	dels, _ := env.store.DeliveriesForIncident(ctx, opened.ID)
 	if len(dels) != 0 {
-		t.Fatalf("intentionally empty: %+v", dels)
+		t.Fatalf("still empty: %+v", dels)
 	}
 }

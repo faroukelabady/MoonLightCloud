@@ -20,26 +20,30 @@ type OperationsHandlers struct {
 }
 
 type incidentWire struct {
-	ID             string  `json:"id"`
-	Rule           string  `json:"rule"`
-	SubjectType    string  `json:"subject_type"`
-	SubjectID      string  `json:"subject_id"`
-	Severity       string  `json:"severity"`
-	State          string  `json:"state"`
-	Episode        int     `json:"episode"`
-	OpenedAt       string  `json:"opened_at"`
-	LastObservedAt string  `json:"last_observed_at"`
-	AcknowledgedAt *string `json:"acknowledged_at,omitempty"`
-	ResolvedAt     *string `json:"resolved_at,omitempty"`
-	ResolutionCode *string `json:"resolution_code,omitempty"`
+	ID                         string  `json:"id"`
+	Rule                       string  `json:"rule"`
+	SubjectType                string  `json:"subject_type"`
+	SubjectID                  string  `json:"subject_id"`
+	Severity                   string  `json:"severity"`
+	State                      string  `json:"state"`
+	Episode                    int     `json:"episode"`
+	OpenedAt                   string  `json:"opened_at"`
+	LastObservedAt             string  `json:"last_observed_at"`
+	AcknowledgedAt             *string `json:"acknowledged_at,omitempty"`
+	ResolvedAt                 *string `json:"resolved_at,omitempty"`
+	ResolutionCode             *string `json:"resolution_code,omitempty"`
+	OpenIntentMaterialized     bool    `json:"open_intent_materialized"`
+	ResolvedIntentMaterialized bool    `json:"resolved_intent_materialized"`
 }
 
 func toIncidentWire(in operations.Incident) incidentWire {
 	w := incidentWire{
 		ID: in.ID, Rule: in.Rule, SubjectType: in.SubjectType, SubjectID: in.SubjectID,
 		Severity: in.Severity, State: in.State, Episode: in.Episode,
-		OpenedAt:       in.OpenedAt.UTC().Format(time.RFC3339Nano),
-		LastObservedAt: in.LastObservedAt.UTC().Format(time.RFC3339Nano),
+		OpenedAt:                   in.OpenedAt.UTC().Format(time.RFC3339Nano),
+		LastObservedAt:             in.LastObservedAt.UTC().Format(time.RFC3339Nano),
+		OpenIntentMaterialized:     in.OpenIntentMaterialized,
+		ResolvedIntentMaterialized: in.ResolvedIntentMaterialized,
 	}
 	if in.AcknowledgedAt != nil {
 		s := in.AcknowledgedAt.UTC().Format(time.RFC3339Nano)

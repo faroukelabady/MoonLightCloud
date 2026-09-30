@@ -3,6 +3,7 @@ package operations
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,12 +376,11 @@ func TestManualResolveGuardMem(t *testing.T) {
 	old := time.Now().Add(-time.Hour)
 	store.devices["d1"] = memDevice{id: "d1", active: true, lastSeen: &old}
 	opened, _, _ := svc.OpenStateful(ctx, RuleDeviceOffline, SubjectDevice, "d1", "")
-	still, err := (&Detector{store: store, cfg: DetectorConfig{OfflineAfter: 5 * time.Minute}, now: time.Now}).StillActive(ctx, opened)
-	if err != nil || !still {
-		t.Fatalf("still active: %v %v", still, err)
-	}
-	if _, err := svc.ResolveIfClear(ctx, opened.ID, ResolutionOperator, still); err == nil {
+	reader.SetManualGuard(5 * time.Minute)
+	if _, err := reader.ResolveOperator(ctx, opened.ID, ""); err == nil {
 		t.Fatal("conflict while active")
+	} else if !strings.Contains(err.Error(), "CONDITION_STILL_ACTIVE") {
+		t.Fatalf("code: %v", err)
 	}
 	event, _, _ := svc.OpenEvent(ctx, RuleDeviceSyncFailed, SubjectSyncCommand, "c1", "sync-command:c1")
 	resolved, err := reader.ResolveOperator(ctx, event.ID, "")

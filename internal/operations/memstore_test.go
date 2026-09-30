@@ -476,12 +476,14 @@ func (m *memStore) ScanFailedCommands(_ context.Context, limit int) ([]FailedCom
 	return out, nil
 }
 
-func (m *memStore) ScanStaleCommands(_ context.Context, olderThan time.Time, limit int) ([]StaleCommand, error) {
+func (m *memStore) ScanStaleCommands(_ context.Context, pendingEdge, runningEdge time.Time, limit int) ([]StaleCommand, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []StaleCommand
 	for _, c := range m.commands {
-		if (c.status == "pending" || c.status == "leased" || c.status == "accepted" || c.status == "running") && c.requested.Before(olderThan) &&
+		eligible := (c.status == "pending" && c.requested.Before(pendingEdge)) ||
+			((c.status == "leased" || c.status == "accepted" || c.status == "running") && c.requested.Before(runningEdge))
+		if eligible &&
 			m.activeFor(RuleDeviceSyncStale, SubjectSyncCommand, c.id) == nil {
 			out = append(out, StaleCommand{CommandID: c.id, DeviceID: c.device, Status: c.status, RequestedAt: c.requested})
 		}
@@ -764,36 +766,6 @@ func (m *memStore) MaterializeResolved(_ context.Context, id string, deliveries 
 	return nil
 }
 
-func (m *memStore) ScanUnmaterializedOpened(_ context.Context, limit int) ([]Incident, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []Incident
-	for _, in := range m.incidents {
-		if (in.State == StateOpen || in.State == StateAcknowledged) && !in.OpenIntentMaterialized {
-			out = append(out, *in)
-		}
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (m *memStore) ScanUnmaterializedResolved(_ context.Context, limit int) ([]Incident, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []Incident
-	for _, in := range m.incidents {
-		if in.State == StateResolved && !in.ResolvedIntentMaterialized {
-			out = append(out, *in)
-		}
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
 func (m *memStore) DeliveryByIdentity(_ context.Context, incidentID, event, recipientID string) (Delivery, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -803,4 +775,44 @@ func (m *memStore) DeliveryByIdentity(_ context.Context, incidentID, event, reci
 		}
 	}
 	return Delivery{}, false, nil
+}
+
+func (m *memStore) ResolveStatefulIfClear(_ context.Context, id, rule, subjectID, code string, offlineEdge, at time.Time) (Incident, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	in, ok := m.incidents[id]
+	if !ok {
+		return Incident{}, false, nil
+	}
+	if in.State != StateOpen && in.State != StateAcknowledged {
+		return *in, false, nil
+	}
+	still := false
+	switch rule {
+	case RuleDeviceOffline:
+		if d, ok := m.devices[subjectID]; ok && d.lastSeen != nil && !d.lastSeen.After(offlineEdge) {
+			still = true
+		}
+	case RuleDeviceSyncStale:
+		if c, ok := m.commands[subjectID]; ok && c.status != "completed" && c.status != "failed" {
+			still = true
+		}
+	case RuleReportStale:
+		if r, ok := m.runs[subjectID]; ok && (r.status == "pending" || r.status == "retry") {
+			still = true
+		}
+	case RuleNotificationStale:
+		if n, ok := m.notifications[subjectID]; ok && (n.status == "pending" || n.status == "retry") {
+			still = true
+		}
+	default:
+		return Incident{}, false, nil
+	}
+	if still {
+		return *in, false, nil
+	}
+	in.State = StateResolved
+	in.ResolvedAt = &at
+	in.ResolutionCode = &code
+	return *in, true, nil
 }

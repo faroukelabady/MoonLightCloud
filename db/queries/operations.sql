@@ -208,14 +208,14 @@ LIMIT $1;
 -- name: ScanStaleCommands :many
 SELECT id, device_id, command_type, command_version, status, requested_at
 FROM device_control_commands
-WHERE status IN ('pending', 'leased', 'accepted', 'running')
-  AND requested_at < $1
+WHERE ((status = 'pending' AND requested_at < $1)
+   OR (status IN ('leased', 'accepted', 'running') AND requested_at < $2))
   AND NOT EXISTS (
     SELECT 1 FROM operational_incidents i
     WHERE i.rule_key = 'DEVICE_SYNC_STALE' AND i.subject_type = 'sync_command'
       AND i.subject_id = device_control_commands.id::text AND i.state IN ('open', 'acknowledged'))
 ORDER BY device_control_commands.requested_at, device_control_commands.id
-LIMIT $2;
+LIMIT $3;
 
 -- name: ScanBlockedRuns :many
 SELECT id, schedule_id, run_kind, slot_local_date, created_at
@@ -312,27 +312,6 @@ WHERE rule_key = $1 AND state IN ('open', 'acknowledged')
 ORDER BY last_observed_at, id
 LIMIT $2;
 
--- M01 materialization repair: rows whose transition committed without its
--- durable event intent (open/resolved deliveries, reconnect recovery).
--- Bounded, oldest first; each is repaired idempotently without touching
--- existing snapshots.
-
--- name: ScanUnmaterializedOpened :many
-SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
-FROM operational_incidents
-WHERE state IN ('open', 'acknowledged') AND NOT open_intent_materialized
-ORDER BY opened_at, id
-LIMIT $1;
-
--- name: ScanUnmaterializedResolved :many
-SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
-    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
-FROM operational_incidents
-WHERE state = 'resolved' AND NOT resolved_intent_materialized
-ORDER BY resolved_at, id
-LIMIT $1;
-
 -- name: MarkOpenIntentMaterialized :execrows
 UPDATE operational_incidents SET open_intent_materialized = TRUE, updated_at = $2 WHERE id = $1;
 
@@ -354,3 +333,81 @@ ON CONFLICT (incident_id, event_type, recipient_id) DO NOTHING
 RETURNING id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot,
     locale_snapshot, template_key, body_snapshot, body_fingerprint, notification_id, notification_idempotency_key,
     status, last_error_code, created_at, updated_at;
+
+-- Manual-resolution guarded transitions (single statement each): the
+-- resolve commits only when the stateful predicate currently reads
+-- clear, closing the check/write race. Callers distinguish "already
+-- resolved" (no-op success) from "still active" (409) by re-reading.
+-- Subject IDs are UUIDs; callers pre-validate and fail closed otherwise.
+
+-- name: ResolveIfOfflineClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $3, resolution_code = $4, updated_at = $3
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM device_control_presence p
+    WHERE p.device_id = i.subject_id::uuid AND p.last_seen_at <= $2)
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
+
+-- name: ResolveIfSyncClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM device_control_commands c
+    WHERE c.id = i.subject_id::uuid AND c.status NOT IN ('completed', 'failed'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
+
+-- name: ResolveIfReportClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM business_report_runs r
+    WHERE r.id = i.subject_id::uuid AND r.status IN ('pending', 'retry'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
+
+-- name: ResolveIfNotificationClear :one
+UPDATE operational_incidents i
+SET state = 'resolved', resolved_at = $2, resolution_code = $3, updated_at = $2
+WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
+  AND NOT EXISTS (
+    SELECT 1 FROM notification_messages n
+    WHERE n.id = i.subject_id::uuid AND n.dispatch_status IN ('pending', 'retry'))
+RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized;
+
+-- Manual-resolution predicate locks: held for the duration of the
+-- guarded-resolve transaction so a concurrent predicate write cannot
+-- commit between validation and resolution. EvalPlanQual only rechecks
+-- when the incident row itself changes, so without these locks a
+-- predicate flip landing mid-flight would be invisible. Missing subject
+-- rows lock nothing (matching StillActive: absent reads as clear).
+-- Writers always touch these same rows, so lock ordering is consistent
+-- (predicate row, then incident row) and cannot deadlock against
+-- detector paths, which never take explicit row locks.
+
+-- name: LockPresenceRow :one
+SELECT device_id FROM device_control_presence WHERE device_id = $1 FOR UPDATE;
+
+-- name: LockCommandRow :one
+SELECT id FROM device_control_commands WHERE id = $1 FOR UPDATE;
+
+-- name: LockRunRow :one
+SELECT id FROM business_report_runs WHERE id = $1 FOR UPDATE;
+
+-- name: LockNotificationRow :one
+SELECT id FROM notification_messages WHERE id = $1 FOR UPDATE;
+
+-- Incident-row lock for guarded manual resolution. Lock ordering across
+-- the codebase is incident row first, predicate row second; no other
+-- path holds these locks in reverse order, so this cannot deadlock.
+
+-- name: LockIncidentRow :one
+SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
+    opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
+FROM operational_incidents
+WHERE id = $1 FOR UPDATE;

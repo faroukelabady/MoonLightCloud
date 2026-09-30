@@ -267,7 +267,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		NotificationStale:   cfg.Operations.NotificationRetryStaleAfter,
 		AutoSyncOnReconnect: cfg.Operations.AutoSyncOnReconnect,
 	}, ids.System{}.New, time.Now, opsMetrics)
-	opsReader.SetStillActive(opsDetector.StillActive)
+	opsReader.SetManualGuard(cfg.Operations.DeviceOfflineAfter)
 	opsRecovery := operations.NewRecoveryWorker(opsStore, operations.NewDeviceCommander(a.DeviceControl), time.Now, opsMetrics)
 	// The detector, alert processor, and recovery worker are always
 	// constructed so dashboard predicate checks (manual resolve guard)

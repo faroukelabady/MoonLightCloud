@@ -1906,7 +1906,7 @@ components:
     OperationsIncident:
       type: object
       description: Durable operational incident. States open/acknowledged/resolved; severities warning/urgent (operator language only).
-      required: [id, rule, subject_type, subject_id, severity, state, episode, opened_at, last_observed_at]
+      required: [id, rule, subject_type, subject_id, severity, state, episode, opened_at, last_observed_at, open_intent_materialized, resolved_intent_materialized]
       properties:
         id:
           type: string
@@ -1946,6 +1946,12 @@ components:
           type: string
           nullable: true
           enum: [RECONNECT_RESOLVED, DEVICE_NO_LONGER_ACTIVE, CONDITION_CLEARED, TERMINAL_REACHED, OPERATOR_RESOLVED]
+        open_intent_materialized:
+          type: boolean
+          description: True when the opened alert intent is durably materialized; false marks a pre-atomic legacy row needing explicit operator reconcile.
+        resolved_intent_materialized:
+          type: boolean
+          description: True when the resolved alert intent is durably materialized; false marks a pre-atomic legacy row needing explicit operator reconcile.
     OperationsIncidentList:
       type: object
       required: [incidents, next_cursor]

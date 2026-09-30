@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
+import { cleanup, render, screen, fireEvent, within } from '@testing-library/svelte';
 import OperationsPage from './OperationsPage.svelte';
 import { dashboardApi, ApiError } from '../lib/api.js';
 
@@ -32,7 +32,9 @@ function row(id: string, rule: string, state: string, severity = 'warning') {
 		state,
 		episode: 1,
 		opened_at: '2026-09-29T10:00:00Z',
-		last_observed_at: '2026-09-29T10:00:00Z'
+		last_observed_at: '2026-09-29T10:00:00Z',
+		open_intent_materialized: true,
+		resolved_intent_materialized: true
 	};
 }
 
@@ -76,5 +78,23 @@ describe('OperationsPage', () => {
 		await fireEvent.click(more);
 		expect(api.incidents).toHaveBeenCalledTimes(2);
 		expect(await screen.findByText('DEVICE_SYNC_FAILED')).toBeTruthy();
+	});
+});
+
+describe('OperationsPage intent review badge', () => {
+	it('flags legacy rows with unmaterialized intents and hides it otherwise', async () => {
+		api.incidents.mockResolvedValue({
+			incidents: [
+				{ ...row('legacy', 'DEVICE_OFFLINE', 'open'), open_intent_materialized: false },
+				row('fresh', 'DEVICE_OFFLINE', 'open')
+			],
+			next_cursor: ''
+		});
+		render(OperationsPage);
+		const badge = await screen.findByTestId('intent-review');
+		expect(badge.textContent).toContain('needs review');
+		const rows = screen.getAllByTestId('incident-row');
+		expect(rows).toHaveLength(2);
+		expect(within(rows[1] as HTMLElement).queryByTestId('intent-review')).toBeNull();
 	});
 });

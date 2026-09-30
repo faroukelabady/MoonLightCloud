@@ -45,12 +45,7 @@ func openOpsHTTP(t *testing.T) *opsHTTPEnv {
 	authSvc := auth.NewService(store, h, "", 1, clock.System{}, ids.System{})
 	svc := operations.NewService(store, ids.System{}.New, time.Now)
 	reader := operations.NewOpsReader(store, svc, operations.NewMetrics())
-	detector := operations.NewDetector(store, svc, nil, operations.DetectorConfig{
-		BatchSize: 100, OfflineAfter: 5 * time.Minute, OnlineWindow: time.Minute,
-		SyncPendingStale: 30 * time.Minute, SyncRunningStale: 30 * time.Minute,
-		ReportStale: time.Hour, NotificationStale: time.Hour,
-	}, ids.System{}.New, time.Now, operations.NewMetrics())
-	reader.SetStillActive(detector.StillActive)
+	reader.SetManualGuard(5 * time.Minute)
 	return &opsHTTPEnv{
 		handlers: &OperationsHandlers{Svc: svc, Ops: reader},
 		svc:      svc, store: store, pool: pool, auth: authSvc,

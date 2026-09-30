@@ -197,3 +197,69 @@ func TestRollback20To18Clean(t *testing.T) {
 		t.Fatalf("stale index restored (%v)", err)
 	}
 }
+
+// v19 → 20 preserves 7A/7B/7C/7D durable state byte-for-byte, including
+// incidents with deliveries, recovery rows, and legacy FALSE intent
+// flags (which R2 repair paths must not fabricate).
+func TestV19To20Preservation(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 19); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string) {
+		t.Helper()
+		if _, err := conn.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO devices (id, name, status, created_at, updated_at)
+		VALUES ('11111111-1111-4111-8111-111111111111', 'shop-pc', 'active', now(), now())`)
+	exec(`INSERT INTO notification_template_mappings
+		(provider_key, template_key, locale, external_template_name, external_language_code, parameter_names, enabled)
+		VALUES ('whatsapp-main', 'daily_business_report_v1', 'ar', 'ext', 'ar', '{report_body}', TRUE)`)
+	exec(`INSERT INTO notification_messages
+		(id, provider_key, idempotency_key, semantic_fingerprint, recipient, template_key, locale,
+		 ext_template_name, ext_language_code, dispatch_status, delivery_status)
+		VALUES ('55555555-5555-4533-8555-555555555555', 'whatsapp-main', 'nb-7d', '\x01',
+			'201012345678', 'daily_business_report_v1', 'ar', 'ext', 'ar', 'blocked', 'UNKNOWN')`)
+	exec(`INSERT INTO business_report_recipients (id, label, provider_key, recipient, locale)
+		VALUES ('66666666-6666-4633-8666-666666666666', 'owner', 'whatsapp-main', '201012345678', 'ar')`)
+	exec(`INSERT INTO operational_alert_recipients (id, label, provider_key, recipient, locale, enabled, created_at, updated_at)
+		VALUES ('0a0a0a0a-0000-4000-8000-000000000001', 'ops', 'whatsapp-main', '201012345678', 'ar', TRUE, now(), now())`)
+	exec(`INSERT INTO operational_incidents (id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key, opened_at, last_observed_at, created_at, updated_at)
+		VALUES ('0b0b0b0b-0000-4000-8000-000000000001', 'NOTIFICATION_BLOCKED', 'notification', '55555555-5555-4533-8555-555555555555', 'warning', 'open', 1, 'notification-blocked:55555555-5555-4533-8555-555555555555', now(), now(), now(), now())`)
+	exec(`INSERT INTO operational_alert_deliveries (id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot, locale_snapshot, template_key, body_snapshot, body_fingerprint, notification_idempotency_key, status, created_at, updated_at)
+		VALUES ('0c0c0c0c-0000-4000-8000-000000000001', '0b0b0b0b-0000-4000-8000-000000000001', '0a0a0a0a-0000-4000-8000-000000000001', 'opened', 'whatsapp-main', '201012345678', 'ar', 'operational_alert_open_v1', 'body', '\x03', 'ops-alert:legacy:opened:d1', 'pending', now(), now())`)
+	exec(`INSERT INTO operational_recovery_actions (id, incident_id, action_type, state, idempotency_key, created_at, updated_at)
+		VALUES ('0d0d0d0d-0000-4000-8000-000000000001', '0b0b0b0b-0000-4000-8000-000000000001', 'DEVICE_RECONNECT_SYNC', 'blocked', 'ops-reconnect:legacy', now(), now())`)
+	before := dumpTable(t, conn, `SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key FROM operational_incidents ORDER BY id`)
+	beforeDels := dumpTable(t, conn, `SELECT id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot, locale_snapshot, template_key, body_snapshot, notification_idempotency_key, status FROM operational_alert_deliveries ORDER BY id`)
+	beforeRec := dumpTable(t, conn, `SELECT incident_id, action_type, state, idempotency_key FROM operational_recovery_actions ORDER BY incident_id`)
+	beforeNotes := dumpTable(t, conn, `SELECT id, dispatch_status FROM notification_messages ORDER BY id`)
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 20 {
+		t.Fatalf("want 20, got %d", v)
+	}
+	if got := dumpTable(t, conn, `SELECT id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key FROM operational_incidents ORDER BY id`); got != before {
+		t.Fatalf("incidents preserved:\n%s\nvs\n%s", before, got)
+	}
+	if got := dumpTable(t, conn, `SELECT id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot, locale_snapshot, template_key, body_snapshot, notification_idempotency_key, status FROM operational_alert_deliveries ORDER BY id`); got != beforeDels {
+		t.Fatalf("deliveries preserved:\n%s\nvs\n%s", beforeDels, got)
+	}
+	if got := dumpTable(t, conn, `SELECT incident_id, action_type, state, idempotency_key FROM operational_recovery_actions ORDER BY incident_id`); got != beforeRec {
+		t.Fatalf("recovery preserved:\n%s\nvs\n%s", beforeRec, got)
+	}
+	if got := dumpTable(t, conn, `SELECT id, dispatch_status FROM notification_messages ORDER BY id`); got != beforeNotes {
+		t.Fatalf("notifications preserved:\n%s\nvs\n%s", beforeNotes, got)
+	}
+	// Legacy FALSE flags survive the upgrade untouched.
+	var openFlag, resolvedFlag bool
+	if err := conn.QueryRow(`SELECT open_intent_materialized, resolved_intent_materialized FROM operational_incidents WHERE id='0b0b0b0b-0000-4000-8000-000000000001'`).Scan(&openFlag, &resolvedFlag); err != nil {
+		t.Fatal(err)
+	}
+	if openFlag || resolvedFlag {
+		t.Fatal("legacy flags stay FALSE through upgrade")
+	}
+}

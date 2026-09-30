@@ -56,9 +56,12 @@ engine.
   only the committing scanner proceeds, losers create nothing. A
   `(incident_id, event_type, recipient_id)` unique constraint backstops
   convergence. Per-incident `open/resolved_intent_materialized` flags
-  distinguish intentionally empty snapshots from missing intents; the
-  detector repairs missing intents oldest-first without touching
-  existing snapshots or minting new alert keys.
+  distinguish intentionally empty snapshots from missing intents. Rows
+  predating atomic writes keep `FALSE` flags and are never
+  auto-fabricated: an explicit operator reconciliation (`operations
+  incidents reconcile --id <uuid>`) declares their current durable state
+  complete with zero new deliveries, zero sends, and zero healing,
+  preserving existing snapshots byte-for-byte.
 - **Progressive scans:** event scans exclude already-represented source
   keys and stateful open scans exclude actively-incidented subjects via
   indexed anti-joins; resolution scans start from active incidents with
@@ -67,5 +70,8 @@ engine.
 - **Migration 00020** adds the flags, the delivery-identity constraint,
   and the leased-covering stale index (Cloud target 20). Rollback to 18
   leaves no Phase 7D tables or indexes.
-- Leased commands join the overall-age stale predicate; the manual
-  resolve guard stays enforced with the engine disabled (fail closed).
+- Leased commands join the overall-age stale predicate. The manual
+  resolve guard runs in one transaction (incident row lock, then
+  predicate subject row lock, then a predicate-guarded UPDATE), so a
+  condition turning active mid-flight is always observed; it stays
+  enforced with the engine disabled (fail closed).

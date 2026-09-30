@@ -110,6 +110,32 @@ func (s *Service) MaterializeResolved(ctx context.Context, id string, deliveries
 	return s.store.MaterializeResolved(ctx, id, deliveries, recovery, s.now().UTC())
 }
 
+// Reconcile declares an ambiguous legacy incident's current durable
+// state complete after explicit operator review: it sets the applicable
+// intent flag with zero new deliveries, zero sends, and zero healing.
+// Existing snapshots, notification IDs, keys, and recovery rows are
+// preserved byte-for-byte. Open/acknowledged incidents reconcile their
+// opened intent; resolved incidents reconcile their resolved intent.
+func (s *Service) Reconcile(ctx context.Context, id string) (Incident, error) {
+	incident, err := s.byID(ctx, id)
+	if err != nil {
+		return Incident{}, err
+	}
+	switch incident.State {
+	case StateOpen, StateAcknowledged:
+		if err := s.MaterializeOpen(ctx, id, nil); err != nil {
+			return Incident{}, err
+		}
+	case StateResolved:
+		if err := s.MaterializeResolved(ctx, id, nil, nil); err != nil {
+			return Incident{}, err
+		}
+	default:
+		return Incident{}, apperr.New(apperr.InvalidInput, "unknown incident state")
+	}
+	return s.byID(ctx, id)
+}
+
 // Acknowledge is idempotent and never resolves.
 func (s *Service) Acknowledge(ctx context.Context, id string) (Incident, error) {
 	incident, ok, err := s.store.Acknowledge(ctx, id, s.now().UTC())

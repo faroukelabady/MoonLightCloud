@@ -298,6 +298,8 @@ export interface IncidentRow {
 	acknowledged_at?: string | null;
 	resolved_at?: string | null;
 	resolution_code?: string | null;
+	open_intent_materialized: boolean;
+	resolved_intent_materialized: boolean;
 }
 
 export interface IncidentDelivery {
