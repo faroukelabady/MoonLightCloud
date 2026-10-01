@@ -101,7 +101,7 @@ GROUP BY s.channel,
     s.currency;
 
 -- name: DashboardProductsNormalized :many
-SELECT l.product_id, l.sku, l.product_name,
+SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
@@ -224,7 +224,7 @@ GROUP BY day.day
 ORDER BY day.day;
 
 -- name: DashboardProductsNormalizedRefunds :many
-SELECT sl.product_id, sl.sku, sl.product_name,
+SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
@@ -270,6 +270,291 @@ LEFT JOIN (
 ) l ON l.return_refund_id = r.return_refund_id
 WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
   AND (@currency::text = '' OR r.currency = @currency::text)
+GROUP BY s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency;
+
+-- Phase 9D Store-scoped dashboard reads. Same frozen aggregates with an
+-- ownership predicate on the authoritative root (sales/returns) or the
+-- ingress event (activity feed). Legacy NULL rows never match a Store
+-- scope; unfiltered queries keep documented global behavior. Historical
+-- FX normalization, exact integer math, and overlap semantics unchanged.
+
+-- name: DashboardNormalizedSummaryForStore :one
+SELECT
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
+        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_total,
+    COUNT(*) FILTER (WHERE s.currency = 'USD')::bigint AS usd_sales,
+    COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS usd_missing_fx
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND s.store_id = @store_id::uuid;
+
+-- name: DashboardNormalizedDailyForStore :many
+SELECT day.day AS day,
+    COUNT(*)::bigint AS transactions,
+    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COUNT(*) FILTER (WHERE day.usd_missing_fx)::bigint AS usd_missing_fx
+FROM (
+    SELECT s.sale_id,
+        ((s.occurred_at AT TIME ZONE @timezone::text)::date)::text AS day,
+        round(CASE WHEN s.currency = 'EGP' THEN s.total_minor::numeric
+        ELSE (s.total_minor::numeric * s.fx_rate_microrate) / 1000000 END) AS normalized,
+        (s.currency = 'USD' AND s.fx_rate_microrate IS NULL) AS usd_missing_fx
+    FROM sales_projection s
+    WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+      AND s.store_id = @store_id::uuid
+) day
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = day.sale_id
+GROUP BY day.day
+ORDER BY day.day;
+
+-- name: DashboardLatestFxForStore :one
+SELECT
+    (SELECT s.fx_rate FROM sales_projection s
+        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid
+        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_rate,
+    (SELECT s.fx_rate_microrate FROM sales_projection s
+        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid
+        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_microrate,
+    (SELECT s.occurred_at FROM sales_projection s
+        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid
+        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_occurred,
+    (SELECT COUNT(DISTINCT s.fx_rate_microrate) FROM sales_projection s
+        WHERE s.currency = 'USD'
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid) AS distinct_rates,
+    (SELECT COALESCE(MIN(s.fx_rate_microrate), -1)::bigint FROM sales_projection s
+        WHERE s.currency = 'USD'
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid) AS min_microrate,
+    (SELECT COALESCE(MAX(s.fx_rate_microrate), -1)::bigint FROM sales_projection s
+        WHERE s.currency = 'USD'
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid) AS max_microrate,
+    (SELECT COUNT(*) FROM sales_projection s
+        WHERE s.currency = 'USD'
+          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+          AND s.store_id = @store_id::uuid) AS usd_sales;
+
+-- name: DashboardBranchesForStore :many
+SELECT s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    s.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(s.subtotal_minor), 0)::bigint AS subtotal,
+    COALESCE(SUM(s.discount_minor), 0)::bigint AS discount,
+    COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
+    COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR s.currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    s.currency;
+
+-- name: DashboardProductsNormalizedForStore :many
+SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
+    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND s.store_id = @store_id::uuid
+GROUP BY l.product_id, l.sku, l.product_name;
+
+-- name: DashboardCategoriesNormalizedForStore :many
+SELECT c.classification_kind AS kind, c.classification_id AS id,
+    c.name_ar, c.name_en,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+        ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
+    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM sale_line_classifications_projection c
+JOIN sale_lines_projection l
+  ON l.sale_id = c.sale_id AND l.sale_item_id = c.sale_item_id
+JOIN sales_projection s ON s.sale_id = c.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND c.classification_kind = @kind::text
+  AND s.store_id = @store_id::uuid
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en;
+
+-- name: DashboardRecentActivityForStore :many
+SELECT kind, event_id, event_type, ts, device_name, detail FROM (
+    (SELECT 'accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,
+        d.name AS device_name, NULL::text AS detail
+    FROM sync_events e
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.store_id = @store_id::uuid
+      AND e.event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+    ORDER BY e.received_at DESC, e.event_id ASC
+    LIMIT @limit_n::int)
+    UNION ALL
+    (SELECT CASE WHEN p.status = 'blocked' THEN 'blocked'::text ELSE 'projected'::text END AS kind,
+        p.event_id, e.event_type, COALESCE(p.processed_at, p.updated_at) AS ts,
+        d.name AS device_name, p.last_error_code AS detail
+    FROM sync_event_processing p
+    JOIN sync_events e ON e.event_id = p.event_id
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.store_id = @store_id::uuid
+      AND ((e.event_type = 'sale.finalized.v1' AND p.processor = 'sale_projection.v1')
+        OR (e.event_type = 'sale.finalized.v2' AND p.processor = 'sale_projection.v2'))
+      AND p.status IN ('processed', 'blocked')
+    ORDER BY ts DESC, kind ASC, event_id ASC
+    LIMIT @limit_n::int)
+    UNION ALL
+    (SELECT 'return_accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,
+        d.name AS device_name, NULL::text AS detail
+    FROM sync_events e
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.store_id = @store_id::uuid
+      AND e.event_type = 'sale.return_refund.finalized.v1'
+    ORDER BY e.received_at DESC, e.event_id ASC
+    LIMIT @limit_n::int)
+    UNION ALL
+    (SELECT CASE WHEN p.status = 'blocked' THEN 'return_blocked'::text ELSE 'return_projected'::text END AS kind,
+        p.event_id, e.event_type, COALESCE(p.processed_at, p.updated_at) AS ts,
+        d.name AS device_name, p.last_error_code AS detail
+    FROM sync_event_processing p
+    JOIN sync_events e ON e.event_id = p.event_id
+    LEFT JOIN devices d ON d.id = e.device_id
+    WHERE e.store_id = @store_id::uuid
+      AND p.processor = 'return_refund_projection.v1' AND p.status IN ('processed', 'blocked')
+    ORDER BY ts DESC, kind ASC, event_id ASC
+    LIMIT @limit_n::int)
+) feed
+ORDER BY ts DESC, kind ASC, event_id ASC
+LIMIT @limit_n::int;
+
+-- name: DashboardLatestSalesForStore :many
+SELECT sale_id, sale_number, channel, occurred_at, currency, total_minor,
+    cashier_id, cashier_name
+FROM sales_projection
+WHERE store_id = @store_id::uuid
+ORDER BY occurred_at DESC, sale_id DESC
+LIMIT @limit_n::int;
+
+-- name: DashboardNormalizedRefundsSummaryForStore :one
+SELECT
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE r.currency = 'USD')::bigint AS usd_returns,
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS usd_missing_fx
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND r.store_id = @store_id::uuid;
+
+-- name: DashboardNormalizedRefundsDailyForStore :many
+SELECT day.day AS day,
+    COUNT(*)::bigint AS transactions,
+    COALESCE(SUM(day.normalized), 0)::bigint AS normalized_refund,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COUNT(*) FILTER (WHERE day.usd_missing_fx)::bigint AS usd_missing_fx
+FROM (
+    SELECT r.return_refund_id,
+        ((r.occurred_at AT TIME ZONE @timezone::text)::date)::text AS day,
+        round(CASE WHEN r.currency = 'EGP' THEN r.refund_total_minor::numeric
+        ELSE (r.refund_total_minor::numeric * r.fx_rate_microrate) / 1000000 END) AS normalized,
+        (r.currency = 'USD' AND r.fx_rate_microrate IS NULL) AS usd_missing_fx
+    FROM return_refund_projection r
+    WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+      AND r.store_id = @store_id::uuid
+) day
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = day.return_refund_id
+GROUP BY day.day
+ORDER BY day.day;
+
+-- name: DashboardProductsNormalizedRefundsForStore :many
+SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND r.store_id = @store_id::uuid
+GROUP BY sl.product_id, sl.sku, sl.product_name;
+
+-- name: DashboardCategoriesNormalizedRefundsForStore :many
+SELECT c.classification_kind AS kind, c.classification_id AS id,
+    c.name_ar, c.name_en,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+        ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
+    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+FROM sale_line_classifications_projection c
+JOIN return_refund_lines_projection l
+  ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND c.classification_kind = @kind::text
+  AND r.store_id = @store_id::uuid
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en;
+
+-- name: DashboardReturnBranchesForStore :many
+SELECT s.channel,
+    s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
+    s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
+    r.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+  AND (@currency::text = '' OR r.currency = @currency::text)
+  AND r.store_id = @store_id::uuid
 GROUP BY s.channel,
     s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
     s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,

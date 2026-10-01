@@ -575,7 +575,7 @@ func (d Devices) RefundsSummaryForStore(ctx context.Context, storeID string, sta
 	return out, nil
 }
 
-func (d Devices) RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundDailyRow, error) {
+func (d Devices) RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds daily for store", storeID)
@@ -583,7 +583,7 @@ func (d Devices) RefundsDailyForStore(ctx context.Context, storeID string, start
 		return nil, err
 	}
 	rows, err := sqlcgen.New(d.pool).ReportRefundsDailyForStore(ctx, sqlcgen.ReportRefundsDailyForStoreParams{
-		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+		Timezone: timezone, StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
 	})
 	if err != nil {
 		return nil, reportErr("refunds daily for store", err)
@@ -672,6 +672,140 @@ func (d Devices) RefundsByTagForStore(ctx context.Context, storeID string, start
 		out = append(out, report.RefundTagRow{
 			ID: uuidString(r.ID), Slug: r.Slug, NameAR: r.NameAr, NameEN: r.NameEn,
 			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) SalesPaymentsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.PaymentRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("sales payments for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportSalesPaymentsForStore(ctx, sqlcgen.ReportSalesPaymentsForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("sales payments for store", err)
+	}
+	out := make([]report.PaymentRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.PaymentRow{
+			Method: r.Method, Currency: r.Currency, Amount: r.Amount, Change: r.Change,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) SalesByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("sales by cashier for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportSalesByCashierForStore(ctx, sqlcgen.ReportSalesByCashierForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("sales by cashier for store", err)
+	}
+	out := make([]report.CashierRow, 0, len(rows))
+	for _, r := range rows {
+		var id, name *string
+		if r.CashierID.Valid {
+			s := r.CashierID.String
+			id = &s
+		}
+		if r.CashierName.Valid {
+			s := r.CashierName.String
+			name = &s
+		}
+		out = append(out, report.CashierRow{
+			CashierID: id, CashierName: name, Units: r.Units, Transactions: r.Transactions,
+			Currency: r.Currency, Subtotal: r.Subtotal, Discount: r.Discount,
+			Tax: r.Tax, SalesTotal: r.SalesTotal,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) SalesByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ChannelRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("sales by channel for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportSalesByChannelForStore(ctx, sqlcgen.ReportSalesByChannelForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("sales by channel for store", err)
+	}
+	out := make([]report.ChannelRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.ChannelRow{
+			Channel: r.Channel, Transactions: r.Transactions, Units: r.Units,
+			Currency: r.Currency, Subtotal: r.Subtotal, Discount: r.Discount,
+			Tax: r.Tax, SalesTotal: r.SalesTotal,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("refunds by cashier for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByCashierForStore(ctx, sqlcgen.ReportRefundsByCashierForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by cashier for store", err)
+	}
+	out := make([]report.RefundCashierRow, 0, len(rows))
+	for _, r := range rows {
+		var id, name *string
+		if r.CashierID.Valid {
+			s := r.CashierID.String
+			id = &s
+		}
+		if r.CashierName.Valid {
+			s := r.CashierName.String
+			name = &s
+		}
+		out = append(out, report.RefundCashierRow{
+			CashierID: id, CashierName: name, Units: r.Units,
+			Currency: r.Currency, Transactions: r.Transactions, RefundTotal: r.RefundTotal,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("refunds by channel for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByChannelForStore(ctx, sqlcgen.ReportRefundsByChannelForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by channel for store", err)
+	}
+	out := make([]report.RefundChannelRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundChannelRow{
+			Channel: r.Channel, Transactions: r.Transactions, Units: r.Units,
+			Currency: r.Currency, RefundTotal: r.RefundTotal,
 		})
 	}
 	return out, nil

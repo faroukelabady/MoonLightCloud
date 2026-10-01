@@ -677,6 +677,7 @@ paths:
         - $ref: '#/components/parameters/ReportPeriod'
         - $ref: '#/components/parameters/ReportFromDate'
         - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Overview with native buckets and normalized presentation values.
@@ -725,6 +726,7 @@ paths:
             enum: [all, EGP, USD]
             default: all
           description: all = normalized EGP per Cairo date; EGP/USD = native buckets only (never converted). Contract metadata (mode, display_currency, normalized) travels with the data so mislabeling is impossible.
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Per-day amounts in the requested mode with explicit currency metadata.
@@ -773,6 +775,7 @@ paths:
             enum: [all, native]
           description: all = normalized EGP ranking (historical per-line FX); native = selected currency bucket.
         - $ref: '#/components/parameters/ReportCurrency'
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Unified rows {product_id, sku, product_name, units, amount_minor}.
@@ -824,6 +827,7 @@ paths:
           schema:
             type: string
             enum: [all, native]
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Facet semantics preserved (subcategory rows may overlap).
@@ -866,6 +870,7 @@ paths:
         - $ref: '#/components/parameters/ReportFromDate'
         - $ref: '#/components/parameters/ReportToDate'
         - $ref: '#/components/parameters/ReportCurrency'
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Rows grouped by full shop snapshot tuple + channel. No ONLINE fabrication.
@@ -942,6 +947,7 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Accepted/projected/blocked events from authoritative rows.
@@ -987,6 +993,7 @@ paths:
             minimum: 1
             maximum: 100
             default: 10
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Newest finalized Sale headers. No fabricated order statuses.
@@ -1228,6 +1235,7 @@ paths:
           schema:
             type: string
             maxLength: 512
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Online order summaries with status counts and webhook inbox stats. Money as exact strings.
@@ -1276,6 +1284,7 @@ paths:
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Order header, lines, addresses, and status history. Money as exact strings.
@@ -1332,6 +1341,7 @@ paths:
         - $ref: '#/components/parameters/ReportFromDate'
         - $ref: '#/components/parameters/ReportToDate'
         - $ref: '#/components/parameters/ReportCurrency'
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Summary with currency buckets, payment totals, freshness.
@@ -1378,6 +1388,7 @@ paths:
         - $ref: '#/components/parameters/ReportFromDate'
         - $ref: '#/components/parameters/ReportToDate'
         - $ref: '#/components/parameters/ReportCurrency'
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Daily rows with per-currency buckets.
@@ -1433,6 +1444,7 @@ paths:
           schema:
             type: string
             enum: [product, root_category, subcategory, tag, cashier, channel]
+        - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
           description: Dimension rows, units descending with identity tie-break.
@@ -1528,6 +1540,19 @@ components:
         type: string
         enum: [EGP, USD]
       description: Optional single-currency filter. Absent means all currencies in separate buckets.
+    StoreScope:
+      name: store_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >-
+        Optional Store ownership scope (Store UUID). Absent means global
+        scope (all Stores plus legacy unscoped rows, backward compatible).
+        A malformed UUID is a 400; an unknown Store yields empty results,
+        never a silent fallback to global. Legacy NULL rows never match a
+        specific Store.
   schemas:
     Status:
       type: object
@@ -2532,6 +2557,11 @@ components:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         transaction_count: {type: integer, description: Finalized sale transactions only; returns counted separately.}
         units_sold: {type: integer}
         return_transaction_count: {type: integer, description: Return/refund transactions in period.}
@@ -2562,6 +2592,11 @@ components:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         days:
           type: array
           items: {$ref: '#/components/schemas/DailyRow'}
@@ -2669,6 +2704,11 @@ components:
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
         dimension: {type: string, enum: [product, root_category, subcategory, cashier, channel]}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         rows:
           type: array
           items: {$ref: '#/components/schemas/BreakdownRow'}
@@ -2747,6 +2787,11 @@ components:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         summary:
           type: object
           required: [transaction_count, units_sold, return_transaction_count, units_returned, currency_totals, payment_totals]
@@ -2777,6 +2822,11 @@ components:
       properties:
         timezone: {type: string}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         mode: {type: string, enum: [all, EGP, USD]}
         display_currency: {type: string, description: Currency unit of amount_minor. Never relabeled client-side.}
         normalized: {type: boolean, description: True only for All mode (historical per-sale FX).}
@@ -2809,6 +2859,11 @@ components:
           type: array
           items: {$ref: '#/components/schemas/DashboardOrderStatusCount'}
         webhook_inbox: {$ref: '#/components/schemas/DashboardWebhookInbox'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
       description: Online orders are provider-derived and never Sales.
     DashboardOrderSummary:
       type: object
@@ -2847,6 +2902,11 @@ components:
       required: [summary, discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, prices_include_tax, payment_method, payment_method_title, customer_first_name, customer_last_name, customer_email, customer_phone, lines, addresses, status_history]
       properties:
         summary: {$ref: '#/components/schemas/DashboardOrderSummary'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         discount_minor: {type: string, description: Exact minor units.}
         shipping_minor: {type: string, description: Exact minor units.}
         cart_tax_minor: {type: string, description: Exact minor units.}
@@ -2914,6 +2974,11 @@ components:
         period: {$ref: '#/components/schemas/PeriodMeta'}
         mode: {type: string, enum: [all, native]}
         unit: {type: string, description: "EGP-normalized in All mode, else the native currency."}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         rows:
           type: array
           items:
@@ -2928,12 +2993,18 @@ components:
               amount_minor: {type: string, description: Exact gross minor units (normalized EGP in All mode).}
               refund_minor: {type: string, description: Exact refund minor units. Nonnegative.}
               net_minor: {type: string, description: Gross minus refunds. Signed; ranking uses net with an explicit label.}
+              store_id: {type: string, format: uuid, nullable: true, description: Owning Store of this row; same SKU from different Stores stays distinct.}
     DashboardCategoryList:
       type: object
       required: [timezone, period, mode, unit, kind, rows]
       properties:
         timezone: {type: string}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         mode: {type: string, enum: [all, native]}
         unit: {type: string}
         kind: {type: string, enum: [root_category, subcategory]}
@@ -2958,6 +3029,11 @@ components:
       properties:
         timezone: {type: string}
         period: {$ref: '#/components/schemas/PeriodMeta'}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         rows:
           type: array
           items:
@@ -3010,6 +3086,11 @@ components:
       type: object
       required: [items]
       properties:
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         items:
           type: array
           items:
@@ -3026,6 +3107,11 @@ components:
       type: object
       required: [sales]
       properties:
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Applied Store ownership scope (Store UUID), or null for the global scope (all Stores plus legacy unscoped rows).
         sales:
           type: array
           items:

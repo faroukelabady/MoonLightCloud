@@ -10,6 +10,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
+	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
 // projectDashReturn ingests a return payload string and projects it
@@ -271,7 +272,7 @@ func TestDashboardActivityReturnKinds(t *testing.T) {
 	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T12:00:00Z",
 		dashReturnPayload(t, salePayload, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "RET-1", "2026-09-20T12:00:00Z", 1))
 
-	items, err := env.dash.RecentActivity(context.Background(), 20)
+	items, err := env.dash.RecentActivity(context.Background(), report.Request{}, 20)
 	if err != nil {
 		t.Fatalf("activity: %v", err)
 	}

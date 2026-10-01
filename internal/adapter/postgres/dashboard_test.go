@@ -161,7 +161,7 @@ func TestDashboardBranchesGroupsShops(t *testing.T) {
 func TestDashboardActivityBounded(t *testing.T) {
 	env := openDashEnv(t)
 	projectDashSale(t, env, "22222222-2222-7222-8222-222222222222", "2026-09-20T10:00:00Z", fixture(t, "sale_egp.json"))
-	items, err := env.dash.RecentActivity(context.Background(), 10)
+	items, err := env.dash.RecentActivity(context.Background(), report.Request{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,10 +186,10 @@ func TestDashboardActivityBounded(t *testing.T) {
 	if !kinds["accepted"] || !kinds["projected"] {
 		t.Fatalf("kinds: %v", kinds)
 	}
-	if _, err := env.dash.RecentActivity(context.Background(), 0); err == nil {
+	if _, err := env.dash.RecentActivity(context.Background(), report.Request{}, 0); err == nil {
 		t.Fatal("limit 0 must fail")
 	}
-	if _, err := env.dash.RecentActivity(context.Background(), 101); err == nil {
+	if _, err := env.dash.RecentActivity(context.Background(), report.Request{}, 101); err == nil {
 		t.Fatal("limit 101 must fail")
 	}
 }
@@ -199,7 +199,7 @@ func TestDashboardActivityBounded(t *testing.T) {
 func TestDashboardLatestSalesFallback(t *testing.T) {
 	env := openDashEnv(t)
 	projectDashSale(t, env, "22222222-2222-7222-8222-222222222222", "2026-09-20T10:00:00Z", fixture(t, "sale_egp.json"))
-	sales, err := env.dash.LatestSales(context.Background(), 10)
+	sales, err := env.dash.LatestSales(context.Background(), report.Request{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestDashboardLatestSalesFallback(t *testing.T) {
 	if s.Channel != "STORE" || s.TotalMinor != "200000" || s.Currency != "EGP" {
 		t.Fatalf("sale: %+v", s)
 	}
-	if _, err := env.dash.LatestSales(context.Background(), 0); err == nil {
+	if _, err := env.dash.LatestSales(context.Background(), report.Request{}, 0); err == nil {
 		t.Fatal("limit 0 must fail")
 	}
 }
@@ -275,7 +275,7 @@ func TestDashboardMoneyLexicalStrings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	latest, err := env.dash.LatestSales(ctx, 10)
+	latest, err := env.dash.LatestSales(ctx, report.Request{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

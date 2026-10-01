@@ -109,7 +109,7 @@ func (s stubReportRepo) RefundsSummaryForStore(context.Context, string, time.Tim
 	return nil, nil
 }
 
-func (s stubReportRepo) RefundsDailyForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundDailyRow, error) {
+func (s stubReportRepo) RefundsDailyForStore(context.Context, string, time.Time, time.Time, string, string) ([]report.RefundDailyRow, error) {
 	return nil, nil
 }
 
@@ -126,6 +126,26 @@ func (s stubReportRepo) RefundsBySubcategoryForStore(context.Context, string, ti
 }
 
 func (s stubReportRepo) RefundsByTagForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundTagRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesPaymentsForStore(context.Context, string, time.Time, time.Time, string) ([]report.PaymentRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByCashierForStore(context.Context, string, time.Time, time.Time, string) ([]report.CashierRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByChannelForStore(context.Context, string, time.Time, time.Time, string) ([]report.ChannelRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsByCashierForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundCashierRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsByChannelForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundChannelRow, error) {
 	return nil, nil
 }
 

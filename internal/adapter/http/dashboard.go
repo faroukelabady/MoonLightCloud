@@ -27,7 +27,19 @@ func NewDashboardDataHandlers(dash dashboard.Service, rep report.Service, log *s
 
 func (h DashboardDataHandlers) parse(r *http.Request) (report.Request, error) {
 	q := r.URL.Query()
-	return h.rep.ParseRequest(q.Get("period"), q.Get("from_date"), q.Get("to_date"), q.Get("currency"))
+	req, err := h.rep.ParseRequest(q.Get("period"), q.Get("from_date"), q.Get("to_date"), q.Get("currency"))
+	if err != nil {
+		return req, err
+	}
+	// One consistent scope model for every dashboard read: empty selects
+	// global behavior (backward compatible); malformed UUIDs 400 here so
+	// no handler invents its own empty/unknown semantics.
+	scope, err := report.ParseStoreScope(q.Get("store_id"))
+	if err != nil {
+		return req, err
+	}
+	req.Store = scope
+	return req, nil
 }
 
 func (h DashboardDataHandlers) observe(r *http.Request, name string, req report.Request, start time.Time) {
@@ -35,8 +47,19 @@ func (h DashboardDataHandlers) observe(r *http.Request, name string, req report.
 		"request_id", RequestID(r),
 		"endpoint", name,
 		"period", req.Period.Kind,
+		"store_id", req.ScopeStoreID(),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
+}
+
+// scopeJSON echoes the applied Store scope in dashboard responses so
+// operators (and the frontend) can never mistake scoped data for global
+// data: the Store UUID, or null for the global scope.
+func scopeJSON(req report.Request) map[string]any {
+	if req.Scoped() {
+		return map[string]any{"store_id": req.ScopeStoreID()}
+	}
+	return map[string]any{"store_id": nil}
 }
 
 // Overview serves GET /api/v1/dashboard/overview.
@@ -105,12 +128,14 @@ func (h DashboardDataHandlers) Products(w http.ResponseWriter, r *http.Request) 
 				"units": row.Units, "units_returned": row.UnitsReturned,
 				"amount_minor": row.NormalizedMinor,
 				"refund_minor": row.RefundNormalizedMinor, "net_minor": row.NetNormalizedMinor,
+				"store_id": row.StoreID,
 			})
 		}
 		h.observe(r, "dashboard_products_normalized", req, start)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"timezone": req.Period.Timezone, "period": periodMetaJSON(req),
 			"mode": "all", "unit": "EGP-normalized", "rows": out,
+			"store_id": scopeOrNull(req),
 		})
 		return
 	}
@@ -148,6 +173,7 @@ func (h DashboardDataHandlers) Products(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"timezone": req.Period.Timezone, "period": periodMetaJSON(req),
 		"mode": "native", "unit": currency, "rows": out,
+		"store_id": scopeOrNull(req),
 	})
 }
 
@@ -186,6 +212,7 @@ func (h DashboardDataHandlers) Categories(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, map[string]any{
 			"timezone": req.Period.Timezone, "period": periodMetaJSON(req),
 			"mode": "all", "unit": "EGP-normalized", "kind": kind, "rows": out,
+			"store_id": scopeOrNull(req),
 		})
 		return
 	}
@@ -223,6 +250,7 @@ func (h DashboardDataHandlers) Categories(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{
 		"timezone": req.Period.Timezone, "period": periodMetaJSON(req),
 		"mode": "native", "unit": currency, "kind": kind, "rows": out,
+		"store_id": scopeOrNull(req),
 	})
 }
 
@@ -242,6 +270,7 @@ func (h DashboardDataHandlers) Branches(w http.ResponseWriter, r *http.Request) 
 	h.observe(r, "dashboard_branches", req, start)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"timezone": req.Period.Timezone, "period": periodMetaJSON(req), "rows": rows,
+		"store_id": scopeOrNull(req),
 	})
 }
 
@@ -277,7 +306,12 @@ func (h DashboardDataHandlers) Activity(w http.ResponseWriter, r *http.Request) 
 		}
 		limit = n
 	}
-	items, err := h.dash.RecentActivity(r.Context(), limit)
+	scope, err := report.ParseStoreScope(r.URL.Query().Get("store_id"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	items, err := h.dash.RecentActivity(r.Context(), report.Request{Store: scope}, limit)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -285,7 +319,7 @@ func (h DashboardDataHandlers) Activity(w http.ResponseWriter, r *http.Request) 
 	h.log.Info("dashboard served", "request_id", RequestID(r),
 		"endpoint", "dashboard_activity",
 		"duration_ms", time.Since(start).Milliseconds())
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "store_id": scopeOrNullReq(r)})
 }
 
 // LatestSales serves GET /api/v1/dashboard/sales/latest (orders fallback).
@@ -300,7 +334,12 @@ func (h DashboardDataHandlers) LatestSales(w http.ResponseWriter, r *http.Reques
 		}
 		limit = n
 	}
-	items, err := h.dash.LatestSales(r.Context(), limit)
+	scope, err := report.ParseStoreScope(r.URL.Query().Get("store_id"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	items, err := h.dash.LatestSales(r.Context(), report.Request{Store: scope}, limit)
 	if err != nil {
 		WriteError(w, r, err)
 		return
@@ -308,7 +347,7 @@ func (h DashboardDataHandlers) LatestSales(w http.ResponseWriter, r *http.Reques
 	h.log.Info("dashboard served", "request_id", RequestID(r),
 		"endpoint", "dashboard_latest_sales",
 		"duration_ms", time.Since(start).Milliseconds())
-	writeJSON(w, http.StatusOK, map[string]any{"sales": items})
+	writeJSON(w, http.StatusOK, map[string]any{"sales": items, "store_id": scopeOrNullReq(r)})
 }
 
 // mode returns the currency presentation mode (default native).
@@ -371,4 +410,22 @@ func periodMetaJSON(req report.Request) map[string]any {
 		"start_utc":           req.Period.StartUTC.Format(layout),
 		"end_utc":             req.Period.EndUTC.Format(layout),
 	}
+}
+
+// scopeOrNull renders the applied Store scope for map responses.
+func scopeOrNull(req report.Request) any {
+	if req.Scoped() {
+		return req.ScopeStoreID()
+	}
+	return nil
+}
+
+// scopeOrNullReq re-parses the Store scope for handlers without a
+// period request (echo only; the service call already validated it).
+func scopeOrNullReq(r *http.Request) any {
+	scope, err := report.ParseStoreScope(r.URL.Query().Get("store_id"))
+	if err != nil || scope == nil {
+		return nil
+	}
+	return scope.StoreID
 }

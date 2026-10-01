@@ -181,25 +181,49 @@ func TestDashboardOrdersMaxLimit(t *testing.T) {
 }
 
 // TestOrderCursorCodec proves token round-trip canonicality, filter
-// binding, and the PII/secret-free payload shape.
+// binding (including Store scope), and the PII/secret-free payload shape.
 func TestOrderCursorCodec(t *testing.T) {
 	cursor := &orders.OrderCursor{
 		CreatedAt:   time.Date(2026, 9, 27, 11, 0, 0, 123456000, time.UTC),
 		ProviderKey: "website", ExternalOrderID: "901",
 	}
-	token, err := encodeOrderCursor(cursor, "website", "PROCESSING")
+	storeA := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	storeB := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	token, err := encodeOrderCursor(cursor, "website", "PROCESSING", storeA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeOrderCursor(token, "website", "PROCESSING")
+	decoded, err := decodeOrderCursor(token, "website", "PROCESSING", storeA)
 	if err != nil {
 		t.Fatalf("round-trip: %v", err)
 	}
 	if !decoded.CreatedAt.Equal(cursor.CreatedAt) || decoded.ProviderKey != "website" || decoded.ExternalOrderID != "901" {
 		t.Fatalf("round-trip: %+v", decoded)
 	}
-	if _, err := decodeOrderCursor(token, "other", "PROCESSING"); err == nil {
-		t.Fatal("filter mismatch must fail")
+	// Store-scope matrix: same scope valid, every cross-scope rejected.
+	for name, filters := range map[string][3]string{
+		"other provider": {"other", "PROCESSING", storeA},
+		"other status":   {"website", "PENDING", storeA},
+		"other store":    {"website", "PROCESSING", storeB},
+		"store to all":   {"website", "PROCESSING", ""},
+	} {
+		if _, err := decodeOrderCursor(token, filters[0], filters[1], filters[2]); err == nil {
+			t.Fatalf("%s must fail", name)
+		}
+	}
+	// All-scope tokens reject Store-scoped use and vice versa.
+	global, err := encodeOrderCursor(cursor, "website", "PROCESSING", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeOrderCursor(global, "website", "PROCESSING", ""); err != nil {
+		t.Fatalf("global round-trip: %v", err)
+	}
+	if _, err := decodeOrderCursor(global, "website", "PROCESSING", storeA); err == nil {
+		t.Fatal("global under store must fail")
+	}
+	if _, err := decodeOrderCursor(token, "website", "PROCESSING", ""); err == nil {
+		t.Fatal("store under global must fail")
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {

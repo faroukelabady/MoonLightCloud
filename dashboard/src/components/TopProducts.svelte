@@ -16,6 +16,7 @@
 		amount_minor: string;
 		refund_minor: string;
 		net_minor: string;
+		store_id?: string | null;
 	}
 
 	let { rows, money, unit, status, errStatus, onretry }: { rows: ProductDisplayRow[]; money: 'EGP' | 'USD'; unit: string; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } =
@@ -88,6 +89,7 @@
 						<td class="num rank">{i + 1}</td>
 						<td>
 							<span class="pname"><span class="thumb" aria-hidden="true">{r.name.slice(0, 1)}</span>{r.name}</span><br /><span class="muted num sku">{r.sku}</span>
+							{#if r.store_id}<br /><span class="muted num storebadge" dir="ltr" title={r.store_id}>{r.store_id.slice(0, 8)}…</span>{/if}
 						</td>
 						<td class="num">{r.units} / {r.units_returned}</td>
 						<td class="num">{formatMinor(r.net_minor, money)}</td>

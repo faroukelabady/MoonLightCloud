@@ -14,30 +14,36 @@ import (
 // They carry only stable list-position metadata (timestamp, provider,
 // order identity) plus the filter set they were issued for — never
 // customer PII, money, or secrets. A cursor reused under different
-// filters is rejected so pages cannot silently skip data.
+// filters (including a different Store scope) is rejected so pages
+// cannot silently skip data.
 const (
-	orderCursorVersion = 1
-	// orderCursorMaxLength bounds decode input: tokens are ~150 bytes.
+	// orderCursorVersion 2 binds the Store scope filter. Version 1
+	// tokens (pre-Store-scope) are rejected as invalid: an in-flight
+	// pre-upgrade pagination restarts its listing with a clean 400,
+	// never silently skipping rows.
+	orderCursorVersion = 2
+	// orderCursorMaxLength bounds decode input: tokens are ~200 bytes.
 	orderCursorMaxLength = 512
 )
 
 type orderCursorToken struct {
-	Version   int    `json:"v"`
-	CreatedAt string `json:"t"`
-	Provider  string `json:"p"`
-	Order     string `json:"o"`
-	FilterP   string `json:"fp"`
-	FilterS   string `json:"fs"`
+	Version     int    `json:"v"`
+	CreatedAt   string `json:"t"`
+	Provider    string `json:"p"`
+	Order       string `json:"o"`
+	FilterP     string `json:"fp"`
+	FilterS     string `json:"fs"`
+	FilterStore string `json:"fst"`
 }
 
 // encodeOrderCursor renders one continuation token for the last returned
-// row under the current filters.
-func encodeOrderCursor(cursor *orders.OrderCursor, provider, status string) (string, error) {
+// row under the current filters (Store scope included).
+func encodeOrderCursor(cursor *orders.OrderCursor, provider, status, storeID string) (string, error) {
 	token := orderCursorToken{
 		Version:   orderCursorVersion,
 		CreatedAt: cursor.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Provider:  cursor.ProviderKey, Order: cursor.ExternalOrderID,
-		FilterP: provider, FilterS: status,
+		FilterP: provider, FilterS: status, FilterStore: storeID,
 	}
 	raw, err := json.Marshal(token)
 	if err != nil {
@@ -47,9 +53,9 @@ func encodeOrderCursor(cursor *orders.OrderCursor, provider, status string) (str
 }
 
 // decodeOrderCursor validates one client-supplied token and binds it to
-// the current request filters. Every rejection is a 400: no server
-// error, no panic, no secret or PII in the error.
-func decodeOrderCursor(value, provider, status string) (*orders.OrderCursor, error) {
+// the current request filters (including Store scope). Every rejection
+// is a 400: no server error, no panic, no secret or PII in the error.
+func decodeOrderCursor(value, provider, status, storeID string) (*orders.OrderCursor, error) {
 	invalid := func() (*orders.OrderCursor, error) {
 		return nil, apperr.New(apperr.InvalidInput, "invalid cursor")
 	}
@@ -69,7 +75,7 @@ func decodeOrderCursor(value, provider, status string) (*orders.OrderCursor, err
 	if token.Version != orderCursorVersion {
 		return invalid()
 	}
-	if token.FilterP != provider || token.FilterS != status {
+	if token.FilterP != provider || token.FilterS != status || token.FilterStore != storeID {
 		return invalid()
 	}
 	created, err := time.Parse(time.RFC3339Nano, token.CreatedAt)
@@ -77,7 +83,8 @@ func decodeOrderCursor(value, provider, status string) (*orders.OrderCursor, err
 		return invalid()
 	}
 	if !printableBounded(token.Provider, 64) || !printableBounded(token.Order, 32) ||
-		!printableBounded(token.FilterP, 64) || !printableBounded(token.FilterS, 16) {
+		!printableBounded(token.FilterP, 64) || !printableBounded(token.FilterS, 16) ||
+		!printableBounded(token.FilterStore, 64) {
 		return invalid()
 	}
 	if token.Provider == "" || token.Order == "" {
@@ -87,7 +94,7 @@ func decodeOrderCursor(value, provider, status string) (*orders.OrderCursor, err
 	// encodings that decode but were never issued here.
 	canonical, err := encodeOrderCursor(&orders.OrderCursor{
 		CreatedAt: created, ProviderKey: token.Provider, ExternalOrderID: token.Order,
-	}, token.FilterP, token.FilterS)
+	}, token.FilterP, token.FilterS, token.FilterStore)
 	if err != nil || canonical != value {
 		return invalid()
 	}

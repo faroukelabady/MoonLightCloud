@@ -123,6 +123,7 @@ export interface ProductRow {
 	amount_minor: string;
 	refund_minor: string;
 	net_minor: string;
+	store_id?: string | null;
 }
 
 export interface CategoryRow {
@@ -250,6 +251,7 @@ export interface OrderListResponse {
 	next_cursor: string | null;
 	status_counts: OrderStatusCount[];
 	webhook_inbox: WebhookInboxStats;
+	store_id: string | null;
 }
 
 export interface LatestSale {
@@ -380,6 +382,18 @@ function query(p: PeriodParams): string {
 	return q.toString();
 }
 
+// storeQuery appends the Store ownership scope. Empty selects the global
+// scope (all Stores plus legacy rows, backward compatible).
+export function storeQuery(store: string): string {
+	return store ? `&store_id=${encodeURIComponent(store)}` : '';
+}
+
+// isStoreID validates a Store scope value before it ever reaches the
+// network: canonical UUID shape only.
+export function isStoreID(value: string): boolean {
+	return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
+}
+
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 	const res = await fetch(path, { signal, credentials: 'same-origin' });
 	if (res.status === 401) throw new ApiError(401, 'UNAUTHORIZED', 'session required');
@@ -411,25 +425,25 @@ export const dashboardApi = {
 	logout: async (): Promise<void> => {
 		await fetch('/api/v1/dashboard/auth/logout', { method: 'POST', credentials: 'same-origin' });
 	},
-	overview: (p: PeriodParams, s?: AbortSignal) => get<OverviewResponse>(`/api/v1/dashboard/overview?${query(p)}`, s),
-	daily: (p: PeriodParams, mode: DailyMode, s?: AbortSignal) =>
-		get<DailyResponse>(`/api/v1/dashboard/daily?${query(p)}&mode=${mode}`, s),
-	products: (p: PeriodParams, mode: BreakdownMode, currency: string, s?: AbortSignal) =>
-		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}`, s),
-	categories: (p: PeriodParams, kind: CategoryKind, mode: BreakdownMode, currency: string, s?: AbortSignal) =>
-		get<{ rows: CategoryRow[] }>(`/api/v1/dashboard/categories?${query(p)}&kind=${kind}&mode=${mode}&currency=${currency}`, s),
-	branches: (p: PeriodParams, s?: AbortSignal) =>
-		get<{ rows: BranchRow[] }>(`/api/v1/dashboard/branches?${query(p)}`, s),
+	overview: (p: PeriodParams, store: string, s?: AbortSignal) => get<OverviewResponse>(`/api/v1/dashboard/overview?${query(p)}${storeQuery(store)}`, s),
+	daily: (p: PeriodParams, mode: DailyMode, store: string, s?: AbortSignal) =>
+		get<DailyResponse>(`/api/v1/dashboard/daily?${query(p)}&mode=${mode}${storeQuery(store)}`, s),
+	products: (p: PeriodParams, mode: BreakdownMode, currency: string, store: string, s?: AbortSignal) =>
+		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}${storeQuery(store)}`, s),
+	categories: (p: PeriodParams, kind: CategoryKind, mode: BreakdownMode, currency: string, store: string, s?: AbortSignal) =>
+		get<{ rows: CategoryRow[] }>(`/api/v1/dashboard/categories?${query(p)}&kind=${kind}&mode=${mode}&currency=${currency}${storeQuery(store)}`, s),
+	branches: (p: PeriodParams, store: string, s?: AbortSignal) =>
+		get<{ rows: BranchRow[] }>(`/api/v1/dashboard/branches?${query(p)}${storeQuery(store)}`, s),
 	syncHealth: (s?: AbortSignal) => get<SyncHealth>('/api/v1/dashboard/sync-health', s),
-	activity: (s?: AbortSignal) => get<{ items: ActivityItem[] }>('/api/v1/dashboard/activity?limit=20', s),
-	latestSales: (s?: AbortSignal) => get<{ sales: LatestSale[] }>('/api/v1/dashboard/sales/latest?limit=8', s),
-	orders: (status: string, provider: string, cursor?: string | null, s?: AbortSignal) =>
+	activity: (store: string, s?: AbortSignal) => get<{ items: ActivityItem[] }>(`/api/v1/dashboard/activity?limit=20${storeQuery(store)}`, s),
+	latestSales: (store: string, s?: AbortSignal) => get<{ sales: LatestSale[] }>(`/api/v1/dashboard/sales/latest?limit=8${storeQuery(store)}`, s),
+	orders: (status: string, provider: string, cursor: string | null | undefined, store: string, s?: AbortSignal) =>
 		get<OrderListResponse>(
-			`/api/v1/dashboard/orders?status=${encodeURIComponent(status)}&provider=${encodeURIComponent(provider)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+			`/api/v1/dashboard/orders?status=${encodeURIComponent(status)}&provider=${encodeURIComponent(provider)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}${storeQuery(store)}`,
 			s
 		),
-	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
-		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s),
+	orderDetail: (provider: string, id: string, store: string, s?: AbortSignal) =>
+		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s),
 	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
 	stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
 	incidents: (params: { state?: string; severity?: string; rule?: string; limit?: number; cursor?: string | null }, s?: AbortSignal) => {

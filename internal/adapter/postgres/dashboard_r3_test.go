@@ -250,7 +250,7 @@ func TestL06ActivityDeterministic(t *testing.T) {
 	}
 	var first string
 	for i := 0; i < 5; i++ {
-		items, err := env.dash.RecentActivity(ctx, 10)
+		items, err := env.dash.RecentActivity(ctx, report.Request{}, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,7 +281,7 @@ func TestR05ActivityTopNPrefix(t *testing.T) {
 	}
 	at := func(limit int) []dashboard.ActivityItem {
 		t.Helper()
-		items, err := env.dash.RecentActivity(ctx, limit)
+		items, err := env.dash.RecentActivity(ctx, report.Request{}, limit)
 		if err != nil {
 			t.Fatal(err)
 		}

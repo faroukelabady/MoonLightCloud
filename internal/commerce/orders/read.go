@@ -63,7 +63,9 @@ type OrderStatusEvent struct {
 
 // OrderDetail is the full operator-visible order.
 type OrderDetail struct {
-	Summary            OrderSummary       `json:"summary"`
+	Summary OrderSummary `json:"summary"`
+	// StoreID echoes the applied ownership scope (UUID or null global).
+	StoreID            *string            `json:"store_id"`
 	DiscountMinor      string             `json:"discount_minor"`
 	ShippingMinor      string             `json:"shipping_minor"`
 	CartTaxMinor       string             `json:"cart_tax_minor"`

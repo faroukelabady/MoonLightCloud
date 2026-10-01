@@ -17,8 +17,9 @@
 	import DevicesPage from './components/DevicesPage.svelte';
 	import OperationsPage from './components/OperationsPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
-	import { dashboardApi, ApiError } from './lib/api.js';
-	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats } from './lib/api.js';
+	import { dashboardApi, ApiError, isStoreID } from './lib/api.js';
+	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow } from './lib/api.js';
+	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
@@ -28,6 +29,8 @@
 	let route = $state('overview');
 	let params: PeriodParams = $state({ period: 'last_10_completed_days' });
 	let currency: 'all' | 'EGP' | 'USD' = $state('all');
+	let store = $state('');
+	let stores: StoreRow[] = $state([]);
 	let fatal = $state<string | null>(null);
 
 	let aborters: AbortController[] = [];
@@ -59,6 +62,8 @@
 		if (p) params = { period: p, from_date: q.get('from_date') ?? undefined, to_date: q.get('to_date') ?? undefined };
 		const c = q.get('currency');
 		if (c === 'EGP' || c === 'USD' || c === 'all') currency = c;
+		const sid = q.get('store_id') ?? '';
+		store = sid && isStoreID(sid) ? sid : '';
 	}
 
 	function navigate(r: string) {
@@ -73,7 +78,24 @@
 		if (params.from_date) q.set('from_date', params.from_date);
 		if (params.to_date) q.set('to_date', params.to_date);
 		q.set('currency', currency);
+		if (store) q.set('store_id', store);
 		return window.location.pathname + '?' + q.toString();
+	}
+
+	// onStore applies a Store scope change: the in-flight requests abort
+	// via freshSignal inside reloadAll (stale A data can never land on a
+	// B view), and every scope-dependent chain restarts — pagination
+	// cursor, selected order detail, and report caches.
+	function onStore(id: string) {
+		store = id && isStoreID(id) ? id : '';
+		orderCursor = null;
+		orderSelected = null;
+		orderDetailState = 'idle';
+		orderDetailErr = null;
+		ordersMore = 'idle';
+		ordersMoreErr = null;
+		window.history.pushState({}, '', urlFor());
+		void reloadAll();
 	}
 
 	function onParams(p: PeriodParams) {
@@ -154,7 +176,7 @@
 		ordersMore = 'idle';
 		ordersMoreErr = null;
 		try {
-			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, signal);
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, signal);
 			orderList = v.orders;
 			orderCursor = v.next_cursor;
 			orderCounts = v.status_counts;
@@ -178,7 +200,7 @@
 		ordersMore = 'loading';
 		ordersMoreErr = null;
 		try {
-			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, freshSignal());
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, store, freshSignal());
 			const seen = new Set(orderList.map(orderKey));
 			for (const row of v.orders) {
 				if (!seen.has(orderKey(row))) {
@@ -211,7 +233,7 @@
 		}
 		orderDetailState = 'loading';
 		try {
-			orderSelected = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, freshSignal());
+			orderSelected = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, store, freshSignal());
 			orderDetailState = 'loaded';
 		} catch (err) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -253,11 +275,11 @@
 		const dailyMode: DailyMode = currency;
 		const breakdownMode: BreakdownMode = currency === 'all' ? 'all' : 'native';
 		await Promise.all([
-			done(dashboardApi.overview(params, signal), (v) => {
+			done(dashboardApi.overview(params, store, signal), (v) => {
 				overview = v;
 				overviewState = v.summary.transaction_count === 0 && v.summary.return_transaction_count === 0 ? 'empty' : 'loaded';
 			}, (s) => (overviewState = s), (n) => (overviewErr = n)),
-			done(dashboardApi.daily(params, dailyMode, signal), (v) => {
+			done(dashboardApi.daily(params, dailyMode, store, signal), (v) => {
 				dailyMeta = { display_currency: v.display_currency, normalized: v.normalized };
 				trendExact = v.days.map((d) => ({ date: d.date, amount_minor: d.amount_minor }));
 				trendRefundExact = v.days.map((d) => ({ date: d.date, refund_minor: d.refund_minor }));
@@ -285,7 +307,7 @@
 				}
 				dailyState = emptyOf(v.days);
 			}, (s) => (dailyState = s), (n) => (dailyErr = n)),
-			done(dashboardApi.products(params, breakdownMode, currency === 'all' ? '' : currency, signal), (v) => {
+			done(dashboardApi.products(params, breakdownMode, currency === 'all' ? '' : currency, store, signal), (v) => {
 				products = v.rows.map((r) => ({
 					name: r.product_name,
 					sku: r.sku,
@@ -293,11 +315,12 @@
 					units_returned: r.units_returned,
 					amount_minor: r.amount_minor,
 					refund_minor: r.refund_minor,
-					net_minor: r.net_minor
+					net_minor: r.net_minor,
+					store_id: r.store_id ?? null
 				}));
 				productsState = emptyOf(products);
 			}, (s) => (productsState = s), (n) => (productsErr = n)),
-			done(dashboardApi.categories(params, catKind, breakdownMode, currency === 'all' ? '' : currency, signal), (v) => {
+			done(dashboardApi.categories(params, catKind, breakdownMode, currency === 'all' ? '' : currency, store, signal), (v) => {
 				categories = v.rows.map((r) => ({
 					name: r.name_en ? `${r.name_ar} / ${r.name_en}` : r.name_ar,
 					units: r.units,
@@ -308,7 +331,7 @@
 				}));
 				categoriesState = emptyOf(categories);
 			}, (s) => (categoriesState = s), (n) => (categoriesErr = n)),
-			done(dashboardApi.branches(params, signal), (v) => {
+			done(dashboardApi.branches(params, store, signal), (v) => {
 				branches = v.rows;
 				branchesState = emptyOf(v.rows);
 			}, (s) => (branchesState = s), (n) => (branchesErr = n)),
@@ -316,15 +339,15 @@
 				syncHealth = v;
 				syncState = 'loaded';
 			}, (s) => (syncState = s), (n) => (syncErr = n)),
-			done(dashboardApi.activity(signal), (v) => {
+			done(dashboardApi.activity(store, signal), (v) => {
 				activity = v.items;
 				activityState = emptyOf(v.items);
 			}, (s) => (activityState = s), (n) => (activityErr = n)),
-			done(dashboardApi.latestSales(signal), (v) => {
+			done(dashboardApi.latestSales(store, signal), (v) => {
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
 			}, (s) => (latestState = s), (n) => (latestErr = n)),
-			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, signal), (v) => {
+			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, signal), (v) => {
 				orderList = v.orders;
 				orderCursor = v.next_cursor;
 				ordersMore = 'idle';
@@ -406,7 +429,14 @@
 		});
 		void (async () => {
 			await checkSession();
-			if (authed) await reloadAll();
+			if (authed) {
+				try {
+					stores = (await dashboardApi.stores()).stores;
+				} catch {
+					stores = [];
+				}
+				await reloadAll();
+			}
 		})();
 	});
 </script>
@@ -427,6 +457,7 @@
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} />
+					<StoreSelector {stores} value={store} onchange={onStore} />
 					{#if periodRange}<div class="muted range num" dir="ltr">{periodRange}</div>{/if}
 				</div>
 				<div class="actorblock">

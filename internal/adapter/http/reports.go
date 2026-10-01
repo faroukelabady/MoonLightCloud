@@ -22,7 +22,16 @@ func NewReportHandlers(svc report.Service, log *slog.Logger) ReportHandlers {
 
 func (h ReportHandlers) parse(r *http.Request) (report.Request, error) {
 	q := r.URL.Query()
-	return h.svc.ParseRequest(q.Get("period"), q.Get("from_date"), q.Get("to_date"), q.Get("currency"))
+	req, err := h.svc.ParseRequest(q.Get("period"), q.Get("from_date"), q.Get("to_date"), q.Get("currency"))
+	if err != nil {
+		return req, err
+	}
+	scope, err := report.ParseStoreScope(q.Get("store_id"))
+	if err != nil {
+		return req, err
+	}
+	req.Store = scope
+	return req, nil
 }
 
 func (h ReportHandlers) observe(r *http.Request, kind string, req report.Request, start time.Time, rows int) {
@@ -30,6 +39,7 @@ func (h ReportHandlers) observe(r *http.Request, kind string, req report.Request
 		"request_id", RequestID(r),
 		"report", kind,
 		"period", req.Period.Kind,
+		"store_id", req.ScopeStoreID(),
 		"start_utc", req.Period.StartUTC.Format(time.RFC3339),
 		"end_utc", req.Period.EndUTC.Format(time.RFC3339),
 		"duration_ms", time.Since(start).Milliseconds(),

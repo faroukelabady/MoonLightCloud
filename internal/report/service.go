@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/google/uuid"
 )
 
 // Breakdown dimensions (fixed enum; handlers switch, queries stay static).
@@ -119,9 +121,13 @@ type Freshness struct {
 // stay finalized-sale-only; return activity rides in the return-specific
 // counters and per-currency buckets (never conflated).
 type Summary struct {
-	GeneratedAt            time.Time       `json:"generated_at"`
-	Timezone               string          `json:"timezone"`
-	Period                 PeriodMeta      `json:"period"`
+	GeneratedAt time.Time  `json:"generated_at"`
+	Timezone    string     `json:"timezone"`
+	Period      PeriodMeta `json:"period"`
+	// StoreID echoes the applied ownership scope: the Store UUID, or
+	// null for the global scope. Consumers must never mistake scoped
+	// data for global data.
+	StoreID                *string         `json:"store_id"`
 	TransactionCount       int64           `json:"transaction_count"`
 	UnitsSold              int64           `json:"units_sold"`
 	ReturnTransactionCount int64           `json:"return_transaction_count"`
@@ -148,8 +154,10 @@ type Daily struct {
 	GeneratedAt time.Time  `json:"generated_at"`
 	Timezone    string     `json:"timezone"`
 	Period      PeriodMeta `json:"period"`
-	Days        []DailyRow `json:"days"`
-	Freshness   Freshness  `json:"freshness"`
+	// StoreID echoes the applied ownership scope (UUID or null global).
+	StoreID   *string    `json:"store_id"`
+	Days      []DailyRow `json:"days"`
+	Freshness Freshness  `json:"freshness"`
 }
 
 // BreakdownRow is one dimension value. Money stays in per-currency
@@ -211,12 +219,14 @@ type LineSaleTotal struct {
 
 // Breakdown is the dimension response.
 type Breakdown struct {
-	GeneratedAt time.Time      `json:"generated_at"`
-	Timezone    string         `json:"timezone"`
-	Period      PeriodMeta     `json:"period"`
-	Dimension   string         `json:"dimension"`
-	Rows        []BreakdownRow `json:"rows"`
-	Freshness   Freshness      `json:"freshness"`
+	GeneratedAt time.Time  `json:"generated_at"`
+	Timezone    string     `json:"timezone"`
+	Period      PeriodMeta `json:"period"`
+	Dimension   string     `json:"dimension"`
+	// StoreID echoes the applied ownership scope (UUID or null global).
+	StoreID   *string        `json:"store_id"`
+	Rows      []BreakdownRow `json:"rows"`
+	Freshness Freshness      `json:"freshness"`
 }
 
 // SummaryRow, DailyRowRaw, etc. are repository row shapes (currency-split).
@@ -417,11 +427,16 @@ type Repository interface {
 	SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
 	RefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
-	RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundDailyRow, error)
+	RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]RefundDailyRow, error)
 	RefundsByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
 	RefundsByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
+	SalesPaymentsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]PaymentRow, error)
+	SalesByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CashierRow, error)
+	SalesByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ChannelRow, error)
+	RefundsByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCashierRow, error)
+	RefundsByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundChannelRow, error)
 }
 
 // Service is the reusable reporting authority for dashboards and jobs.
@@ -440,7 +455,56 @@ func NewService(r Repository, c clock.Clock, loc *time.Location) Service {
 type Request struct {
 	Period   Period
 	Currency string // "" means all currencies, separately bucketed
-	now      time.Time
+	// Store scopes ownership: nil = all Stores + legacy (global, backward
+	// compatible). Non-nil selects exactly one proven Store; legacy NULL
+	// rows never match a specific scope.
+	Store *StoreScope
+	now   time.Time
+}
+
+// StoreScope is the canonical report ownership selector shared by HTTP
+// handlers (dashboard session + token APIs): one parsing model, no
+// per-handler rule drift.
+type StoreScope struct {
+	// StoreID is a validated Store UUID string. Empty means no selection
+	// (global); StoreID selection never includes legacy NULL rows.
+	StoreID string
+}
+
+// ParseStoreScope validates the optional store_id query value. Empty
+// selects global behavior (backward compatible). A malformed UUID is a
+// 400; an unknown but well-formed UUID passes through and yields empty
+// results (never a silent fallback to global).
+func ParseStoreScope(storeID string) (*StoreScope, error) {
+	trimmed := strings.TrimSpace(storeID)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if _, err := uuid.Parse(trimmed); err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "store_id must be a UUID")
+	}
+	return &StoreScope{StoreID: trimmed}, nil
+}
+
+// storeIDOrNil renders the applied scope for responses: the Store UUID
+// pointer, or nil (JSON null) for the global scope.
+func (r Request) StoreIDOrNil() *string {
+	if !r.Scoped() {
+		return nil
+	}
+	id := r.Store.StoreID
+	return &id
+}
+
+// Scoped reports whether a specific Store is selected.
+func (r Request) Scoped() bool { return r.Store != nil && r.Store.StoreID != "" }
+
+// ScopeStoreID returns the selected Store UUID or "" when global.
+func (r Request) ScopeStoreID() string {
+	if !r.Scoped() {
+		return ""
+	}
+	return r.Store.StoreID
 }
 
 // GeneratedAt returns the single captured request instant.
@@ -470,6 +534,126 @@ func ParseDimension(d string) (string, error) {
 		return "", apperr.New(apperr.InvalidInput,
 			fmt.Sprintf("unsupported dimension %q: want product|root_category|subcategory|cashier|channel", d))
 	}
+}
+
+// scopedFetch routes one repository read through the selected Store
+// scope. Specific scopes call the Store-scoped repository surface with
+// the validated Store UUID; global requests keep the frozen methods.
+func (s Service) scopedSalesSummary(ctx context.Context, req Request) ([]SummaryRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesPayments(ctx context.Context, req Request) ([]PaymentRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesPaymentsForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesPayments(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsSummary(ctx context.Context, req Request) ([]RefundSummaryRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesDaily(ctx context.Context, req Request, mode, timezone string) ([]DailyRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.SalesDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
+	}
+	return s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
+}
+
+func (s Service) scopedRefundsDaily(ctx context.Context, req Request, mode, timezone string) ([]RefundDailyRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
+	}
+	return s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
+}
+
+func (s Service) scopedSalesByProduct(ctx context.Context, req Request) ([]ProductRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByProductForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByProduct(ctx context.Context, req Request) ([]RefundProductRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsByProductForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByCategory(ctx context.Context, req Request, root bool) ([]CategoryRow, error) {
+	if req.Scoped() {
+		if root {
+			return s.repo.SalesByRootCategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		}
+		return s.repo.SalesBySubcategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	if root {
+		return s.repo.SalesByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByCategory(ctx context.Context, req Request, root bool) ([]RefundCategoryRow, error) {
+	if req.Scoped() {
+		if root {
+			return s.repo.RefundsByRootCategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		}
+		return s.repo.RefundsBySubcategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	if root {
+		return s.repo.RefundsByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByTag(ctx context.Context, req Request) ([]TagRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByTagForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByTag(ctx context.Context, req Request) ([]RefundTagRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsByTagForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByCashier(ctx context.Context, req Request) ([]CashierRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByCashierForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByCashier(ctx context.Context, req Request) ([]RefundCashierRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsByCashierForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByChannel(ctx context.Context, req Request) ([]ChannelRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByChannelForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByChannel(ctx context.Context, req Request) ([]RefundChannelRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsByChannelForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 }
 
 // subChecked/subtracts with overflow failure (net may be negative, but
@@ -513,15 +697,15 @@ func metaOf(p Period, loc *time.Location) PeriodMeta {
 // negative). TransactionCount/UnitsSold stay sale-only; return activity
 // rides in ReturnTransactionCount/UnitsReturned.
 func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
-	rows, err := s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	rows, err := s.scopedSalesSummary(ctx, req)
 	if err != nil {
 		return Summary{}, err
 	}
-	pays, err := s.repo.SalesPayments(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	pays, err := s.scopedSalesPayments(ctx, req)
 	if err != nil {
 		return Summary{}, err
 	}
-	refunds, err := s.repo.RefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	refunds, err := s.scopedRefundsSummary(ctx, req)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -532,6 +716,7 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 	out := Summary{
 		GeneratedAt: req.now, Timezone: req.Period.Timezone,
 		Period: metaOf(req.Period, s.loc), Freshness: fresh,
+		StoreID:        req.StoreIDOrNil(),
 		CurrencyTotals: []CurrencyTotal{}, PaymentTotals: []PaymentTotal{},
 	}
 	byCurrency := map[string]int{}
@@ -584,11 +769,11 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 // days create their own rows (a day with refunds but no sales is real
 // activity); net may be negative and is never clamped.
 func (s Service) Daily(ctx context.Context, req Request) (Daily, error) {
-	rows, err := s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
+	rows, err := s.scopedSalesDaily(ctx, req, req.Currency, req.Period.Timezone)
 	if err != nil {
 		return Daily{}, err
 	}
-	refundRows, err := s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
+	refundRows, err := s.scopedRefundsDaily(ctx, req, req.Currency, req.Period.Timezone)
 	if err != nil {
 		return Daily{}, err
 	}
@@ -599,6 +784,7 @@ func (s Service) Daily(ctx context.Context, req Request) (Daily, error) {
 	out := Daily{
 		GeneratedAt: req.now, Timezone: req.Period.Timezone,
 		Period: metaOf(req.Period, s.loc), Freshness: fresh, Days: []DailyRow{},
+		StoreID: req.StoreIDOrNil(),
 	}
 	byDay := map[string]int{}
 	byBucket := map[string]map[string]int{}
@@ -680,14 +866,15 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		GeneratedAt: req.now, Timezone: req.Period.Timezone,
 		Period: metaOf(req.Period, s.loc), Dimension: dimension,
 		Rows: []BreakdownRow{}, Freshness: fresh,
+		StoreID: req.StoreIDOrNil(),
 	}
 	switch dimension {
 	case DimensionProduct:
-		rows, err := s.repo.SalesByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		rows, err := s.scopedSalesByProduct(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.repo.RefundsByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		refundRows, err := s.scopedRefundsByProduct(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -744,18 +931,12 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 	case DimensionRootCategory, DimensionSubcategory:
 		var rows []CategoryRow
 		var refundRows []RefundCategoryRow
-		if dimension == DimensionRootCategory {
-			rows, err = s.repo.SalesByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		if root := dimension == DimensionRootCategory; true {
+			rows, err = s.scopedSalesByCategory(ctx, req, root)
 			if err != nil {
 				return Breakdown{}, err
 			}
-			refundRows, err = s.repo.RefundsByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-		} else {
-			rows, err = s.repo.SalesBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-			if err != nil {
-				return Breakdown{}, err
-			}
-			refundRows, err = s.repo.RefundsBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+			refundRows, err = s.scopedRefundsByCategory(ctx, req, root)
 		}
 		if err != nil {
 			return Breakdown{}, err
@@ -811,11 +992,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = sortCategoryRows(byKey, order, req.Currency)
 	case DimensionTag:
-		rows, err := s.repo.SalesByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		rows, err := s.scopedSalesByTag(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.repo.RefundsByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		refundRows, err := s.scopedRefundsByTag(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -872,11 +1053,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = sortCategoryRows(byKey, order, req.Currency)
 	case DimensionCashier:
-		rows, err := s.repo.SalesByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		rows, err := s.scopedSalesByCashier(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.repo.RefundsByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		refundRows, err := s.scopedRefundsByCashier(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -938,13 +1119,13 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = sortCashierRows(byKey, order)
 	case DimensionChannel:
-		rows, err := s.repo.SalesByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		rows, err := s.scopedSalesByChannel(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
-		refundRows, err := s.repo.RefundsByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+		refundRows, err := s.scopedRefundsByChannel(ctx, req)
 		if err != nil {
 			return Breakdown{}, err
 		}

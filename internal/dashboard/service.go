@@ -94,6 +94,11 @@ type NormalizedProductRow struct {
 	NormalizedMinor       string  `json:"normalized_minor"`
 	RefundNormalizedMinor string  `json:"refund_normalized_minor"`
 	NetNormalizedMinor    string  `json:"net_normalized_minor"`
+	// StoreID identifies the owning Store so same-SKU rows from
+	// different Stores stay visually distinct. Null only when the
+	// underlying row predates Store attribution (should not happen for
+	// projected products; treated as unscoped).
+	StoreID *string `json:"store_id"`
 }
 
 // NormalizedCategoryRow mirrors products for category facets (facet
@@ -135,12 +140,14 @@ type DailyDay struct {
 
 // DailyResponse wraps daily rows with explicit mode metadata.
 type DailyResponse struct {
-	Timezone        string            `json:"timezone"`
-	Period          report.PeriodMeta `json:"period"`
-	Mode            string            `json:"mode"`
-	DisplayCurrency string            `json:"display_currency"`
-	Normalized      bool              `json:"normalized"`
-	Days            []DailyDay        `json:"days"`
+	Timezone string            `json:"timezone"`
+	Period   report.PeriodMeta `json:"period"`
+	// StoreID echoes the applied ownership scope (UUID or null global).
+	StoreID         *string    `json:"store_id"`
+	Mode            string     `json:"mode"`
+	DisplayCurrency string     `json:"display_currency"`
+	Normalized      bool       `json:"normalized"`
+	Days            []DailyDay `json:"days"`
 }
 
 // ModeAverage is a server-computed average transaction value: truncating
@@ -188,8 +195,10 @@ type Overview struct {
 	GeneratedAt time.Time         `json:"generated_at"`
 	Timezone    string            `json:"timezone"`
 	Period      report.PeriodMeta `json:"period"`
-	Summary     SummaryDTO        `json:"summary"`
-	Normalized  NormalizedTotal   `json:"normalized"`
+	// StoreID echoes the applied ownership scope (UUID or null global).
+	StoreID    *string         `json:"store_id"`
+	Summary    SummaryDTO      `json:"summary"`
+	Normalized NormalizedTotal `json:"normalized"`
 	// Averages carries per-mode server-computed average transaction values
 	// (truncating integer division; identical rule in every mode).
 	Averages OverviewAverages `json:"averages"`
@@ -257,6 +266,23 @@ type Repository interface {
 	DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
 	DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
 	DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
+	// Phase 9D Store-scoped dashboard reads. Same frozen row shapes with
+	// an ownership predicate on the authoritative root (or ingress event
+	// for the activity feed). Internal until dashboard HTTP wires them;
+	// global reads keep ALL+legacy behavior.
+	DashboardNormalizedSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (NormalizedSummaryRow, error)
+	DashboardNormalizedDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]NormalizedDailyRow, error)
+	DashboardLatestFxForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (LatestFxRow, error)
+	DashboardBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]BranchRowRaw, error)
+	DashboardProductsNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]NormalizedProductRowRaw, error)
+	DashboardCategoriesNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]NormalizedCategoryRowRaw, error)
+	DashboardRecentActivityForStore(ctx context.Context, storeID string, limit int) ([]ActivityItem, error)
+	DashboardLatestSalesForStore(ctx context.Context, storeID string, limit int) ([]LatestSale, error)
+	DashboardNormalizedRefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (NormalizedRefundSummaryRow, error)
+	DashboardNormalizedRefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]NormalizedRefundDailyRow, error)
+	DashboardProductsNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
+	DashboardCategoriesNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
+	DashboardReturnBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
 }
 
 type (
@@ -301,6 +327,7 @@ type (
 		Units       int64
 		Normalized  int64
 		MissingFx   int64
+		StoreID     *string
 	}
 	NormalizedCategoryRowRaw struct {
 		Kind           string
@@ -331,6 +358,7 @@ type (
 		Units       int64
 		Normalized  int64
 		MissingFx   int64
+		StoreID     *string
 	}
 	NormalizedRefundCategoryRowRaw struct {
 		Kind           string
@@ -368,22 +396,138 @@ func NewService(reports report.Service, repo Repository, saleStore sale.Store, c
 	return Service{reports: reports, repo: repo, saleStore: saleStore, clock: c}
 }
 
+// scopedDashboard routes one dashboard repository read through the
+// selected Store scope. Specific scopes call the Store-scoped surface
+// with the validated Store UUID; global requests keep frozen methods.
+func (s Service) scopedNormalizedSummary(ctx context.Context, req report.Request) (NormalizedSummaryRow, error) {
+	if req.Scoped() {
+		return s.repo.DashboardNormalizedSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	}
+	return s.repo.DashboardNormalizedSummary(ctx, req.Period.StartUTC, req.Period.EndUTC)
+}
+
+func (s Service) scopedNormalizedRefundsSummary(ctx context.Context, req report.Request) (NormalizedRefundSummaryRow, error) {
+	if req.Scoped() {
+		return s.repo.DashboardNormalizedRefundsSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	}
+	return s.repo.DashboardNormalizedRefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC)
+}
+
+func (s Service) scopedSalesSummaryNative(ctx context.Context, req report.Request) ([]report.SummaryRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, "")
+	}
+	return s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, "")
+}
+
+func (s Service) scopedNormalizedDaily(ctx context.Context, req report.Request) ([]NormalizedDailyRow, error) {
+	if req.Scoped() {
+		return s.repo.DashboardNormalizedDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+	}
+	return s.repo.DashboardNormalizedDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+}
+
+func (s Service) scopedNormalizedRefundsDaily(ctx context.Context, req report.Request) ([]NormalizedRefundDailyRow, error) {
+	if req.Scoped() {
+		return s.repo.DashboardNormalizedRefundsDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+	}
+	return s.repo.DashboardNormalizedRefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+}
+
+func (s Service) scopedProductsNormalized(ctx context.Context, req report.Request) ([]NormalizedProductRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardProductsNormalizedForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	}
+	return s.repo.DashboardProductsNormalized(ctx, req.Period.StartUTC, req.Period.EndUTC)
+}
+
+func (s Service) scopedProductsNormalizedRefunds(ctx context.Context, req report.Request) ([]NormalizedRefundProductRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardProductsNormalizedRefundsForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	}
+	return s.repo.DashboardProductsNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC)
+}
+
+func (s Service) scopedCategoriesNormalized(ctx context.Context, req report.Request, kind string) ([]NormalizedCategoryRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardCategoriesNormalizedForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, kind)
+	}
+	return s.repo.DashboardCategoriesNormalized(ctx, req.Period.StartUTC, req.Period.EndUTC, kind)
+}
+
+func (s Service) scopedCategoriesNormalizedRefunds(ctx context.Context, req report.Request, kind string) ([]NormalizedRefundCategoryRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardCategoriesNormalizedRefundsForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, kind)
+	}
+	return s.repo.DashboardCategoriesNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC, kind)
+}
+
+func (s Service) scopedBranches(ctx context.Context, req report.Request) ([]BranchRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardBranchesForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.DashboardBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedReturnBranches(ctx context.Context, req report.Request) ([]ReturnBranchRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.DashboardReturnBranchesForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.DashboardReturnBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedLatestFx(ctx context.Context, req report.Request) (LatestFxRow, error) {
+	if req.Scoped() {
+		return s.repo.DashboardLatestFxForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	}
+	return s.repo.DashboardLatestFx(ctx, req.Period.StartUTC, req.Period.EndUTC)
+}
+
+func (s Service) scopedRecentActivity(ctx context.Context, req report.Request, limit int) ([]ActivityItem, error) {
+	if req.Scoped() {
+		return s.repo.DashboardRecentActivityForStore(ctx, req.ScopeStoreID(), limit)
+	}
+	return s.repo.DashboardRecentActivity(ctx, limit)
+}
+
+func (s Service) scopedLatestSales(ctx context.Context, req report.Request, limit int) ([]LatestSale, error) {
+	if req.Scoped() {
+		return s.repo.DashboardLatestSalesForStore(ctx, req.ScopeStoreID(), limit)
+	}
+	return s.repo.DashboardLatestSales(ctx, limit)
+}
+
+func (s Service) scopedNativeSalesDaily(ctx context.Context, req report.Request, mode string) ([]report.DailyRowRaw, error) {
+	if req.Scoped() {
+		return s.repo.SalesDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	}
+	return s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+}
+
+func (s Service) scopedNativeRefundsDaily(ctx context.Context, req report.Request, mode string) ([]report.RefundDailyRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	}
+	return s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+}
+
 // Overview assembles summary + normalized total + FX info. A USD sale
 // without an FX snapshot is a projection-integrity error, not silently
 // droppable revenue.
+
 func (s Service) Overview(ctx context.Context, req report.Request) (Overview, error) {
 	sum, err := s.reports.Summary(ctx, req)
 	if err != nil {
 		return Overview{}, err
 	}
-	norm, err := s.repo.DashboardNormalizedSummary(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	norm, err := s.scopedNormalizedSummary(ctx, req)
 	if err != nil {
 		return Overview{}, err
 	}
 	if norm.USDMissingFx > 0 {
 		return Overview{}, apperr.New(apperr.Internal, "projection integrity: USD sale without FX snapshot")
 	}
-	refundNorm, err := s.repo.DashboardNormalizedRefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	refundNorm, err := s.scopedNormalizedRefundsSummary(ctx, req)
 	if err != nil {
 		return Overview{}, err
 	}
@@ -398,13 +542,14 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 	if err != nil {
 		return Overview{}, err
 	}
-	nativeRows, err := s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, "")
+	nativeRows, err := s.scopedSalesSummaryNative(ctx, req)
 	if err != nil {
 		return Overview{}, err
 	}
 	return Overview{
 		GeneratedAt: req.GeneratedAt(), Timezone: req.Period.Timezone,
 		Period:  sum.Period,
+		StoreID: req.StoreIDOrNil(),
 		Summary: toSummaryDTO(sum),
 		Normalized: NormalizedTotal{
 			NormalizedTotalMinor:  minorString(norm.Normalized),
@@ -493,11 +638,11 @@ func (s Service) Daily(ctx context.Context, req report.Request, mode string) (Da
 		return DailyResponse{}, apperr.New(apperr.InvalidInput, "unsupported daily mode: want all|EGP|USD")
 	}
 	if mode == "all" {
-		rows, err := s.repo.DashboardNormalizedDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+		rows, err := s.scopedNormalizedDaily(ctx, req)
 		if err != nil {
 			return DailyResponse{}, err
 		}
-		refundRows, err := s.repo.DashboardNormalizedRefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Period.Timezone)
+		refundRows, err := s.scopedNormalizedRefundsDaily(ctx, req)
 		if err != nil {
 			return DailyResponse{}, err
 		}
@@ -532,17 +677,17 @@ func (s Service) Daily(ctx context.Context, req report.Request, mode string) (Da
 		}
 		sort.Strings(order)
 		out := DailyResponse{Mode: "all", DisplayCurrency: "EGP", Normalized: true, Days: []DailyDay{},
-			Timezone: req.Period.Timezone, Period: periodMeta(req)}
+			Timezone: req.Period.Timezone, Period: periodMeta(req), StoreID: req.StoreIDOrNil()}
 		for _, d := range order {
 			out.Days = append(out.Days, *byDay[d])
 		}
 		return out, nil
 	}
-	native, err := s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	native, err := s.scopedNativeSalesDaily(ctx, req, mode)
 	if err != nil {
 		return DailyResponse{}, err
 	}
-	refundNative, err := s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, req.Period.Timezone)
+	refundNative, err := s.scopedNativeRefundsDaily(ctx, req, mode)
 	if err != nil {
 		return DailyResponse{}, err
 	}
@@ -571,7 +716,7 @@ func (s Service) Daily(ctx context.Context, req report.Request, mode string) (Da
 	}
 	sort.Strings(order)
 	out := DailyResponse{Mode: mode, DisplayCurrency: mode, Normalized: false, Days: []DailyDay{},
-		Timezone: req.Period.Timezone, Period: periodMeta(req)}
+		Timezone: req.Period.Timezone, Period: periodMeta(req), StoreID: req.StoreIDOrNil()}
 	for _, d := range order {
 		out.Days = append(out.Days, *byDay[d])
 	}
@@ -593,11 +738,11 @@ func periodMeta(req report.Request) report.PeriodMeta {
 // (gross minus refunds, each normalized with its own historical FX). The
 // net ranking is explicit: gross-only consumers must not reuse it.
 func (s Service) ProductsNormalized(ctx context.Context, req report.Request) ([]NormalizedProductRow, error) {
-	rows, err := s.repo.DashboardProductsNormalized(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	rows, err := s.scopedProductsNormalized(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	refundRows, err := s.repo.DashboardProductsNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	refundRows, err := s.scopedProductsNormalizedRefunds(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -620,6 +765,10 @@ func (s Service) ProductsNormalized(ctx context.Context, req report.Request) ([]
 		row := getRow(productKey(r.ProductID, r.SKU, r.ProductName), func(row *NormalizedProductRow) {
 			row.ProductID, row.SKU, row.ProductName = r.ProductID, r.SKU, r.ProductName
 		})
+		if row.StoreID == nil && r.StoreID != nil {
+			store := *r.StoreID
+			row.StoreID = &store
+		}
 		row.Units = r.Units
 		row.NormalizedMinor = minorString(r.Normalized)
 	}
@@ -630,6 +779,10 @@ func (s Service) ProductsNormalized(ctx context.Context, req report.Request) ([]
 		row := getRow(productKey(r.ProductID, r.SKU, r.ProductName), func(row *NormalizedProductRow) {
 			row.ProductID, row.SKU, row.ProductName = r.ProductID, r.SKU, r.ProductName
 		})
+		if row.StoreID == nil && r.StoreID != nil {
+			store := *r.StoreID
+			row.StoreID = &store
+		}
 		row.UnitsReturned = r.Units
 		row.RefundNormalizedMinor = minorString(r.Normalized)
 	}
@@ -672,11 +825,11 @@ func (s Service) CategoriesNormalized(ctx context.Context, req report.Request, k
 	if kind != report.DimensionRootCategory && kind != report.DimensionSubcategory {
 		return nil, apperr.New(apperr.InvalidInput, "unsupported normalized category dimension")
 	}
-	rows, err := s.repo.DashboardCategoriesNormalized(ctx, req.Period.StartUTC, req.Period.EndUTC, kindName(kind))
+	rows, err := s.scopedCategoriesNormalized(ctx, req, kindName(kind))
 	if err != nil {
 		return nil, err
 	}
-	refundRows, err := s.repo.DashboardCategoriesNormalizedRefunds(ctx, req.Period.StartUTC, req.Period.EndUTC, kindName(kind))
+	refundRows, err := s.scopedCategoriesNormalizedRefunds(ctx, req, kindName(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -746,11 +899,11 @@ func kindName(dimension string) string {
 // Refunds attribute to the historical SALE shop tuple (Phase 4A lineage
 // guarantee); current shop settings are never consulted.
 func (s Service) Branches(ctx context.Context, req report.Request) ([]BranchRow, error) {
-	rows, err := s.repo.DashboardBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	rows, err := s.scopedBranches(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	refundRows, err := s.repo.DashboardReturnBranches(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	refundRows, err := s.scopedReturnBranches(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -935,23 +1088,23 @@ func safeDiagnostic(code string) (ar, en string) {
 		return "حدث خطأ أثناء المعالجة", "A processing error occurred"
 	}
 }
-func (s Service) RecentActivity(ctx context.Context, limit int) ([]ActivityItem, error) {
+func (s Service) RecentActivity(ctx context.Context, req report.Request, limit int) ([]ActivityItem, error) {
 	if limit < 1 || limit > 100 {
 		return nil, apperr.New(apperr.InvalidInput, "limit must be within [1, 100]")
 	}
-	return s.repo.DashboardRecentActivity(ctx, limit)
+	return s.scopedRecentActivity(ctx, req, limit)
 }
 
 // LatestSales returns the newest finalized sales (orders fallback).
-func (s Service) LatestSales(ctx context.Context, limit int) ([]LatestSale, error) {
+func (s Service) LatestSales(ctx context.Context, req report.Request, limit int) ([]LatestSale, error) {
 	if limit < 1 || limit > 100 {
 		return nil, apperr.New(apperr.InvalidInput, "limit must be within [1, 100]")
 	}
-	return s.repo.DashboardLatestSales(ctx, limit)
+	return s.scopedLatestSales(ctx, req, limit)
 }
 
 func (s Service) fxInfo(ctx context.Context, req report.Request) (FxInfo, error) {
-	row, err := s.repo.DashboardLatestFx(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	row, err := s.scopedLatestFx(ctx, req)
 	if err != nil {
 		return FxInfo{}, err
 	}

@@ -452,3 +452,85 @@ WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
  AND (@currency::text = '' OR l.refund_currency = @currency::text)
  AND r.store_id = @store_id::uuid
 GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency;
+
+-- name: ReportSalesPaymentsForStore :many
+SELECT p.method, p.amount_currency AS currency,
+    COALESCE(SUM(p.amount_minor), 0)::bigint AS amount,
+    COALESCE(SUM(p.change_minor), 0)::bigint AS change
+FROM sale_payments_projection p
+JOIN sales_projection s ON s.sale_id = p.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR p.amount_currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY p.method, p.amount_currency
+ORDER BY p.method, p.amount_currency;
+
+-- name: ReportSalesByCashierForStore :many
+SELECT s.cashier_id, s.cashier_name, s.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(s.subtotal_minor), 0)::bigint AS subtotal,
+    COALESCE(SUM(s.discount_minor), 0)::bigint AS discount,
+    COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
+    COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR s.currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY s.cashier_id, s.cashier_name, s.currency;
+
+-- name: ReportSalesByChannelForStore :many
+SELECT s.channel, s.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(s.subtotal_minor), 0)::bigint AS subtotal,
+    COALESCE(SUM(s.discount_minor), 0)::bigint AS discount,
+    COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
+    COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR s.currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY s.channel, s.currency;
+
+-- name: ReportRefundsByCashierForStore :many
+SELECT s.cashier_id, s.cashier_name, r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR r.currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY s.cashier_id, s.cashier_name, r.currency;
+
+-- name: ReportRefundsByChannelForStore :many
+SELECT s.channel, r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total
+FROM return_refund_projection r
+JOIN sales_projection s ON s.sale_id = r.sale_id
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR r.currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY s.channel, r.currency;

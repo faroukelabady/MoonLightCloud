@@ -912,6 +912,7 @@ func (d Devices) GetOrderDetailForStore(ctx context.Context, storeID, providerKe
 	}
 	name := strings.TrimSpace(header.CustomerFirstName + " " + header.CustomerLastName)
 	detail := orders.OrderDetail{
+		StoreID: storeString(header.StoreID),
 		Summary: orders.OrderSummary{
 			ProviderKey: header.ProviderKey, ExternalOrderID: header.ExternalOrderID,
 			OrderNumber: header.OrderNumber, ProviderStatus: header.ProviderStatus,
