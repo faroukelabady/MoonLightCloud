@@ -8,15 +8,15 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 )
 
-// Fresh database reaches 20 with operations tables and the carried
+// Fresh database reaches the current target with operations tables and the carried
 // pending/lease constraint enforced.
 func TestFreshTo19(t *testing.T) {
 	conn, ctx := openRaw(t)
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 20 {
-		t.Fatalf("want 20, got %d", v)
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
 	}
 	for _, table := range []string{
 		"operational_alert_recipients", "operational_incidents",
@@ -83,18 +83,11 @@ func TestV18To19Preservation(t *testing.T) {
 	beforeCmds := dumpTable(t, conn, `SELECT id, device_id, status, result_code FROM device_control_commands ORDER BY id`)
 	beforeNotes := dumpTable(t, conn, `SELECT id, dispatch_status FROM notification_messages ORDER BY id`)
 	beforeRuns := dumpTable(t, conn, `SELECT id, status FROM business_report_runs ORDER BY id`)
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 19); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != 20 {
-		t.Fatalf("want 20, got %d", v)
-	}
-	var enforced bool
-	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='operational_deliveries_identity_unique')`).Scan(&enforced); err != nil || !enforced {
-		t.Fatalf("delivery identity unique present (%v)", err)
-	}
-	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname='idx_operations_incidents_resolve')`).Scan(&enforced); err != nil || !enforced {
-		t.Fatalf("resolve index present (%v)", err)
+	if v := version(t, conn, ctx); v != 19 {
+		t.Fatalf("want 19, got %d", v)
 	}
 	if got := dumpTable(t, conn, `SELECT id, device_id, status, result_code FROM device_control_commands ORDER BY id`); got != beforeCmds {
 		t.Fatalf("commands preserved:\n%s\nvs\n%s", beforeCmds, got)
@@ -150,7 +143,7 @@ func dumpTable(t *testing.T, conn *sql.DB, q string) string {
 // rows, and re-upgrade restores full behavior.
 func TestRollback20To18Clean(t *testing.T) {
 	conn, ctx := openRaw(t)
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 20); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(`INSERT INTO devices (id, name, status, created_at, updated_at)
@@ -186,13 +179,19 @@ func TestRollback20To18Clean(t *testing.T) {
 		t.Fatalf("frozen rows preserved: %d (%v)", devices, err)
 	}
 	// Re-upgrade restores everything including the replacement stale index.
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 20); err != nil {
 		t.Fatal(err)
 	}
 	if v := version(t, conn, ctx); v != 20 {
 		t.Fatalf("want 20, got %d", v)
 	}
 	var enforced bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='operational_deliveries_identity_unique')`).Scan(&enforced); err != nil || !enforced {
+		t.Fatalf("delivery identity unique present (%v)", err)
+	}
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname='idx_operations_incidents_resolve')`).Scan(&enforced); err != nil || !enforced {
+		t.Fatalf("resolve index present (%v)", err)
+	}
 	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname='idx_operations_commands_stale')`).Scan(&enforced); err != nil || !enforced {
 		t.Fatalf("stale index restored (%v)", err)
 	}
@@ -236,7 +235,7 @@ func TestV19To20Preservation(t *testing.T) {
 	beforeDels := dumpTable(t, conn, `SELECT id, incident_id, recipient_id, event_type, provider_key_snapshot, recipient_snapshot, locale_snapshot, template_key, body_snapshot, notification_idempotency_key, status FROM operational_alert_deliveries ORDER BY id`)
 	beforeRec := dumpTable(t, conn, `SELECT incident_id, action_type, state, idempotency_key FROM operational_recovery_actions ORDER BY incident_id`)
 	beforeNotes := dumpTable(t, conn, `SELECT id, dispatch_status FROM notification_messages ORDER BY id`)
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 20); err != nil {
 		t.Fatal(err)
 	}
 	if v := version(t, conn, ctx); v != 20 {

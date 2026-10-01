@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog/slug"
+	"github.com/google/uuid"
 )
 
 // EventSaleFinalizedV2 is the registered v2 event type.
@@ -83,7 +85,7 @@ func DecodeV2(raw json.RawMessage) (PayloadV2, error) {
 }
 
 // ValidateV2 enforces every v1 invariant (via conversion) plus tag rules.
-// Tags are optional per line (empty means captured empty); each entry
+// Tags are required as a non-null array per line (empty means captured empty); each entry
 // needs a UUID tag_id, a bounded slug, and 1..200-rune display names.
 func ValidateV2(p PayloadV2) (ValidatedV2, error) {
 	fail := func(format string, args ...any) (ValidatedV2, error) {
@@ -109,18 +111,23 @@ func ValidateV2(p PayloadV2) (ValidatedV2, error) {
 		return ValidatedV2{}, apperr.New(apperr.Unprocessable, "invalid sale.finalized.v2: "+err.Error())
 	}
 	for i := range p.Lines {
+		if p.Lines[i].Tags == nil {
+			return fail("lines[%d].tags must be an array", i)
+		}
 		seen := map[string]bool{}
 		for j := range p.Lines[i].Tags {
 			tag := &p.Lines[i].Tags[j]
-			if !isUUID(tag.TagID) {
+			id, err := uuid.Parse(tag.TagID)
+			if !isUUID(tag.TagID) || err != nil {
 				return fail("lines[%d].tags[%d].tag_id must be a UUID", i, j)
 			}
-			if seen[tag.TagID] {
-				return fail("lines[%d] duplicates tag_id %s", i, tag.TagID)
+			canonicalID := id.String()
+			if seen[canonicalID] {
+				return fail("lines[%d] duplicates tag_id", i)
 			}
-			seen[tag.TagID] = true
-			if len(tag.Slug) == 0 || len(tag.Slug) > 64 {
-				return fail("lines[%d].tags[%d].slug must be 1..64 chars", i, j)
+			seen[canonicalID] = true
+			if len(tag.Slug) > 64 || !slug.Valid(tag.Slug) {
+				return fail("lines[%d].tags[%d].slug must match catalog policy", i, j)
 			}
 			if !validTagName(tag.NameAR) {
 				return fail("lines[%d].tags[%d].name_ar must be 1..200 runes", i, j)

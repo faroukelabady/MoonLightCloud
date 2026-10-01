@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	isync "github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
@@ -111,6 +112,125 @@ func TestSaleV1ProjectsUnknownCapture(t *testing.T) {
 	}
 	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 0 {
 		t.Fatalf("no tag rows for v1: %d", n)
+	}
+}
+
+func TestSaleV2EmptyTagsProjectsCapturedEmpty(t *testing.T) {
+	env := openSaleEnv(t)
+	projectSaleV2(t, env, "bbbbbbbb-bbbb-4bbb-8bbb-000000000004", "2026-09-20T10:00:00Z", nil)
+	var capture *bool
+	if err := env.pool.QueryRow(context.Background(), `SELECT tag_capture FROM sales_projection`).Scan(&capture); err != nil {
+		t.Fatal(err)
+	}
+	if capture == nil || !*capture {
+		t.Fatal("valid empty v2 array must be captured-empty")
+	}
+	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 0 {
+		t.Fatalf("empty capture has %d tags", n)
+	}
+}
+
+func TestPreviouslyAcceptedMalformedV2BlocksWithoutProjection(t *testing.T) {
+	env := openSaleEnv(t)
+	ctx := context.Background()
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(v2Fixture(t, nil)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range payload["lines"].([]any) {
+		entry.(map[string]any)["tags"] = nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventID := "aaaaaaaa-aaaa-7aaa-8aaa-000000000007"
+	// Seed a pre-remediation accepted event; new transport would reject it.
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash) VALUES ($1,$2,'sale.finalized.v2',now(),$3,'\x01')`, eventID, env.devID, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	store := NewDevices(env.pool, 5*time.Second)
+	record, ok, err := store.LoadSaleEvent(ctx, eventID)
+	if err != nil || !ok {
+		t.Fatalf("load: %v %v", ok, err)
+	}
+	result, err := store.ProjectSaleV2(ctx, record, time.Now())
+	if err != nil || result.Outcome != sale.OutcomeBlocked || result.ErrorCode != ErrValidation {
+		t.Fatalf("durable validation outcome: %+v %v", result, err)
+	}
+	for _, table := range []string{"sale_event_ownership", "sales_projection", "sale_item_tag_snapshots"} {
+		if n := saleCount(t, env.pool, table); n != 0 {
+			t.Fatalf("%s has partial state: %d", table, n)
+		}
+	}
+	if n := saleCount(t, env.pool, "sync_events"); n != 1 {
+		t.Fatalf("accepted history must remain: %d", n)
+	}
+}
+
+func TestSaleV2MalformedTagsRejectBeforeOwnershipOrProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"missing", func(line map[string]any) { delete(line, "tags") }},
+		{"null", func(line map[string]any) { line["tags"] = nil }},
+		{"mixed lines", nil},
+		{"invalid slug", func(line map[string]any) { line["tags"].([]any)[0].(map[string]any)["slug"] = "bad slug/!" }},
+		{"case duplicate identity", func(line map[string]any) {
+			tags := line["tags"].([]any)
+			original := tags[0].(map[string]any)
+			duplicate := map[string]any{}
+			for key, value := range original {
+				duplicate[key] = value
+			}
+			duplicate["tag_id"] = "AAAAAAAA-0000-4000-8000-000000000001"
+			line["tags"] = append(tags, duplicate)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := openSaleEnv(t)
+			var m map[string]any
+			if err := json.Unmarshal([]byte(v2Fixture(t, nil)), &m); err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "mixed lines" {
+				lines := m["lines"].([]any)
+				second := map[string]any{}
+				for key, value := range lines[0].(map[string]any) {
+					second[key] = value
+				}
+				second["sale_item_id"] = "33333333-3333-4333-8333-333333333334"
+				delete(second, "tags")
+				m["lines"] = append(lines, second)
+				for _, value := range m["totals"].(map[string]any) {
+					money := value.(map[string]any)
+					money["amount_minor"] = money["amount_minor"].(float64) * 2
+				}
+				for _, value := range m["payments"].([]any) {
+					money := value.(map[string]any)["amount"].(map[string]any)
+					money["amount_minor"] = money["amount_minor"].(float64) * 2
+				}
+			} else {
+				for _, entry := range m["lines"].([]any) {
+					tc.mutate(entry.(map[string]any))
+				}
+			}
+			payload, err := json.Marshal(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(`{"events":[{"event_id":"aaaaaaaa-aaaa-7aaa-8aaa-000000000009","event_type":"sale.finalized.v2","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`, payload)
+			result, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
+			if err == nil && len(result.Events) > 0 && result.Events[0].Status == "accepted" {
+				t.Fatalf("accepted malformed v2: %+v", result)
+			}
+			for _, table := range []string{"sync_events", "sale_event_ownership", "sales_projection", "sale_item_tag_snapshots"} {
+				if n := saleCount(t, env.pool, table); n != 0 {
+					t.Fatalf("%s has %d rows after rejection", table, n)
+				}
+			}
+		})
 	}
 }
 

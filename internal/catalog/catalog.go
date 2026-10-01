@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog/slug"
 )
 
 // Registered event types (wired in internal/app).
@@ -128,16 +129,8 @@ func validLocale(locale string) bool { return locale == LocaleAR || locale == Lo
 
 func validRevision(revision int64) bool { return revision >= 1 }
 
-func validSlug(slug string) bool {
-	if slug == "" {
-		return false
-	}
-	for _, r := range slug {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-			return false
-		}
-	}
-	return true
+func validSlug(value string) bool {
+	return slug.Valid(value)
 }
 
 func validDimension(dim *int) bool {

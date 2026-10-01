@@ -8,7 +8,6 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
-	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -228,7 +227,7 @@ func (d Devices) SalesByChannel(ctx context.Context, startUTC, endUTC time.Time,
 func (d Devices) SalesProjectionFreshness(ctx context.Context) (report.FreshnessRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
-	r, err := sqlcgen.New(d.pool).ReportFreshness(ctx, sale.ProcessorSaleProjectionV1)
+	r, err := sqlcgen.New(d.pool).ReportFreshness(ctx)
 	if err != nil {
 		return report.FreshnessRow{}, reportErr("projection freshness", err)
 	}

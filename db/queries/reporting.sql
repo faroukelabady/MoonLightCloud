@@ -125,15 +125,24 @@ WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
 GROUP BY s.channel, s.currency;
 
 -- name: ReportFreshness :one
+WITH sale_events AS (
+    SELECT event_id, received_at,
+        CASE event_type
+            WHEN 'sale.finalized.v1' THEN 'sale_projection.v1'
+            WHEN 'sale.finalized.v2' THEN 'sale_projection.v2'
+        END AS processor
+    FROM sync_events
+    WHERE event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+)
 SELECT
-    (SELECT max(received_at)::timestamptz FROM sync_events WHERE event_type = 'sale.finalized.v1') AS latest_received,
+    (SELECT max(received_at)::timestamptz FROM sale_events) AS latest_received,
     (SELECT max(occurred_at)::timestamptz FROM sales_projection) AS latest_occurred,
-    (SELECT count(*) FROM sync_events e WHERE e.event_type = 'sale.finalized.v1'
-        AND NOT EXISTS (SELECT 1 FROM sync_event_processing p
-            WHERE p.event_id = e.event_id AND p.processor = @processor::text
+    (SELECT count(*) FROM sale_events e WHERE NOT EXISTS (SELECT 1 FROM sync_event_processing p
+            WHERE p.event_id = e.event_id AND p.processor = e.processor
               AND p.status IN ('processed', 'blocked'))) AS backlog,
-    (SELECT count(*) FROM sync_event_processing
-        WHERE processor = @processor::text AND status = 'blocked') AS blocked;
+    (SELECT count(*) FROM sale_events e JOIN sync_event_processing p
+        ON p.event_id = e.event_id AND p.processor = e.processor
+        WHERE p.status = 'blocked') AS blocked;
 
 -- Phase 4B return/refund aggregates. Same conventions as the frozen sale
 -- queries: half-open [start, end) on the RETURN occurred_at (business

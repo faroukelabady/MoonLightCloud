@@ -12,15 +12,24 @@ import (
 )
 
 const reportFreshness = `-- name: ReportFreshness :one
+WITH sale_events AS (
+    SELECT event_id, received_at,
+        CASE event_type
+            WHEN 'sale.finalized.v1' THEN 'sale_projection.v1'
+            WHEN 'sale.finalized.v2' THEN 'sale_projection.v2'
+        END AS processor
+    FROM sync_events
+    WHERE event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+)
 SELECT
-    (SELECT max(received_at)::timestamptz FROM sync_events WHERE event_type = 'sale.finalized.v1') AS latest_received,
+    (SELECT max(received_at)::timestamptz FROM sale_events) AS latest_received,
     (SELECT max(occurred_at)::timestamptz FROM sales_projection) AS latest_occurred,
-    (SELECT count(*) FROM sync_events e WHERE e.event_type = 'sale.finalized.v1'
-        AND NOT EXISTS (SELECT 1 FROM sync_event_processing p
-            WHERE p.event_id = e.event_id AND p.processor = $1::text
+    (SELECT count(*) FROM sale_events e WHERE NOT EXISTS (SELECT 1 FROM sync_event_processing p
+            WHERE p.event_id = e.event_id AND p.processor = e.processor
               AND p.status IN ('processed', 'blocked'))) AS backlog,
-    (SELECT count(*) FROM sync_event_processing
-        WHERE processor = $1::text AND status = 'blocked') AS blocked
+    (SELECT count(*) FROM sale_events e JOIN sync_event_processing p
+        ON p.event_id = e.event_id AND p.processor = e.processor
+        WHERE p.status = 'blocked') AS blocked
 `
 
 type ReportFreshnessRow struct {
@@ -30,8 +39,8 @@ type ReportFreshnessRow struct {
 	Blocked        int64              `json:"blocked"`
 }
 
-func (q *Queries) ReportFreshness(ctx context.Context, processor string) (ReportFreshnessRow, error) {
-	row := q.db.QueryRow(ctx, reportFreshness, processor)
+func (q *Queries) ReportFreshness(ctx context.Context) (ReportFreshnessRow, error) {
+	row := q.db.QueryRow(ctx, reportFreshness)
 	var i ReportFreshnessRow
 	err := row.Scan(
 		&i.LatestReceived,
