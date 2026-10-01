@@ -14,6 +14,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/faroukelabady/MoonLightCloud/internal/store"
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -379,4 +380,95 @@ func (s lifecycleStub) IsActive(_ context.Context, id string) (bool, error) {
 	}
 	// Unknown or malformed IDs behave like the auth lookup: not found.
 	return false, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND")
+}
+
+type stubStores struct {
+	bindings  []postgres.DeviceStoreInfo
+	summaries []storeSummaryWire
+	err       error
+}
+
+type storeSummaryWire struct {
+	ID          string
+	DisplayName string
+	Timezone    string
+	Status      string
+	DeviceCount int64
+}
+
+func (s stubStores) BindingsWithStores(context.Context) ([]postgres.DeviceStoreInfo, error) {
+	return s.bindings, s.err
+}
+
+func (s stubStores) StoreSummaries(context.Context) ([]store.Summary, error) {
+	out := make([]store.Summary, 0, len(s.summaries))
+	for _, row := range s.summaries {
+		out = append(out, store.Summary{
+			ID: row.ID, DisplayName: row.DisplayName, Timezone: row.Timezone,
+			Status: row.Status, DeviceCount: row.DeviceCount,
+		})
+	}
+	return out, s.err
+}
+
+func TestDashboardDevicesShowStoreContext(t *testing.T) {
+	h := dashSetup([]auth.Device{{ID: "dev-A", Name: "shop-pc", Status: "active"}, {ID: "dev-B", Status: "active"}})
+	h.Stores = stubStores{bindings: []postgres.DeviceStoreInfo{
+		{DeviceID: "dev-A", StoreID: "store-1", DisplayName: "Cairo Gallery", Status: "active"},
+	}}
+	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	rec := httptest.NewRecorder()
+	h.Devices(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("devices: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Devices []struct {
+			DeviceID  string `json:"device_id"`
+			StoreID   string `json:"store_id"`
+			StoreName string `json:"store_name"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]struct {
+		id, name string
+	}{}
+	for _, d := range body.Devices {
+		byID[d.DeviceID] = struct {
+			id, name string
+		}{d.StoreID, d.StoreName}
+	}
+	if byID["dev-A"].id != "store-1" || byID["dev-A"].name != "Cairo Gallery" {
+		t.Fatalf("bound device shows store: %v", byID)
+	}
+	if byID["dev-B"].id != "" {
+		t.Fatalf("unbound device shows no store: %v", byID)
+	}
+}
+
+func TestDashboardStoresList(t *testing.T) {
+	h := &StoreHandlers{Stores: stubStores{summaries: []storeSummaryWire{
+		{ID: "store-1", DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo", Status: "active", DeviceCount: 2},
+	}}}
+	req := httptest.NewRequest("GET", "/api/v1/dashboard/stores", nil)
+	rec := httptest.NewRecorder()
+	h.ListStores(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("stores: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Stores []struct {
+			StoreID     string `json:"store_id"`
+			DisplayName string `json:"display_name"`
+			DeviceCount int64  `json:"device_count"`
+		} `json:"stores"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Stores) != 1 || body.Stores[0].StoreID != "store-1" || body.Stores[0].DeviceCount != 2 {
+		t.Fatalf("store list: %v", body)
+	}
 }

@@ -364,6 +364,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/stores:
+    get:
+      summary: Registered Stores with bound device counts (read-only)
+      operationId: dashboardStores
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Store registry snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStoreList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /api/v1/dashboard/devices/{device_id}/sync-requests:
     post:
       summary: Queue sync_now.v1 (Idempotency-Key required, one active per device)
@@ -457,6 +477,43 @@ paths:
                 $ref: '#/components/schemas/Capabilities'
         '401':
           description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/sync/store-registration:
+    post:
+      summary: Bind the authenticated device to its Retail Store identity
+      operationId: storeRegistration
+      security:
+        - deviceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreRegistrationRequest'
+      responses:
+        '200':
+          description: Authoritative binding outcome (idempotent; conflicts stay conflicts).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreRegistrationResult'
+        '400':
+          description: Invalid Store identity or metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Device already bound to a different Store (STORE_BINDING_CONFLICT).
           content:
             application/json:
               schema:
@@ -1528,6 +1585,9 @@ components:
         server_time:
           type: string
           format: date-time
+        store_registration:
+          type: boolean
+          description: Phase 9A store binding support. Absent/false on older clouds.
     SyncBatch:
       type: object
       required: [events]
@@ -1898,6 +1958,71 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DeviceControlCommand'
+        store_id:
+          type: string
+          format: uuid
+          description: Bound Store, if any. Absent means unbound/legacy — never fabricated.
+        store_name:
+          type: string
+          description: Bound Store display name, if any.
+    DashboardStoreList:
+      type: object
+      required: [stores]
+      properties:
+        stores:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStore'
+    DashboardStore:
+      type: object
+      required: [store_id, display_name, timezone, status, device_count, created_at, updated_at]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        timezone:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        device_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    StoreRegistrationRequest:
+      type: object
+      required: [store_id, display_name, timezone]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+          description: Retail-owned Store identity. Identity, never a secret; the device credential authorizes.
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        timezone:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: IANA identifier (e.g. Africa/Cairo).
+    StoreRegistrationResult:
+      type: object
+      required: [store_id, display_name, timezone]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        timezone:
+          type: string
     DashboardSyncRequestResponse:
       type: object
       required: [command, created]

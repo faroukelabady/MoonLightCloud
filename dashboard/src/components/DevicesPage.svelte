@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
-	import type { DeviceRow, DeviceCommandWire } from '../lib/api';
+	import type { DeviceRow, DeviceCommandWire, StoreRow } from '../lib/api';
 
 	let devices: DeviceRow[] = [];
+	let stores: StoreRow[] | null = null;
 	let incidentSummary: Record<string, { open_count: number; max_severity: string }> = {};
 	let loading = true;
 	let error: string | null = null;
@@ -62,6 +63,12 @@
 			const res = await dashboardApi.devices(signal);
 			devices = res.devices ?? [];
 			try {
+				const sres = await dashboardApi.stores(signal);
+				stores = sres.stores ?? [];
+			} catch {
+				stores = null;
+			}
+			try {
 				const sum = await dashboardApi.operationsSummary(signal);
 				incidentSummary = Object.fromEntries((sum.devices ?? []).map((d) => [d.device_id, d]));
 			} catch {
@@ -111,6 +118,11 @@
 				<li data-testid="device-row" data-device={d.device_id}>
 					<strong>{d.name || d.device_id}</strong>
 					<span data-testid="connectivity">{d.connectivity}</span>
+					{#if d.store_id}
+						<span data-testid="device-store" title={d.store_id}>{d.store_name || d.store_id}</span>
+					{:else}
+						<span data-testid="device-store-unbound" title="no Store binding">unbound</span>
+					{/if}
 					{#if incidentSummary[d.device_id]}
 						<span data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
 					{/if}
@@ -138,6 +150,21 @@
 		</ul>
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
+	{#if stores !== null}
+		<h3>Stores</h3>
+		{#if stores.length === 0}<p>No stores registered.</p>
+		{:else}
+			<ul>
+				{#each stores as st (st.store_id)}
+					<li data-testid="store-row" data-store={st.store_id}>
+						<strong>{st.display_name}</strong>
+						<span class="mono">{st.store_id}</span>
+						<span>{st.device_count} device(s)</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{/if}
 </section>
 
 <style>

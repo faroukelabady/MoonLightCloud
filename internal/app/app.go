@@ -257,7 +257,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ctlHandlers = &adapterhttp.DeviceControlHandlers{Svc: a.DeviceControl, Log: log}
 	}
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
-		Svc: a.DeviceControl, Auth: a.Devices, OnlineWindow: cfg.DeviceControl.OnlineWindow,
+		Svc: a.DeviceControl, Auth: a.Devices, Stores: store, OnlineWindow: cfg.DeviceControl.OnlineWindow,
 	}
 	opsNotify := notifications.NewService(opsStore, opsStore, log)
 	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
@@ -280,7 +280,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

@@ -283,6 +283,18 @@ export interface DeviceRow {
 	last_seen_at?: string | null;
 	active_command?: DeviceCommandWire | null;
 	recent_commands?: DeviceCommandWire[];
+	store_id?: string;
+	store_name?: string;
+}
+
+export interface StoreRow {
+	store_id: string;
+	display_name: string;
+	timezone: string;
+	status: string;
+	device_count: number;
+	created_at: string;
+	updated_at: string;
 }
 
 export interface IncidentRow {
@@ -419,6 +431,7 @@ export const dashboardApi = {
 	orderDetail: (provider: string, id: string, s?: AbortSignal) =>
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}`, s),
 	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
+	stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
 	incidents: (params: { state?: string; severity?: string; rule?: string; limit?: number; cursor?: string | null }, s?: AbortSignal) => {
 		const q = new URLSearchParams();
 		if (params.state) q.set('state', params.state);

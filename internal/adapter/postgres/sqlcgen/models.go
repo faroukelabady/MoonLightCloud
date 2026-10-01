@@ -342,6 +342,12 @@ type DeviceCredential struct {
 	LastUsedAt      pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type DeviceStoreBinding struct {
+	DeviceID  pgtype.UUID        `json:"device_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type NotificationDeliveryStatusHistory struct {
 	NotificationID    pgtype.UUID        `json:"notification_id"`
 	ProviderKey       string             `json:"provider_key"`
@@ -616,6 +622,15 @@ type SalesProjection struct {
 	TagCapture          pgtype.Bool        `json:"tag_capture"`
 }
 
+type Store struct {
+	ID          pgtype.UUID        `json:"id"`
+	DisplayName string             `json:"display_name"`
+	Timezone    string             `json:"timezone"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SyncEvent struct {
 	EventID            pgtype.UUID        `json:"event_id"`
 	DeviceID           pgtype.UUID        `json:"device_id"`
@@ -626,6 +641,7 @@ type SyncEvent struct {
 	Payload            []byte             `json:"payload"`
 	PayloadHash        []byte             `json:"payload_hash"`
 	PayloadHashVersion int32              `json:"payload_hash_version"`
+	StoreID            pgtype.UUID        `json:"store_id"`
 }
 
 type SyncEventProcessing struct {

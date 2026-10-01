@@ -5,13 +5,14 @@ import { dashboardApi } from '../lib/api.js';
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;
-	return { ...mod, dashboardApi: { devices: vi.fn(), syncRequest: vi.fn(), operationsSummary: vi.fn() } };
+	return { ...mod, dashboardApi: { devices: vi.fn(), syncRequest: vi.fn(), operationsSummary: vi.fn(), stores: vi.fn() } };
 });
 
 const api = dashboardApi as unknown as {
 	devices: ReturnType<typeof vi.fn>;
 	syncRequest: ReturnType<typeof vi.fn>;
 	operationsSummary: ReturnType<typeof vi.fn>;
+	stores: ReturnType<typeof vi.fn>;
 };
 
 
@@ -120,5 +121,25 @@ describe('DevicesPage incident badges', () => {
 		expect(await screen.findByTestId('incident-badge')).toBeTruthy();
 		expect((await screen.findByTestId('incident-badge')).textContent).toContain('2 incident(s)');
 		expect(api.operationsSummary).toHaveBeenCalledOnce();
+	});
+});
+
+describe('DevicesPage store display', () => {
+	it('shows bound store names and unbound markers plus the store list', async () => {
+		api.devices.mockResolvedValue({
+			devices: [
+				{ device_id: 'd1', lifecycle: 'active', connectivity: 'ONLINE', store_id: 's1', store_name: 'Cairo Gallery' },
+				{ device_id: 'd2', lifecycle: 'active', connectivity: 'NEVER_SEEN' },
+			],
+		});
+		api.stores.mockResolvedValue({
+			stores: [
+				{ store_id: 's1', display_name: 'Cairo Gallery', timezone: 'Africa/Cairo', status: 'active', device_count: 1, created_at: '', updated_at: '' },
+			],
+		});
+		render(DevicesPage);
+		expect(await screen.findByText('Cairo Gallery')).toBeTruthy();
+		expect(await screen.findByText('unbound')).toBeTruthy();
+		expect(await screen.findByText('1 device(s)')).toBeTruthy();
 	});
 });

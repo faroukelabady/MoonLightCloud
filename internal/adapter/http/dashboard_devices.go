@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
+	"github.com/faroukelabady/MoonLightCloud/internal/store"
 )
 
 // DeviceLister abstracts operator device enumeration for the dashboard.
@@ -24,12 +26,24 @@ type DeviceLister interface {
 type DashboardDeviceHandlers struct {
 	Svc          *devicecontrol.Service
 	Auth         DeviceLister
+	Stores       StoreDirectory
 	OnlineWindow time.Duration
+}
+
+// StoreDirectory supplies authoritative Store context for display:
+// per-device bindings plus the read-only Store registry. Nil disables
+// Store columns; unbound devices show no Store rather than a fabricated
+// one.
+type StoreDirectory interface {
+	BindingsWithStores(ctx context.Context) ([]postgres.DeviceStoreInfo, error)
+	StoreSummaries(ctx context.Context) ([]store.Summary, error)
 }
 
 type deviceRow struct {
 	DeviceID       string        `json:"device_id"`
 	Name           string        `json:"name,omitempty"`
+	StoreID        string        `json:"store_id,omitempty"`
+	StoreName      string        `json:"store_name,omitempty"`
 	Lifecycle      string        `json:"lifecycle"`
 	Connectivity   string        `json:"connectivity"`
 	LastSeenAt     *time.Time    `json:"last_seen_at,omitempty"`
@@ -60,9 +74,25 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 		return
 	}
 	now := time.Now().UTC()
+	// One bounded Store-context read for all devices; unbound devices
+	// keep empty Store fields (truthfully unbound, never fabricated).
+	stores := map[string]postgres.DeviceStoreInfo{}
+	if h.Stores != nil {
+		if infos, err := h.Stores.BindingsWithStores(r.Context()); err != nil {
+			WriteError(w, r, err)
+			return
+		} else {
+			for _, info := range infos {
+				stores[info.DeviceID] = info
+			}
+		}
+	}
 	rows := make([]deviceRow, 0, len(devices))
 	for _, d := range devices {
 		row := deviceRow{DeviceID: d.ID, Name: d.Name, Lifecycle: string(d.Status)}
+		if info, ok := stores[d.ID]; ok {
+			row.StoreID, row.StoreName = info.StoreID, info.DisplayName
+		}
 		ov := overviews[d.ID]
 		if ov.Presence != nil {
 			row.LastSeenAt = ov.Presence.LastSeenAt

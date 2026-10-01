@@ -46,6 +46,16 @@ func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
+	// Server-derived ingress Store context: the authenticated device's
+	// bound Store, snapshotted per batch. Never trusted from payloads;
+	// NULL for unbound/legacy devices. Replays keep the originally
+	// snapshotted row untouched (duplicate path below never rewrites).
+	var batchStore pgtype.UUID
+	if binding, err := q.BindingByDevice(ctx, duid); err == nil {
+		batchStore = binding.StoreID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, apperr.Wrap(apperr.Unavailable, "ingestion temporarily unavailable", redact(err))
+	}
 	results := make([]sync.EventResult, 0, len(events))
 	for _, ev := range events {
 		euid, err := parseUUID(ev.EventID)
@@ -58,6 +68,7 @@ func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string,
 			OccurredAt: pgTime(ev.OccurredAt), ReceivedAt: pgTime(receivedAt),
 			Payload: ev.Payload, PayloadHash: ev.Hash,
 			PayloadHashVersion: sync.HashVersionExact,
+			StoreID:            batchStore,
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

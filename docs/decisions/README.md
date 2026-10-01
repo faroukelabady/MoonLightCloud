@@ -35,3 +35,5 @@ Concise, irreversible-or-important choices only.
 - [0031](0031-commerce-provider-abstraction.md) — commerce provider abstraction (6A)
 - [0032](0032-woocommerce-adapter.md) — WooCommerce adapter (6B)
 - [0033](0033-online-order-ingestion.md) — Online order ingestion (6C)
+- [0038](0038-historical-sale-tag-snapshots.md) — historical sale tag snapshots, v2 projection (8C)
+- [0039](0039-cloud-store-registry.md) — Cloud store registry & ingress store context (9A)

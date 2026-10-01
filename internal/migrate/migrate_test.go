@@ -651,3 +651,52 @@ func TestV20To21PreservesSales(t *testing.T) {
 		t.Fatalf("sale money preserved: %d (%v)", total, err)
 	}
 }
+
+// v21 → 22 preserves devices, catalog, and sales with NULL store context
+// and fabricates no stores or bindings.
+func TestV21To22PreservesEverything(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 21); err != nil {
+		t.Fatal(err)
+	}
+	dev := "11111111-1111-7111-8111-111111111111"
+	e1 := "22222222-2222-7222-8222-222222222222"
+	saleID := "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa"
+	if _, err := conn.ExecContext(ctx, `INSERT INTO devices (id, name, status) VALUES ($1,'shop','active')`, dev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
+		 VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e1, dev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx,
+		`INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at,
+		 shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en,
+		 currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at)
+		 VALUES ($1,$2,$3,'MLR-1','STORE',now(),now(),'a','b','c','d','e','f','g','EGP',100,0,0,100,now())`,
+		saleID, e1, dev); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var isNull bool
+	if err := conn.QueryRowContext(ctx, `SELECT store_id IS NULL FROM sync_events WHERE event_id=$1`, e1).Scan(&isNull); err != nil || !isNull {
+		t.Fatalf("legacy ingress stays NULL: %v", err)
+	}
+	var stores, bindings int
+	if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM stores`).Scan(&stores); err != nil || stores != 0 {
+		t.Fatalf("no fabricated stores: %d (%v)", stores, err)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM device_store_bindings`).Scan(&bindings); err != nil || bindings != 0 {
+		t.Fatalf("no fabricated bindings: %d (%v)", bindings, err)
+	}
+	var total int64
+	if err := conn.QueryRowContext(ctx, `SELECT total_minor FROM sales_projection WHERE sale_id=$1`, saleID).Scan(&total); err != nil || total != 100 {
+		t.Fatalf("sale preserved: %d (%v)", total, err)
+	}
+}

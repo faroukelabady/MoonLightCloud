@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -39,6 +39,8 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		DeviceAuth(devices)(SyncCapabilities(syncSvc)))
 	mux.Handle("POST /api/v1/sync/batches",
 		DeviceAuth(devices)(SyncBatch(syncSvc, onSyncIngest)))
+	mux.Handle("POST /api/v1/sync/store-registration",
+		DeviceAuth(devices)(StoreRegistration(storeReg)))
 	// Phase 7C device control plane (Retail-initiated polling only).
 	// Registered only when the control plane is enabled; otherwise 404.
 	if ctl != nil {
@@ -84,6 +86,10 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	if dashDevices != nil {
 		mux.Handle("GET /api/v1/dashboard/devices",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.Devices)))
+		if dashDevices.Stores != nil {
+			mux.Handle("GET /api/v1/dashboard/stores",
+				dashAuth.RequireDashboardSession(http.HandlerFunc((&StoreHandlers{Stores: dashDevices.Stores}).ListStores)))
+		}
 		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.CreateSyncRequest)))
 	}

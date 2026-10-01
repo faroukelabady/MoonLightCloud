@@ -13,8 +13,8 @@ import (
 
 const insertSyncEvent = `-- name: InsertSyncEvent :one
 INSERT INTO sync_events
-    (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, payload_hash_version)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, payload_hash_version, store_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (event_id) DO NOTHING
 RETURNING event_id
 `
@@ -29,6 +29,7 @@ type InsertSyncEventParams struct {
 	Payload            []byte             `json:"payload"`
 	PayloadHash        []byte             `json:"payload_hash"`
 	PayloadHashVersion int32              `json:"payload_hash_version"`
+	StoreID            pgtype.UUID        `json:"store_id"`
 }
 
 func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams) (pgtype.UUID, error) {
@@ -42,6 +43,7 @@ func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams
 		arg.Payload,
 		arg.PayloadHash,
 		arg.PayloadHashVersion,
+		arg.StoreID,
 	)
 	var event_id pgtype.UUID
 	err := row.Scan(&event_id)

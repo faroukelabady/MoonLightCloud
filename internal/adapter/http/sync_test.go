@@ -139,6 +139,9 @@ func TestSyncCapabilitiesAdvertisesSale(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
+	if !caps.StoreRegistration {
+		t.Fatalf("capabilities must advertise store registration: %+v", caps)
+	}
 	if caps.APIVersion != "v1" || len(caps.SupportedEvents) == 0 || caps.ServerTime == "" {
 		t.Fatalf("bad capabilities: %+v", caps)
 	}

@@ -122,6 +122,9 @@ type Capabilities struct {
 	MaxPayloadBytes int      `json:"max_payload_bytes"`
 	MaxBodyBytes    int      `json:"max_body_bytes"`
 	ServerTime      string   `json:"server_time"`
+	// StoreRegistration advertises Phase 9A store binding support.
+	// Older clients ignore it; new clients skip registration when false.
+	StoreRegistration bool `json:"store_registration"`
 }
 
 // Capabilities builds the capabilities response.
@@ -134,6 +137,7 @@ func (s Service) Capabilities() Capabilities {
 		APIVersion: APIVersion, SupportedEvents: events,
 		MaxBatchEvents: MaxBatchEvents, MaxPayloadBytes: MaxPayloadBytes,
 		MaxBodyBytes: MaxSyncBodyBytes, ServerTime: s.clock.Now().Format(time.RFC3339Nano),
+		StoreRegistration: true,
 	}
 }
 
