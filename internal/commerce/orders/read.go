@@ -103,6 +103,13 @@ type OrderReader interface {
 	GetOrderDetail(ctx context.Context, providerKey, externalOrderID string) (OrderDetail, error)
 	CountOrdersByStatus(ctx context.Context, provider string) ([]OrderStatusCount, error)
 	OrderInboxStats(ctx context.Context) (WebhookQueueStats, error)
+	// Phase 9C Store-scoped reads. Root ownership controls the whole
+	// graph; legacy NULL rows never match. Internal until 9D: no HTTP
+	// change; global reads keep ALL+legacy behavior.
+	ListOrderSummariesForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *OrderCursor) ([]OrderSummary, error)
+	ListOrderPageForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *OrderCursor) (OrderPage, error)
+	GetOrderDetailForStore(ctx context.Context, storeID, providerKey, externalOrderID string) (OrderDetail, error)
+	CountOrdersByStatusForStore(ctx context.Context, storeID, provider string) ([]OrderStatusCount, error)
 }
 
 // OrderCursor is a deterministic list cursor: created_at DESC,

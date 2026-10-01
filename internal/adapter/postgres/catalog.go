@@ -1851,6 +1851,34 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
 
+// CatalogOnlineConfiguredProductsForStore enumerates the online-
+// configured products of exactly one proven Store through canonical
+// projected state. Provider publication must use this (or a single
+// authoritative product) rather than any global enumeration, so one
+// Store's write can never sweep another Store's products.
+func (d Devices) CatalogOnlineConfiguredProductsForStore(ctx context.Context, storeID string, limit int) ([]string, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "store_id must be a UUID")
+	}
+	if limit <= 0 || limit > 1000 {
+		return nil, apperr.New(apperr.InvalidInput, "limit must be 1..1000")
+	}
+	rows, err := sqlcgen.New(d.pool).CatalogOnlineConfiguredProductsForStore(ctx, sqlcgen.CatalogOnlineConfiguredProductsForStoreParams{
+		StoreID: suid, Limit: int32(limit),
+	})
+	if err != nil {
+		return nil, apperr.Wrap(apperr.Internal, "online products for store", redact(err))
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, uuidString(row.ProductID))
+	}
+	return out, nil
+}
+
 // Catalog read API for future phases (internal/catalog.Repository).
 
 func catalogNotFound(what string) error {
@@ -1894,6 +1922,7 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 			ID: uuidString(row.ProductID), SKU: row.Sku, Name: row.Name,
 			IsActive: row.IsActive, Revision: row.SourceRevision,
 			SourceEventID: uuidString(row.SourceEventID),
+			StoreID:       storeString(row.StoreID),
 		},
 		TopCategoryID: uuidString(row.TopCategoryID),
 	}

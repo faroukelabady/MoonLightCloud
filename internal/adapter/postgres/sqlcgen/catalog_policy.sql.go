@@ -52,6 +52,58 @@ func (q *Queries) CatalogOnlineConfiguredProducts(ctx context.Context, limit int
 	return items, nil
 }
 
+const catalogOnlineConfiguredProductsForStore = `-- name: CatalogOnlineConfiguredProductsForStore :many
+SELECT product_id, sell_offline, sell_online, online_allocation_limit, source_revision
+FROM catalog_product_sales_policies
+WHERE sell_online AND store_id = $1
+ORDER BY product_id
+LIMIT $2
+`
+
+type CatalogOnlineConfiguredProductsForStoreParams struct {
+	StoreID pgtype.UUID `json:"store_id"`
+	Limit   int32       `json:"limit"`
+}
+
+type CatalogOnlineConfiguredProductsForStoreRow struct {
+	ProductID             pgtype.UUID `json:"product_id"`
+	SellOffline           bool        `json:"sell_offline"`
+	SellOnline            bool        `json:"sell_online"`
+	OnlineAllocationLimit pgtype.Int8 `json:"online_allocation_limit"`
+	SourceRevision        int64       `json:"source_revision"`
+}
+
+// Phase 9C Store-aware publication enumeration: online-configured
+// products of exactly one proven Store through canonical projected
+// state. Legacy NULL rows never match. The global variant above stays
+// for administration/diagnostics and must not feed Store-specific
+// provider writes.
+func (q *Queries) CatalogOnlineConfiguredProductsForStore(ctx context.Context, arg CatalogOnlineConfiguredProductsForStoreParams) ([]CatalogOnlineConfiguredProductsForStoreRow, error) {
+	rows, err := q.db.Query(ctx, catalogOnlineConfiguredProductsForStore, arg.StoreID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogOnlineConfiguredProductsForStoreRow{}
+	for rows.Next() {
+		var i CatalogOnlineConfiguredProductsForStoreRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.SellOffline,
+			&i.SellOnline,
+			&i.OnlineAllocationLimit,
+			&i.SourceRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const catalogProductSalesPolicyByID = `-- name: CatalogProductSalesPolicyByID :one
 SELECT product_id, sell_offline, sell_online, online_allocation_limit,
     source_revision, source_event_id, source_device_id, source_payload_hash, store_id

@@ -72,10 +72,11 @@ INSERT INTO commerce_online_orders (
     prices_include_tax, created_at, modified_at, paid_at, completed_at,
     payment_method, payment_method_title,
     customer_first_name, customer_last_name, customer_email, customer_phone,
-    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines
+    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
+    store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 )
 ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
     order_number = excluded.order_number,
@@ -93,6 +94,7 @@ ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
     revision = excluded.revision, fingerprint = excluded.fingerprint,
     provider_deleted = excluded.provider_deleted,
     mapping_complete = excluded.mapping_complete, unmapped_lines = excluded.unmapped_lines,
+    store_id = excluded.store_id,
     projected_at = now(), updated_at = now();
 
 -- name: DeleteCommerceOrderLines :exec
@@ -135,7 +137,7 @@ SELECT provider_key, external_order_id, order_number,
     payment_method, payment_method_title,
     customer_first_name, customer_last_name, customer_email, customer_phone,
     revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
-    projected_at, updated_at
+    store_id, projected_at, updated_at
 FROM commerce_online_orders
 WHERE provider_key = $1 AND external_order_id = $2;
 
@@ -204,3 +206,45 @@ WHERE provider_key = $1 AND external_order_id = $2;
 SELECT generation FROM commerce_online_order_reconcile_fences
 WHERE provider_key = $1 AND external_order_id = $2
 FOR UPDATE;
+
+-- Phase 9C Store-scoped order reads. Root ownership controls the entire
+-- graph (lines/addresses/history join the root, never carry their own
+-- Store). Legacy NULL rows never match a Store scope. Global reads above
+-- keep documented ALL+legacy behavior for administration.
+
+-- name: ListCommerceOrdersForStore :many
+SELECT provider_key, external_order_id, order_number,
+    provider_status, canonical_status, currency, total_minor,
+    created_at, modified_at,
+    customer_first_name, customer_last_name,
+    mapping_complete, unmapped_lines, provider_deleted, revision
+FROM commerce_online_orders
+WHERE store_id = $1
+  AND (NULLIF($2::text, '') IS NULL OR provider_key = $2)
+  AND (NULLIF($3::text, '') IS NULL OR canonical_status = $3)
+  AND ($4::timestamptz IS NULL OR created_at < $4::timestamptz
+    OR (created_at = $4::timestamptz AND (provider_key, external_order_id) > ($5::text, $6::text)))
+ORDER BY created_at DESC, provider_key, external_order_id
+LIMIT $7;
+
+-- name: CountCommerceOrdersByStatusForStore :many
+SELECT canonical_status, count(*)::bigint AS total
+FROM commerce_online_orders
+WHERE store_id = $1
+  AND (NULLIF($2::text, '') IS NULL OR provider_key = $2)
+GROUP BY canonical_status;
+
+-- name: GetCommerceOrderForStore :one
+-- Store-scoped point read: wrong-Store and missing rows are
+-- indistinguishable (repository-standard not-found), so Store A can
+-- never observe Store B order/customer data through this surface.
+SELECT provider_key, external_order_id, order_number,
+    provider_status, canonical_status, currency,
+    discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, total_minor,
+    prices_include_tax, created_at, modified_at, paid_at, completed_at,
+    payment_method, payment_method_title,
+    customer_first_name, customer_last_name, customer_email, customer_phone,
+    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
+    store_id, projected_at, updated_at
+FROM commerce_online_orders
+WHERE provider_key = $1 AND external_order_id = $2 AND store_id = $3;

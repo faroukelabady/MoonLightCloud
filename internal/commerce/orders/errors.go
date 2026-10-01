@@ -16,6 +16,11 @@ const (
 	CodeOrderProviderAuth        = "ORDER_PROVIDER_AUTH"
 	CodeOrderProviderInvalid     = "ORDER_PROVIDER_INVALID"
 	CodeOrderReconcileError      = "ORDER_RECONCILE_ERROR"
+	// CodeCommerceStoreScopeConflict marks a terminal cross-Store order
+	// attribution failure: resolved product mappings prove more than one
+	// Store, or contradict an established order Store. The attempt writes
+	// nothing; the prior projection (if any) stays intact.
+	CodeCommerceStoreScopeConflict = "COMMERCE_STORE_SCOPE_CONFLICT"
 )
 
 // BlockedError is a terminal reconciliation failure carrying a stable

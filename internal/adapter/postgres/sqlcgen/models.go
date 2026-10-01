@@ -213,6 +213,7 @@ type CommerceOnlineOrder struct {
 	UnmappedLines      int32              `json:"unmapped_lines"`
 	ProjectedAt        pgtype.Timestamptz `json:"projected_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	StoreID            pgtype.UUID        `json:"store_id"`
 }
 
 type CommerceOnlineOrderAddress struct {
@@ -292,6 +293,7 @@ type CommerceProductMapping struct {
 	ExternalProductID string             `json:"external_product_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 type Device struct {

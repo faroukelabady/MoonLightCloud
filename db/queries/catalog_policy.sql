@@ -29,3 +29,15 @@ SELECT product_id, sell_offline, sell_online, online_allocation_limit, source_re
 FROM catalog_product_sales_policies
 WHERE sell_online ORDER BY product_id
 LIMIT $1;
+
+-- name: CatalogOnlineConfiguredProductsForStore :many
+-- Phase 9C Store-aware publication enumeration: online-configured
+-- products of exactly one proven Store through canonical projected
+-- state. Legacy NULL rows never match. The global variant above stays
+-- for administration/diagnostics and must not feed Store-specific
+-- provider writes.
+SELECT product_id, sell_offline, sell_online, online_allocation_limit, source_revision
+FROM catalog_product_sales_policies
+WHERE sell_online AND store_id = $1
+ORDER BY product_id
+LIMIT $2;

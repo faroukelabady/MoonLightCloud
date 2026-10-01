@@ -157,6 +157,44 @@ func (q *Queries) CountCommerceOrdersByStatus(ctx context.Context, dollar_1 stri
 	return items, nil
 }
 
+const countCommerceOrdersByStatusForStore = `-- name: CountCommerceOrdersByStatusForStore :many
+SELECT canonical_status, count(*)::bigint AS total
+FROM commerce_online_orders
+WHERE store_id = $1
+  AND (NULLIF($2::text, '') IS NULL OR provider_key = $2)
+GROUP BY canonical_status
+`
+
+type CountCommerceOrdersByStatusForStoreParams struct {
+	StoreID pgtype.UUID `json:"store_id"`
+	Column2 string      `json:"column_2"`
+}
+
+type CountCommerceOrdersByStatusForStoreRow struct {
+	CanonicalStatus string `json:"canonical_status"`
+	Total           int64  `json:"total"`
+}
+
+func (q *Queries) CountCommerceOrdersByStatusForStore(ctx context.Context, arg CountCommerceOrdersByStatusForStoreParams) ([]CountCommerceOrdersByStatusForStoreRow, error) {
+	rows, err := q.db.Query(ctx, countCommerceOrdersByStatusForStore, arg.StoreID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountCommerceOrdersByStatusForStoreRow{}
+	for rows.Next() {
+		var i CountCommerceOrdersByStatusForStoreRow
+		if err := rows.Scan(&i.CanonicalStatus, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteCommerceOrderAddresses = `-- name: DeleteCommerceOrderAddresses :exec
 DELETE FROM commerce_online_order_addresses WHERE provider_key = $1 AND external_order_id = $2
 `
@@ -234,7 +272,7 @@ SELECT provider_key, external_order_id, order_number,
     payment_method, payment_method_title,
     customer_first_name, customer_last_name, customer_email, customer_phone,
     revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
-    projected_at, updated_at
+    store_id, projected_at, updated_at
 FROM commerce_online_orders
 WHERE provider_key = $1 AND external_order_id = $2
 `
@@ -244,9 +282,42 @@ type GetCommerceOrderParams struct {
 	ExternalOrderID string `json:"external_order_id"`
 }
 
-func (q *Queries) GetCommerceOrder(ctx context.Context, arg GetCommerceOrderParams) (CommerceOnlineOrder, error) {
+type GetCommerceOrderRow struct {
+	ProviderKey        string             `json:"provider_key"`
+	ExternalOrderID    string             `json:"external_order_id"`
+	OrderNumber        string             `json:"order_number"`
+	ProviderStatus     string             `json:"provider_status"`
+	CanonicalStatus    string             `json:"canonical_status"`
+	Currency           string             `json:"currency"`
+	DiscountMinor      int64              `json:"discount_minor"`
+	ShippingMinor      int64              `json:"shipping_minor"`
+	CartTaxMinor       int64              `json:"cart_tax_minor"`
+	TotalTaxMinor      int64              `json:"total_tax_minor"`
+	TotalMinor         int64              `json:"total_minor"`
+	PricesIncludeTax   bool               `json:"prices_include_tax"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ModifiedAt         pgtype.Timestamptz `json:"modified_at"`
+	PaidAt             pgtype.Timestamptz `json:"paid_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	PaymentMethod      string             `json:"payment_method"`
+	PaymentMethodTitle string             `json:"payment_method_title"`
+	CustomerFirstName  string             `json:"customer_first_name"`
+	CustomerLastName   string             `json:"customer_last_name"`
+	CustomerEmail      string             `json:"customer_email"`
+	CustomerPhone      string             `json:"customer_phone"`
+	Revision           int64              `json:"revision"`
+	Fingerprint        []byte             `json:"fingerprint"`
+	ProviderDeleted    bool               `json:"provider_deleted"`
+	MappingComplete    bool               `json:"mapping_complete"`
+	UnmappedLines      int32              `json:"unmapped_lines"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	ProjectedAt        pgtype.Timestamptz `json:"projected_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetCommerceOrder(ctx context.Context, arg GetCommerceOrderParams) (GetCommerceOrderRow, error) {
 	row := q.db.QueryRow(ctx, getCommerceOrder, arg.ProviderKey, arg.ExternalOrderID)
-	var i CommerceOnlineOrder
+	var i GetCommerceOrderRow
 	err := row.Scan(
 		&i.ProviderKey,
 		&i.ExternalOrderID,
@@ -275,6 +346,100 @@ func (q *Queries) GetCommerceOrder(ctx context.Context, arg GetCommerceOrderPara
 		&i.ProviderDeleted,
 		&i.MappingComplete,
 		&i.UnmappedLines,
+		&i.StoreID,
+		&i.ProjectedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCommerceOrderForStore = `-- name: GetCommerceOrderForStore :one
+SELECT provider_key, external_order_id, order_number,
+    provider_status, canonical_status, currency,
+    discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, total_minor,
+    prices_include_tax, created_at, modified_at, paid_at, completed_at,
+    payment_method, payment_method_title,
+    customer_first_name, customer_last_name, customer_email, customer_phone,
+    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
+    store_id, projected_at, updated_at
+FROM commerce_online_orders
+WHERE provider_key = $1 AND external_order_id = $2 AND store_id = $3
+`
+
+type GetCommerceOrderForStoreParams struct {
+	ProviderKey     string      `json:"provider_key"`
+	ExternalOrderID string      `json:"external_order_id"`
+	StoreID         pgtype.UUID `json:"store_id"`
+}
+
+type GetCommerceOrderForStoreRow struct {
+	ProviderKey        string             `json:"provider_key"`
+	ExternalOrderID    string             `json:"external_order_id"`
+	OrderNumber        string             `json:"order_number"`
+	ProviderStatus     string             `json:"provider_status"`
+	CanonicalStatus    string             `json:"canonical_status"`
+	Currency           string             `json:"currency"`
+	DiscountMinor      int64              `json:"discount_minor"`
+	ShippingMinor      int64              `json:"shipping_minor"`
+	CartTaxMinor       int64              `json:"cart_tax_minor"`
+	TotalTaxMinor      int64              `json:"total_tax_minor"`
+	TotalMinor         int64              `json:"total_minor"`
+	PricesIncludeTax   bool               `json:"prices_include_tax"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ModifiedAt         pgtype.Timestamptz `json:"modified_at"`
+	PaidAt             pgtype.Timestamptz `json:"paid_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	PaymentMethod      string             `json:"payment_method"`
+	PaymentMethodTitle string             `json:"payment_method_title"`
+	CustomerFirstName  string             `json:"customer_first_name"`
+	CustomerLastName   string             `json:"customer_last_name"`
+	CustomerEmail      string             `json:"customer_email"`
+	CustomerPhone      string             `json:"customer_phone"`
+	Revision           int64              `json:"revision"`
+	Fingerprint        []byte             `json:"fingerprint"`
+	ProviderDeleted    bool               `json:"provider_deleted"`
+	MappingComplete    bool               `json:"mapping_complete"`
+	UnmappedLines      int32              `json:"unmapped_lines"`
+	StoreID            pgtype.UUID        `json:"store_id"`
+	ProjectedAt        pgtype.Timestamptz `json:"projected_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Store-scoped point read: wrong-Store and missing rows are
+// indistinguishable (repository-standard not-found), so Store A can
+// never observe Store B order/customer data through this surface.
+func (q *Queries) GetCommerceOrderForStore(ctx context.Context, arg GetCommerceOrderForStoreParams) (GetCommerceOrderForStoreRow, error) {
+	row := q.db.QueryRow(ctx, getCommerceOrderForStore, arg.ProviderKey, arg.ExternalOrderID, arg.StoreID)
+	var i GetCommerceOrderForStoreRow
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ExternalOrderID,
+		&i.OrderNumber,
+		&i.ProviderStatus,
+		&i.CanonicalStatus,
+		&i.Currency,
+		&i.DiscountMinor,
+		&i.ShippingMinor,
+		&i.CartTaxMinor,
+		&i.TotalTaxMinor,
+		&i.TotalMinor,
+		&i.PricesIncludeTax,
+		&i.CreatedAt,
+		&i.ModifiedAt,
+		&i.PaidAt,
+		&i.CompletedAt,
+		&i.PaymentMethod,
+		&i.PaymentMethodTitle,
+		&i.CustomerFirstName,
+		&i.CustomerLastName,
+		&i.CustomerEmail,
+		&i.CustomerPhone,
+		&i.Revision,
+		&i.Fingerprint,
+		&i.ProviderDeleted,
+		&i.MappingComplete,
+		&i.UnmappedLines,
+		&i.StoreID,
 		&i.ProjectedAt,
 		&i.UpdatedAt,
 	)
@@ -756,6 +921,99 @@ func (q *Queries) ListCommerceOrders(ctx context.Context, arg ListCommerceOrders
 	return items, nil
 }
 
+const listCommerceOrdersForStore = `-- name: ListCommerceOrdersForStore :many
+
+SELECT provider_key, external_order_id, order_number,
+    provider_status, canonical_status, currency, total_minor,
+    created_at, modified_at,
+    customer_first_name, customer_last_name,
+    mapping_complete, unmapped_lines, provider_deleted, revision
+FROM commerce_online_orders
+WHERE store_id = $1
+  AND (NULLIF($2::text, '') IS NULL OR provider_key = $2)
+  AND (NULLIF($3::text, '') IS NULL OR canonical_status = $3)
+  AND ($4::timestamptz IS NULL OR created_at < $4::timestamptz
+    OR (created_at = $4::timestamptz AND (provider_key, external_order_id) > ($5::text, $6::text)))
+ORDER BY created_at DESC, provider_key, external_order_id
+LIMIT $7
+`
+
+type ListCommerceOrdersForStoreParams struct {
+	StoreID pgtype.UUID        `json:"store_id"`
+	Column2 string             `json:"column_2"`
+	Column3 string             `json:"column_3"`
+	Column4 pgtype.Timestamptz `json:"column_4"`
+	Column5 string             `json:"column_5"`
+	Column6 string             `json:"column_6"`
+	Limit   int32              `json:"limit"`
+}
+
+type ListCommerceOrdersForStoreRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ExternalOrderID   string             `json:"external_order_id"`
+	OrderNumber       string             `json:"order_number"`
+	ProviderStatus    string             `json:"provider_status"`
+	CanonicalStatus   string             `json:"canonical_status"`
+	Currency          string             `json:"currency"`
+	TotalMinor        int64              `json:"total_minor"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ModifiedAt        pgtype.Timestamptz `json:"modified_at"`
+	CustomerFirstName string             `json:"customer_first_name"`
+	CustomerLastName  string             `json:"customer_last_name"`
+	MappingComplete   bool               `json:"mapping_complete"`
+	UnmappedLines     int32              `json:"unmapped_lines"`
+	ProviderDeleted   bool               `json:"provider_deleted"`
+	Revision          int64              `json:"revision"`
+}
+
+// Phase 9C Store-scoped order reads. Root ownership controls the entire
+// graph (lines/addresses/history join the root, never carry their own
+// Store). Legacy NULL rows never match a Store scope. Global reads above
+// keep documented ALL+legacy behavior for administration.
+func (q *Queries) ListCommerceOrdersForStore(ctx context.Context, arg ListCommerceOrdersForStoreParams) ([]ListCommerceOrdersForStoreRow, error) {
+	rows, err := q.db.Query(ctx, listCommerceOrdersForStore,
+		arg.StoreID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommerceOrdersForStoreRow{}
+	for rows.Next() {
+		var i ListCommerceOrdersForStoreRow
+		if err := rows.Scan(
+			&i.ProviderKey,
+			&i.ExternalOrderID,
+			&i.OrderNumber,
+			&i.ProviderStatus,
+			&i.CanonicalStatus,
+			&i.Currency,
+			&i.TotalMinor,
+			&i.CreatedAt,
+			&i.ModifiedAt,
+			&i.CustomerFirstName,
+			&i.CustomerLastName,
+			&i.MappingComplete,
+			&i.UnmappedLines,
+			&i.ProviderDeleted,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockOrderReconcileFence = `-- name: LockOrderReconcileFence :one
 SELECT generation FROM commerce_online_order_reconcile_fences
 WHERE provider_key = $1 AND external_order_id = $2
@@ -784,10 +1042,11 @@ INSERT INTO commerce_online_orders (
     prices_include_tax, created_at, modified_at, paid_at, completed_at,
     payment_method, payment_method_title,
     customer_first_name, customer_last_name, customer_email, customer_phone,
-    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines
+    revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines,
+    store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 )
 ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
     order_number = excluded.order_number,
@@ -805,6 +1064,7 @@ ON CONFLICT (provider_key, external_order_id) DO UPDATE SET
     revision = excluded.revision, fingerprint = excluded.fingerprint,
     provider_deleted = excluded.provider_deleted,
     mapping_complete = excluded.mapping_complete, unmapped_lines = excluded.unmapped_lines,
+    store_id = excluded.store_id,
     projected_at = now(), updated_at = now()
 `
 
@@ -836,6 +1096,7 @@ type UpsertCommerceOrderParams struct {
 	ProviderDeleted    bool               `json:"provider_deleted"`
 	MappingComplete    bool               `json:"mapping_complete"`
 	UnmappedLines      int32              `json:"unmapped_lines"`
+	StoreID            pgtype.UUID        `json:"store_id"`
 }
 
 func (q *Queries) UpsertCommerceOrder(ctx context.Context, arg UpsertCommerceOrderParams) error {
@@ -867,6 +1128,7 @@ func (q *Queries) UpsertCommerceOrder(ctx context.Context, arg UpsertCommerceOrd
 		arg.ProviderDeleted,
 		arg.MappingComplete,
 		arg.UnmappedLines,
+		arg.StoreID,
 	)
 	return err
 }

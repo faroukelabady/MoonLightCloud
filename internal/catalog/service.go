@@ -25,6 +25,8 @@ type ProductHeader struct {
 	IsActive      bool
 	Revision      int64
 	SourceEventID string
+	// StoreID is the proven projection Store, nil for legacy rows.
+	StoreID *string
 }
 
 // Product is the full projected product aggregate.

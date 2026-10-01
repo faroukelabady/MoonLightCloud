@@ -83,6 +83,24 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 		return SyncResult{}, mappingErr
 	}
 
+	// Phase 9C mapping ownership: the mapping mirrors its authoritative
+	// product. A legacy NULL mapping adopts the proven product Store
+	// through the idempotent same-pair path before any provider call; a
+	// mapping owned by another proven Store can never serve this
+	// product (unreachable via product immutability, fenced explicitly).
+	if mapped && mapping.StoreID == nil && desired.StoreID != nil {
+		adopted, err := s.mappings.CreateProductMapping(ctx, key, productID, mapping.ExternalProductID)
+		if err != nil {
+			return SyncResult{}, err
+		}
+		mapping = adopted
+	}
+	if mapped && mapping.StoreID != nil && desired.StoreID != nil &&
+		*mapping.StoreID != *desired.StoreID {
+		return SyncResult{}, apperr.New(apperr.Conflict,
+			"STORE_SCOPE_CONFLICT: commerce mapping owned by another store")
+	}
+
 	if !desired.Published && !mapped {
 		s.logInfo("commerce sync noop", "provider", string(key), "product", productID)
 		return SyncResult{Outcome: SyncNoOp, ProviderKey: key}, nil

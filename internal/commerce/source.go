@@ -24,7 +24,11 @@ type CatalogReader interface {
 // published online (is_active AND sell_online), and the Phase 5C derived
 // availability with source revisions.
 type DesiredProduct struct {
-	Product           CommerceProduct
+	Product CommerceProduct
+	// StoreID is the proven Store of the authoritative catalog product,
+	// nil for legacy products. Never sent to providers; used only for
+	// mapping/order ownership gates.
+	StoreID           *string
 	Published         bool
 	Availability      catalog.ProductAvailability
 	CatalogRevision   int64
@@ -126,6 +130,7 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 	}
 	desired := DesiredProduct{
 		Product:           assembled,
+		StoreID:           product.StoreID,
 		Availability:      availability,
 		CatalogRevision:   product.Revision,
 		InventoryRevision: availability.InventoryRevision,

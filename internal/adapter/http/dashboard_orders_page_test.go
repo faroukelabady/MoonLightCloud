@@ -64,6 +64,28 @@ func (f *pagingOrderReader) OrderInboxStats(_ context.Context) (orders.WebhookQu
 	return orders.WebhookQueueStats{}, nil
 }
 
+// Phase 9C Store-scoped reads: paging contract tests use the global
+// surface only; scoped reads are covered against real PostgreSQL.
+func (f *pagingOrderReader) ListOrderSummariesForStore(_ context.Context, _ string, _, _ string, _ int, _ *orders.OrderCursor) ([]orders.OrderSummary, error) {
+	return f.items, nil
+}
+
+func (f *pagingOrderReader) ListOrderPageForStore(_ context.Context, _ string, _, _ string, limit int, _ *orders.OrderCursor) (orders.OrderPage, error) {
+	items := f.items
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return orders.OrderPage{Items: items}, nil
+}
+
+func (f *pagingOrderReader) GetOrderDetailForStore(_ context.Context, _, _, _ string) (orders.OrderDetail, error) {
+	return orders.OrderDetail{}, nil
+}
+
+func (f *pagingOrderReader) CountOrdersByStatusForStore(_ context.Context, _, _ string) ([]orders.OrderStatusCount, error) {
+	return nil, nil
+}
+
 func pagingFixture(count int) []orders.OrderSummary {
 	items := make([]orders.OrderSummary, 0, count)
 	for i := 0; i < count; i++ {

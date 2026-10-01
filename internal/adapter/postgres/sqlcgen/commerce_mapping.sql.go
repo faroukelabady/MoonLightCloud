@@ -11,26 +11,85 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adoptCommerceProductMappingStore = `-- name: AdoptCommerceProductMappingStore :one
+UPDATE commerce_product_mappings SET store_id = $3, updated_at = now()
+WHERE provider_key = $1 AND product_id = $2 AND store_id IS NULL
+RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at
+`
+
+type AdoptCommerceProductMappingStoreParams struct {
+	ProviderKey string      `json:"provider_key"`
+	ProductID   pgtype.UUID `json:"product_id"`
+	StoreID     pgtype.UUID `json:"store_id"`
+}
+
+type AdoptCommerceProductMappingStoreRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Phase 9C one-time legacy adoption: a NULL mapping adopts the proven
+// Store of its own product. The WHERE clause makes concurrent adoption
+// deterministic (same product implies same Store); a lost race reads
+// back the winner instead of overwriting.
+func (q *Queries) AdoptCommerceProductMappingStore(ctx context.Context, arg AdoptCommerceProductMappingStoreParams) (AdoptCommerceProductMappingStoreRow, error) {
+	row := q.db.QueryRow(ctx, adoptCommerceProductMappingStore, arg.ProviderKey, arg.ProductID, arg.StoreID)
+	var i AdoptCommerceProductMappingStoreRow
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.ExternalProductID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createCommerceProductMapping = `-- name: CreateCommerceProductMapping :one
-INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id)
-VALUES ($1, $2, $3)
+INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id, store_id)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
-RETURNING provider_key, product_id, external_product_id, created_at, updated_at
+RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at
 `
 
 type CreateCommerceProductMappingParams struct {
 	ProviderKey       string      `json:"provider_key"`
 	ProductID         pgtype.UUID `json:"product_id"`
 	ExternalProductID string      `json:"external_product_id"`
+	StoreID           pgtype.UUID `json:"store_id"`
 }
 
-func (q *Queries) CreateCommerceProductMapping(ctx context.Context, arg CreateCommerceProductMappingParams) (CommerceProductMapping, error) {
-	row := q.db.QueryRow(ctx, createCommerceProductMapping, arg.ProviderKey, arg.ProductID, arg.ExternalProductID)
-	var i CommerceProductMapping
+type CreateCommerceProductMappingRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Phase 9C: store_id mirrors the authoritative catalog product at
+// creation (NULL for legacy products). ON CONFLICT DO NOTHING keeps the
+// frozen same-pair idempotency; adoption and cross-Store conflicts are
+// decided in Go before insert.
+func (q *Queries) CreateCommerceProductMapping(ctx context.Context, arg CreateCommerceProductMappingParams) (CreateCommerceProductMappingRow, error) {
+	row := q.db.QueryRow(ctx, createCommerceProductMapping,
+		arg.ProviderKey,
+		arg.ProductID,
+		arg.ExternalProductID,
+		arg.StoreID,
+	)
+	var i CreateCommerceProductMappingRow
 	err := row.Scan(
 		&i.ProviderKey,
 		&i.ProductID,
 		&i.ExternalProductID,
+		&i.StoreID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -38,7 +97,7 @@ func (q *Queries) CreateCommerceProductMapping(ctx context.Context, arg CreateCo
 }
 
 const findCommerceProductMappingByExternal = `-- name: FindCommerceProductMappingByExternal :one
-SELECT provider_key, product_id, external_product_id, created_at, updated_at
+SELECT provider_key, product_id, external_product_id, store_id, created_at, updated_at
 FROM commerce_product_mappings
 WHERE provider_key = $1 AND external_product_id = $2
 `
@@ -48,13 +107,23 @@ type FindCommerceProductMappingByExternalParams struct {
 	ExternalProductID string `json:"external_product_id"`
 }
 
-func (q *Queries) FindCommerceProductMappingByExternal(ctx context.Context, arg FindCommerceProductMappingByExternalParams) (CommerceProductMapping, error) {
+type FindCommerceProductMappingByExternalRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) FindCommerceProductMappingByExternal(ctx context.Context, arg FindCommerceProductMappingByExternalParams) (FindCommerceProductMappingByExternalRow, error) {
 	row := q.db.QueryRow(ctx, findCommerceProductMappingByExternal, arg.ProviderKey, arg.ExternalProductID)
-	var i CommerceProductMapping
+	var i FindCommerceProductMappingByExternalRow
 	err := row.Scan(
 		&i.ProviderKey,
 		&i.ProductID,
 		&i.ExternalProductID,
+		&i.StoreID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -63,7 +132,7 @@ func (q *Queries) FindCommerceProductMappingByExternal(ctx context.Context, arg 
 
 const getCommerceProductMapping = `-- name: GetCommerceProductMapping :one
 
-SELECT provider_key, product_id, external_product_id, created_at, updated_at
+SELECT provider_key, product_id, external_product_id, store_id, created_at, updated_at
 FROM commerce_product_mappings
 WHERE provider_key = $1 AND product_id = $2
 `
@@ -73,17 +142,77 @@ type GetCommerceProductMappingParams struct {
 	ProductID   pgtype.UUID `json:"product_id"`
 }
 
+type GetCommerceProductMappingRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Phase 6A durable provider product mappings. Integration state, not a
 // projection: never cleared by catalog/policy/inventory rebuilds.
-func (q *Queries) GetCommerceProductMapping(ctx context.Context, arg GetCommerceProductMappingParams) (CommerceProductMapping, error) {
+func (q *Queries) GetCommerceProductMapping(ctx context.Context, arg GetCommerceProductMappingParams) (GetCommerceProductMappingRow, error) {
 	row := q.db.QueryRow(ctx, getCommerceProductMapping, arg.ProviderKey, arg.ProductID)
-	var i CommerceProductMapping
+	var i GetCommerceProductMappingRow
 	err := row.Scan(
 		&i.ProviderKey,
 		&i.ProductID,
 		&i.ExternalProductID,
+		&i.StoreID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listCommerceProductMappingsForStore = `-- name: ListCommerceProductMappingsForStore :many
+SELECT provider_key, product_id, external_product_id, store_id, created_at, updated_at
+FROM commerce_product_mappings
+WHERE provider_key = $1 AND store_id = $2
+ORDER BY product_id
+`
+
+type ListCommerceProductMappingsForStoreParams struct {
+	ProviderKey string      `json:"provider_key"`
+	StoreID     pgtype.UUID `json:"store_id"`
+}
+
+type ListCommerceProductMappingsForStoreRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Phase 9C Store-scoped mapping enumeration. No global list exists, so
+// there is no legacy behavior to preserve: scoped reads only.
+func (q *Queries) ListCommerceProductMappingsForStore(ctx context.Context, arg ListCommerceProductMappingsForStoreParams) ([]ListCommerceProductMappingsForStoreRow, error) {
+	rows, err := q.db.Query(ctx, listCommerceProductMappingsForStore, arg.ProviderKey, arg.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommerceProductMappingsForStoreRow{}
+	for rows.Next() {
+		var i ListCommerceProductMappingsForStoreRow
+		if err := rows.Scan(
+			&i.ProviderKey,
+			&i.ProductID,
+			&i.ExternalProductID,
+			&i.StoreID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

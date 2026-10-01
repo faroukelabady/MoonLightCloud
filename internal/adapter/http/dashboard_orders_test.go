@@ -60,6 +60,40 @@ func (s *stubOrderReader) OrderInboxStats(_ context.Context) (orders.WebhookQueu
 	return s.inbox, nil
 }
 
+// Phase 9C Store-scoped reads: handler contract tests use the global
+// surface only; scoped reads are covered against real PostgreSQL.
+func (s *stubOrderReader) ListOrderSummariesForStore(_ context.Context, _ string, _, _ string, _ int, _ *orders.OrderCursor) ([]orders.OrderSummary, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.summaries, nil
+}
+
+func (s *stubOrderReader) ListOrderPageForStore(_ context.Context, _ string, _, _ string, limit int, _ *orders.OrderCursor) (orders.OrderPage, error) {
+	if s.err != nil {
+		return orders.OrderPage{}, s.err
+	}
+	items := s.summaries
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return orders.OrderPage{Items: items}, nil
+}
+
+func (s *stubOrderReader) GetOrderDetailForStore(_ context.Context, _, _, _ string) (orders.OrderDetail, error) {
+	if s.err != nil {
+		return orders.OrderDetail{}, s.err
+	}
+	return s.detail, nil
+}
+
+func (s *stubOrderReader) CountOrdersByStatusForStore(_ context.Context, _, _ string) ([]orders.OrderStatusCount, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.counts, nil
+}
+
 func testOrderLog() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

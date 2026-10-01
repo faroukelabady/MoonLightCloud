@@ -14,8 +14,12 @@ type ProductMapping struct {
 	ProviderKey       ProviderKey
 	ProductID         string
 	ExternalProductID string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// StoreID is the proven Store of the authoritative MoonLight
+	// product, nil for legacy mappings. Never sourced from provider
+	// payloads; adopted only from product authority.
+	StoreID   *string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ProductMappingRepository persists provider product mappings with
