@@ -4,21 +4,24 @@
 -- products); inactive products and sell_online=false still project rows.
 
 -- name: UpsertCatalogProductInventory :exec
+-- Phase 9B store ownership: see UpsertCatalogCategory.
 INSERT INTO catalog_product_inventory (
     product_id, stock_quantity,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (product_id) DO UPDATE SET
     stock_quantity = excluded.stock_quantity,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now();
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_product_inventory.store_id),
+    projected_at = now();
 
 -- name: CatalogProductInventoryByID :one
 SELECT product_id, stock_quantity,
     source_revision, source_event_id, source_device_id, source_payload_hash,
-    source_received_at, projected_at
+    source_received_at, projected_at, store_id
 FROM catalog_product_inventory WHERE product_id = $1;
 
 -- name: CatalogAvailabilityByProductID :one

@@ -66,7 +66,7 @@ func (q *Queries) CatalogAvailabilityByProductID(ctx context.Context, productID 
 const catalogProductInventoryByID = `-- name: CatalogProductInventoryByID :one
 SELECT product_id, stock_quantity,
     source_revision, source_event_id, source_device_id, source_payload_hash,
-    source_received_at, projected_at
+    source_received_at, projected_at, store_id
 FROM catalog_product_inventory WHERE product_id = $1
 `
 
@@ -82,6 +82,7 @@ func (q *Queries) CatalogProductInventoryByID(ctx context.Context, productID pgt
 		&i.SourcePayloadHash,
 		&i.SourceReceivedAt,
 		&i.ProjectedAt,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -91,13 +92,15 @@ const upsertCatalogProductInventory = `-- name: UpsertCatalogProductInventory :e
 INSERT INTO catalog_product_inventory (
     product_id, stock_quantity,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (product_id) DO UPDATE SET
     stock_quantity = excluded.stock_quantity,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now()
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_product_inventory.store_id),
+    projected_at = now()
 `
 
 type UpsertCatalogProductInventoryParams struct {
@@ -108,12 +111,14 @@ type UpsertCatalogProductInventoryParams struct {
 	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 // Phase 5C product inventory projection. Current-state replace semantics
 // per product: one row carrying the highest valid revision. Depends on the
 // core product projection (dependency wait, never terminal for missing
 // products); inactive products and sell_online=false still project rows.
+// Phase 9B store ownership: see UpsertCatalogCategory.
 func (q *Queries) UpsertCatalogProductInventory(ctx context.Context, arg UpsertCatalogProductInventoryParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogProductInventory,
 		arg.ProductID,
@@ -123,6 +128,7 @@ func (q *Queries) UpsertCatalogProductInventory(ctx context.Context, arg UpsertC
 		arg.SourceDeviceID,
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
+		arg.StoreID,
 	)
 	return err
 }

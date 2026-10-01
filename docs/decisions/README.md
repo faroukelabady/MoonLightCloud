@@ -37,3 +37,4 @@ Concise, irreversible-or-important choices only.
 - [0033](0033-online-order-ingestion.md) — Online order ingestion (6C)
 - [0038](0038-historical-sale-tag-snapshots.md) — historical sale tag snapshots, v2 projection (8C)
 - [0039](0039-cloud-store-registry.md) — Cloud store registry & ingress store context (9A)
+- [0040](0040-store-scoped-projections.md) — Store-scoped projections & ownership isolation (9B)

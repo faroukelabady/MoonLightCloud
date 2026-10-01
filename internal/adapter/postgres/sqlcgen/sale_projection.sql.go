@@ -167,10 +167,10 @@ INSERT INTO sales_projection (
     cashier_id, cashier_name, currency,
     subtotal_minor, discount_minor, tax_minor, total_minor,
     fx_base, fx_quote, fx_rate, fx_rate_microrate,
-    received_at
+    received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
 )
 ON CONFLICT (sale_id) DO NOTHING
 RETURNING sale_id, source_event_id
@@ -203,6 +203,7 @@ type InsertSaleProjectionParams struct {
 	FxRate              pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate     pgtype.Int8        `json:"fx_rate_microrate"`
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
+	StoreID             pgtype.UUID        `json:"store_id"`
 }
 
 type InsertSaleProjectionRow struct {
@@ -242,6 +243,7 @@ func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjec
 		arg.FxRate,
 		arg.FxRateMicrorate,
 		arg.ReceivedAt,
+		arg.StoreID,
 	)
 	var i InsertSaleProjectionRow
 	err := row.Scan(&i.SaleID, &i.SourceEventID)
@@ -270,7 +272,7 @@ func (q *Queries) SaleProjectionByEventID(ctx context.Context, sourceEventID pgt
 
 const saleProjectionBySaleID = `-- name: SaleProjectionBySaleID :one
 SELECT sale_id, source_event_id, source_device_id, sale_number, channel,
-    occurred_at, paid_at, currency, subtotal_minor, discount_minor, tax_minor, total_minor
+    occurred_at, paid_at, currency, subtotal_minor, discount_minor, tax_minor, total_minor, store_id
 FROM sales_projection WHERE sale_id = $1
 `
 
@@ -287,6 +289,7 @@ type SaleProjectionBySaleIDRow struct {
 	DiscountMinor  int64              `json:"discount_minor"`
 	TaxMinor       int64              `json:"tax_minor"`
 	TotalMinor     int64              `json:"total_minor"`
+	StoreID        pgtype.UUID        `json:"store_id"`
 }
 
 func (q *Queries) SaleProjectionBySaleID(ctx context.Context, saleID pgtype.UUID) (SaleProjectionBySaleIDRow, error) {
@@ -305,6 +308,7 @@ func (q *Queries) SaleProjectionBySaleID(ctx context.Context, saleID pgtype.UUID
 		&i.DiscountMinor,
 		&i.TaxMinor,
 		&i.TotalMinor,
+		&i.StoreID,
 	)
 	return i, err
 }

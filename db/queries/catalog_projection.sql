@@ -18,20 +18,27 @@ ORDER BY e.received_at, e.event_id
 LIMIT $3;
 
 -- name: UpsertCatalogCategory :exec
+-- Phase 9B: store_id carries the event's own ingress Store context
+-- (NULL for legacy events). COALESCE preserves proven ownership: a
+-- legacy event never wipes an adopted Store, and a scoped event adopts
+-- a NULL row or reaffirms its own Store (cross-Store writes are fenced
+-- in Go before this upsert runs).
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now();
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    projected_at = now();
 
 -- name: CatalogCategoryByID :one
 SELECT category_id, status, name_ar, name_en, source_revision,
-    source_event_id, source_device_id, source_payload_hash
+    source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_categories WHERE category_id = $1;
 
 -- name: DeleteCatalogCategoryEdges :exec
@@ -49,46 +56,54 @@ SELECT parent_id FROM catalog_category_edges WHERE child_id = $1 ORDER BY positi
 SELECT parent_id, child_id FROM catalog_category_edges ORDER BY parent_id, child_id;
 
 -- name: UpsertCatalogTag :exec
+-- Phase 9B store ownership: see UpsertCatalogCategory.
 INSERT INTO catalog_tags (
     tag_id, slug, is_active, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (tag_id) DO UPDATE SET
     slug = excluded.slug, is_active = excluded.is_active,
     name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now();
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    projected_at = now();
 
 -- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,
-    source_event_id, source_device_id, source_payload_hash
+    source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_tags WHERE tag_id = $1;
 
 -- name: UpsertCatalogProduct :exec
+-- Phase 9B store ownership: see UpsertCatalogCategory.
 INSERT INTO catalog_products (
     product_id, sku, name, description, top_category_id, width_cm, height_cm,
     is_active, source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (product_id) DO UPDATE SET
     sku = excluded.sku, name = excluded.name, description = excluded.description,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now();
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_products.store_id),
+    projected_at = now();
 
 -- name: CatalogProductByID :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_products WHERE product_id = $1;
 
 -- name: CatalogProductBySKU :one
+-- Phase 9B: SKU resolves only within one Store scope (NULL scope matches
+-- legacy rows). A bare global SKU lookup could cross Store ownership.
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash
-FROM catalog_products WHERE sku = $1;
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
+FROM catalog_products WHERE sku = $1 AND store_id IS NOT DISTINCT FROM $2;
 
 -- name: DeleteCatalogProductPrices :exec
 DELETE FROM catalog_product_prices WHERE product_id = $1;

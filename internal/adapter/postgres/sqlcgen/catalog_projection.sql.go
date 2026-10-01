@@ -83,7 +83,7 @@ func (q *Queries) CatalogActiveProducts(ctx context.Context, limit int32) ([]Cat
 
 const catalogCategoryByID = `-- name: CatalogCategoryByID :one
 SELECT category_id, status, name_ar, name_en, source_revision,
-    source_event_id, source_device_id, source_payload_hash
+    source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_categories WHERE category_id = $1
 `
 
@@ -96,6 +96,7 @@ type CatalogCategoryByIDRow struct {
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
 	SourcePayloadHash []byte      `json:"source_payload_hash"`
+	StoreID           pgtype.UUID `json:"store_id"`
 }
 
 func (q *Queries) CatalogCategoryByID(ctx context.Context, categoryID pgtype.UUID) (CatalogCategoryByIDRow, error) {
@@ -110,6 +111,7 @@ func (q *Queries) CatalogCategoryByID(ctx context.Context, categoryID pgtype.UUI
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -209,7 +211,7 @@ func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEn
 
 const catalogProductByID = `-- name: CatalogProductByID :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_products WHERE product_id = $1
 `
 
@@ -226,6 +228,7 @@ type CatalogProductByIDRow struct {
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
 	SourcePayloadHash []byte      `json:"source_payload_hash"`
+	StoreID           pgtype.UUID `json:"store_id"`
 }
 
 func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID) (CatalogProductByIDRow, error) {
@@ -244,15 +247,21 @@ func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID)
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
+		&i.StoreID,
 	)
 	return i, err
 }
 
 const catalogProductBySKU = `-- name: CatalogProductBySKU :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash
-FROM catalog_products WHERE sku = $1
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
+FROM catalog_products WHERE sku = $1 AND store_id IS NOT DISTINCT FROM $2
 `
+
+type CatalogProductBySKUParams struct {
+	Sku     string      `json:"sku"`
+	StoreID pgtype.UUID `json:"store_id"`
+}
 
 type CatalogProductBySKURow struct {
 	ProductID         pgtype.UUID `json:"product_id"`
@@ -267,10 +276,13 @@ type CatalogProductBySKURow struct {
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
 	SourcePayloadHash []byte      `json:"source_payload_hash"`
+	StoreID           pgtype.UUID `json:"store_id"`
 }
 
-func (q *Queries) CatalogProductBySKU(ctx context.Context, sku string) (CatalogProductBySKURow, error) {
-	row := q.db.QueryRow(ctx, catalogProductBySKU, sku)
+// Phase 9B: SKU resolves only within one Store scope (NULL scope matches
+// legacy rows). A bare global SKU lookup could cross Store ownership.
+func (q *Queries) CatalogProductBySKU(ctx context.Context, arg CatalogProductBySKUParams) (CatalogProductBySKURow, error) {
+	row := q.db.QueryRow(ctx, catalogProductBySKU, arg.Sku, arg.StoreID)
 	var i CatalogProductBySKURow
 	err := row.Scan(
 		&i.ProductID,
@@ -285,6 +297,7 @@ func (q *Queries) CatalogProductBySKU(ctx context.Context, sku string) (CatalogP
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -431,7 +444,7 @@ func (q *Queries) CatalogProductsReferencingCategory(ctx context.Context, topCat
 
 const catalogTagByID = `-- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,
-    source_event_id, source_device_id, source_payload_hash
+    source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_tags WHERE tag_id = $1
 `
 
@@ -445,6 +458,7 @@ type CatalogTagByIDRow struct {
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
 	SourcePayloadHash []byte      `json:"source_payload_hash"`
+	StoreID           pgtype.UUID `json:"store_id"`
 }
 
 func (q *Queries) CatalogTagByID(ctx context.Context, tagID pgtype.UUID) (CatalogTagByIDRow, error) {
@@ -460,6 +474,7 @@ func (q *Queries) CatalogTagByID(ctx context.Context, tagID pgtype.UUID) (Catalo
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -742,13 +757,15 @@ const upsertCatalogCategory = `-- name: UpsertCatalogCategory :exec
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now()
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    projected_at = now()
 `
 
 type UpsertCatalogCategoryParams struct {
@@ -761,8 +778,14 @@ type UpsertCatalogCategoryParams struct {
 	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
+// Phase 9B: store_id carries the event's own ingress Store context
+// (NULL for legacy events). COALESCE preserves proven ownership: a
+// legacy event never wipes an adopted Store, and a scoped event adopts
+// a NULL row or reaffirms its own Store (cross-Store writes are fenced
+// in Go before this upsert runs).
 func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCategoryParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogCategory,
 		arg.CategoryID,
@@ -774,6 +797,7 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 		arg.SourceDeviceID,
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
+		arg.StoreID,
 	)
 	return err
 }
@@ -782,15 +806,17 @@ const upsertCatalogProduct = `-- name: UpsertCatalogProduct :exec
 INSERT INTO catalog_products (
     product_id, sku, name, description, top_category_id, width_cm, height_cm,
     is_active, source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (product_id) DO UPDATE SET
     sku = excluded.sku, name = excluded.name, description = excluded.description,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now()
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_products.store_id),
+    projected_at = now()
 `
 
 type UpsertCatalogProductParams struct {
@@ -807,8 +833,10 @@ type UpsertCatalogProductParams struct {
 	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
+// Phase 9B store ownership: see UpsertCatalogCategory.
 func (q *Queries) UpsertCatalogProduct(ctx context.Context, arg UpsertCatalogProductParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogProduct,
 		arg.ProductID,
@@ -824,6 +852,7 @@ func (q *Queries) UpsertCatalogProduct(ctx context.Context, arg UpsertCatalogPro
 		arg.SourceDeviceID,
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
+		arg.StoreID,
 	)
 	return err
 }
@@ -832,14 +861,16 @@ const upsertCatalogTag = `-- name: UpsertCatalogTag :exec
 INSERT INTO catalog_tags (
     tag_id, slug, is_active, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (tag_id) DO UPDATE SET
     slug = excluded.slug, is_active = excluded.is_active,
     name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now()
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    projected_at = now()
 `
 
 type UpsertCatalogTagParams struct {
@@ -853,8 +884,10 @@ type UpsertCatalogTagParams struct {
 	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
+// Phase 9B store ownership: see UpsertCatalogCategory.
 func (q *Queries) UpsertCatalogTag(ctx context.Context, arg UpsertCatalogTagParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogTag,
 		arg.TagID,
@@ -867,6 +900,7 @@ func (q *Queries) UpsertCatalogTag(ctx context.Context, arg UpsertCatalogTagPara
 		arg.SourceDeviceID,
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
+		arg.StoreID,
 	)
 	return err
 }

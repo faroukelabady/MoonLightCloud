@@ -90,6 +90,7 @@ type CatalogCategory struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 type CatalogCategoryEdge struct {
@@ -113,6 +114,7 @@ type CatalogProduct struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 type CatalogProductInventory struct {
@@ -124,6 +126,7 @@ type CatalogProductInventory struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 type CatalogProductPrice struct {
@@ -144,6 +147,7 @@ type CatalogProductSalesPolicy struct {
 	SourcePayloadHash     []byte             `json:"source_payload_hash"`
 	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
 }
 
 type CatalogProductSubcategory struct {
@@ -176,6 +180,7 @@ type CatalogTag struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
 type CommerceOnlineOrder struct {
@@ -533,6 +538,7 @@ type ReturnRefundProjection struct {
 	ActorUserName         pgtype.Text        `json:"actor_user_name"`
 	ReceivedAt            pgtype.Timestamptz `json:"received_at"`
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
 }
 
 type SaleEventOwnership struct {
@@ -620,6 +626,7 @@ type SalesProjection struct {
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 	ProjectedAt         pgtype.Timestamptz `json:"projected_at"`
 	TagCapture          pgtype.Bool        `json:"tag_capture"`
+	StoreID             pgtype.UUID        `json:"store_id"`
 }
 
 type Store struct {

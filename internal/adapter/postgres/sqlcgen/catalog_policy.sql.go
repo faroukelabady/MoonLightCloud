@@ -54,7 +54,7 @@ func (q *Queries) CatalogOnlineConfiguredProducts(ctx context.Context, limit int
 
 const catalogProductSalesPolicyByID = `-- name: CatalogProductSalesPolicyByID :one
 SELECT product_id, sell_offline, sell_online, online_allocation_limit,
-    source_revision, source_event_id, source_device_id, source_payload_hash
+    source_revision, source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_product_sales_policies WHERE product_id = $1
 `
 
@@ -67,6 +67,7 @@ type CatalogProductSalesPolicyByIDRow struct {
 	SourceEventID         pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID        pgtype.UUID `json:"source_device_id"`
 	SourcePayloadHash     []byte      `json:"source_payload_hash"`
+	StoreID               pgtype.UUID `json:"store_id"`
 }
 
 func (q *Queries) CatalogProductSalesPolicyByID(ctx context.Context, productID pgtype.UUID) (CatalogProductSalesPolicyByIDRow, error) {
@@ -81,6 +82,7 @@ func (q *Queries) CatalogProductSalesPolicyByID(ctx context.Context, productID p
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -90,14 +92,16 @@ const upsertCatalogProductSalesPolicy = `-- name: UpsertCatalogProductSalesPolic
 INSERT INTO catalog_product_sales_policies (
     product_id, sell_offline, sell_online, online_allocation_limit,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (product_id) DO UPDATE SET
     sell_offline = excluded.sell_offline, sell_online = excluded.sell_online,
     online_allocation_limit = excluded.online_allocation_limit,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at, projected_at = now()
+    source_received_at = excluded.source_received_at,
+    store_id = COALESCE(excluded.store_id, catalog_product_sales_policies.store_id),
+    projected_at = now()
 `
 
 type UpsertCatalogProductSalesPolicyParams struct {
@@ -110,12 +114,14 @@ type UpsertCatalogProductSalesPolicyParams struct {
 	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
 	SourcePayloadHash     []byte             `json:"source_payload_hash"`
 	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
 }
 
 // Phase 5B product sales-policy projection. Current-state replace
 // semantics per product: one row carrying the highest valid revision.
 // Depends on the core product projection (dependency wait, never terminal
 // for missing products); inactive products still project policy rows.
+// Phase 9B store ownership: see UpsertCatalogCategory.
 func (q *Queries) UpsertCatalogProductSalesPolicy(ctx context.Context, arg UpsertCatalogProductSalesPolicyParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogProductSalesPolicy,
 		arg.ProductID,
@@ -127,6 +133,7 @@ func (q *Queries) UpsertCatalogProductSalesPolicy(ctx context.Context, arg Upser
 		arg.SourceDeviceID,
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
+		arg.StoreID,
 	)
 	return err
 }

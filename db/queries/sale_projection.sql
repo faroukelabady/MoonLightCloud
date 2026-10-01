@@ -11,17 +11,17 @@ INSERT INTO sales_projection (
     cashier_id, cashier_name, currency,
     subtotal_minor, discount_minor, tax_minor, total_minor,
     fx_base, fx_quote, fx_rate, fx_rate_microrate,
-    received_at
+    received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
 )
 ON CONFLICT (sale_id) DO NOTHING
 RETURNING sale_id, source_event_id;
 
 -- name: SaleProjectionBySaleID :one
 SELECT sale_id, source_event_id, source_device_id, sale_number, channel,
-    occurred_at, paid_at, currency, subtotal_minor, discount_minor, tax_minor, total_minor
+    occurred_at, paid_at, currency, subtotal_minor, discount_minor, tax_minor, total_minor, store_id
 FROM sales_projection WHERE sale_id = $1;
 
 -- name: SaleProjectionByEventID :one

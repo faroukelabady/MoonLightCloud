@@ -275,3 +275,180 @@ JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
  AND (@currency::text = '' OR l.refund_currency = @currency::text)
 GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency;
+
+-- Phase 9B store-scoped read isolation. Same frozen aggregates as above,
+-- restricted to one proven Store via the sale/return root ownership. No
+-- slug/name grouping crosses Stores: tag/category rows group by snapshot
+-- identity within the Store filter. Legacy NULL rows never match a Store
+-- scope; unfiltered methods above keep their documented global behavior.
+-- No service/HTTP change: the Store filter stays internal until 9D.
+
+-- name: ReportSalesSummaryForStore :many
+SELECT s.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(s.subtotal_minor), 0)::bigint AS subtotal,
+    COALESCE(SUM(s.discount_minor), 0)::bigint AS discount,
+    COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
+    COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS line_cost
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id,
+        COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor::numeric * quantity) AS ext_cost
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR s.currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY s.currency
+ORDER BY s.currency;
+
+-- name: ReportSalesDailyForStore :many
+SELECT ((s.occurred_at AT TIME ZONE @timezone::text)::date)::text AS day,
+    s.currency,
+    count(*)::bigint AS transactions,
+    COALESCE(SUM(s.subtotal_minor), 0)::bigint AS subtotal,
+    COALESCE(SUM(s.discount_minor), 0)::bigint AS discount,
+    COALESCE(SUM(s.tax_minor), 0)::bigint AS tax,
+    COALESCE(SUM(s.total_minor), 0)::bigint AS sales_total,
+    COALESCE(SUM(l.units), 0)::bigint AS units,
+    COALESCE(SUM(l.ext_cost), 0)::bigint AS line_cost
+FROM sales_projection s
+LEFT JOIN (
+    SELECT sale_id,
+        COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor::numeric * quantity) AS ext_cost
+    FROM sale_lines_projection
+    GROUP BY sale_id
+) l ON l.sale_id = s.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR s.currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY 1, s.currency
+ORDER BY 1, s.currency;
+
+-- name: ReportSalesByProductForStore :many
+SELECT l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY l.product_id, l.sku, l.product_name, l.line_currency;
+
+-- name: ReportSalesByCategoryForStore :many
+SELECT c.classification_kind AS kind, c.classification_id AS id,
+    c.name_ar, c.name_en, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
+FROM sale_line_classifications_projection c
+JOIN sale_lines_projection l
+  ON l.sale_id = c.sale_id AND l.sale_item_id = c.sale_item_id
+JOIN sales_projection s ON s.sale_id = c.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND c.classification_kind = @kind::text
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.line_currency;
+
+-- name: ReportSalesByTagForStore :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
+FROM sale_item_tag_snapshots t
+JOIN sale_lines_projection l
+  ON l.sale_id = t.sale_id AND l.sale_item_id = t.sale_item_id
+JOIN sales_projection s ON s.sale_id = t.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.line_currency;
+
+-- name: ReportRefundsSummaryForStore :many
+SELECT r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.gross_refunded_minor), 0)::bigint AS gross_refunded,
+ COALESCE(SUM(r.discount_refunded_minor), 0)::bigint AS discount_refunded,
+ COALESCE(SUM(r.tax_refunded_minor), 0)::bigint AS tax_refunded,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+ COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR r.currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY r.currency ORDER BY r.currency;
+
+-- name: ReportRefundsDailyForStore :many
+SELECT ((r.occurred_at AT TIME ZONE @timezone::text)::date)::text AS day,
+ r.currency, count(*)::bigint AS transactions,
+ COALESCE(SUM(l.units), 0)::bigint AS units,
+ COALESCE(SUM(r.refund_total_minor), 0)::bigint AS refund_total,
+ COALESCE(SUM(l.ext_cost), 0)::bigint AS returned_cost
+FROM return_refund_projection r
+LEFT JOIN (
+    SELECT return_refund_id, COALESCE(SUM(quantity), 0)::bigint AS units,
+        SUM(cost_minor) AS ext_cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+) l ON l.return_refund_id = r.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR r.currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY 1, r.currency ORDER BY 1, r.currency;
+
+-- name: ReportRefundsByProductForStore :many
+SELECT sl.product_id, sl.sku, sl.product_name, l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency;
+
+-- name: ReportRefundsByCategoryForStore :many
+SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,
+ l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM sale_line_classifications_projection c
+JOIN return_refund_lines_projection l
+  ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND c.classification_kind = @kind::text
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.refund_currency;
+
+-- name: ReportRefundsByTagForStore :many
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
+ l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM sale_item_tag_snapshots t
+JOIN return_refund_lines_projection l
+  ON l.sale_id = t.sale_id AND l.original_sale_line_id = t.sale_item_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency;

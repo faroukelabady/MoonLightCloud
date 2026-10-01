@@ -22,5 +22,7 @@ SET payload_hash = $2, payload_hash_version = 2
 WHERE event_id = $1 AND payload_hash_version = 1;
 
 -- name: SaleEventByID :one
-SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload
+-- Phase 9B: store_id is the trusted ingress context (NULL for legacy or
+-- unbound events). Projectors copy it verbatim; they never re-derive it.
+SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, store_id
 FROM sync_events WHERE event_id = $1;

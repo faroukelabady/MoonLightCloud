@@ -407,6 +407,21 @@ type Repository interface {
 	RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCashierRow, error)
 	RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundChannelRow, error)
 	ReturnProjectionFreshness(ctx context.Context) (ReturnFreshnessRow, error)
+	// Phase 9B store-scoped read isolation. Same frozen row shapes
+	// restricted to one proven Store. Internal until 9D: no service,
+	// HTTP, or dashboard change; unfiltered methods keep global behavior.
+	SalesSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]SummaryRow, error)
+	SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
+	SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
+	SalesByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
+	SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
+	SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
+	RefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
+	RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundDailyRow, error)
+	RefundsByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
+	RefundsByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
+	RefundsBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
+	RefundsByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
 }
 
 // Service is the reusable reporting authority for dashboards and jobs.

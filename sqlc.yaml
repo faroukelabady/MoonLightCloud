@@ -25,6 +25,7 @@ sql:
       - "db/migrations/00020_operational_integrity.sql"
       - "db/migrations/00021_sale_historical_tags.sql"
       - "db/migrations/00022_store_identity.sql"
+      - "db/migrations/00023_store_scoped_projections.sql"
     gen:
       go:
         package: "sqlcgen"

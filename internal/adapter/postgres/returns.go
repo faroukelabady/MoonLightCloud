@@ -66,6 +66,7 @@ func (d Devices) LoadReturnEvent(ctx context.Context, eventID string) (returnref
 		OccurredAt: row.OccurredAt.Time, ReceivedAt: row.ReceivedAt.Time,
 		Payload: json.RawMessage(row.Payload),
 	}
+	rec.StoreID = storeString(row.StoreID)
 	if row.CredentialID.Valid {
 		c := uuidString(row.CredentialID)
 		rec.CredentialID = &c
@@ -219,6 +220,17 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 		}
 		_ = tx.Rollback(ctx)
 		return d.persistReturnRetry(ctx, euid, now, ErrProjection, "sale lookup failed")
+	}
+	// Phase 9B ownership gate: the return resolves its sale within the
+	// SAME Store ownership context, before any cumulative guard or write.
+	// A scoped return for another proven Store's sale is rejected with
+	// zero mutation; a scoped return for an unscoped legacy sale needs
+	// device-provenance continuity (same authoring device), else it stays
+	// LEGACY_SCOPE_AMBIGUOUS rather than inventing ownership. Legacy
+	// returns keep legacy coexistence.
+	if scope := returnSaleScope(saleProj.StoreID, saleProj.SourceDeviceID, event); scope != nil {
+		_ = tx.Rollback(ctx)
+		return d.markReturnBlocked(ctx, euid, now, scope.ErrorCode, scope.Message)
 	}
 	// Integrity cross-checks against committed history. Each is terminal:
 	// committed sale projections are immutable, so no retry can change
@@ -565,7 +577,43 @@ func returnHeaderParams(rid, euid, duid pgtype.UUID, event returnrefund.EventRec
 		ShopReceiptFooterAr: v.Shop.ReceiptFooterAR, ShopReceiptFooterEn: v.Shop.ReceiptFooterEN,
 		ActorUserID: actorID, ActorUserName: pgText(strOrEmpty(v.Actor.UserName)),
 		ReceivedAt: pgTime(event.ReceivedAt),
+		StoreID:    storeUUID(event.StoreID),
 	}
+}
+
+// returnScopeVerdict carries a terminal scope verdict for return projection.
+type returnScopeVerdict struct {
+	ErrorCode string
+	Message   string
+}
+
+// returnSaleScope enforces same-Store return attribution against the
+// locked parent sale row.
+//
+//   - sale scoped S, return scoped S: proceed.
+//   - sale scoped S, return scoped T (T non-empty, T != S): conflict, zero
+//     mutation.
+//   - sale scoped S, legacy return: proceed (legacy coexistence; the return
+//     row stays unscoped, money attributes via the sale join).
+//   - legacy sale, legacy return: proceed.
+//   - legacy sale, scoped return: proceed only with device-provenance
+//     continuity (same authoring device as the sale); otherwise ownership
+//     would be invented and the event stays ambiguous.
+func returnSaleScope(saleStore, saleDevice pgtype.UUID, event returnrefund.EventRecord) *returnScopeVerdict {
+	incoming := event.StoreID
+	if incoming == nil || *incoming == "" {
+		return nil
+	}
+	if !saleStore.Valid {
+		if saleDevice.Valid && uuidString(saleDevice) == event.DeviceID {
+			return nil
+		}
+		return &returnScopeVerdict{ErrorCode: ErrLegacyScopeAmbiguous, Message: "return store cannot be proven from legacy sale"}
+	}
+	if uuidString(saleStore) == *incoming {
+		return nil
+	}
+	return &returnScopeVerdict{ErrorCode: ErrStoreScopeConflict, Message: "return references a sale owned by another store"}
 }
 
 // insertReturnChildren writes lines + refund payments with deterministic

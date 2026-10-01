@@ -57,6 +57,10 @@ type EventRecord struct {
 	OccurredAt   time.Time
 	ReceivedAt   time.Time
 	Payload      json.RawMessage
+	// StoreID is the trusted ingress Store context (sync_events.store_id),
+	// nil for legacy/unbound events. Projectors copy it verbatim; they
+	// never re-derive Store ownership from bindings or payloads.
+	StoreID *string
 }
 
 // Stats reuses the frozen sale processing-stats shape: one generic

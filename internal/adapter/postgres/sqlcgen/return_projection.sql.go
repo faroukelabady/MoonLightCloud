@@ -144,11 +144,11 @@ INSERT INTO return_refund_projection (
     shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone,
     shop_receipt_footer_ar, shop_receipt_footer_en,
     actor_user_id, actor_user_name,
-    received_at
+    received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
     $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-    $26, $27, $28, $29, $30, $31
+    $26, $27, $28, $29, $30, $31, $32
 )
 ON CONFLICT (return_refund_id) DO NOTHING
 RETURNING return_refund_id, source_event_id
@@ -186,6 +186,7 @@ type InsertReturnProjectionParams struct {
 	ActorUserID           pgtype.UUID        `json:"actor_user_id"`
 	ActorUserName         pgtype.Text        `json:"actor_user_name"`
 	ReceivedAt            pgtype.Timestamptz `json:"received_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
 }
 
 type InsertReturnProjectionRow struct {
@@ -226,6 +227,7 @@ func (q *Queries) InsertReturnProjection(ctx context.Context, arg InsertReturnPr
 		arg.ActorUserID,
 		arg.ActorUserName,
 		arg.ReceivedAt,
+		arg.StoreID,
 	)
 	var i InsertReturnProjectionRow
 	err := row.Scan(&i.ReturnRefundID, &i.SourceEventID)
@@ -233,9 +235,9 @@ func (q *Queries) InsertReturnProjection(ctx context.Context, arg InsertReturnPr
 }
 
 const lockSaleProjectionForReturn = `-- name: LockSaleProjectionForReturn :one
-SELECT sale_id, source_event_id, sale_number, channel, occurred_at, paid_at,
+SELECT sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at,
     currency, subtotal_minor, discount_minor, tax_minor, total_minor,
-    fx_base, fx_quote, fx_rate, fx_rate_microrate
+    fx_base, fx_quote, fx_rate, fx_rate_microrate, store_id
 FROM sales_projection WHERE sale_id = $1
 FOR UPDATE
 `
@@ -243,6 +245,7 @@ FOR UPDATE
 type LockSaleProjectionForReturnRow struct {
 	SaleID          pgtype.UUID        `json:"sale_id"`
 	SourceEventID   pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID  pgtype.UUID        `json:"source_device_id"`
 	SaleNumber      string             `json:"sale_number"`
 	Channel         string             `json:"channel"`
 	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
@@ -256,6 +259,7 @@ type LockSaleProjectionForReturnRow struct {
 	FxQuote         pgtype.Text        `json:"fx_quote"`
 	FxRate          pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate pgtype.Int8        `json:"fx_rate_microrate"`
+	StoreID         pgtype.UUID        `json:"store_id"`
 }
 
 // Parent-row lock serializing all return projections for one sale, so the
@@ -267,6 +271,7 @@ func (q *Queries) LockSaleProjectionForReturn(ctx context.Context, saleID pgtype
 	err := row.Scan(
 		&i.SaleID,
 		&i.SourceEventID,
+		&i.SourceDeviceID,
 		&i.SaleNumber,
 		&i.Channel,
 		&i.OccurredAt,
@@ -280,6 +285,7 @@ func (q *Queries) LockSaleProjectionForReturn(ctx context.Context, saleID pgtype
 		&i.FxQuote,
 		&i.FxRate,
 		&i.FxRateMicrorate,
+		&i.StoreID,
 	)
 	return i, err
 }
@@ -340,7 +346,7 @@ func (q *Queries) ReturnProjectionByEventID(ctx context.Context, sourceEventID p
 const returnProjectionByID = `-- name: ReturnProjectionByID :one
 SELECT return_refund_id, source_event_id, source_device_id, return_number, kind,
     reason, sale_id, sale_number, channel, occurred_at, currency,
-    gross_refunded_minor, discount_refunded_minor, tax_refunded_minor, refund_total_minor
+    gross_refunded_minor, discount_refunded_minor, tax_refunded_minor, refund_total_minor, store_id
 FROM return_refund_projection WHERE return_refund_id = $1
 `
 
@@ -360,6 +366,7 @@ type ReturnProjectionByIDRow struct {
 	DiscountRefundedMinor int64              `json:"discount_refunded_minor"`
 	TaxRefundedMinor      int64              `json:"tax_refunded_minor"`
 	RefundTotalMinor      int64              `json:"refund_total_minor"`
+	StoreID               pgtype.UUID        `json:"store_id"`
 }
 
 func (q *Queries) ReturnProjectionByID(ctx context.Context, returnRefundID pgtype.UUID) (ReturnProjectionByIDRow, error) {
@@ -381,6 +388,7 @@ func (q *Queries) ReturnProjectionByID(ctx context.Context, returnRefundID pgtyp
 		&i.DiscountRefundedMinor,
 		&i.TaxRefundedMinor,
 		&i.RefundTotalMinor,
+		&i.StoreID,
 	)
 	return i, err
 }

@@ -53,6 +53,7 @@ func (d Devices) LoadSaleEvent(ctx context.Context, eventID string) (sale.EventR
 		OccurredAt: row.OccurredAt.Time, ReceivedAt: row.ReceivedAt.Time,
 		Payload: json.RawMessage(row.Payload),
 	}
+	rec.StoreID = storeString(row.StoreID)
 	if row.CredentialID.Valid {
 		c := uuidString(row.CredentialID)
 		rec.CredentialID = &c
@@ -204,9 +205,14 @@ func (d Devices) ProjectSale(ctx context.Context, event sale.EventRecord, now ti
 				return d.persistRetry(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection, "header race with rollback")
 			}
 			if uuidString(existing.SourceEventID) != event.EventID {
-				// Header from another event despite durable ownership:
-				// projection/ownership integrity failure — never overwrite.
+				// Header from another event despite durable ownership.
+				// Phase 9B: a proven cross-Store mismatch is a scope
+				// conflict; otherwise the frozen integrity verdict stands.
 				_ = tx.Rollback(ctx)
+				if scope := saleScopeCheck(existing.StoreID, uuidString(existing.SourceEventID), event); scope != nil {
+					return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, scope.ErrorCode,
+						"sale owned by another store")
+				}
 				return d.markBlocked(ctx, sale.ProcessorSaleProjectionV1, euid, now, ErrProjection,
 					"projection source differs from durable ownership")
 			}
@@ -418,6 +424,7 @@ func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRec
 	}
 	return sqlcgen.InsertSaleProjectionParams{
 		SaleID: saleUID, SourceEventID: euid, SourceDeviceID: duid,
+		StoreID:    storeUUID(event.StoreID),
 		SaleNumber: v.SaleNumber, Channel: v.Channel,
 		OccurredAt: pgTime(v.Occurred), PaidAt: pgTime(v.Paid),
 		ShopNameAr: v.Shop.NameAR, ShopNameEn: v.Shop.NameEN,
@@ -431,6 +438,28 @@ func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRec
 		FxBase: fxBase, FxQuote: fxQuote, FxRate: fxRate, FxRateMicrorate: fxMicro,
 		ReceivedAt: pgTime(event.ReceivedAt),
 	}
+}
+
+// saleScopeCheck enforces historical ownership immutability at the write
+// boundary. The durable winner is already proven to be this event; when a
+// sale row from another event exists, two proven non-NULL Stores must
+// never mix: the incoming event blocks with STORE_SCOPE_CONFLICT. Legacy
+// NULL rows never adopt Store ownership (historical truth): same-event
+// replay proceeds and keeps its stored (possibly NULL) context, while a
+// different event for an existing sale stays a scope conflict when either
+// side is scoped, else falls through to the existing integrity check.
+func saleScopeCheck(existingStore pgtype.UUID, existingEvent string, event sale.EventRecord) *sale.ProjectResult {
+	if existingEvent == event.EventID {
+		return nil
+	}
+	incoming := event.StoreID
+	if incoming != nil && *incoming != "" {
+		return &sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: ErrStoreScopeConflict}
+	}
+	if existingStore.Valid {
+		return &sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: ErrStoreScopeConflict}
+	}
+	return nil
 }
 
 // insertProjectionChildren writes lines + payments + classifications with

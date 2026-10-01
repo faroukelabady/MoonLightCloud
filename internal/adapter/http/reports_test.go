@@ -79,6 +79,56 @@ func (s stubReportRepo) ReturnProjectionFreshness(context.Context) (report.Retur
 	return report.ReturnFreshnessRow{}, nil
 }
 
+// Phase 9B store-scoped methods: contract tests exercise the unfiltered
+// surface only; scoped reads are covered against real PostgreSQL.
+func (s stubReportRepo) SalesSummaryForStore(context.Context, string, time.Time, time.Time, string) ([]report.SummaryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesDailyForStore(context.Context, string, time.Time, time.Time, string, string) ([]report.DailyRowRaw, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByProductForStore(context.Context, string, time.Time, time.Time, string) ([]report.ProductRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByRootCategoryForStore(context.Context, string, time.Time, time.Time, string) ([]report.CategoryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesBySubcategoryForStore(context.Context, string, time.Time, time.Time, string) ([]report.CategoryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByTagForStore(context.Context, string, time.Time, time.Time, string) ([]report.TagRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsSummaryForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundSummaryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsDailyForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundDailyRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsByProductForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundProductRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsByRootCategoryForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundCategoryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsBySubcategoryForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundCategoryRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) RefundsByTagForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundTagRow, error) {
+	return nil, nil
+}
+
 func reportTestMux() http.Handler {
 	loc, _ := time.LoadLocation("Africa/Cairo")
 	svc := report.NewService(stubReportRepo{

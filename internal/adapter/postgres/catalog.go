@@ -70,6 +70,7 @@ func (d Devices) LoadCatalogEvent(ctx context.Context, eventID string) (catalog.
 		OccurredAt: row.OccurredAt.Time, ReceivedAt: row.ReceivedAt.Time,
 		Payload: json.RawMessage(row.Payload),
 	}
+	rec.StoreID = storeString(row.StoreID)
 	if row.CredentialID.Valid {
 		c := uuidString(row.CredentialID)
 		rec.CredentialID = &c
@@ -801,14 +802,24 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	// Equal revisions compare reconstructed semantic state (R02): the
 	// stored hash may predate semantic fingerprinting and never decides.
 	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
 	if row, err := q.CatalogCategoryByID(ctx, cuid); err == nil {
 		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category lookup failed")
+	}
+	// Phase 9B ownership gate: runs before any revision decision so a
+	// cross-Store event can never adopt, overwrite, or moot another
+	// Store's projection, even when stale or revision-equal.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "category owned by another store")
 	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
@@ -850,13 +861,31 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	}
 
 	// Parent dependency: missing parents wait retryably, never terminally.
-	parentsOK, err := hasCatalogParents(ctx, q, valid.ParentIDs)
-	if err != nil {
+	// Phase 9B: an edge must never resolve a node owned by another
+	// proven Store. NULL (legacy) rows are wildcards on either side.
+	// Existence and scope resolve in one bounded pass per parent.
+	if effStore := effectiveScope(writeStore, existingStore); effStore != nil {
+		for _, parent := range valid.ParentIDs {
+			puid, _ := parseUUID(parent)
+			prow, err := q.CatalogCategoryByID(ctx, puid)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					_ = tx.Rollback(ctx)
+					return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "parent category not yet projected")
+				}
+				_ = tx.Rollback(ctx)
+				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed")
+			}
+			if !scopeCompatible(effStore, storeString(prow.StoreID)) {
+				_ = tx.Rollback(ctx)
+				return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "category edge crosses store ownership")
+			}
+		}
+	} else if parentsOK, err := hasCatalogParents(ctx, q, valid.ParentIDs); err != nil || !parentsOK {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent lookup failed")
-	}
-	if !parentsOK {
-		_ = tx.Rollback(ctx)
+		if err != nil {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent lookup failed")
+		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "parent category not yet projected")
 	}
 
@@ -938,6 +967,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		CategoryID: cuid, Status: valid.Status, NameAr: nameAR, NameEn: nameEN,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isUniqueViolation(err) {
@@ -1143,14 +1173,22 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
 	}
 	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
 	if row, err := q.CatalogTagByID(ctx, tuid); err == nil {
 		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "tag owned by another store")
 	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
@@ -1204,6 +1242,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		NameAr: nameAR, NameEn: nameEN,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isUniqueViolation(err) {
@@ -1278,14 +1317,24 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	}
 
 	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
 	if row, err := q.CatalogProductByID(ctx, puid); err == nil {
 		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory. A scoped event for a
+	// product owned by another Store blocks here; a scoped event adopts a
+	// NULL legacy row by aggregate-ID + revision continuity.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product owned by another store")
 	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
@@ -1337,31 +1386,47 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, msg)
 	}
-	if _, err := q.CatalogCategoryByID(ctx, topUID); err != nil {
+	effStore := effectiveScope(writeStore, existingStore)
+	topRow, err := q.CatalogCategoryByID(ctx, topUID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return wait("top category not yet projected")
 		}
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "top category lookup failed")
 	}
+	if !scopeCompatible(effStore, storeString(topRow.StoreID)) {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "top category owned by another store")
+	}
 	for _, sub := range valid.SubcategoryIDs {
 		suid, _ := parseUUID(sub)
-		if _, err := q.CatalogCategoryByID(ctx, suid); err != nil {
+		subRow, err := q.CatalogCategoryByID(ctx, suid)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return wait("subcategory not yet projected")
 			}
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory lookup failed")
 		}
+		if !scopeCompatible(effStore, storeString(subRow.StoreID)) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "subcategory owned by another store")
+		}
 	}
 	for _, tagID := range valid.TagIDs {
 		guid, _ := parseUUID(tagID)
-		if _, err := q.CatalogTagByID(ctx, guid); err != nil {
+		tagRow, err := q.CatalogTagByID(ctx, guid)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return wait("tag not yet projected")
 			}
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed")
+		}
+		if !scopeCompatible(effStore, storeString(tagRow.StoreID)) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "tag owned by another store")
 		}
 	}
 
@@ -1398,6 +1463,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		TopCategoryID: topUID, WidthCm: width, HeightCm: height, IsActive: valid.IsActive,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isUniqueViolation(err) {
@@ -1540,14 +1606,22 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
 	}
 	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
 	if row, err := q.CatalogProductSalesPolicyByID(ctx, puid); err == nil {
 		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "sales policy owned by another store")
 	}
 	proceed, stale := revisionGate(valid.SalesPolicyRevision, storedRevision)
 	if stale {
@@ -1587,14 +1661,20 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	}
 
 	// Dependency resolution: the core product must exist. Absence is a
-	// retryable wait (out-of-order arrival), never terminal.
-	if _, err := q.CatalogProductByID(ctx, puid); err != nil {
+	// retryable wait (out-of-order arrival), never terminal. A product
+	// owned by another proven Store can never back this policy.
+	productRow, err := q.CatalogProductByID(ctx, puid)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product owned by another store")
 	}
 
 	var allocation pgtype.Int8
@@ -1607,6 +1687,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 		OnlineAllocationLimit: allocation,
 		SourceRevision:        valid.SalesPolicyRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy upsert failed")
@@ -1684,14 +1765,24 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
 	}
 	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
 	if row, err := q.CatalogProductInventoryByID(ctx, puid); err == nil {
 		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory. A high revision
+	// from one Store never suppresses another Store's inventory: it
+	// conflicts instead, leaving the proven row untouched.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "inventory owned by another store")
 	}
 	proceed, stale := revisionGate(valid.InventoryRevision, storedRevision)
 	if stale {
@@ -1731,8 +1822,10 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	}
 
 	// Dependency resolution: the core product must exist. Absence is a
-	// retryable wait (out-of-order arrival), never terminal.
-	if _, err := q.CatalogProductByID(ctx, puid); err != nil {
+	// retryable wait (out-of-order arrival), never terminal. A product
+	// owned by another proven Store can never back this inventory.
+	productRow, err := q.CatalogProductByID(ctx, puid)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
@@ -1740,12 +1833,17 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
 	}
+	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product owned by another store")
+	}
 
 	fingerprint := catalog.FingerprintProductInventory(valid)
 	if err := q.UpsertCatalogProductInventory(ctx, sqlcgen.UpsertCatalogProductInventoryParams{
 		ProductID: puid, StockQuantity: int64(valid.StockQuantity),
 		SourceRevision: valid.InventoryRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory upsert failed")

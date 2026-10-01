@@ -51,7 +51,7 @@ func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams
 }
 
 const saleEventByID = `-- name: SaleEventByID :one
-SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload
+SELECT event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, store_id
 FROM sync_events WHERE event_id = $1
 `
 
@@ -63,8 +63,11 @@ type SaleEventByIDRow struct {
 	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
 	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
 	Payload      []byte             `json:"payload"`
+	StoreID      pgtype.UUID        `json:"store_id"`
 }
 
+// Phase 9B: store_id is the trusted ingress context (NULL for legacy or
+// unbound events). Projectors copy it verbatim; they never re-derive it.
 func (q *Queries) SaleEventByID(ctx context.Context, eventID pgtype.UUID) (SaleEventByIDRow, error) {
 	row := q.db.QueryRow(ctx, saleEventByID, eventID)
 	var i SaleEventByIDRow
@@ -76,6 +79,7 @@ func (q *Queries) SaleEventByID(ctx context.Context, eventID pgtype.UUID) (SaleE
 		&i.OccurredAt,
 		&i.ReceivedAt,
 		&i.Payload,
+		&i.StoreID,
 	)
 	return i, err
 }
