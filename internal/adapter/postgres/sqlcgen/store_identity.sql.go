@@ -67,7 +67,7 @@ func (q *Queries) InsertDeviceBinding(ctx context.Context, arg InsertDeviceBindi
 	return err
 }
 
-const insertStore = `-- name: InsertStore :exec
+const insertStore = `-- name: InsertStore :execrows
 
 INSERT INTO stores (id, display_name, timezone)
 VALUES ($1, $2, $3)
@@ -83,9 +83,12 @@ type InsertStoreParams struct {
 // Phase 9A store registry + device bindings. Bindings are immutable:
 // inserts only, conflicts stay conflicts; enforced by PRIMARY KEY on
 // device_id (at most one binding per device).
-func (q *Queries) InsertStore(ctx context.Context, arg InsertStoreParams) error {
-	_, err := q.db.Exec(ctx, insertStore, arg.ID, arg.DisplayName, arg.Timezone)
-	return err
+func (q *Queries) InsertStore(ctx context.Context, arg InsertStoreParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertStore, arg.ID, arg.DisplayName, arg.Timezone)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listBindingsWithStores = `-- name: ListBindingsWithStores :many
@@ -172,6 +175,17 @@ func (q *Queries) ListStores(ctx context.Context) ([]ListStoresRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockStoreRegistrationDevice = `-- name: LockStoreRegistrationDevice :one
+SELECT status FROM devices WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockStoreRegistrationDevice(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, lockStoreRegistrationDevice, id)
+	var status string
+	err := row.Scan(&status)
+	return status, err
 }
 
 const storeByID = `-- name: StoreByID :one

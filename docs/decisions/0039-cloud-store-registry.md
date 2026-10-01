@@ -19,15 +19,18 @@ domain event contracts.
   (device PK → store, one binding per device enforced by PRIMARY
   KEY, stores may have many devices). No tenant/organization model.
 - Registration endpoint `POST /api/v1/sync/store-registration`
-  (device auth, tight body bound): unbound devices bind with
-  first-writer-wins convergence; bound devices re-presenting the
-  same store converge idempotently (metadata last-writer-wins);
-  bound devices presenting another store get deterministic
-  `STORE_BINDING_CONFLICT`. Authorization rests on the
-  operator-provisioned device credential, never on store-UUID
-  knowledge. Revoked devices are rejected by existing auth before
-  registration logic runs, and revocation never touches stores,
-  bindings, or history.
+  authenticates through existing device credentials. An unbound active
+  device may atomically bootstrap a genuinely new Store. Joining an existing
+  Store requires explicit durable enrollment by the trusted operator CLI:
+  `moonlight-cloud device enroll-store <device-id> <store-id>`.
+  Enrollment validates existing Store and active device, replays matching
+  bindings idempotently, and rejects immutable binding conflicts. A generic
+  join attempt returns 409 `STORE_ENROLLMENT_REQUIRED` before metadata changes.
+  The Store insert affected-row count rejects concurrent bootstrap losers;
+  registration/enrollment serialize on the active device row in PostgreSQL.
+  Bound devices re-presenting their Store converge metadata idempotently;
+  another Store returns `STORE_BINDING_CONFLICT`. Revocation never deletes
+  Store identity, bindings, or historical ingress context.
 - Ingress context: `sync_events.store_id` is set server-side from
   the authenticated device binding at ACK, NULL for unbound/legacy
   devices, and never rewritten afterwards (replays keep the

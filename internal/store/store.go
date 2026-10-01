@@ -7,6 +7,7 @@ package store
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -38,9 +39,8 @@ type Binding struct {
 }
 
 // RegistrationRequest is the Retail-presented Store identity. The device
-// credential (not store_id knowledge) authorizes the binding: only the
-// operator-provisioned device channel may call, and bound devices
-// presenting a different store conflict deterministically.
+// credential authenticates the device. New Store bootstrap is allowed;
+// joining an existing Store requires prior trusted operator enrollment.
 type RegistrationRequest struct {
 	StoreID     string `json:"store_id"`
 	DisplayName string `json:"display_name"`
@@ -58,6 +58,9 @@ type RegistrationResult struct {
 // ValidateRegistration enforces request bounds. No unbounded strings, no
 // config blobs; timezone must be a valid IANA identifier.
 func ValidateRegistration(request RegistrationRequest) error {
+	if !utf8.ValidString(request.DisplayName) || !utf8.ValidString(request.Timezone) {
+		return apperr.New(apperr.InvalidInput, "store metadata must be valid UTF-8")
+	}
 	if !isUUID(request.StoreID) {
 		return apperr.New(apperr.InvalidInput, "store_id must be a UUID")
 	}

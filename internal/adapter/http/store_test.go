@@ -131,3 +131,12 @@ func TestStoreRegistrationRevokedDeviceRejected(t *testing.T) {
 		t.Fatalf("revoked device: want 401, got %d", rec.Code)
 	}
 }
+
+func TestStoreRegistrationRawUTF8RejectedBeforeDecode(t *testing.T) {
+	h, token, registrar := storeTestSetup(t)
+	body := "{\"store_id\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"display_name\":\"" + string([]byte{0xff}) + "\",\"timezone\":\"Africa/Cairo\"}"
+	rec := postRegistration(t, h, token, body)
+	if rec.Code != 400 || len(registrar.stores) != 0 || len(registrar.bindings) != 0 {
+		t.Fatalf("invalid bytes mutated state: %d", rec.Code)
+	}
+}

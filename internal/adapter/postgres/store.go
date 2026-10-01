@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
@@ -39,6 +40,16 @@ func (d Devices) RegisterStore(ctx context.Context, deviceID string, request sto
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
+	status, err := q.LockStoreRegistrationDevice(ctx, duid)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "active") {
+		return store.RegistrationResult{}, apperr.New(apperr.Unauthorized, "device is not active")
+	}
+	if err != nil {
+		return store.RegistrationResult{}, apperr.Wrap(apperr.Unavailable, "registration temporarily unavailable", redact(err))
+	}
+	request.StoreID = uuidString(suid)
+	request.DisplayName = strings.TrimSpace(request.DisplayName)
+	request.Timezone = strings.TrimSpace(request.Timezone)
 	if existing, err := q.BindingByDevice(ctx, duid); err == nil {
 		if uuidString(existing.StoreID) != request.StoreID {
 			_ = tx.Rollback(ctx)
@@ -58,19 +69,16 @@ func (d Devices) RegisterStore(ctx context.Context, deviceID string, request sto
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return store.RegistrationResult{}, apperr.Wrap(apperr.Unavailable, "registration temporarily unavailable", redact(err))
 	}
-	// Unbound device: establish the store row (or adopt an existing one
-	// provisioned by another device of the same store) and bind.
-	if err := q.InsertStore(ctx, sqlcgen.InsertStoreParams{
+	// Unbound devices may bootstrap only a genuinely new Store. The insert's
+	// affected-row count also rejects a concurrent loser without enrolling it.
+	inserted, err := q.InsertStore(ctx, sqlcgen.InsertStoreParams{
 		ID: suid, DisplayName: request.DisplayName, Timezone: request.Timezone,
-	}); err != nil {
-		_ = tx.Rollback(ctx)
+	})
+	if err != nil {
 		return store.RegistrationResult{}, apperr.Wrap(apperr.Unavailable, "registration temporarily unavailable", redact(err))
 	}
-	if err := q.UpdateStoreMetadata(ctx, sqlcgen.UpdateStoreMetadataParams{
-		ID: suid, DisplayName: request.DisplayName, Timezone: request.Timezone,
-	}); err != nil {
-		_ = tx.Rollback(ctx)
-		return store.RegistrationResult{}, apperr.Wrap(apperr.Unavailable, "registration temporarily unavailable", redact(err))
+	if inserted != 1 {
+		return store.RegistrationResult{}, apperr.New(apperr.Conflict, "STORE_ENROLLMENT_REQUIRED")
 	}
 	if err := q.InsertDeviceBinding(ctx, sqlcgen.InsertDeviceBindingParams{
 		DeviceID: duid, StoreID: suid,
@@ -92,6 +100,57 @@ func (d Devices) RegisterStore(ctx context.Context, deviceID string, request sto
 		return store.RegistrationResult{}, apperr.Wrap(apperr.Unavailable, "registration temporarily unavailable", redact(err))
 	}
 	return store.RegistrationResult{StoreID: request.StoreID, DisplayName: request.DisplayName, Timezone: request.Timezone, Bound: true}, nil
+}
+
+// EnrollStore is an operator-only enrollment seam used by the trusted CLI.
+// It never changes Store metadata or replaces an existing device binding.
+func (d Devices) EnrollStore(ctx context.Context, deviceID, storeID string) error {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	duid, err := parseUUID(deviceID)
+	if err != nil {
+		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
+	}
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return apperr.New(apperr.InvalidInput, "store id must be a UUID")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	status, err := q.LockStoreRegistrationDevice(ctx, duid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperr.New(apperr.NotFound, "device not found")
+	}
+	if err != nil {
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	if status != "active" {
+		return apperr.New(apperr.Conflict, "DEVICE_NOT_ACTIVE")
+	}
+	if _, err := q.StoreByID(ctx, suid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperr.New(apperr.NotFound, "store not found")
+		}
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	if binding, err := q.BindingByDevice(ctx, duid); err == nil {
+		if uuidString(binding.StoreID) != uuidString(suid) {
+			return apperr.New(apperr.Conflict, ErrStoreBindingConflict)
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	if err := q.InsertDeviceBinding(ctx, sqlcgen.InsertDeviceBindingParams{DeviceID: duid, StoreID: suid}); err != nil {
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return apperr.Wrap(apperr.Unavailable, "enrollment temporarily unavailable", redact(err))
+	}
+	return nil
 }
 
 // DeviceStoreInfo is one device's authoritative Store context for

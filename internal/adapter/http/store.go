@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/store"
@@ -42,10 +43,18 @@ func StoreRegistration(registrar StoreRegistrar) http.HandlerFunc {
 			WriteError(w, r, apperr.New(apperr.TooLarge, "registration body exceeds the size limit"))
 			return
 		}
+		if !utf8.Valid(body) {
+			WriteError(w, r, apperr.New(apperr.InvalidInput, "registration body must be valid UTF-8"))
+			return
+		}
 		var request store.RegistrationRequest
 		dec := json.NewDecoder(bytes.NewReader(body))
 		if err := dec.Decode(&request); err != nil {
 			WriteError(w, r, apperr.New(apperr.InvalidInput, "registration body must be a JSON object"))
+			return
+		}
+		if err := dec.Decode(new(any)); err != io.EOF {
+			WriteError(w, r, apperr.New(apperr.InvalidInput, "registration body must contain one JSON object"))
 			return
 		}
 		result, err := registrar.RegisterStore(r.Context(), dev.ID, request)

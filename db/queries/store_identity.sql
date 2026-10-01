@@ -2,7 +2,7 @@
 -- inserts only, conflicts stay conflicts; enforced by PRIMARY KEY on
 -- device_id (at most one binding per device).
 
--- name: InsertStore :exec
+-- name: InsertStore :execrows
 INSERT INTO stores (id, display_name, timezone)
 VALUES ($1, $2, $3)
 ON CONFLICT (id) DO NOTHING;
@@ -46,3 +46,6 @@ SELECT b.device_id, b.store_id, s.display_name, s.status
 FROM device_store_bindings b
 JOIN stores s ON s.id = b.store_id
 ORDER BY b.device_id;
+
+-- name: LockStoreRegistrationDevice :one
+SELECT status FROM devices WHERE id = $1 FOR UPDATE;

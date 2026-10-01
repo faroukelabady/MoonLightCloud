@@ -487,7 +487,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 
 func deviceCmd(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: moonlight-cloud device create|list|rotate|revoke ...")
+		return fmt.Errorf("usage: moonlight-cloud device create|list|rotate|revoke|enroll-store ...")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -509,6 +509,11 @@ func deviceCmd(args []string) error {
 		clock.System{}, ids.System{},
 	)
 	switch args[0] {
+	case "enroll-store":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: moonlight-cloud device enroll-store <device-id> <store-id>")
+		}
+		return postgres.NewDevices(pool, cfg.DBQueryTimeout).EnrollStore(ctx, args[1], args[2])
 	case "create":
 		fs := flag.NewFlagSet("create", flag.ContinueOnError)
 		name := fs.String("name", "", "device name")

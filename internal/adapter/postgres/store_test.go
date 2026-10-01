@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -234,7 +235,12 @@ func TestStoreTwoDevicesOneStore(t *testing.T) {
 	}
 	d := NewDevices(pool, 5*time.Second)
 	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
-	for _, devID := range []string{first.Device.ID, second.Device.ID} {
+	for i, devID := range []string{first.Device.ID, second.Device.ID} {
+		if i == 1 {
+			if err := d.EnrollStore(ctx, devID, storeID); err != nil {
+				t.Fatal(err)
+			}
+		}
 		result, err := d.RegisterStore(ctx, devID, store.RegistrationRequest{
 			StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
 		})
@@ -392,5 +398,92 @@ func TestStoreCrossDeviceIsolation(t *testing.T) {
 		if got != want {
 			t.Fatalf("event %s has store %s, want %s", eventID, got, want)
 		}
+	}
+}
+
+func TestStoreConcurrentDifferentDevicesCannotImplicitlyEnroll(t *testing.T) {
+	pool, authSvc := openTestRepo(t)
+	ctx := context.Background()
+	d := NewDevices(pool, 5*time.Second)
+	ids := make([]string, 8)
+	for i := range ids {
+		p, err := authSvc.Create(ctx, fmt.Sprintf("bootstrap-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = p.Device.ID
+	}
+	const storeID = "aaaaaaaa-0000-4000-8000-000000000001"
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range ids {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = d.RegisterStore(ctx, ids[i], store.RegistrationRequest{StoreID: storeID, DisplayName: fmt.Sprintf("winner-%d", i), Timezone: "Africa/Cairo"})
+		}(i)
+	}
+	wg.Wait()
+	winner := -1
+	for i, err := range errs {
+		if err == nil {
+			if winner >= 0 {
+				t.Fatal("multiple bootstrap winners")
+			}
+			winner = i
+		} else {
+			var appErr *apperr.Error
+			if !errors.As(err, &appErr) || appErr.Message != "STORE_ENROLLMENT_REQUIRED" {
+				t.Fatal(err)
+			}
+		}
+	}
+	if winner < 0 {
+		t.Fatal("no winner")
+	}
+	var bindings int
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM device_store_bindings WHERE store_id=$1`, storeID).Scan(&bindings); err != nil || bindings != 1 {
+		t.Fatalf("bindings %d: %v", bindings, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT display_name FROM stores WHERE id=$1`, storeID).Scan(&name); err != nil || name != fmt.Sprintf("winner-%d", winner) {
+		t.Fatalf("metadata %q: %v", name, err)
+	}
+}
+func TestStoreCanonicalUUIDAndMalformedMetadata(t *testing.T) {
+	d, id := openStoreEnv(t)
+	ctx := context.Background()
+	canonical := "aaaaaaaa-0000-4000-8000-000000000001"
+	for _, representation := range []string{canonical, strings.ToUpper(canonical), "urn:uuid:" + canonical, "{" + canonical + "}", strings.ReplaceAll(canonical, "-", "")} {
+		result, err := d.RegisterStore(ctx, id, store.RegistrationRequest{StoreID: representation, DisplayName: "متجر 🌙", Timezone: "Africa/Cairo"})
+		if err != nil || result.StoreID != canonical {
+			t.Fatalf("UUID %q: %v", representation, err)
+		}
+	}
+	for _, name := range []string{string([]byte{0xff}), strings.Repeat("x", 201), " "} {
+		if _, err := d.RegisterStore(ctx, id, store.RegistrationRequest{StoreID: canonical, DisplayName: name, Timezone: "Africa/Cairo"}); err == nil {
+			t.Fatal("bad metadata accepted")
+		}
+	}
+	var name string
+	if err := d.pool.QueryRow(ctx, `SELECT display_name FROM stores WHERE id=$1`, canonical).Scan(&name); err != nil || name != "متجر 🌙" {
+		t.Fatalf("rejected metadata mutated Store: %q %v", name, err)
+	}
+}
+
+func TestStoreRegistrationAtomicRollback(t *testing.T) {
+	d, id := openStoreEnv(t)
+	ctx := context.Background()
+	_, err := d.pool.Exec(ctx, `CREATE FUNCTION reject_store_binding() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected binding failure'; END $$; CREATE TRIGGER reject_binding BEFORE INSERT ON device_store_bindings FOR EACH ROW EXECUTE FUNCTION reject_store_binding()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.RegisterStore(ctx, id, store.RegistrationRequest{StoreID: "aaaaaaaa-0000-4000-8000-000000000001", DisplayName: "Atomic", Timezone: "Africa/Cairo"})
+	if err == nil {
+		t.Fatal("fault not triggered")
+	}
+	var stores, bindings int
+	if err = d.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM stores),(SELECT count(*) FROM device_store_bindings)`).Scan(&stores, &bindings); err != nil || stores != 0 || bindings != 0 {
+		t.Fatalf("partial bootstrap: %d %d %v", stores, bindings, err)
 	}
 }
