@@ -16,8 +16,14 @@ parameters. Phase 9 (multi-Store) deliberately left notification
 integration state globally scoped.
 
 Phase 10 adds Telegram as the second concrete provider with no new
-notification subsystem, no schema change (Cloud stays 25), no Store
-ownership change, no Retail change, and no commerce coupling.
+notification subsystem, no Store ownership change, no Retail change,
+and no commerce coupling. The original Phase 10 candidate is
+`63c3c619b1bd92bd9acd0e7d8ccf7ebd2b89bec5`; it already contains
+Phase 10. The actual Phase 9 ancestor is
+`d7deb309c55a1da7918336fb323369ed109fcbe5`.
+
+Phase 10-R1 raises the schema from 25 to 26 with append-only migration
+00026 so the documented maximum username fits all recipient constraints.
 
 Bot API verification (official docs, fetched 2026-10-02; Bot API
 10.3, latest changelog August 24, 2026): `POST
@@ -38,10 +44,13 @@ route, no polling, no media.
 Recipient union (minimal STOP-justified shared change): the generic
 enqueue gate accepts E.164, Telegram numeric chat IDs (optional `-`,
 up to 16 digits — the full 52-bit space, keeping the pre-existing
-17-digit rejection), and `@username` (5..31 chars after `@`, inside
-the durable 32-column bound). Each adapter enforces its own strict
+17-digit rejection), and `@username` (5..32 ASCII letters, digits or underscores after `@`,
+33 characters including `@`). The official
+[Telegram username policy](https://core.telegram.org/method/account.checkUsername)
+defines the 5..32 character body. Each adapter enforces its own strict
 subset at send time (WhatsApp keeps strict E.164, Telegram its own
-canonicalizer), so widening enqueue acceptance can never misdirect
+validator, rejecting every numeric zero representation without rewriting
+valid destination bytes), so widening enqueue acceptance can never misdirect
 a send: unknown shapes block terminally at dispatch. Frozen
 provider tests were expanded, not weakened.
 
@@ -82,7 +91,17 @@ Cloud-only runtime configuration; Retail is untouched.
 
 WhatsApp request format, auth, webhooks, callbacks, ordering, and
 ambiguity semantics are unchanged (frozen 7A regressions green).
-No migration, no `go.mod` change, no OpenAPI change, no dashboard
-change. Multi-provider registry holds both adapters with duplicate
+R1 migration 00026 widens notification, report-recipient and operational-
+recipient length checks to 33. Delivery snapshot columns already use
+unbounded text. Downgrade refuses atomically while any widened recipient
+exceeds 32 characters; it never truncates or rewrites history. No `go.mod`,
+OpenAPI or dashboard change. Multi-provider registry holds both adapters with duplicate
 keys failing startup safely; the canonical dispatcher serves both
 with per-row independent outcomes.
+
+R1 requires explicit, typed envelope evidence: incomplete or contradictory
+HTTP 2xx responses, duplicate envelope fields, malformed success identities,
+trailing JSON/garbage and oversized responses are ambiguous. Supported
+complete failures retain their existing classes. Unrelated future fields
+remain allowed. Durable send-start evidence survives dispatcher and process
+restart; ambiguous sends are never automatically repeated.

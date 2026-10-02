@@ -114,11 +114,8 @@ var (
 	// stays rejected.
 	telegramRecipientNumericPattern = regexp.MustCompile(`^-?[0-9]{1,16}$`)
 	// telegramRecipientUsernamePattern is the Telegram @username chat
-	// identity: @ plus 5..31 word characters. The 31-character body
-	// cap (not Telegram's 32) keeps every accepted recipient within
-	// the durable 32-character recipient column; a 32-character
-	// username must be registered by numeric chat ID instead.
-	telegramRecipientUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,31}$`)
+	// identity: @ plus the documented 5..32 username characters.
+	telegramRecipientUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,32}$`)
 	// idempotencyKeyPattern bounds caller identity without PII rules:
 	// printable ASCII, no controls, no whitespace edges.
 	idempotencyKeyPattern = regexp.MustCompile(`^[!-~]{1,128}$`)

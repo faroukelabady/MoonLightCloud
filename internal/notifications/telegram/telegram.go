@@ -63,8 +63,8 @@ var (
 	// optional -, then up to 16 digits (full 52-bit Bot API space).
 	telegramNumericPattern = regexp.MustCompile(`^-?[0-9]{1,16}$`)
 	// telegramUsernamePattern mirrors the generic enqueue union: @
-	// plus 5..31 word characters (32-column durable bound).
-	telegramUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,31}$`)
+	// plus 5..32 word characters (33-character durable bound).
+	telegramUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,32}$`)
 	// botTokenPattern gates the token to the Bot API charset:
 	// digits, one colon, then word characters and hyphens (e.g.
 	// 123456:ABC-DEF...). Anything outside this set (percent
@@ -94,11 +94,12 @@ func validateBotToken(token string) error {
 func ValidateRecipient(recipient string) (string, error) {
 	switch {
 	case telegramNumericPattern.MatchString(recipient):
-		if recipient == "0" || recipient == "-0" {
-			return "", fmt.Errorf("invalid telegram recipient: chat ID zero is never valid")
-		}
-		if _, err := strconv.ParseInt(recipient, 10, 64); err != nil {
+		value, err := strconv.ParseInt(recipient, 10, 64)
+		if err != nil {
 			return "", fmt.Errorf("invalid telegram recipient: want a numeric chat ID or @username")
+		}
+		if value == 0 {
+			return "", fmt.Errorf("invalid telegram recipient: chat ID zero is never valid")
 		}
 		return recipient, nil
 	case telegramUsernamePattern.MatchString(recipient):
@@ -172,22 +173,22 @@ type sendMessageRequest struct {
 // design (no unknown-field rejection): the API gains Message fields
 // over time and only ok/result/error_code/parameters drive behavior.
 type botAPIResponse struct {
-	OK          bool                `json:"ok"`
+	OK          *bool               `json:"ok"`
 	Result      *sendMessageResult  `json:"result,omitempty"`
-	ErrorCode   int                 `json:"error_code,omitempty"`
-	Description string              `json:"description,omitempty"`
+	ErrorCode   *int                `json:"error_code,omitempty"`
+	Description *string             `json:"description,omitempty"`
 	Parameters  *responseParameters `json:"parameters,omitempty"`
 }
 
 // sendMessageResult carries the success evidence Phase 10 needs:
 // the actual returned chat identity and the chat-scoped message ID.
 type sendMessageResult struct {
-	MessageID int64        `json:"message_id"`
+	MessageID *int64       `json:"message_id"`
 	Chat      *messageChat `json:"chat"`
 }
 
 type messageChat struct {
-	ID int64 `json:"id"`
+	ID *int64 `json:"id"`
 }
 
 // responseParameters carries machine-actionable error metadata.
@@ -256,6 +257,9 @@ func (p *Provider) SendTemplate(ctx context.Context, req notifications.TemplateS
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
+		if ctx.Err() != nil {
+			return notifications.SendResult{}, ctx.Err()
+		}
 		return notifications.SendResult{}, notifications.AmbiguousError("telegram response read failed")
 	}
 	if int64(len(raw)) > maxResponseBytes {
@@ -326,27 +330,73 @@ func (p *Provider) renderRequest(req notifications.TemplateSendRequest) ([]byte,
 // Anything else after the request may have been sent is AMBIGUOUS:
 // Telegram may already own the message, so MoonLight must not resend.
 func acceptResponse(raw []byte) (notifications.SendResult, error) {
-	var parsed botAPIResponse
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if err := decoder.Decode(&parsed); err != nil {
-		return notifications.SendResult{}, notifications.AmbiguousError("telegram success response malformed")
+	parsed, hasErrorCode, err := decodeEnvelope(raw)
+	if err != nil || parsed.OK == nil {
+		return notifications.SendResult{}, notifications.AmbiguousError("telegram response envelope incomplete")
 	}
-	if !parsed.OK {
-		return notifications.SendResult{}, classifyStatus(parsed.ErrorCode, "", parsed.Parameters)
+	if !*parsed.OK {
+		if parsed.Result != nil || parsed.ErrorCode == nil || *parsed.ErrorCode < 400 || *parsed.ErrorCode > 599 ||
+			parsed.Description == nil || strings.TrimSpace(*parsed.Description) == "" {
+			return notifications.SendResult{}, notifications.AmbiguousError("telegram failure evidence incomplete")
+		}
+		return notifications.SendResult{}, classifyStatus(*parsed.ErrorCode, "", parsed.Parameters)
+	}
+	if hasErrorCode {
+		return notifications.SendResult{}, notifications.AmbiguousError("telegram response evidence contradictory")
 	}
 	result := parsed.Result
-	if result == nil || result.Chat == nil {
-		return notifications.SendResult{}, notifications.AmbiguousError("telegram success without message result")
-	}
-	if result.Chat.ID == 0 {
-		return notifications.SendResult{}, notifications.AmbiguousError("telegram success without chat identity")
-	}
-	if result.MessageID == 0 {
-		// message_id 0 marks ephemeral or not-yet-sendable
-		// messages: no durable uniqueness, so no acceptance.
+	if result == nil || result.Chat == nil || result.Chat.ID == nil || *result.Chat.ID == 0 ||
+		result.MessageID == nil || *result.MessageID <= 0 {
 		return notifications.SendResult{}, notifications.AmbiguousError("telegram success without usable message identity")
 	}
-	return notifications.SendResult{ProviderMessageID: providerMessageID(result.Chat.ID, result.MessageID)}, nil
+	return notifications.SendResult{ProviderMessageID: providerMessageID(*result.Chat.ID, *result.MessageID)}, nil
+}
+
+// decodeEnvelope checks exact field presence and types, one JSON object,
+// and unambiguous known fields. Future unrelated fields remain tolerated.
+func decodeEnvelope(raw []byte) (botAPIResponse, bool, error) {
+	var parsed botAPIResponse
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return parsed, false, fmt.Errorf("invalid telegram envelope")
+	}
+	fields := map[string]json.RawMessage{}
+	known := map[string]bool{"ok": true, "result": true, "error_code": true, "description": true, "parameters": true}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return parsed, false, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return parsed, false, fmt.Errorf("invalid telegram envelope field")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return parsed, false, err
+		}
+		if known[strings.ToLower(key)] {
+			if !known[key] || fields[key] != nil {
+				return parsed, false, fmt.Errorf("contradictory telegram envelope field")
+			}
+			fields[key] = value
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return parsed, false, err
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return parsed, false, fmt.Errorf("trailing telegram response")
+	}
+	data, err := json.Marshal(fields)
+	if err != nil {
+		return parsed, false, err
+	}
+	err = json.Unmarshal(data, &parsed)
+	_, hasErrorCode := fields["error_code"]
+	return parsed, hasErrorCode, err
 }
 
 // providerMessageID builds the deterministic composite identity

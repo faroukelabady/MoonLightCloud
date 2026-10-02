@@ -29,3 +29,16 @@ plus a database backup from before the newer semantics were accepted:
 `internal/migrate/migrate_test.go` covers fresh→latest, v5→latest,
 v6→latest, projection→ownership backfill (winner + loser), v1-only Down,
 v2 Down refusal with intact schema/data, and ownership Down policy.
+
+## Telegram recipient bound (00026)
+
+Schema 26 expands recipient checks from 32 to 33 characters in notification
+messages, business-report recipients and operational-alert recipients.
+Existing values and delivery snapshots are not rewritten. Startup requires
+schema 26 for the R1 binary.
+
+Down reinstates the old constraints in one transaction and refuses while
+any affected value exceeds 32 characters. A refusal leaves schema version
+26 and all data intact. There is no truncation. Rollback requires a compatible
+backup/application pair or explicit operator handling of the longer durable
+values; do not silently change queued destinations or historical snapshots.

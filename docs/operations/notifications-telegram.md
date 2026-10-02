@@ -55,13 +55,14 @@ authoritative. A Telegram destination is one of:
 
 - numeric chat ID: `123456789`, `-1001234567890` (sign preserved,
   string end to end — never a JavaScript number);
-- `@username`: `@operations` (5..31 word characters after `@`; the
-  cap keeps every recipient inside the durable 32-character column —
-  a 32-character username is registered by numeric chat ID instead).
+- `@username`: `@operations` (5..32 ASCII letters, digits or underscores
+  after `@`, 33 characters total; schema 26 is required).
 
 Validation is deterministic and rewrites nothing: empty,
-whitespace-edged, control-bearing, zero, overlong, and malformed
-values are rejected at enqueue. Unknown-but-shaped destinations pass
+whitespace-edged, control-bearing, overlong, and malformed shapes are
+rejected by generic enqueue validation. The provider-specific send gate
+additionally rejects all numeric zero representations (`0`, `-00`, etc.)
+before network access; valid nonzero bytes are preserved. Unknown-but-shaped destinations pass
 validation and block terminally at send (Telegram answers
 `chat not found`); they are never retried in a hot loop.
 

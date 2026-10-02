@@ -86,7 +86,7 @@ func TestTelegramRecipientMatrix(t *testing.T) {
 	for _, valid := range []string{
 		"123456789", "-1001234567890", "-1", "1",
 		"4503599627370496", // 52-bit Bot API ceiling shape
-		"@operations", "@MoonLight_Ops1",
+		"@operations", "@MoonLight_Ops1", "@" + strings.Repeat("a", 32),
 	} {
 		canonical, err := ValidateRecipient(valid)
 		if err != nil {
@@ -97,7 +97,7 @@ func TestTelegramRecipientMatrix(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{
-		"", "   ", "abc", "@ab", "@" + strings.Repeat("a", 32),
+		"", "   ", "abc", "@ab", "@" + strings.Repeat("a", 33),
 		"@user-name", "@user name", "0", "-0", "+123456789",
 		"12 34", "12\n34", "@\u00e9", "chat:1",
 		strings.Repeat("1", 17), // longer than any Bot API chat ID
