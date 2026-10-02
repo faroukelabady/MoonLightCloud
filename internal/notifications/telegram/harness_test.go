@@ -17,7 +17,7 @@ import (
 
 // testBotToken is an unmistakably fake token. Real tokens never appear
 // in fixtures, assertions, or failure output.
-const testBotToken = "TESTTOKEN000:AAA-fake-test-only"
+const testBotToken = "123456:AAA-fake-test-only"
 
 // botHarness is a deterministic TLS Bot API stub: it records outbound
 // requests and serves scripted responses. It is not Telegram. The

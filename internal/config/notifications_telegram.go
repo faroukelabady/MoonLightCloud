@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -39,6 +40,10 @@ const (
 	MinTelegramHTTPTimeout     = 1 * time.Second
 	MaxTelegramHTTPTimeout     = 120 * time.Second
 )
+
+// telegramBotTokenPattern mirrors the adapter gate (see
+// telegram.validateBotToken): Bot API charset only.
+var telegramBotTokenPattern = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
 
 // loadTelegramNotificationConfig reads NOTIFICATIONS_TELEGRAM_*
 // environment variables. Disabled (default) requires nothing and
@@ -100,13 +105,12 @@ func (c TelegramNotificationConfig) validate() error {
 	if !validNotificationProviderKey(c.ProviderKey) {
 		return fmt.Errorf("invalid NOTIFICATIONS_TELEGRAM_PROVIDER_KEY: use 1..64 lowercase letters, numbers, hyphen, underscore")
 	}
-	if len(c.BotToken) == 0 || len(c.BotToken) > 256 {
-		return fmt.Errorf("NOTIFICATIONS_TELEGRAM_BOT_TOKEN is required when Telegram notifications are enabled")
-	}
-	for i := 0; i < len(c.BotToken); i++ {
-		if c.BotToken[i] < 32 || c.BotToken[i] == 127 {
-			return fmt.Errorf("invalid NOTIFICATIONS_TELEGRAM_BOT_TOKEN: want a bounded non-control token")
-		}
+	// Same Bot API charset as the adapter gate (telegram.validateBotToken;
+	// kept in sync manually — config cannot import the adapter package):
+	// digits, one colon, word characters and hyphens. Rejected before
+	// any URL construction so parse errors can never echo the token.
+	if !telegramBotTokenPattern.MatchString(c.BotToken) || len(c.BotToken) > 256 {
+		return fmt.Errorf("invalid NOTIFICATIONS_TELEGRAM_BOT_TOKEN: want a bounded Bot API token")
 	}
 	if c.BaseURL == "" {
 		// Empty means the production default; normalization applies it.

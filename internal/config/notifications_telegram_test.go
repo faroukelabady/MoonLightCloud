@@ -25,7 +25,7 @@ func validTelegramEnv() map[string]string {
 	return map[string]string{
 		"NOTIFICATIONS_TELEGRAM_ENABLED":      "true",
 		"NOTIFICATIONS_TELEGRAM_PROVIDER_KEY": "telegram-main",
-		"NOTIFICATIONS_TELEGRAM_BOT_TOKEN":    "TESTTOKEN000:AAA-fake-test-only",
+		"NOTIFICATIONS_TELEGRAM_BOT_TOKEN":    "123456:AAA-fake-test-only",
 	}
 }
 
@@ -69,11 +69,30 @@ func TestTelegramNotificationConfig(t *testing.T) {
 			}
 		}
 	})
+	t.Run("non-URL-safe token rejected without value leak", func(t *testing.T) {
+		// F-02: only Bot API charset digits:word reaches URL
+		// construction; everything else fails closed at startup.
+		for _, token := range []string{
+			"123:SECRET%zzTOKEN", "justastring", "abc:DEF123",
+			"123:tok en", "123:tok?en", "123:tok#en", "123:tok/en",
+		} {
+			env := validTelegramEnv()
+			env["NOTIFICATIONS_TELEGRAM_BOT_TOKEN"] = token
+			setTelegramEnv(t, env)
+			_, err := loadTelegramNotificationConfig()
+			if err == nil {
+				t.Fatalf("token %q must fail", token)
+			}
+			if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "tok ") {
+				t.Fatalf("value leaked: %q", err.Error())
+			}
+		}
+	})
 	t.Run("insecure base rejected without value leak", func(t *testing.T) {
 		for _, raw := range []string{
 			"http://api.telegram.org",
-			"https://user:TESTTOKEN000@api.telegram.org",
-			"https://api.telegram.org?token=TESTTOKEN000",
+			"https://user:123456@api.telegram.org",
+			"https://api.telegram.org?token=123456",
 			"https://api.telegram.org#frag",
 		} {
 			env := validTelegramEnv()
@@ -83,7 +102,7 @@ func TestTelegramNotificationConfig(t *testing.T) {
 			if err == nil {
 				t.Fatalf("base %q must fail", raw)
 			}
-			if strings.Contains(err.Error(), "TESTTOKEN000") {
+			if strings.Contains(err.Error(), "123456") {
 				t.Fatalf("value leaked: %q", err.Error())
 			}
 		}

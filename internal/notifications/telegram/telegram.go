@@ -65,7 +65,23 @@ var (
 	// telegramUsernamePattern mirrors the generic enqueue union: @
 	// plus 5..31 word characters (32-column durable bound).
 	telegramUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,31}$`)
+	// botTokenPattern gates the token to the Bot API charset:
+	// digits, one colon, then word characters and hyphens (e.g.
+	// 123456:ABC-DEF...). Anything outside this set (percent
+	// escapes, spaces, ?/# controls) is rejected before URL
+	// construction, so a malformed token can never reach url.Parse
+	// where failure text would echo the secret-bearing URL.
+	botTokenPattern = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
 )
+
+// validateBotToken enforces the bounded Bot API token shape. Error
+// text never echoes the supplied value.
+func validateBotToken(token string) error {
+	if len(token) == 0 || len(token) > 256 || !botTokenPattern.MatchString(token) {
+		return fmt.Errorf("telegram provider requires a bounded Bot API bot token")
+	}
+	return nil
+}
 
 // ValidateRecipient is the deterministic Telegram recipient
 // validator/canonicalizer. Accepted forms (Bot API chat_id):
@@ -111,17 +127,12 @@ func NewProvider(cfg config.TelegramNotificationConfig, httpClient *http.Client)
 	if err != nil {
 		return nil, err
 	}
-	// The token travels in the request URL path, so control bytes
-	// are rejected here (not only at env-load validation): a raw
-	// control byte must never reach URL construction, where parse
-	// errors could echo secret-bearing text.
-	if len(cfg.BotToken) == 0 || len(cfg.BotToken) > 256 {
-		return nil, fmt.Errorf("telegram provider requires a bot token")
-	}
-	for i := 0; i < len(cfg.BotToken); i++ {
-		if cfg.BotToken[i] < 32 || cfg.BotToken[i] == 127 {
-			return nil, fmt.Errorf("telegram provider requires a bounded non-control bot token")
-		}
+	// The token travels in the request URL path, so its shape is
+	// gated here (not only at env-load validation): only URL-safe
+	// Bot API characters may reach URL construction, where parse
+	// errors could otherwise echo secret-bearing text.
+	if err := validateBotToken(cfg.BotToken); err != nil {
+		return nil, err
 	}
 	client := &http.Client{Timeout: cfg.HTTPTimeout}
 	if client.Timeout <= 0 {
@@ -205,7 +216,14 @@ func (p *Provider) SendTemplate(ctx context.Context, req notifications.TemplateS
 	target := p.baseURL + "/bot" + p.botToken + "/sendMessage"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		return notifications.SendResult{}, err
+		// Belt-and-braces: construction errors embed the
+		// secret-bearing URL (Go quotes it into *url.Error
+		// text), so they are replaced with a fixed string.
+		// Token shape is gated at construction, but the base
+		// URL is operator-controlled: no failure here may
+		// carry URL or token bytes. Deterministic for the
+		// same config, so terminal, never retried.
+		return notifications.SendResult{}, notifications.ValidationError("telegram request construction failed")
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")

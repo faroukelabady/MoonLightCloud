@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -30,8 +31,7 @@ func newBotStub(t *testing.T) *botStub {
 	t.Helper()
 	stub := &botStub{chatID: 555666777, message: 31337}
 	stub.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw := make([]byte, r.ContentLength)
-		_, _ = r.Body.Read(raw)
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		stub.mu.Lock()
 		stub.requests++
 		stub.bodies = append(stub.bodies, string(raw))
@@ -54,7 +54,7 @@ func telegramTestProvider(t *testing.T, stub *botStub) *telegram.Provider {
 	t.Helper()
 	provider, err := telegram.NewProvider(config.TelegramNotificationConfig{
 		Enabled: true, ProviderKey: "telegram-main",
-		BotToken: "TESTTOKEN000:AAA-fake-test-only", BaseURL: stub.server.URL,
+		BotToken: "123456:AAA-fake-test-only", BaseURL: stub.server.URL,
 		HTTPTimeout: 10 * time.Second,
 	}, stub.server.Client())
 	if err != nil {

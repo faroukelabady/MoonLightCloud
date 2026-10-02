@@ -33,12 +33,32 @@ func TestTelegramConfigMatrix(t *testing.T) {
 		"missing provider key": func(c *config.TelegramNotificationConfig) { c.ProviderKey = "" },
 		"bad provider key":     func(c *config.TelegramNotificationConfig) { c.ProviderKey = "Telegram Main!" },
 		"missing token":        func(c *config.TelegramNotificationConfig) { c.BotToken = "" },
-		"control token":        func(c *config.TelegramNotificationConfig) { c.BotToken = "abc\ndef" },
 	} {
 		cfg := good
 		mutate(&cfg)
 		if _, err := NewProvider(cfg, nil); err == nil {
 			t.Fatalf("%s must fail", name)
+		}
+	}
+	// Malformed tokens fail closed at construction with value-free
+	// errors: no token bytes may reach URL construction, where parse
+	// failures would echo the secret-bearing URL (F-02).
+	for name, token := range map[string]string{
+		"control token":    "abc\ndef",
+		"no-colon token":   "justastring",
+		"non-digit prefix": "abc:DEF123",
+		"url-escape token": "123:SECRET%zzTOKEN",
+		"spaced token":     "123:tok en",
+		"query token":      "123:tok?en",
+		"fragment token":   "123:tok#en",
+		"slash token":      "123:tok/en",
+	} {
+		cfg := good
+		cfg.BotToken = token
+		if _, err := NewProvider(cfg, nil); err == nil {
+			t.Fatalf("%s must fail", name)
+		} else if strings.Contains(err.Error(), strings.TrimSpace(token)) {
+			t.Fatalf("%s: token bytes in validation error: %q", name, err.Error())
 		}
 	}
 	// Duplicate logical keys collide: startup must fail safely.
@@ -581,5 +601,52 @@ func TestTelegramLiveBotAPI(t *testing.T) {
 	}
 	if result.ProviderMessageID == "" || !strings.Contains(result.ProviderMessageID, ":") {
 		t.Fatalf("live identity: %q", result.ProviderMessageID)
+	}
+}
+
+// TestTelegramConstructionErrorSanitized pins F-02 remediation: when
+// request construction fails (here via an operator-controlled base
+// URL that breaks URL parsing), the error is a fixed MoonLight-owned
+// string. The secret-bearing URL — base, token, path — never enters
+// error values, no matter which part of the URL broke parsing.
+func TestTelegramConstructionErrorSanitized(t *testing.T) {
+	for name, baseURL := range map[string]string{
+		"bad escape in base": "https://%zz",
+		"control in base":    "https://exam\nple.com",
+	} {
+		cfg := testBotConfig(newBotHarness(t))
+		cfg.BaseURL = baseURL
+		provider, err := NewProvider(cfg, nil)
+		if err != nil {
+			t.Fatalf("%s: construction validates token, not base URL: %v", name, err)
+		}
+		_, err = provider.SendTemplate(context.Background(), testBotRequest("123456789"))
+		if err == nil {
+			t.Fatalf("%s must fail", name)
+			continue
+		}
+		got := asNotificationError(t, err)
+		if got.Kind != notifications.ErrorValidation || got.Retryable() {
+			t.Fatalf("%s: construction failure must terminally block: %v", name, err)
+		}
+		for _, secret := range []string{testBotToken, "sendMessage", "%zz", "exam"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("%s: secret-bearing bytes in error: %q", name, err.Error())
+			}
+		}
+	}
+}
+
+// TestTelegramOKFalseOn200 pins NOTE-2: a 200 envelope with ok:false
+// classifies through the embedded error_code, never as success.
+func TestTelegramOKFalseOn200(t *testing.T) {
+	harness := newBotHarness(t)
+	harness.script = func(_ botRecordedRequest) (int, any, map[string]string) {
+		return http.StatusOK, botFailure(401, "Unauthorized", nil), nil
+	}
+	provider := testBotProvider(t, harness)
+	_, err := provider.SendTemplate(context.Background(), testBotRequest("123456789"))
+	if got := asNotificationError(t, err); got.Kind != notifications.ErrorAuthentication {
+		t.Fatalf("ok:false on 200 must classify by envelope: %v", err)
 	}
 }

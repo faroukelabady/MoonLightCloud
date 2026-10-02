@@ -28,7 +28,7 @@ These remain manual operational prerequisites.
 |---|---|---|
 | `NOTIFICATIONS_TELEGRAM_ENABLED` | — | default `false`: no provider, no credentials required |
 | `NOTIFICATIONS_TELEGRAM_PROVIDER_KEY` | when enabled | logical instance key, e.g. `telegram-main` (future `telegram-ops` needs no redesign) |
-| `NOTIFICATIONS_TELEGRAM_BOT_TOKEN` | when enabled | URL-path credential; never URL-logged, never persisted, never sent to Retail |
+| `NOTIFICATIONS_TELEGRAM_BOT_TOKEN` | when enabled | Bot API shape `digits:word` (`123456:ABC-DEF...`); URL-path credential; never URL-logged, never persisted, never sent to Retail |
 | `NOTIFICATIONS_TELEGRAM_BASE_URL` | — | default `https://api.telegram.org`; https only, no userinfo/query/fragment |
 | `NOTIFICATIONS_TELEGRAM_HTTP_TIMEOUT` | — | default 15s, within 1s..120s |
 

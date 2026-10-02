@@ -2,8 +2,8 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
@@ -66,13 +66,30 @@ func TestTelegramReportRunnerEndToEnd(t *testing.T) {
 	if stub.count() != 1 {
 		t.Fatalf("one remote send, got %d", stub.count())
 	}
-	var body string
+	var raw string
 	stub.mu.Lock()
 	if len(stub.bodies) > 0 {
-		body = stub.bodies[0]
+		raw = stub.bodies[0]
 	}
 	stub.mu.Unlock()
-	if !strings.Contains(body, deliveries[0].Body) || deliveries[0].Body == "" {
-		t.Fatal("telegram text must equal the canonical report body")
+	// The wire form is JSON: newlines travel as escapes, so the raw
+	// capture can never contain the literal canonical body. Decode
+	// first, then compare the text field byte-for-byte against the
+	// canonical snapshot (plus the exact chat identity).
+	var wire struct {
+		ChatID string `json:"chat_id"`
+		Text   string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
+		t.Fatalf("wire body must decode: %v", err)
+	}
+	if deliveries[0].Body == "" {
+		t.Fatal("canonical report body must not be empty")
+	}
+	if wire.Text != deliveries[0].Body {
+		t.Fatal("telegram text must equal the canonical report body byte-for-byte")
+	}
+	if wire.ChatID != "@operations" {
+		t.Fatalf("chat identity: %q", wire.ChatID)
 	}
 }
