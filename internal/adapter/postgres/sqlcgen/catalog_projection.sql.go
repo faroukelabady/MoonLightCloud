@@ -248,14 +248,20 @@ LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $4
 WHERE e.event_type = $1
   AND e.payload->>($2::text) = ($3::text)
+  AND (CASE WHEN $6::boolean
+       THEN e.store_id IS NOT DISTINCT FROM $7::uuid
+       ELSE $7::uuid IS NULL OR e.store_id IS NULL
+            OR e.store_id = $7::uuid END)
 `
 
 type CatalogEntityEventRevisionsParams struct {
-	EventType string `json:"event_type"`
-	Column2   string `json:"column_2"`
-	Column3   string `json:"column_3"`
-	Processor string `json:"processor"`
-	Column5   string `json:"column_5"`
+	EventType          string      `json:"event_type"`
+	Column2            string      `json:"column_2"`
+	Column3            string      `json:"column_3"`
+	Processor          string      `json:"processor"`
+	Column5            string      `json:"column_5"`
+	StoreScopedDefault bool        `json:"store_scoped_default"`
+	StoreID            pgtype.UUID `json:"store_id"`
 }
 
 type CatalogEntityEventRevisionsRow struct {
@@ -282,6 +288,8 @@ func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEn
 		arg.Column3,
 		arg.Processor,
 		arg.Column5,
+		arg.StoreScopedDefault,
+		arg.StoreID,
 	)
 	if err != nil {
 		return nil, err
@@ -644,6 +652,95 @@ func (q *Queries) CatalogTagProductStores(ctx context.Context, tagID pgtype.UUID
 	return items, nil
 }
 
+const defaultCatalogRecoveryCandidates = `-- name: DefaultCatalogRecoveryCandidates :many
+WITH defaults AS (
+ SELECT DISTINCT ON (e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'))
+        e.event_id,e.event_type,e.store_id,e.payload,p.processor,e.received_at
+ FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
+ WHERE e.store_id IS NOT NULL AND (
+  (e.event_type='catalog.category.snapshot.v1' AND p.processor='catalog_category_projection.v1'
+   AND e.payload->>'category_id'=ANY($1::text[])) OR
+  (e.event_type='catalog.tag.snapshot.v1' AND p.processor='catalog_tag_projection.v1'
+   AND e.payload->>'tag_id'=ANY($2::text[])))
+ AND (p.status='processed' OR (p.status='blocked'
+  AND p.last_error_code IN ('STORE_SCOPE_CONFLICT','CATALOG_REVISION_CONFLICT')
+  AND p.last_error_message IN ('category owned by another store','tag owned by another store','equal revision with conflicting state')
+  AND NOT EXISTS (SELECT 1 FROM sync_events own JOIN sync_event_processing settled
+       ON settled.event_id=own.event_id AND settled.processor=p.processor AND settled.status='processed'
+       WHERE own.store_id=e.store_id AND own.event_type=e.event_type
+         AND COALESCE(own.payload->>'category_id',own.payload->>'tag_id')=COALESCE(e.payload->>'category_id',e.payload->>'tag_id')
+         AND (own.payload->>'catalog_revision')::bigint >= (e.payload->>'catalog_revision')::bigint)
+  AND (EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+        WHERE c.category_id::text=e.payload->>'category_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id)
+    OR EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+        WHERE t.tag_id::text=e.payload->>'tag_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id))
+  AND NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+        WHERE c.default_algorithm=1 AND c.store_id=e.store_id AND s.payload->>'category_id'=e.payload->>'category_id')
+  AND NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+        WHERE t.default_algorithm=1 AND t.store_id=e.store_id AND s.payload->>'tag_id'=e.payload->>'tag_id')))
+ ORDER BY e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'),
+          (e.payload->>'catalog_revision')::bigint DESC,e.received_at DESC,e.event_id DESC
+), candidates AS (
+ SELECT d.event_id,d.processor,d.received_at FROM defaults d WHERE
+  (d.event_type='catalog.category.snapshot.v1' AND (
+   NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+     WHERE c.default_algorithm=1 AND c.store_id=d.store_id AND s.payload->>'category_id'=d.payload->>'category_id'
+       AND c.source_revision >= (d.payload->>'catalog_revision')::bigint)
+   OR EXISTS(SELECT 1 FROM catalog_categories c WHERE c.category_id::text=d.payload->>'category_id' AND c.store_id=d.store_id AND c.default_algorithm=0)))
+  OR (d.event_type='catalog.tag.snapshot.v1' AND (
+   NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+     WHERE t.default_algorithm=1 AND t.store_id=d.store_id AND s.payload->>'tag_id'=d.payload->>'tag_id'
+       AND t.source_revision >= (d.payload->>'catalog_revision')::bigint)
+   OR EXISTS(SELECT 1 FROM catalog_tags t WHERE t.tag_id::text=d.payload->>'tag_id' AND t.store_id=d.store_id AND t.default_algorithm=0)))
+ UNION
+ SELECT e.event_id,p.processor,e.received_at FROM catalog_categories c
+ JOIN sync_events e ON e.event_id=c.source_event_id AND e.store_id=c.store_id
+ JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_category_projection.v1'
+ WHERE p.status='processed' AND EXISTS(SELECT 1 FROM catalog_category_edges edge
+   WHERE edge.child_id=c.category_id AND edge.parent_id::text=ANY($1::text[]))
+ UNION
+ SELECT e.event_id,p.processor,e.received_at FROM catalog_products product
+ JOIN sync_events e ON e.event_id=product.source_event_id AND e.store_id=product.store_id
+ JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_product_projection.v1'
+ WHERE p.status='processed' AND (product.top_category_id::text=ANY($1::text[])
+   OR EXISTS(SELECT 1 FROM catalog_product_subcategories sub WHERE sub.product_id=product.product_id AND sub.category_id::text=ANY($1::text[]))
+   OR EXISTS(SELECT 1 FROM catalog_product_tags tag WHERE tag.product_id=product.product_id AND tag.tag_id::text=ANY($2::text[])))
+)
+SELECT event_id,processor FROM candidates ORDER BY received_at,event_id LIMIT 100
+`
+
+type DefaultCatalogRecoveryCandidatesParams struct {
+	CategoryIds []string `json:"category_ids"`
+	TagIds      []string `json:"tag_ids"`
+}
+
+type DefaultCatalogRecoveryCandidatesRow struct {
+	EventID   pgtype.UUID `json:"event_id"`
+	Processor string      `json:"processor"`
+}
+
+// Only authoritative scoped events are replayed. Never reset genuine
+// equal-revision/ownership conflicts, or unbound historical processing.
+func (q *Queries) DefaultCatalogRecoveryCandidates(ctx context.Context, arg DefaultCatalogRecoveryCandidatesParams) ([]DefaultCatalogRecoveryCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, defaultCatalogRecoveryCandidates, arg.CategoryIds, arg.TagIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DefaultCatalogRecoveryCandidatesRow{}
+	for rows.Next() {
+		var i DefaultCatalogRecoveryCandidatesRow
+		if err := rows.Scan(&i.EventID, &i.Processor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteCatalogCategoryEdges = `-- name: DeleteCatalogCategoryEdges :exec
 DELETE FROM catalog_category_edges WHERE child_id = $1
 `
@@ -866,12 +963,17 @@ WHERE p.event_id = e.event_id
     SELECT 1 FROM sync_events e2
     WHERE e2.event_type = 'catalog.product.snapshot.v1'
       AND e2.payload->>'product_id' = e.payload->>'product_id'
+      AND (e.store_id IS NULL OR e2.store_id IS NULL OR e2.store_id = e.store_id)
       AND (e2.payload->>'catalog_revision')::bigint > (e.payload->>'catalog_revision')::bigint
   )
   AND EXISTS (
-    SELECT 1 FROM catalog_categories c
-    WHERE (c.category_id::text = e.payload->>'top_category_id'
-           OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
+    SELECT 1 FROM catalog_categories c JOIN sync_events source ON source.event_id = c.source_event_id
+    WHERE ((c.default_algorithm = 1 AND e.store_id = c.store_id)
+       OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+      AND (c.category_id::text = e.payload->>'top_category_id'
+           OR source.payload->>'category_id' = e.payload->>'top_category_id'
+           OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids'))
+           OR source.payload->>'category_id' IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
       AND c.projected_at > p.updated_at
   )
 `
@@ -890,23 +992,19 @@ func (q *Queries) RearmBlockedCatalogProducts(ctx context.Context) error {
 	return err
 }
 
-const recoverDefaultCatalogBlocked = `-- name: RecoverDefaultCatalogBlocked :execrows
-UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
-    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
-WHERE status = 'blocked'
-  AND processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1',
-                    'catalog_product_projection.v1')
-  AND last_error_code IN ('STORE_SCOPE_CONFLICT', 'CATALOG_REVISION_CONFLICT')
+const rearmDefaultCatalogRecovery = `-- name: RearmDefaultCatalogRecovery :execrows
+UPDATE sync_event_processing SET status='pending',next_attempt_at=NULL,processed_at=NULL,
+       last_error_code=NULL,last_error_message=NULL
+WHERE event_id=$1 AND processor=$2 AND status IN ('processed','blocked')
 `
 
-// Phase 9-R2 F08 upgrade recovery. An event that was permanently blocked
-// by a pre-R2 catalog identity/scope defect becomes pending again once,
-// so it re-projects under the current identity model. Bounded to the
-// durable catalog projectors and the exact terminal codes the R1/R2
-// identity changes made obsolete; it never resets validation, cycle,
-// depth, graph-conflict, inventory/policy, sale, or return failures.
-func (q *Queries) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error) {
-	result, err := q.db.Exec(ctx, recoverDefaultCatalogBlocked)
+type RearmDefaultCatalogRecoveryParams struct {
+	EventID   pgtype.UUID `json:"event_id"`
+	Processor string      `json:"processor"`
+}
+
+func (q *Queries) RearmDefaultCatalogRecovery(ctx context.Context, arg RearmDefaultCatalogRecoveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rearmDefaultCatalogRecovery, arg.EventID, arg.Processor)
 	if err != nil {
 		return 0, err
 	}
@@ -921,24 +1019,67 @@ WHERE processor = 'catalog_product_projection.v1'
   AND last_error_code IN ('CATALOG_DEPENDENCY_WAIT', 'CATALOG_INVALID_RELATION')
   AND event_id IN (
     SELECT e.event_id FROM sync_events e
+    JOIN catalog_categories c ON c.category_id = $1::uuid
+    JOIN sync_events source ON source.event_id = c.source_event_id
     WHERE e.event_type = 'catalog.product.snapshot.v1'
-      AND (e.payload->>'top_category_id' = ($1::text)
-           OR e.payload->'subcategory_ids' @> to_jsonb(($2::text)))
+      AND ((c.default_algorithm = 1 AND e.store_id = c.store_id)
+        OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+      AND (e.payload->>'top_category_id' IN (c.category_id::text, source.payload->>'category_id')
+           OR e.payload->'subcategory_ids' @> to_jsonb(c.category_id::text)
+           OR e.payload->'subcategory_ids' @> to_jsonb(source.payload->>'category_id'))
   )
 `
-
-type ResetCatalogProductRetriesForGraphParams struct {
-	Column1 string `json:"column_1"`
-	Column2 string `json:"column_2"`
-}
 
 // Re-evaluation trigger: after a category graph commit, waiting or
 // graph-blocked product events referencing the changed category become
 // pending again so they re-validate against the new graph with no operator
 // retry and no Retail resend. Other error codes are never touched.
-func (q *Queries) ResetCatalogProductRetriesForGraph(ctx context.Context, arg ResetCatalogProductRetriesForGraphParams) error {
-	_, err := q.db.Exec(ctx, resetCatalogProductRetriesForGraph, arg.Column1, arg.Column2)
+func (q *Queries) ResetCatalogProductRetriesForGraph(ctx context.Context, dollar_1 pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, resetCatalogProductRetriesForGraph, dollar_1)
 	return err
+}
+
+const retireRawDefaultCategory = `-- name: RetireRawDefaultCategory :execrows
+UPDATE catalog_categories c SET store_id = NULL, default_algorithm = 2
+WHERE c.category_id = $1 AND c.default_algorithm = 0
+  AND (c.store_id = $2 OR (c.store_id IS NULL AND EXISTS (
+       SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id AND e.store_id=$2)))
+`
+
+type RetireRawDefaultCategoryParams struct {
+	CategoryID pgtype.UUID `json:"category_id"`
+	StoreID    pgtype.UUID `json:"store_id"`
+}
+
+// Keep the raw compatibility snapshot and its source provenance. It no
+// longer claims a Store once that Store transitions to a canonical row.
+func (q *Queries) RetireRawDefaultCategory(ctx context.Context, arg RetireRawDefaultCategoryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireRawDefaultCategory, arg.CategoryID, arg.StoreID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireRawDefaultTag = `-- name: RetireRawDefaultTag :execrows
+UPDATE catalog_tags t SET store_id = NULL, default_algorithm = 2
+WHERE t.tag_id = $1 AND t.default_algorithm = 0
+  AND (t.store_id = $2 OR (t.store_id IS NULL AND EXISTS (
+       SELECT 1 FROM sync_events e WHERE e.event_id=t.source_event_id AND e.store_id=$2)))
+`
+
+type RetireRawDefaultTagParams struct {
+	TagID   pgtype.UUID `json:"tag_id"`
+	StoreID pgtype.UUID `json:"store_id"`
+}
+
+// Also releases the obsolete (Store, slug) claim before canonical replay.
+func (q *Queries) RetireRawDefaultTag(ctx context.Context, arg RetireRawDefaultTagParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireRawDefaultTag, arg.TagID, arg.StoreID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertCatalogCategory = `-- name: UpsertCatalogCategory :exec

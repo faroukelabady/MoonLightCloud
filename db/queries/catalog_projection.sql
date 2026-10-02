@@ -87,20 +87,6 @@ ON CONFLICT (tag_id) DO UPDATE SET
 SELECT COALESCE(default_algorithm, 0) FROM catalog_tags
 WHERE tag_id = $1 AND store_id = $2;
 
--- name: RecoverDefaultCatalogBlocked :execrows
--- Phase 9-R2 F08 upgrade recovery. An event that was permanently blocked
--- by a pre-R2 catalog identity/scope defect becomes pending again once,
--- so it re-projects under the current identity model. Bounded to the
--- durable catalog projectors and the exact terminal codes the R1/R2
--- identity changes made obsolete; it never resets validation, cycle,
--- depth, graph-conflict, inventory/policy, sale, or return failures.
-UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
-    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
-WHERE status = 'blocked'
-  AND processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1',
-                    'catalog_product_projection.v1')
-  AND last_error_code IN ('STORE_SCOPE_CONFLICT', 'CATALOG_REVISION_CONFLICT');
-
 -- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,
     source_event_id, source_device_id, source_payload_hash, store_id
@@ -210,7 +196,11 @@ FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $4
 WHERE e.event_type = $1
-  AND e.payload->>($2::text) = ($3::text);
+  AND e.payload->>($2::text) = ($3::text)
+  AND (CASE WHEN sqlc.arg(store_scoped_default)::boolean
+       THEN e.store_id IS NOT DISTINCT FROM sqlc.narg(store_id)::uuid
+       ELSE sqlc.narg(store_id)::uuid IS NULL OR e.store_id IS NULL
+            OR e.store_id = sqlc.narg(store_id)::uuid END);
 
 -- name: CatalogProductsReferencingCategory :many
 -- Projected products whose top or subcategory set references a category.
@@ -232,9 +222,14 @@ WHERE processor = 'catalog_product_projection.v1'
   AND last_error_code IN ('CATALOG_DEPENDENCY_WAIT', 'CATALOG_INVALID_RELATION')
   AND event_id IN (
     SELECT e.event_id FROM sync_events e
+    JOIN catalog_categories c ON c.category_id = $1::uuid
+    JOIN sync_events source ON source.event_id = c.source_event_id
     WHERE e.event_type = 'catalog.product.snapshot.v1'
-      AND (e.payload->>'top_category_id' = ($1::text)
-           OR e.payload->'subcategory_ids' @> to_jsonb(($2::text)))
+      AND ((c.default_algorithm = 1 AND e.store_id = c.store_id)
+        OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+      AND (e.payload->>'top_category_id' IN (c.category_id::text, source.payload->>'category_id')
+           OR e.payload->'subcategory_ids' @> to_jsonb(c.category_id::text)
+           OR e.payload->'subcategory_ids' @> to_jsonb(source.payload->>'category_id'))
   );
 
 -- name: LockCatalogEntity :exec
@@ -268,12 +263,17 @@ WHERE p.event_id = e.event_id
     SELECT 1 FROM sync_events e2
     WHERE e2.event_type = 'catalog.product.snapshot.v1'
       AND e2.payload->>'product_id' = e.payload->>'product_id'
+      AND (e.store_id IS NULL OR e2.store_id IS NULL OR e2.store_id = e.store_id)
       AND (e2.payload->>'catalog_revision')::bigint > (e.payload->>'catalog_revision')::bigint
   )
   AND EXISTS (
-    SELECT 1 FROM catalog_categories c
-    WHERE (c.category_id::text = e.payload->>'top_category_id'
-           OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
+    SELECT 1 FROM catalog_categories c JOIN sync_events source ON source.event_id = c.source_event_id
+    WHERE ((c.default_algorithm = 1 AND e.store_id = c.store_id)
+       OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+      AND (c.category_id::text = e.payload->>'top_category_id'
+           OR source.payload->>'category_id' = e.payload->>'top_category_id'
+           OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids'))
+           OR source.payload->>'category_id' IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
       AND c.projected_at > p.updated_at
   );
 
@@ -320,3 +320,81 @@ SELECT p.store_id
 FROM catalog_product_tags t
 JOIN catalog_products p ON p.product_id = t.product_id
 WHERE t.tag_id = $1 AND p.store_id IS NOT NULL;
+
+-- name: RetireRawDefaultCategory :execrows
+-- Keep the raw compatibility snapshot and its source provenance. It no
+-- longer claims a Store once that Store transitions to a canonical row.
+UPDATE catalog_categories c SET store_id = NULL, default_algorithm = 2
+WHERE c.category_id = $1 AND c.default_algorithm = 0
+  AND (c.store_id = $2 OR (c.store_id IS NULL AND EXISTS (
+       SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id AND e.store_id=$2)));
+
+-- name: RetireRawDefaultTag :execrows
+-- Also releases the obsolete (Store, slug) claim before canonical replay.
+UPDATE catalog_tags t SET store_id = NULL, default_algorithm = 2
+WHERE t.tag_id = $1 AND t.default_algorithm = 0
+  AND (t.store_id = $2 OR (t.store_id IS NULL AND EXISTS (
+       SELECT 1 FROM sync_events e WHERE e.event_id=t.source_event_id AND e.store_id=$2)));
+
+-- name: DefaultCatalogRecoveryCandidates :many
+-- Only authoritative scoped events are replayed. Never reset genuine
+-- equal-revision/ownership conflicts, or unbound historical processing.
+WITH defaults AS (
+ SELECT DISTINCT ON (e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'))
+        e.event_id,e.event_type,e.store_id,e.payload,p.processor,e.received_at
+ FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
+ WHERE e.store_id IS NOT NULL AND (
+  (e.event_type='catalog.category.snapshot.v1' AND p.processor='catalog_category_projection.v1'
+   AND e.payload->>'category_id'=ANY(sqlc.arg(category_ids)::text[])) OR
+  (e.event_type='catalog.tag.snapshot.v1' AND p.processor='catalog_tag_projection.v1'
+   AND e.payload->>'tag_id'=ANY(sqlc.arg(tag_ids)::text[])))
+ AND (p.status='processed' OR (p.status='blocked'
+  AND p.last_error_code IN ('STORE_SCOPE_CONFLICT','CATALOG_REVISION_CONFLICT')
+  AND p.last_error_message IN ('category owned by another store','tag owned by another store','equal revision with conflicting state')
+  AND NOT EXISTS (SELECT 1 FROM sync_events own JOIN sync_event_processing settled
+       ON settled.event_id=own.event_id AND settled.processor=p.processor AND settled.status='processed'
+       WHERE own.store_id=e.store_id AND own.event_type=e.event_type
+         AND COALESCE(own.payload->>'category_id',own.payload->>'tag_id')=COALESCE(e.payload->>'category_id',e.payload->>'tag_id')
+         AND (own.payload->>'catalog_revision')::bigint >= (e.payload->>'catalog_revision')::bigint)
+  AND (EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+        WHERE c.category_id::text=e.payload->>'category_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id)
+    OR EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+        WHERE t.tag_id::text=e.payload->>'tag_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id))
+  AND NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+        WHERE c.default_algorithm=1 AND c.store_id=e.store_id AND s.payload->>'category_id'=e.payload->>'category_id')
+  AND NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+        WHERE t.default_algorithm=1 AND t.store_id=e.store_id AND s.payload->>'tag_id'=e.payload->>'tag_id')))
+ ORDER BY e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'),
+          (e.payload->>'catalog_revision')::bigint DESC,e.received_at DESC,e.event_id DESC
+), candidates AS (
+ SELECT d.event_id,d.processor,d.received_at FROM defaults d WHERE
+  (d.event_type='catalog.category.snapshot.v1' AND (
+   NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
+     WHERE c.default_algorithm=1 AND c.store_id=d.store_id AND s.payload->>'category_id'=d.payload->>'category_id'
+       AND c.source_revision >= (d.payload->>'catalog_revision')::bigint)
+   OR EXISTS(SELECT 1 FROM catalog_categories c WHERE c.category_id::text=d.payload->>'category_id' AND c.store_id=d.store_id AND c.default_algorithm=0)))
+  OR (d.event_type='catalog.tag.snapshot.v1' AND (
+   NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
+     WHERE t.default_algorithm=1 AND t.store_id=d.store_id AND s.payload->>'tag_id'=d.payload->>'tag_id'
+       AND t.source_revision >= (d.payload->>'catalog_revision')::bigint)
+   OR EXISTS(SELECT 1 FROM catalog_tags t WHERE t.tag_id::text=d.payload->>'tag_id' AND t.store_id=d.store_id AND t.default_algorithm=0)))
+ UNION
+ SELECT e.event_id,p.processor,e.received_at FROM catalog_categories c
+ JOIN sync_events e ON e.event_id=c.source_event_id AND e.store_id=c.store_id
+ JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_category_projection.v1'
+ WHERE p.status='processed' AND EXISTS(SELECT 1 FROM catalog_category_edges edge
+   WHERE edge.child_id=c.category_id AND edge.parent_id::text=ANY(sqlc.arg(category_ids)::text[]))
+ UNION
+ SELECT e.event_id,p.processor,e.received_at FROM catalog_products product
+ JOIN sync_events e ON e.event_id=product.source_event_id AND e.store_id=product.store_id
+ JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_product_projection.v1'
+ WHERE p.status='processed' AND (product.top_category_id::text=ANY(sqlc.arg(category_ids)::text[])
+   OR EXISTS(SELECT 1 FROM catalog_product_subcategories sub WHERE sub.product_id=product.product_id AND sub.category_id::text=ANY(sqlc.arg(category_ids)::text[]))
+   OR EXISTS(SELECT 1 FROM catalog_product_tags tag WHERE tag.product_id=product.product_id AND tag.tag_id::text=ANY(sqlc.arg(tag_ids)::text[])))
+)
+SELECT event_id,processor FROM candidates ORDER BY received_at,event_id LIMIT 100;
+
+-- name: RearmDefaultCatalogRecovery :execrows
+UPDATE sync_event_processing SET status='pending',next_attempt_at=NULL,processed_at=NULL,
+       last_error_code=NULL,last_error_message=NULL
+WHERE event_id=$1 AND processor=$2 AND status IN ('processed','blocked');

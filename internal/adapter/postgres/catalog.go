@@ -368,12 +368,12 @@ type resolvedParent struct {
 // event projected); a raw/Store-created parent resolves to itself. It
 // reports parentOK=false when a parent row is not projected yet, which the
 // caller turns into a retryable dependency wait.
-func resolveCategoryParents(ctx context.Context, q *sqlcgen.Queries, parentIDs []string, store pgtype.UUID, scoped bool) ([]resolvedParent, bool, error) {
+func resolveCategoryParents(ctx context.Context, q *sqlcgen.Queries, parentIDs []string, store pgtype.UUID) ([]resolvedParent, bool, error) {
 	out := make([]resolvedParent, 0, len(parentIDs))
 	scopedStore := store.Valid
 	for _, parent := range parentIDs {
 		projected := parent
-		if scoped && scopedStore && isSharedCategoryID(parent) {
+		if scopedStore && isSharedCategoryID(parent) {
 			projected = canonicalDefaultCategoryID(parent, store)
 		}
 		puid, err := parseUUID(projected)
@@ -418,14 +418,16 @@ func graphSettledForProduct(ctx context.Context, q *sqlcgen.Queries, topID strin
 			return false, nil
 		}
 		projected := int64(-1)
+		var scope pgtype.UUID
 		if row, err := q.CatalogCategoryByID(ctx, uid); err == nil {
 			projected = row.SourceRevision
+			scope = row.StoreID
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return false, err
 		}
 		events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
-			EventType: catalog.EventCategorySnapshotV1, Column2: "category_id", Column3: id,
-			Processor: catalog.ProcessorCategoryProjectionV1, Column5: "catalog_revision",
+			EventType: catalog.EventCategorySnapshotV1, Column2: "category_id", Column3: rawDefaultCategoryID(id, scope),
+			Processor: catalog.ProcessorCategoryProjectionV1, Column5: "catalog_revision", StoreID: scope, StoreScopedDefault: defaultCatalogEntity(catalog.EventCategorySnapshotV1, rawDefaultCategoryID(id, scope)),
 		})
 		if err != nil {
 			return false, err
@@ -493,27 +495,6 @@ func categoryParentsChanged(ctx context.Context, q *sqlcgen.Queries, cuid pgtype
 	return false, nil
 }
 
-// categoryParentsRemoved reports whether the incoming parent set drops any
-// currently projected parent edge. Only a removal can make a referenced
-// category unreachable from a product's top and thus orphan a product;
-// pure additions are always reachability-safe.
-func categoryParentsRemoved(ctx context.Context, q *sqlcgen.Queries, cuid pgtype.UUID, newParents []string) (bool, error) {
-	current, err := q.CatalogCategoryParents(ctx, cuid)
-	if err != nil {
-		return false, err
-	}
-	want := make(map[string]bool, len(newParents))
-	for _, p := range newParents {
-		want[p] = true
-	}
-	for _, p := range current {
-		if !want[uuidString(p)] {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // categoryChangeRepairable reports whether every projected product that
 // would ACTUALLY become structurally invalid under the proposed graph has
 // a newer accepted (and still repairable) product revision. The proposed
@@ -556,14 +537,29 @@ func categoryChangeRepairable(ctx context.Context, q *sqlcgen.Queries, allEdges 
 			if !orphaned {
 				continue
 			}
+			productRow, err := q.CatalogProductByID(ctx, productID)
+			if err != nil {
+				return false, err
+			}
 			repairable, err := entityHasNewerRepairableEvent(ctx, q,
 				catalog.EventProductSnapshotV1, "product_id", pid,
-				catalog.ProcessorProductProjectionV1, "catalog_revision")
+				catalog.ProcessorProductProjectionV1, "catalog_revision", productRow.StoreID)
 			if err != nil {
 				return false, err
 			}
 			if !repairable {
-				return false, nil
+				// Upgrade recovery can replay the current source revision
+				// solely to remap raw default references. Authorize that
+				// narrow pending replay only when its canonical references
+				// satisfy this proposed graph; ordinary equal conflicts
+				// cannot serve as accepted repairs.
+				repairable, err = defaultReferenceRepairPending(ctx, q, productRow, proposed)
+				if err != nil {
+					return false, err
+				}
+				if !repairable {
+					return false, nil
+				}
 			}
 		}
 	}
@@ -608,10 +604,10 @@ func productOrphanedByGraph(ctx context.Context, q *sqlcgen.Queries, productID s
 // the newer event is judged on its own merits. Terminally dead newer
 // events (validation/conflict/cycle/depth) do not supersede: the older
 // revision is then evaluated normally as the closest valid state.
-func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, incomingRevision int64) (bool, error) {
+func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, incomingRevision int64, scope pgtype.UUID) (bool, error) {
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor, Column5: revKey,
+		Processor: processor, Column5: revKey, StoreID: scope, StoreScopedDefault: defaultCatalogEntity(eventType, entityID),
 	})
 	if err != nil {
 		return false, err
@@ -627,8 +623,15 @@ func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey,
 // entityHasNewerRepairableEvent generalizes the repair check across catalog
 // entity types: a newer accepted event that is missing, pending, retrying,
 // or blocked on a transient graph wait can still advance the entity.
-func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string) (bool, error) {
-	uid, err := parseUUID(entityID)
+func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, scope pgtype.UUID) (bool, error) {
+	projectedID := entityID
+	if eventType == catalog.EventCategorySnapshotV1 {
+		projectedID = canonicalDefaultCategoryID(entityID, scope)
+	}
+	if eventType == catalog.EventTagSnapshotV1 {
+		projectedID = canonicalDefaultTagID(entityID, scope)
+	}
+	uid, err := parseUUID(projectedID)
 	if err != nil {
 		return false, nil
 	}
@@ -657,7 +660,7 @@ func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, even
 	}
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor, Column5: revKey,
+		Processor: processor, Column5: revKey, StoreID: scope, StoreScopedDefault: defaultCatalogEntity(eventType, entityID),
 	})
 	if err != nil {
 		return false, err
@@ -814,17 +817,42 @@ func (d Devices) RearmBlockedProducts(ctx context.Context) error {
 	return nil
 }
 
-// RecoverDefaultCatalogBlocked re-arms catalog events permanently blocked
-// by the obsolete pre-R2 default-catalog identity/scope model. Bounded to
-// the exact terminal codes the R1/R2 identity changes made obsolete; it
-// never resets validation, cycle, depth, graph-conflict, inventory/policy,
-// sale, or return failures. Returns the number of re-armed events.
+// RecoverDefaultCatalogBlocked re-arms at most 100 authoritative source
+// events for missing canonical defaults and raw current-state references.
+// Obsolete blocked default events require concrete foreign raw provenance;
+// an error code alone never authorizes reset. Repeat after catalog workers
+// converge until zero. Durable processing rows make interruption restart-safe.
 func (d Devices) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
-	n, err := sqlcgen.New(d.pool).RecoverDefaultCatalogBlocked(ctx)
+	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		return 0, apperr.Wrap(apperr.Internal, "recover blocked catalog events", redact(err))
+		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	categories := []string{}
+	for id := range sharedCategoryIDs {
+		categories = append(categories, id)
+	}
+	tags := []string{}
+	for id := range sharedTagIDs {
+		tags = append(tags, id)
+	}
+	candidates, err := q.DefaultCatalogRecoveryCandidates(ctx, sqlcgen.DefaultCatalogRecoveryCandidatesParams{CategoryIds: categories, TagIds: tags})
+	if err != nil {
+		return 0, apperr.Wrap(apperr.Internal, "catalog recovery lookup failed", redact(err))
+	}
+	var n int64
+	for _, candidate := range candidates {
+		count, err := q.RearmDefaultCatalogRecovery(ctx, sqlcgen.RearmDefaultCatalogRecoveryParams{EventID: candidate.EventID, Processor: candidate.Processor})
+		if err != nil {
+			return 0, apperr.Wrap(apperr.Internal, "catalog recovery failed", redact(err))
+		}
+		n += count
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
 	}
 	return n, nil
 }
@@ -1030,18 +1058,6 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
 	}
 
-	// Canonical parent IDs for this event's Store scope, used by the
-	// equal-revision semantic comparison before the dependency resolution
-	// below re-derives them with existence checks.
-	scopedParentIDs := make([]string, 0, len(valid.ParentIDs))
-	for _, parent := range valid.ParentIDs {
-		if sharedNode && isSharedCategoryID(parent) {
-			scopedParentIDs = append(scopedParentIDs, canonicalDefaultCategoryID(parent, eventWriteStore))
-		} else {
-			scopedParentIDs = append(scopedParentIDs, parent)
-		}
-	}
-
 	// Revision gate against current projection (missing row = first write).
 	// Equal revisions compare reconstructed semantic state (R02): the
 	// stored hash may predate semantic fingerprinting and never decides.
@@ -1074,6 +1090,18 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "category owned by another store")
 		}
 	}
+	arbitrationScope := storeUUID(effectiveScope(writeStore, existingStore))
+	// Canonical parent IDs for this event's Store scope, used by the
+	// equal-revision semantic comparison before the dependency resolution
+	// below re-derives them with existence checks.
+	scopedParentIDs := make([]string, 0, len(valid.ParentIDs))
+	for _, parent := range valid.ParentIDs {
+		if arbitrationScope.Valid && isSharedCategoryID(parent) {
+			scopedParentIDs = append(scopedParentIDs, canonicalDefaultCategoryID(parent, arbitrationScope))
+		} else {
+			scopedParentIDs = append(scopedParentIDs, parent)
+		}
+	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -1083,7 +1111,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		// revision: skip revalidation and resolve as a stale no-op.
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventCategorySnapshotV1, "category_id", valid.CategoryID,
-			catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision)
+			catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision, arbitrationScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1103,16 +1131,18 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		// projected identity, so compare against the same identity.
 		if sharedNode && !exists {
 			proceed = true
-		} else if !exists || !reflect.DeepEqual(catalog.NormalizeCategorySnapshot(withCategoryGraph(valid, projectedID, scopedParentIDs)), currentSnapshot) {
+		} else if !exists || !reflect.DeepEqual(catalog.NormalizeCategorySnapshot(withCategoryGraph(valid, projectedID, scopedParentIDs)), canonicalCategorySnapshot(currentSnapshot, arbitrationScope)) {
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
-		} else {
+		} else if reflect.DeepEqual(catalog.NormalizeCategorySnapshot(withCategoryGraph(valid, projectedID, scopedParentIDs)), currentSnapshot) {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		} else {
+			proceed = true
 		}
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventCategorySnapshotV1, "category_id", valid.CategoryID,
-		catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision)
+		catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision, arbitrationScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1127,7 +1157,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	// Store-scoped default parents to their Store-local canonical rows, so
 	// it may sit under a local root (F09). Legacy NULL rows are wildcards.
 	effStore := effectiveScope(writeStore, existingStore)
-	resolvedParents, parentOK, err := resolveCategoryParents(ctx, q, valid.ParentIDs, eventWriteStore, sharedNode)
+	resolvedParents, parentOK, err := resolveCategoryParents(ctx, q, valid.ParentIDs, storeUUID(effStore))
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed")
@@ -1213,15 +1243,14 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	// label/status-only revisions never change graph validity, so the
 	// product lock sweep and repair requirement apply only to genuine
 	// reparents. F04 needs ordinary label mutation to project.
-	// Adding a parent can only increase reachability, so it can never
-	// orphan a product; only a removed parent can. The expensive product
-	// lock sweep and repair requirement therefore apply to removals.
-	parentsRemoved, err := categoryParentsRemoved(ctx, q, cuid, projectedParentIDs)
+	// Both additions and removals can invalidate Product structure. Apply
+	// the affected-Product locks and full proposed-graph guard to either.
+	parentsChanged, err := categoryParentsChanged(ctx, q, cuid, projectedParentIDs)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent comparison failed")
 	}
-	if parentsRemoved {
+	if parentsChanged {
 		affectedKeys := [][2]string{{"category", projectedID}}
 		for _, id := range descendants {
 			uid, err := parseUUID(id)
@@ -1261,6 +1290,12 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		}
 	}
 
+	if sharedNode {
+		if _, err := q.RetireRawDefaultCategory(ctx, sqlcgen.RetireRawDefaultCategoryParams{CategoryID: mustParseUUID(valid.CategoryID), StoreID: eventWriteStore}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+		}
+	}
 	fingerprint := catalog.FingerprintCategory(valid)
 	nameAR := ""
 	nameEN := pgtype.Text{}
@@ -1339,7 +1374,7 @@ func (d Devices) resetCatalogProductsForGraph(ctx context.Context, categoryIDs [
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := sqlcgen.New(tx)
 	for _, id := range categoryIDs {
-		if err := q.ResetCatalogProductRetriesForGraph(ctx, sqlcgen.ResetCatalogProductRetriesForGraphParams{Column1: id, Column2: id}); err != nil {
+		if err := q.ResetCatalogProductRetriesForGraph(ctx, mustParseUUID(id)); err != nil {
 			_ = tx.Rollback(ctx)
 			d.logResetFailure(categoryIDs, err)
 			return
@@ -1529,7 +1564,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	if !proceed {
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventTagSnapshotV1, "tag_id", valid.TagID,
-			catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision)
+			catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision, storeUUID(effectiveScope(writeStore, existingStore)))
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1555,7 +1590,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventTagSnapshotV1, "tag_id", valid.TagID,
-		catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision)
+		catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision, storeUUID(effectiveScope(writeStore, existingStore)))
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1586,6 +1621,12 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			nameAR = pgText(name.Name)
 		case catalog.LocaleEN:
 			nameEN = pgText(name.Name)
+		}
+	}
+	if sharedNode {
+		if _, err := q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
 		}
 	}
 	fingerprint := catalog.FingerprintTag(valid)
@@ -1662,14 +1703,14 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	// validity) and need no lock.
 	lockKeys := [][2]string{
 		{"product", valid.ProductID},
-		{"category", valid.TopCategoryID},
+		{"category", canonicalDefaultCategoryID(valid.TopCategoryID, storeUUID(event.StoreID))},
 		// Inventory decisions use their own namespace; taking it here makes
 		// product adoption and concurrent inventory writes for the same
 		// product serialize (F02 adoption-race protection).
 		{"product-inventory", valid.ProductID},
 	}
 	for _, sub := range valid.SubcategoryIDs {
-		lockKeys = append(lockKeys, [2]string{"category", sub})
+		lockKeys = append(lockKeys, [2]string{"category", canonicalDefaultCategoryID(sub, storeUUID(event.StoreID))})
 	}
 	if err := lockCatalogEntities(ctx, q, lockKeys...); err != nil {
 		_ = tx.Rollback(ctx)
@@ -1726,7 +1767,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		// no-op without revalidation.
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventProductSnapshotV1, "product_id", valid.ProductID,
-			catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision)
+			catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision, storeScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -1743,16 +1784,31 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
 		}
-		if !exists || !reflect.DeepEqual(catalog.NormalizeProductSnapshot(projectedValid), currentSnapshot) {
+		normalizedCurrent := currentSnapshot
+		normalizedCurrent.SubcategoryIDs = append([]string{}, currentSnapshot.SubcategoryIDs...)
+		normalizedCurrent.TagIDs = append([]string{}, currentSnapshot.TagIDs...)
+		normalizedCurrent.TopCategoryID = canonicalDefaultCategoryID(currentSnapshot.TopCategoryID, storeScope)
+		for i, id := range normalizedCurrent.SubcategoryIDs {
+			normalizedCurrent.SubcategoryIDs[i] = canonicalDefaultCategoryID(id, storeScope)
+		}
+		for i, id := range normalizedCurrent.TagIDs {
+			normalizedCurrent.TagIDs[i] = canonicalDefaultTagID(id, storeScope)
+		}
+		sort.Strings(normalizedCurrent.TagIDs)
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductSnapshot(projectedValid), normalizedCurrent) {
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
 		}
-		return d.assertProductStructure(ctx, q, tx, attempt, projectedValid, count, now)
+		if reflect.DeepEqual(catalog.NormalizeProductSnapshot(projectedValid), currentSnapshot) {
+			return d.assertProductStructure(ctx, q, tx, attempt, projectedValid, count, now)
+		}
+		// Same semantics, old physical references: rewrite current state only.
+		proceed = true
 	}
 
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventProductSnapshotV1, "product_id", valid.ProductID,
-		catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision)
+		catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision, storeScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -2043,7 +2099,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	if !proceed {
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventProductSalesPolicySnapshotV1, "product_id", valid.ProductID,
-			catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision)
+			catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision, storeUUID(event.StoreID))
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -2064,7 +2120,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventProductSalesPolicySnapshotV1, "product_id", valid.ProductID,
-		catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision)
+		catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision, storeUUID(event.StoreID))
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -2204,7 +2260,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	if !proceed {
 		supersededEqual, err := entitySuperseded(ctx, q,
 			catalog.EventInventoryProductSnapshotV1, "product_id", valid.ProductID,
-			catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision)
+			catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -2225,7 +2281,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	}
 	superseded, err := entitySuperseded(ctx, q,
 		catalog.EventInventoryProductSnapshotV1, "product_id", valid.ProductID,
-		catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision)
+		catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
@@ -2581,4 +2637,60 @@ func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (cat
 	availability.OnlineAvailable = online
 	availability.Ready = ready
 	return availability, nil
+}
+
+func defaultCatalogEntity(eventType, id string) bool {
+	return eventType == catalog.EventCategorySnapshotV1 && isSharedCategoryID(id) || eventType == catalog.EventTagSnapshotV1 && isSharedTagID(id)
+}
+func rawDefaultCategoryID(id string, scope pgtype.UUID) string {
+	for raw := range sharedCategoryIDs {
+		if canonicalDefaultCategoryID(raw, scope) == id {
+			return raw
+		}
+	}
+	return id
+}
+
+func canonicalCategorySnapshot(value catalog.NormalizedCategory, scope pgtype.UUID) catalog.NormalizedCategory {
+	value.ParentIDs = append([]string{}, value.ParentIDs...)
+	for i, id := range value.ParentIDs {
+		value.ParentIDs[i] = canonicalDefaultCategoryID(id, scope)
+	}
+	return value
+}
+
+func defaultReferenceRepairPending(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.CatalogProductByIDRow, edges []catalog.Edge) (bool, error) {
+	if !row.StoreID.Valid {
+		return false, nil
+	}
+	current, exists, err := currentProductSnapshot(ctx, q, row.ProductID)
+	if err != nil || !exists {
+		return false, err
+	}
+	top := canonicalDefaultCategoryID(current.TopCategoryID, row.StoreID)
+	changed := top != current.TopCategoryID
+	if hasParents(edges, top) {
+		return false, nil
+	}
+	reachable := reachableFromTop(edges, top)
+	for _, sub := range current.SubcategoryIDs {
+		canonical := canonicalDefaultCategoryID(sub, row.StoreID)
+		changed = changed || canonical != sub
+		if !reachable[canonical] {
+			return false, nil
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{EventType: catalog.EventProductSnapshotV1, Column2: "product_id", Column3: uuidString(row.ProductID), Processor: catalog.ProcessorProductProjectionV1, Column5: "catalog_revision", StoreID: row.StoreID})
+	if err != nil {
+		return false, err
+	}
+	for _, event := range events {
+		if event.EventID == row.SourceEventID && (event.ProcessingStatus == "pending" || event.ProcessingStatus == "retry") {
+			return true, nil
+		}
+	}
+	return false, nil
 }

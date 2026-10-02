@@ -52,30 +52,47 @@ row:
 
 ### Upgrade from the pre-R2 model (F08)
 
-Migration 25 adds `default_algorithm` (0 = raw ID, 1 = Store-scoped
-canonical ID) with a `DEFAULT 0`, so pre-existing rows are explicitly
-marked "raw". A default-identity event computes its canonical row directly
-and ignores any pre-R2 Store annotation on the raw row (the frozen
-ownership gate is used only for legacy and Store-created identities). An
-equal-revision Store-scoped event whose canonical row is absent
-re-projects rather than conflicting, so no "unrelated A edit" is required.
+Migration 25 remains unchanged. Its existing `default_algorithm` column
+records 0 for raw rows and 1 for canonical rows. R3 uses 2 for a retired
+raw compatibility snapshot: names, identity, source provenance and raw
+edges are retained, but its obsolete Store annotation is released in the
+same transaction that writes that Store's canonical row. This also frees
+the old Store/slug claim. Unbound source history is never assigned a Store.
 
-Permanently blocked catalog events from the obsolete model are recovered
-with the bounded operator command:
+After deploying R3, run:
 
 ```
 moonlight-cloud projection recover-catalog
 ```
 
-which flips only `STORE_SCOPE_CONFLICT` / `CATALOG_REVISION_CONFLICT`
-blocks on the three catalog processors back to pending. It never resets
-validation, cycle, depth, graph-conflict, inventory/policy, sale, or
-return failures, and never rewrites a durable event.
+Each invocation atomically re-arms at most 100 authoritative source events
+for missing canonical defaults and current Category/Product references
+still using raw defaults. Run the catalog workers to convergence, inspect
+processing errors, then repeat recovery until it reports zero. A nonzero
+count means work was queued, not that projection has completed. Durable
+pending/retry state survives interruption; rerunning recovery is safe.
+Do not rely on a later unrelated catalog edit to complete this transition.
+
+Previously processed sources are included. An obsolete blocked default
+requires concrete foreign raw-row provenance and the original ownership
+or equal-revision error shape; matching an error code alone is insufficient.
+Genuine permanent conflicts and unbound processing remain unchanged.
+Existing canonical rows can coexist with raw references during recovery;
+equal-revision replay only changes current reference representation when
+all other semantics match. The Product graph guard permits that narrow
+pending source replay only when the canonical references are valid in the
+proposed graph. It still rejects ordinary equal-revision contradictions.
+
+Recovery never rewrites durable payloads or historical Sale/Return data.
+Pending/retry events use ordinary projector scheduling. No new migration,
+identity algorithm, catalog system, financial logic or dependency is added.
+A schema rollback alone cannot undo canonical identities already written;
+use the established backup/restore procedure for a lossless rollback.
 
 ### Category management compatibility (F09)
 
-A Store-scoped default Category resolves a Store-scoped default parent to
-the *parent Store's* canonical row for the same Store, and resolves a
+Any Category with an effective Store resolves a default parent to
+that same Store's canonical row, and resolves a
 Store-created parent to itself. A child therefore may sit under a local
 root (matching the frozen Retail max-depth-3 DAG), while a foreign
 proven-Store parent still blocks. Products resolve their referenced
@@ -85,8 +102,8 @@ stays intuitively consistent.
 The cross-aggregate orphan guard is evaluated against the **proposed**
 graph and only requires a product repair when a referencing product would
 *actually* become structurally invalid (its top gains a parent, or a
-subcategory becomes unreachable). A pure parent addition never blocks, and
-a removal that keeps every product reachable (e.g. dropping one of several
+subcategory becomes unreachable). Both additions and removals run the full integrity guard. A harmless
+addition or a removal that keeps every product reachable (e.g. dropping one of several
 parents) is accepted — matching the frozen Retail contract that permits
 these DAG operations while still rejecting genuine orphaning, cycles, and
 max-depth violations.
@@ -96,13 +113,13 @@ max-depth violations.
 | Concern | Behavior |
 |---|---|
 | Fresh installations | Each Store's seeded IDs project to its own canonical rows; products converge; no `STORE_SCOPE_CONFLICT`. |
-| Existing installations | Raw pre-R2 rows keep their data and annotation; the first Store-scoped event writes the canonical row. Raw rows are never deleted. |
+| Existing installations | Explicit bounded recovery replays processed authoritative sources, releases obsolete raw Store/slug claims atomically and remaps current references. Raw compatibility snapshots are retained. |
 | Already projected default rows | No destructive backfill; `default_algorithm` records the scheme. |
 | Pending durable catalog events | Unchanged; replay re-derives canonical rows deterministically. |
-| Previously blocked events | `projection recover-catalog` re-arms only identity/scope blocks. |
+| Previously blocked events | Only concrete obsolete default-ownership blocks are eligible; genuine permanent conflicts remain blocked. |
 | Historical Category/Tag IDs | Sale/return snapshots are immutable and keep raw IDs and labels; reporting is snapshot-based. |
 | Product references | Resolve to the same Store's canonical rows; cross-Store references still block. |
-| Revisions and replay | A Store's own counter orders its own row; equal-revision identical state is a no-op; divergent same-Store state is a normal conflict. |
+| Revisions and replay | Accepted-history arbitration and graph re-evaluation use effective Store scope; a Store's own counter orders its own row; equal-revision identical state is a no-op; divergent same-Store state is a normal conflict. |
 | Rebuilds | Wiping current-state rows, resetting the catalog processors, and replaying events reproduces the canonical Store-scoped state deterministically (see `TestR2_RebuildDefaultCatalog`). Projector retry backoff (`DefaultScanInterval` + per-attempt backoff) bounds convergence time; it is a latency, not a correctness, property. |
 | Conflicting same-ID attacks | Store-created aggregate identities remain globally arbitrated and still block. Default IDs are public reference data and confer no authority over another Store's row. |
 

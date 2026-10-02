@@ -361,16 +361,13 @@ func projectionCmd(args []string) error {
 		}
 		return store.ResetProcessing(ctx, processor, args[1])
 	case "recover-catalog":
-		// Phase 9-R2 F08 bounded upgrade recovery: re-arm catalog events
-		// permanently blocked by the obsolete pre-R2 identity/scope model
-		// so they re-project under the current model. Never touches
-		// validation/cycle/depth/graph, inventory/policy, sale, or return
-		// failures. Safe to run once after upgrading.
+		// Replay at most 100 affected current-state sources. Repeat after
+		// workers converge until zero; permanent unrelated failures remain.
 		n, err := store.RecoverDefaultCatalogBlocked(ctx)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("re-armed %d previously blocked catalog events\n", n)
+		fmt.Printf("re-armed %d affected catalog events (batch limit 100; repeat after projection convergence until zero)\n", n)
 		return nil
 	default:
 		return fmt.Errorf("unknown projection subcommand %q", args[0])

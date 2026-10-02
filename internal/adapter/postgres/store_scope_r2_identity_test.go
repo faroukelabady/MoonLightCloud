@@ -146,41 +146,7 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 // default row annotated with Store A (raw seeded ID) must not block newer
 // or equal-revision Store B traffic, and an identical A replay must not be
 // required. Both Stores converge to their own canonical rows.
-func TestR2_PreFixOwnedDefaultUpgrade(t *testing.T) {
-	f := openScopeFixture(t)
-	ctx := context.Background()
-	names := map[string]string{"en": "Gold"}
-	// Reconstruct exactly the pre-R2 projector output: raw seeded ID owned
-	// by A with a store annotation.
-	f.ingest(t, f.devA, f.credA, r2EventID(200), catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, names, 1))
-	requireOutcome(t, f.projectCatalog(t, r2EventID(200), catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
-	if _, err := f.pool.Exec(ctx, `UPDATE catalog_tags SET store_id=$1, default_algorithm=0 WHERE tag_id=$2`, scopeStoreA, sharedTagGold); err != nil {
-		t.Fatal(err)
-	}
-	// B's equal-revision event must not be blocked by A's annotation.
-	requireOutcome(t, f.projectCatalog(t, r2EventID(200), catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
-	f.ingest(t, f.devB, f.credB, r2EventID(201), catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, names, 1))
-	res := f.projectCatalog(t, r2EventID(201), catalog.EventTagSnapshotV1)
-	requireOutcome(t, res, catalog.OutcomeProcessed, "")
-	// B's higher-revision update applies.
-	f.ingest(t, f.devB, f.credB, r2EventID(202), catalog.EventTagSnapshotV1,
-		tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "B newer"}, 2))
-	requireOutcome(t, f.projectCatalog(t, r2EventID(202), catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
-	labelB := ""
-	if err := f.pool.QueryRow(ctx, `SELECT name_en FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreB)).Scan(&labelB); err != nil || labelB != "B newer" {
-		t.Fatalf("B converged: %q (%v)", labelB, err)
-	}
-
-	// Same for Categories.
-	catInit := categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1)
-	f.ingest(t, f.devA, f.credA, r2EventID(210), catalog.EventCategorySnapshotV1, catInit)
-	requireOutcome(t, f.projectCatalog(t, r2EventID(210), catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
-	if _, err := f.pool.Exec(ctx, `UPDATE catalog_categories SET store_id=$1, default_algorithm=0 WHERE category_id=$2`, scopeStoreA, sharedCatIslamic); err != nil {
-		t.Fatal(err)
-	}
-	f.ingest(t, f.devB, f.credB, r2EventID(211), catalog.EventCategorySnapshotV1, catInit)
-	requireOutcome(t, f.projectCatalog(t, r2EventID(211), catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
-}
+func TestR2_PreFixOwnedDefaultUpgrade(t *testing.T) { testR3RealUpgrade(t) }
 
 // TestR2_RebuildDefaultCatalog proves wiping current-state catalog rows and
 // re-projecting the same default-identity events deterministically
@@ -213,6 +179,14 @@ func TestR2_RebuildDefaultCatalog(t *testing.T) {
 	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1)), catalog.OutcomeProcessed, "")
 	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV1, categoryPayload("00000000-0000-0000-0000-000000000102", "active", map[string]string{"en": "Pharaonic"}, nil, 1)), catalog.OutcomeProcessed, "")
 	requireOutcome(t, project(f.devB, f.credB, catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1)), catalog.OutcomeProcessed, "")
+
+	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV1, categoryPayload("00000000-0000-0000-0000-000000000202", "active", map[string]string{"en": "Human"}, []string{sharedCatIslamic, "00000000-0000-0000-0000-000000000102"}, 1)), catalog.OutcomeProcessed, "")
+	for i, device := range []struct{ dev, cred string }{{f.devA, f.credA}, {f.devB, f.credB}} {
+		child := fmt.Sprintf("a9000000-0000-4000-8000-%012d", 90+i)
+		product := fmt.Sprintf("a9000000-0000-4000-8000-%012d", 92+i)
+		requireOutcome(t, project(device.dev, device.cred, catalog.EventCategorySnapshotV1, categoryPayload(child, "active", map[string]string{"ar": "فرع", "en": "custom"}, []string{sharedCatIslamic}, 1)), catalog.OutcomeProcessed, "")
+		requireOutcome(t, project(device.dev, device.cred, catalog.EventProductSnapshotV1, productPayload(product, "SAME-SKU", "product", sharedCatIslamic, []string{"00000000-0000-0000-0000-000000000202", child}, []string{sharedTagGold}, 1)), catalog.OutcomeProcessed, "")
+	}
 
 	before := countCatalogRows(t, f)
 	// Rebuild: wipe current-state catalog rows, re-arm the projectors, and
@@ -256,6 +230,7 @@ func TestR2_RebuildDefaultCatalog(t *testing.T) {
 			break
 		}
 	}
+	r3Converge(t, f)
 	after := countCatalogRows(t, f)
 	if before != after {
 		t.Fatalf("rebuild not deterministic: before=%v after=%v", before, after)
@@ -265,31 +240,33 @@ func TestR2_RebuildDefaultCatalog(t *testing.T) {
 // countCatalogRows returns a stable signature of Store-scoped catalog rows.
 func countCatalogRows(t *testing.T, f *scopeFixture) string {
 	t.Helper()
-	rows := map[string]int{}
-	for _, q := range []string{
-		`SELECT coalesce(store_id::text,'N')||':'||name_en FROM catalog_categories ORDER BY 1`,
-		`SELECT coalesce(store_id::text,'N')||':'||name_en FROM catalog_tags ORDER BY 1`,
-		`SELECT coalesce(store_id::text,'N')||':'||sku FROM catalog_products ORDER BY 1`,
-		`SELECT coalesce(c.store_id::text,'N')||':'||cc.name_en FROM catalog_category_edges e JOIN catalog_categories c ON c.category_id=e.parent_id JOIN catalog_categories cc ON cc.category_id=e.child_id ORDER BY 1`,
-	} {
-		r, err := f.pool.Query(context.Background(), q)
+	state := map[string][]json.RawMessage{}
+	for _, table := range []string{"catalog_categories", "catalog_tags", "catalog_products", "catalog_category_edges", "catalog_product_subcategories", "catalog_product_tags", "catalog_product_prices", "catalog_product_translations"} {
+		rows, err := f.pool.Query(context.Background(), `SELECT (to_jsonb(t)-'projected_at')::text FROM `+table+` t ORDER BY (to_jsonb(t)-'projected_at')::text`)
 		if err != nil {
 			t.Fatal(err)
 		}
-		n := 0
-		for r.Next() {
-			n++
+		for rows.Next() {
+			var raw string
+			if err = rows.Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			state[table] = append(state[table], json.RawMessage(raw))
 		}
-		r.Close()
-		rows[q[:20]] = n
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
 	}
-	b, _ := json.Marshal(rows)
-	return string(b)
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
 
-// TestR2_PreFixBlockedRecovery proves the bounded recovery re-arms only
-// the obsolete identity/scope blocks and never resets unrelated terminal
-// failures.
+// TestR2_PreFixBlockedRecovery proves error codes alone never authorize
+// recovery of genuine terminal conflicts without obsolete raw ownership.
 func TestR2_PreFixBlockedRecovery(t *testing.T) {
 	f := openScopeFixture(t)
 	ctx := context.Background()
@@ -319,8 +296,8 @@ func TestR2_PreFixBlockedRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Fatalf("re-armed %d, want 2", n)
+	if n != 0 {
+		t.Fatalf("re-armed %d, want 0", n)
 	}
 	statusOf := func(event, processor string) string {
 		var s string
@@ -329,8 +306,8 @@ func TestR2_PreFixBlockedRecovery(t *testing.T) {
 		}
 		return s
 	}
-	if statusOf(e1, catalog.ProcessorTagProjectionV1) != "pending" || statusOf(e2, catalog.ProcessorCategoryProjectionV1) != "pending" {
-		t.Fatal("identity-blocked events must be re-armed")
+	if statusOf(e1, catalog.ProcessorTagProjectionV1) != "blocked" || statusOf(e2, catalog.ProcessorCategoryProjectionV1) != "blocked" {
+		t.Fatal("genuine conflicts without obsolete raw ownership must remain blocked")
 	}
 	if statusOf(e3, catalog.ProcessorTagProjectionV1) != "blocked" {
 		t.Fatal("validation failure must NOT be reset")
