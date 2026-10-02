@@ -5,14 +5,20 @@
 	// Store-aware page. Native <select> keeps keyboard access and RTL
 	// behavior free; selection is by immutable Store UUID (never name —
 	// two Stores may share a display name). Empty value = All Stores.
+	// state='error' surfaces a registry failure with an explicit retry;
+	// the current selection is never silently widened to global.
 	let {
 		stores,
 		value,
-		onchange
+		state = 'loaded',
+		onchange,
+		onretry = () => {}
 	}: {
 		stores: StoreRow[];
 		value: string;
+		state?: 'idle' | 'loading' | 'loaded' | 'error';
 		onchange: (id: string) => void;
+		onretry?: () => void;
 	} = $props();
 
 	function shortID(id: string): string {
@@ -25,6 +31,7 @@
 	<select
 		data-testid="store-selector"
 		aria-label="Store scope / نطاق المتجر"
+		aria-busy={state === 'loading'}
 		value={value}
 		onchange={(e) => onchange((e.currentTarget as HTMLSelectElement).value)}
 	>
@@ -35,11 +42,17 @@
 			</option>
 		{/each}
 	</select>
+	{#if state === 'error'}
+		<span class="storeerror" role="alert">تعذر تحميل المتاجر / Stores unavailable</span>
+		<button type="button" class="storeretry" data-testid="store-retry" onclick={() => onretry()}>
+			إعادة المحاولة / Retry
+		</button>
+	{/if}
 </label>
 
 <style>
 	.storeselect {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: 0.5rem;
 	}
@@ -51,5 +64,16 @@
 		font-family: monospace;
 		direction: ltr;
 		max-width: 16rem;
+	}
+	.storeerror {
+		font-size: 0.78rem;
+		color: var(--danger);
+	}
+	.storeretry {
+		background: transparent;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		padding: 4px 10px;
+		font-size: 0.78rem;
 	}
 </style>

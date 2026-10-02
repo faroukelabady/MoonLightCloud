@@ -26,6 +26,51 @@ const (
 	ErrLegacyScopeAmbiguous = "LEGACY_SCOPE_AMBIGUOUS"
 )
 
+// Phase 9-R1 F04 shared default catalog identity.
+//
+// Retail seeds the same reference catalog (fixed UUIDs) into every fresh
+// installation. Those identities are deliberately installation-invariant
+// reference data, not Store-owned aggregates: "Islamic", "Cats",
+// "tutankhamun" mean the same thing in every shop. Cloud therefore treats
+// exactly these enumerated IDs as a shared reference namespace (owned by
+// no Store); any Store may reference them and they never collide.
+//
+// This is narrow and explicit. Store-created categories/tags keep their
+// per-event Store ownership and cross-Store same-ID takeovers still fail
+// with STORE_SCOPE_CONFLICT. Identity is derived from the fixed IDs, never
+// from mutable labels. No durable event bytes are rewritten.
+var sharedCategoryIDs = map[string]struct{}{
+	"00000000-0000-0000-0000-000000000101": {},
+	"00000000-0000-0000-0000-000000000102": {},
+	"00000000-0000-0000-0000-000000000201": {},
+	"00000000-0000-0000-0000-000000000202": {},
+	"00000000-0000-0000-0000-000000000203": {},
+	"00000000-0000-0000-0000-000000000204": {},
+	"00000000-0000-0000-0000-000000000301": {},
+}
+
+var sharedTagIDs = map[string]struct{}{
+	"10000000-0000-0000-0000-000000000001": {},
+	"10000000-0000-0000-0000-000000000002": {},
+	"10000000-0000-0000-0000-000000000003": {},
+	"10000000-0000-0000-0000-000000000004": {},
+	"10000000-0000-0000-0000-000000000005": {},
+}
+
+// isSharedCategoryID reports whether a category identity is part of the
+// shared reference catalog.
+func isSharedCategoryID(id string) bool {
+	_, ok := sharedCategoryIDs[id]
+	return ok
+}
+
+// isSharedTagID reports whether a tag identity is part of the shared
+// reference catalog.
+func isSharedTagID(id string) bool {
+	_, ok := sharedTagIDs[id]
+	return ok
+}
+
 // storeUUID converts an ingress Store UUID string (nil = legacy) to a
 // nullable database value.
 func storeUUID(storeID *string) pgtype.UUID {

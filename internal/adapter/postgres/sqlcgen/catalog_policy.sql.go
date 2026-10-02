@@ -53,10 +53,12 @@ func (q *Queries) CatalogOnlineConfiguredProducts(ctx context.Context, limit int
 }
 
 const catalogOnlineConfiguredProductsForStore = `-- name: CatalogOnlineConfiguredProductsForStore :many
-SELECT product_id, sell_offline, sell_online, online_allocation_limit, source_revision
-FROM catalog_product_sales_policies
-WHERE sell_online AND store_id = $1
-ORDER BY product_id
+SELECT pol.product_id, pol.sell_offline, pol.sell_online, pol.online_allocation_limit, pol.source_revision
+FROM catalog_product_sales_policies pol
+JOIN catalog_products p ON p.product_id = pol.product_id
+WHERE pol.sell_online AND pol.store_id = $1
+  AND p.store_id = pol.store_id
+ORDER BY pol.product_id
 LIMIT $2
 `
 
@@ -78,6 +80,9 @@ type CatalogOnlineConfiguredProductsForStoreRow struct {
 // state. Legacy NULL rows never match. The global variant above stays
 // for administration/diagnostics and must not feed Store-specific
 // provider writes.
+// Phase 9-R1 F02: the policy's Store must also be the owning product's
+// Store, so a contradictory product/policy pair can never be enumerated
+// (and published) as another Store's resource.
 func (q *Queries) CatalogOnlineConfiguredProductsForStore(ctx context.Context, arg CatalogOnlineConfiguredProductsForStoreParams) ([]CatalogOnlineConfiguredProductsForStoreRow, error) {
 	rows, err := q.db.Query(ctx, catalogOnlineConfiguredProductsForStore, arg.StoreID, arg.Limit)
 	if err != nil {

@@ -38,6 +38,15 @@ SELECT
     inv.source_event_id AS inventory_event_id,
     inv.projected_at AS inventory_projected_at
 FROM catalog_products p
-LEFT JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
+-- Phase 9-R1 F02: a dependency may back the product only when it is
+-- either unscoped legacy (NULL) or owned by the product's exact proven
+-- Store. A proven dependency from any other Store is excluded, so a
+-- contradictory durable relationship cannot expose foreign stock or
+-- policy as positive availability.
+LEFT JOIN catalog_product_sales_policies pol
+  ON pol.product_id = p.product_id
+ AND (pol.store_id IS NULL OR pol.store_id = p.store_id)
+LEFT JOIN catalog_product_inventory inv
+  ON inv.product_id = p.product_id
+ AND (inv.store_id IS NULL OR inv.store_id = p.store_id)
 WHERE p.product_id = $1;

@@ -11,12 +11,16 @@
 		onchange: (p: PeriodParams) => void;
 	} = $props();
 
-	let customFrom = $state(params.from_date ?? '');
-	let customTo = $state(params.to_date ?? '');
+	// Neutral initial state: the L01 effect below is the single source that
+	// copies the authoritative params into these editable fields, so the
+	// component never captures a stale initial prop reference (Svelte
+	// state_referenced_locally warning) while behavior stays identical.
+	let customFrom = $state('');
+	let customTo = $state('');
 	// Draft period: clicking Custom reveals inputs without issuing any
 	// request. Only Apply commits a custom range (both dates required),
 	// so selecting Custom never fires transient 400s.
-	let draftPeriod = $state(params.period);
+	let draftPeriod = $state('last_10_completed_days');
 	let customError: string | null = $state(null);
 
 	// L01: keep visible inputs synchronized with authoritative URL/filter

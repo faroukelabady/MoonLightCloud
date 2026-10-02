@@ -1141,7 +1141,9 @@ func (q *Queries) DashboardNormalizedSummaryForStore(ctx context.Context, arg Da
 }
 
 const dashboardProductsNormalized = `-- name: DashboardProductsNormalized :many
-SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
+SELECT l.product_id, l.sku, l.product_name,
+    (CASE WHEN COUNT(s.store_id) = COUNT(*) AND COUNT(DISTINCT s.store_id) = 1
+        THEN MIN(s.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
@@ -1167,6 +1169,12 @@ type DashboardProductsNormalizedRow struct {
 	MissingFx   int64       `json:"missing_fx"`
 }
 
+// Phase 9-R1 F01: PostgreSQL has no MIN(uuid). A Product badge is only
+// emitted when every contributing Sale row carries the same proven Store;
+// a group that mixes legacy NULL with a scoped Store (or spans Stores)
+// stays unscoped so the badge never falsely assigns mixed ownership.
+// Product identity is the group key, so same-SKU Products in A and B stay
+// distinct rows.
 func (q *Queries) DashboardProductsNormalized(ctx context.Context, arg DashboardProductsNormalizedParams) ([]DashboardProductsNormalizedRow, error) {
 	rows, err := q.db.Query(ctx, dashboardProductsNormalized, arg.StartUtc, arg.EndUtc)
 	if err != nil {
@@ -1196,7 +1204,7 @@ func (q *Queries) DashboardProductsNormalized(ctx context.Context, arg Dashboard
 }
 
 const dashboardProductsNormalizedForStore = `-- name: DashboardProductsNormalizedForStore :many
-SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
+SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
@@ -1224,6 +1232,8 @@ type DashboardProductsNormalizedForStoreRow struct {
 	MissingFx   int64       `json:"missing_fx"`
 }
 
+// Phase 9-R1 F01: the WHERE clause pins every row to one proven Store, so
+// the badge is that Store and never a foreign or NULL owner.
 func (q *Queries) DashboardProductsNormalizedForStore(ctx context.Context, arg DashboardProductsNormalizedForStoreParams) ([]DashboardProductsNormalizedForStoreRow, error) {
 	rows, err := q.db.Query(ctx, dashboardProductsNormalizedForStore, arg.StartUtc, arg.EndUtc, arg.StoreID)
 	if err != nil {
@@ -1253,7 +1263,9 @@ func (q *Queries) DashboardProductsNormalizedForStore(ctx context.Context, arg D
 }
 
 const dashboardProductsNormalizedRefunds = `-- name: DashboardProductsNormalizedRefunds :many
-SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
+SELECT sl.product_id, sl.sku, sl.product_name,
+    (CASE WHEN COUNT(r.store_id) = COUNT(*) AND COUNT(DISTINCT r.store_id) = 1
+        THEN MIN(r.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
@@ -1281,6 +1293,8 @@ type DashboardProductsNormalizedRefundsRow struct {
 	MissingFx        int64       `json:"missing_fx"`
 }
 
+// Phase 9-R1 F01: see DashboardProductsNormalized. Same unconditional
+// proven-Store badge rule (no MIN(uuid)).
 func (q *Queries) DashboardProductsNormalizedRefunds(ctx context.Context, arg DashboardProductsNormalizedRefundsParams) ([]DashboardProductsNormalizedRefundsRow, error) {
 	rows, err := q.db.Query(ctx, dashboardProductsNormalizedRefunds, arg.StartUtc, arg.EndUtc)
 	if err != nil {
@@ -1310,7 +1324,7 @@ func (q *Queries) DashboardProductsNormalizedRefunds(ctx context.Context, arg Da
 }
 
 const dashboardProductsNormalizedRefundsForStore = `-- name: DashboardProductsNormalizedRefundsForStore :many
-SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
+SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
@@ -1340,6 +1354,8 @@ type DashboardProductsNormalizedRefundsForStoreRow struct {
 	MissingFx        int64       `json:"missing_fx"`
 }
 
+// Phase 9-R1 F01: scoped predicate pins one proven Store (see the sales
+// variant); no MIN(uuid).
 func (q *Queries) DashboardProductsNormalizedRefundsForStore(ctx context.Context, arg DashboardProductsNormalizedRefundsForStoreParams) ([]DashboardProductsNormalizedRefundsForStoreRow, error) {
 	rows, err := q.db.Query(ctx, dashboardProductsNormalizedRefundsForStore, arg.StartUtc, arg.EndUtc, arg.StoreID)
 	if err != nil {

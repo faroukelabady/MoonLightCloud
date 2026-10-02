@@ -33,7 +33,9 @@ ON CONFLICT (category_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    -- Phase 9-R1 F04: shared default reference identities stay Store-less
+    -- (global); every other identity preserves proven ownership.
+    store_id = CASE WHEN @shared::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_categories.store_id) END,
     projected_at = now();
 
 -- name: CatalogCategoryByID :one
@@ -68,7 +70,9 @@ ON CONFLICT (tag_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    -- Phase 9-R1 F04: shared default reference identities stay Store-less
+    -- (global); every other identity preserves proven ownership.
+    store_id = CASE WHEN @shared::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_tags.store_id) END,
     projected_at = now();
 
 -- name: CatalogTagByID :one
@@ -246,3 +250,47 @@ WHERE p.event_id = e.event_id
            OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids')))
       AND c.projected_at > p.updated_at
   );
+
+-- Phase 9-R1 F02: complete ownership-relationship validation before a
+-- current-state aggregate may adopt a Store. Each query returns the
+-- proven stores of the durable dependents/edges that must agree with the
+-- adopting Store; NULL (legacy) dependents are wildcards and omitted.
+
+-- name: CatalogProductDependentStores :many
+-- Proven Store ownership of a product's inventory, sales policy, and
+-- provider mapping. Adopting a product into a Store that already has a
+-- dependent owned by another proven Store is rejected instead of
+-- committing a contradictory durable relationship.
+SELECT i.store_id FROM catalog_product_inventory i
+WHERE i.product_id = $1 AND i.store_id IS NOT NULL
+UNION
+SELECT pol.store_id FROM catalog_product_sales_policies pol
+WHERE pol.product_id = $1 AND pol.store_id IS NOT NULL
+UNION
+SELECT m.store_id FROM commerce_product_mappings m
+WHERE m.product_id = $1 AND m.store_id IS NOT NULL;
+
+-- name: CatalogCategoryChildStores :many
+-- Proven Store ownership of a category's existing children edges.
+SELECT c.store_id
+FROM catalog_category_edges e
+JOIN catalog_categories c ON c.category_id = e.child_id
+WHERE e.parent_id = $1 AND c.store_id IS NOT NULL;
+
+-- name: CatalogCategoryProductStores :many
+-- Proven Store ownership of products referencing a category as top or
+-- subcategory.
+SELECT p.store_id FROM catalog_products p
+WHERE p.top_category_id = $1 AND p.store_id IS NOT NULL
+UNION
+SELECT p.store_id
+FROM catalog_product_subcategories s
+JOIN catalog_products p ON p.product_id = s.product_id
+WHERE s.category_id = $1 AND p.store_id IS NOT NULL;
+
+-- name: CatalogTagProductStores :many
+-- Proven Store ownership of products attached to a tag.
+SELECT p.store_id
+FROM catalog_product_tags t
+JOIN catalog_products p ON p.product_id = t.product_id
+WHERE t.tag_id = $1 AND p.store_id IS NOT NULL;

@@ -33,10 +33,18 @@
 	let stores: StoreRow[] = $state([]);
 	let fatal = $state<string | null>(null);
 
+	let storesState: 'idle' | 'loading' | 'loaded' | 'error' = $state('idle');
+
+	// scopeEpoch fences stale async responses: every freshSignal (any new
+	// load or scope transition) advances it, and callers drop results whose
+	// captured epoch is no longer current. Abort alone cannot stop a
+	// response that already resolved before the abort.
 	let aborters: AbortController[] = [];
+	let scopeEpoch = 0;
 	function freshSignal(): AbortSignal {
 		for (const c of aborters) c.abort();
 		aborters = [];
+		scopeEpoch += 1;
 		const c = new AbortController();
 		aborters.push(c);
 		return c.signal;
@@ -68,34 +76,52 @@
 
 	function navigate(r: string) {
 		window.history.pushState({}, '', '/dashboard/' + (r === 'overview' ? '' : r) + window.location.search);
-		readRoute();
-		void reloadAll();
+		applyRouteTransition();
 	}
 
-	function urlFor(): string {
+	function urlFor(storeOverride?: string): string {
 		const q = new URLSearchParams();
 		q.set('period', params.period);
 		if (params.from_date) q.set('from_date', params.from_date);
 		if (params.to_date) q.set('to_date', params.to_date);
 		q.set('currency', currency);
-		if (store) q.set('store_id', store);
+		const effectiveStore = storeOverride === undefined ? store : storeOverride;
+		if (effectiveStore) q.set('store_id', effectiveStore);
 		return window.location.pathname + '?' + q.toString();
 	}
 
-	// onStore applies a Store scope change: the in-flight requests abort
-	// via freshSignal inside reloadAll (stale A data can never land on a
-	// B view), and every scope-dependent chain restarts — pagination
-	// cursor, selected order detail, and report caches.
-	function onStore(id: string) {
-		store = id && isStoreID(id) ? id : '';
-		orderCursor = null;
+	// resetScopeState invalidates every Store-scoped chain so no previous
+	// Store's list row, pagination cursor, selected detail, or error can
+	// survive a scope change. Called by every scope transition, including
+	// history navigation and authenticated (re)initialization.
+	function resetScopeState() {
 		orderSelected = null;
 		orderDetailState = 'idle';
 		orderDetailErr = null;
+		orderCursor = null;
 		ordersMore = 'idle';
 		ordersMoreErr = null;
-		window.history.pushState({}, '', urlFor());
+		orderList = [];
+		orderCounts = [];
+		orderInbox = null;
+		ordersErr = null;
+	}
+
+	// applyRouteTransition is the single Store-scope transition path for
+	// the explicit selector, browser Back/Forward, URL navigation, and
+	// refresh initialization. It re-reads the URL, resets scope-dependent
+	// state when the scope actually changed, and reloads under a fresh
+	// epoch so a stale response cannot restore the previous Store.
+	function applyRouteTransition() {
+		const previous = store;
+		readRoute();
+		if (store !== previous) resetScopeState();
 		void reloadAll();
+	}
+
+	function onStore(id: string) {
+		window.history.pushState({}, '', urlFor(id && isStoreID(id) ? id : ''));
+		applyRouteTransition();
 	}
 
 	function onParams(p: PeriodParams) {
@@ -121,6 +147,38 @@
 			return true;
 		}
 		return false;
+	}
+
+	// loadStores fetches the Store registry. Failure is surfaced truthfully
+	// (storesState='error') and never resets the current selection to
+	// global; a late response from an earlier initialization is dropped by
+	// its epoch so it cannot override a newer scope choice.
+	let storesEpoch = 0;
+	async function loadStores() {
+		const epoch = ++storesEpoch;
+		storesState = 'loading';
+		try {
+			const v = await dashboardApi.stores();
+			if (epoch !== storesEpoch) return;
+			stores = v.stores;
+			storesState = 'loaded';
+		} catch {
+			if (epoch !== storesEpoch) return;
+			stores = [];
+			storesState = 'error';
+		}
+	}
+
+	// initAuthenticated is the shared post-authentication path for an
+	// existing session at mount, a successful login, and session recovery:
+	// apply the URL scope, clear any prior scope-dependent state, load the
+	// registry, then load business reads.
+	async function initAuthenticated() {
+		readRoute();
+		resetScopeState();
+		storesEpoch += 1; // invalidate any prior in-flight registry load
+		await loadStores();
+		await reloadAll();
 	}
 
 	// ---- widget data ----
@@ -172,17 +230,20 @@
 	async function reloadOrders() {
 		if (!authed) return;
 		const signal = freshSignal();
+		const epoch = scopeEpoch;
 		ordersState = 'loading';
 		ordersMore = 'idle';
 		ordersMoreErr = null;
 		try {
 			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, signal);
+			if (epoch !== scopeEpoch) return;
 			orderList = v.orders;
 			orderCursor = v.next_cursor;
 			orderCounts = v.status_counts;
 			orderInbox = v.webhook_inbox;
 			ordersState = v.orders.length === 0 ? 'empty' : 'loaded';
 		} catch (err) {
+			if (epoch !== scopeEpoch) return;
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			if (requireAuth(err)) return;
 			ordersState = 'error';
@@ -197,10 +258,15 @@
 
 	async function loadMoreOrders() {
 		if (!authed || !orderCursor || ordersMore === 'loading') return;
+		const signal = freshSignal();
+		const epoch = scopeEpoch;
 		ordersMore = 'loading';
 		ordersMoreErr = null;
 		try {
-			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, store, freshSignal());
+			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, store, signal);
+			// A scope change while the continuation was in flight must not
+			// append the previous Store's rows to the new Store's list.
+			if (epoch !== scopeEpoch) return;
 			const seen = new Set(orderList.map(orderKey));
 			for (const row of v.orders) {
 				if (!seen.has(orderKey(row))) {
@@ -211,6 +277,7 @@
 			orderCursor = v.next_cursor;
 			ordersMore = 'idle';
 		} catch (err) {
+			if (epoch !== scopeEpoch) return;
 			if (err instanceof DOMException && err.name === 'AbortError') {
 				ordersMore = 'idle';
 				return;
@@ -232,10 +299,16 @@
 			return;
 		}
 		orderDetailState = 'loading';
+		const signal = freshSignal();
+		const epoch = scopeEpoch;
 		try {
-			orderSelected = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, store, freshSignal());
+			const detail = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, store, signal);
+			// Drop a detail response that belongs to a superseded scope.
+			if (epoch !== scopeEpoch) return;
+			orderSelected = detail;
 			orderDetailState = 'loaded';
 		} catch (err) {
+			if (epoch !== scopeEpoch) return;
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			if (requireAuth(err)) return;
 			orderDetailState = 'error';
@@ -255,6 +328,7 @@
 		if (!authed) return;
 		fatal = null;
 		const signal = freshSignal();
+		const epoch = scopeEpoch;
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
 			ordersState = 'loading';
 		const done = async <T>(
@@ -264,8 +338,11 @@
 			setErr: (n: number | null) => void
 		) => {
 			try {
-				apply(await p);
+				const v = await p;
+				if (epoch !== scopeEpoch) return;
+				apply(v);
 			} catch (err) {
+				if (epoch !== scopeEpoch) return;
 				if (err instanceof DOMException && err.name === 'AbortError') return;
 				if (requireAuth(err)) return;
 				setState('error');
@@ -378,6 +455,13 @@
 	async function logout() {
 		await dashboardApi.logout();
 		authed = false;
+		// Do not leak one session's Store registry or scoped rows into the
+		// next login; re-authentication re-reads the URL and reloads. The
+		// epoch bump also drops a registry response still in flight.
+		storesEpoch += 1;
+		stores = [];
+		storesState = 'idle';
+		resetScopeState();
 	}
 
 	// KPI cards follow the same active-currency scoping as the reporting
@@ -423,20 +507,12 @@
 
 	onMount(() => {
 		readRoute();
-		window.addEventListener('popstate', () => {
-			readRoute();
-			void reloadAll();
-		});
+		// Back/Forward is a scope transition like any other: the shared
+		// handler resets scope-dependent state before reloading.
+		window.addEventListener('popstate', () => applyRouteTransition());
 		void (async () => {
 			await checkSession();
-			if (authed) {
-				try {
-					stores = (await dashboardApi.stores()).stores;
-				} catch {
-					stores = [];
-				}
-				await reloadAll();
-			}
+			if (authed) await initAuthenticated();
 		})();
 	});
 </script>
@@ -444,7 +520,7 @@
 {#if authed === null}
 	<div class="muted pad">جارٍ التحميل… / Loading…</div>
 {:else if !authed}
-	<LoginPage onlogin={() => ((authed = true), reloadAll())} />
+	<LoginPage onlogin={() => ((authed = true), void initAuthenticated())} />
 {:else}
 	<div class="shell">
 		<div class="sidewrap"><Sidebar {route} {navigate} /></div>
@@ -457,7 +533,7 @@
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} />
-					<StoreSelector {stores} value={store} onchange={onStore} />
+					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if periodRange}<div class="muted range num" dir="ltr">{periodRange}</div>{/if}
 				</div>
 				<div class="actorblock">
@@ -625,6 +701,14 @@
 	.periodblock {
 		flex: 1;
 		min-width: 0;
+		/* F06: keep the period controls and the Store selector on one
+		row when space allows (they wrap only when they genuinely do not
+		fit), so adding the selector never inflates the topbar and pushes
+		the dashboard grid past its density budget. */
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px 12px;
 	}
 	.range {
 		font-size: 0.75rem;
@@ -698,6 +782,10 @@
 	.a-act { grid-column: span 3; }
 	.a-latest { grid-column: span 6; }
 	.a-branch { grid-column: span 3; }
+	/* Wide read-only tables (orders/devices/operations) span the full grid
+	so their min-content width can never overflow the viewport on the
+	overview composition (F06: no horizontal overflow). */
+	.a-orders { grid-column: span 12; }
 	@media (max-width: 1280px) {
 		.a-sync { grid-column: span 4; grid-row: auto; }
 		.dash.ov .a-trend { grid-column: span 6; }

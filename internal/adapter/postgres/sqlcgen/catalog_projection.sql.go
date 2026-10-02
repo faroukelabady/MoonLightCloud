@@ -116,6 +116,34 @@ func (q *Queries) CatalogCategoryByID(ctx context.Context, categoryID pgtype.UUI
 	return i, err
 }
 
+const catalogCategoryChildStores = `-- name: CatalogCategoryChildStores :many
+SELECT c.store_id
+FROM catalog_category_edges e
+JOIN catalog_categories c ON c.category_id = e.child_id
+WHERE e.parent_id = $1 AND c.store_id IS NOT NULL
+`
+
+// Proven Store ownership of a category's existing children edges.
+func (q *Queries) CatalogCategoryChildStores(ctx context.Context, parentID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, catalogCategoryChildStores, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var store_id pgtype.UUID
+		if err := rows.Scan(&store_id); err != nil {
+			return nil, err
+		}
+		items = append(items, store_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const catalogCategoryParents = `-- name: CatalogCategoryParents :many
 SELECT parent_id FROM catalog_category_edges WHERE child_id = $1 ORDER BY position, parent_id
 `
@@ -133,6 +161,38 @@ func (q *Queries) CatalogCategoryParents(ctx context.Context, childID pgtype.UUI
 			return nil, err
 		}
 		items = append(items, parent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const catalogCategoryProductStores = `-- name: CatalogCategoryProductStores :many
+SELECT p.store_id FROM catalog_products p
+WHERE p.top_category_id = $1 AND p.store_id IS NOT NULL
+UNION
+SELECT p.store_id
+FROM catalog_product_subcategories s
+JOIN catalog_products p ON p.product_id = s.product_id
+WHERE s.category_id = $1 AND p.store_id IS NOT NULL
+`
+
+// Proven Store ownership of products referencing a category as top or
+// subcategory.
+func (q *Queries) CatalogCategoryProductStores(ctx context.Context, topCategoryID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, catalogCategoryProductStores, topCategoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var store_id pgtype.UUID
+		if err := rows.Scan(&store_id); err != nil {
+			return nil, err
+		}
+		items = append(items, store_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -300,6 +360,46 @@ func (q *Queries) CatalogProductBySKU(ctx context.Context, arg CatalogProductByS
 		&i.StoreID,
 	)
 	return i, err
+}
+
+const catalogProductDependentStores = `-- name: CatalogProductDependentStores :many
+
+SELECT i.store_id FROM catalog_product_inventory i
+WHERE i.product_id = $1 AND i.store_id IS NOT NULL
+UNION
+SELECT pol.store_id FROM catalog_product_sales_policies pol
+WHERE pol.product_id = $1 AND pol.store_id IS NOT NULL
+UNION
+SELECT m.store_id FROM commerce_product_mappings m
+WHERE m.product_id = $1 AND m.store_id IS NOT NULL
+`
+
+// Phase 9-R1 F02: complete ownership-relationship validation before a
+// current-state aggregate may adopt a Store. Each query returns the
+// proven stores of the durable dependents/edges that must agree with the
+// adopting Store; NULL (legacy) dependents are wildcards and omitted.
+// Proven Store ownership of a product's inventory, sales policy, and
+// provider mapping. Adopting a product into a Store that already has a
+// dependent owned by another proven Store is rejected instead of
+// committing a contradictory durable relationship.
+func (q *Queries) CatalogProductDependentStores(ctx context.Context, productID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, catalogProductDependentStores, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var store_id pgtype.UUID
+		if err := rows.Scan(&store_id); err != nil {
+			return nil, err
+		}
+		items = append(items, store_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const catalogProductPrices = `-- name: CatalogProductPrices :many
@@ -477,6 +577,34 @@ func (q *Queries) CatalogTagByID(ctx context.Context, tagID pgtype.UUID) (Catalo
 		&i.StoreID,
 	)
 	return i, err
+}
+
+const catalogTagProductStores = `-- name: CatalogTagProductStores :many
+SELECT p.store_id
+FROM catalog_product_tags t
+JOIN catalog_products p ON p.product_id = t.product_id
+WHERE t.tag_id = $1 AND p.store_id IS NOT NULL
+`
+
+// Proven Store ownership of products attached to a tag.
+func (q *Queries) CatalogTagProductStores(ctx context.Context, tagID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, catalogTagProductStores, tagID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var store_id pgtype.UUID
+		if err := rows.Scan(&store_id); err != nil {
+			return nil, err
+		}
+		items = append(items, store_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteCatalogCategoryEdges = `-- name: DeleteCatalogCategoryEdges :exec
@@ -764,7 +892,9 @@ ON CONFLICT (category_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    -- Phase 9-R1 F04: shared default reference identities stay Store-less
+    -- (global); every other identity preserves proven ownership.
+    store_id = CASE WHEN $11::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_categories.store_id) END,
     projected_at = now()
 `
 
@@ -779,6 +909,7 @@ type UpsertCatalogCategoryParams struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
+	Shared            bool               `json:"shared"`
 }
 
 // Phase 9B: store_id carries the event's own ingress Store context
@@ -798,6 +929,7 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
 		arg.StoreID,
+		arg.Shared,
 	)
 	return err
 }
@@ -869,7 +1001,9 @@ ON CONFLICT (tag_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    -- Phase 9-R1 F04: shared default reference identities stay Store-less
+    -- (global); every other identity preserves proven ownership.
+    store_id = CASE WHEN $12::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_tags.store_id) END,
     projected_at = now()
 `
 
@@ -885,6 +1019,7 @@ type UpsertCatalogTagParams struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
+	Shared            bool               `json:"shared"`
 }
 
 // Phase 9B store ownership: see UpsertCatalogCategory.
@@ -901,6 +1036,7 @@ func (q *Queries) UpsertCatalogTag(ctx context.Context, arg UpsertCatalogTagPara
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
 		arg.StoreID,
+		arg.Shared,
 	)
 	return err
 }

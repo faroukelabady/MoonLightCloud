@@ -39,3 +39,4 @@ Concise, irreversible-or-important choices only.
 - [0039](0039-cloud-store-registry.md) — Cloud store registry & ingress store context (9A)
 - [0040](0040-store-scoped-projections.md) — Store-scoped projections & ownership isolation (9B)
 - [0041](0041-store-scoped-commerce.md) — Store-scoped commerce ownership & order isolation (9C)
+- [0042](0042-shared-default-catalog-identity.md) — shared default catalog identity & adoption dependency integrity (9-R1)

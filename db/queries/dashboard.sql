@@ -101,7 +101,15 @@ GROUP BY s.channel,
     s.currency;
 
 -- name: DashboardProductsNormalized :many
-SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
+-- Phase 9-R1 F01: PostgreSQL has no MIN(uuid). A Product badge is only
+-- emitted when every contributing Sale row carries the same proven Store;
+-- a group that mixes legacy NULL with a scoped Store (or spans Stores)
+-- stays unscoped so the badge never falsely assigns mixed ownership.
+-- Product identity is the group key, so same-SKU Products in A and B stay
+-- distinct rows.
+SELECT l.product_id, l.sku, l.product_name,
+    (CASE WHEN COUNT(s.store_id) = COUNT(*) AND COUNT(DISTINCT s.store_id) = 1
+        THEN MIN(s.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
@@ -224,7 +232,11 @@ GROUP BY day.day
 ORDER BY day.day;
 
 -- name: DashboardProductsNormalizedRefunds :many
-SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
+-- Phase 9-R1 F01: see DashboardProductsNormalized. Same unconditional
+-- proven-Store badge rule (no MIN(uuid)).
+SELECT sl.product_id, sl.sku, sl.product_name,
+    (CASE WHEN COUNT(r.store_id) = COUNT(*) AND COUNT(DISTINCT r.store_id) = 1
+        THEN MIN(r.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
@@ -382,7 +394,9 @@ GROUP BY s.channel,
     s.currency;
 
 -- name: DashboardProductsNormalizedForStore :many
-SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id)::uuid AS store_id,
+-- Phase 9-R1 F01: the WHERE clause pins every row to one proven Store, so
+-- the badge is that Store and never a foreign or NULL owner.
+SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
@@ -506,7 +520,9 @@ GROUP BY day.day
 ORDER BY day.day;
 
 -- name: DashboardProductsNormalizedRefundsForStore :many
-SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id)::uuid AS store_id,
+-- Phase 9-R1 F01: scoped predicate pins one proven Store (see the sales
+-- variant); no MIN(uuid).
+SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
