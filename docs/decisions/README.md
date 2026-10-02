@@ -40,3 +40,4 @@ Concise, irreversible-or-important choices only.
 - [0040](0040-store-scoped-projections.md) — Store-scoped projections & ownership isolation (9B)
 - [0041](0041-store-scoped-commerce.md) — Store-scoped commerce ownership & order isolation (9C)
 - [0042](0042-shared-default-catalog-identity.md) — shared default catalog identity & adoption dependency integrity (9-R1)
+- [0043](0043-telegram-notification-adapter.md) — Telegram notification adapter as second NotificationProvider (10)

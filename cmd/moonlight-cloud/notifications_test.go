@@ -217,3 +217,35 @@ func TestNotificationEnqueueMalformedParam(t *testing.T) {
 		}
 	}
 }
+
+// TestNotificationEnqueueTelegramCLI is the Phase 10 operator
+// manual-send proof through the GENERIC enqueue path: no
+// Telegram-only command exists, and the recipient stays masked in
+// CLI output exactly like WhatsApp recipients.
+func TestNotificationEnqueueTelegramCLI(t *testing.T) {
+	ctx := context.Background()
+	mappings := &memMappingStoreAdapter{m: map[string]notifications.TemplateMapping{
+		"telegram-main\x00operator_test_v1\x00ar": {
+			ProviderKey: "telegram-main", TemplateKey: "operator_test_v1", Locale: "ar",
+			ExternalTemplateName: "telegram_text_v1", ExternalLanguageCode: "ar",
+			ParameterNames: []string{"body"}, Enabled: true,
+		},
+	}}
+	outbox := &memOutboxAdapter{rows: map[string]memOutboxRow{}}
+	service := notifications.NewService(mappings, outbox, nil)
+	var out bytes.Buffer
+	params := map[string]string{"body": "manual telegram proof"}
+	if err := runNotificationEnqueue(ctx, service, &out, "telegram-main", "@operations",
+		"operator_test_v1", "ar", "manual-tg-001", params); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	first := out.String()
+	if !strings.Contains(first, "created=true") || !strings.Contains(first, "provider=telegram-main") {
+		t.Fatalf("enqueue output: %q", first)
+	}
+	for _, forbidden := range []string{"@operations", "manual telegram proof"} {
+		if strings.Contains(first, forbidden) {
+			t.Fatalf("recipient/body in CLI output: %q", forbidden)
+		}
+	}
+}

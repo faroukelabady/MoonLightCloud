@@ -107,6 +107,18 @@ var (
 	// leading +, then 7..15 digits. No country inference, no national
 	// rewriting: callers supply international identity as-is.
 	recipientPattern = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	// telegramRecipientNumericPattern is the Telegram numeric chat
+	// identity: optional leading - (group/channel/supergroup IDs are
+	// negative), then up to 16 digits. Sixteen digits cover the full
+	// Bot API 52-bit chat-ID space; the pre-existing 17-digit rejection
+	// stays rejected.
+	telegramRecipientNumericPattern = regexp.MustCompile(`^-?[0-9]{1,16}$`)
+	// telegramRecipientUsernamePattern is the Telegram @username chat
+	// identity: @ plus 5..31 word characters. The 31-character body
+	// cap (not Telegram's 32) keeps every accepted recipient within
+	// the durable 32-character recipient column; a 32-character
+	// username must be registered by numeric chat ID instead.
+	telegramRecipientUsernamePattern = regexp.MustCompile(`^@[A-Za-z0-9_]{5,31}$`)
 	// idempotencyKeyPattern bounds caller identity without PII rules:
 	// printable ASCII, no controls, no whitespace edges.
 	idempotencyKeyPattern = regexp.MustCompile(`^[!-~]{1,128}$`)
@@ -135,9 +147,33 @@ func ValidateLocale(locale string) error {
 	return nil
 }
 
-// ValidateRecipient rejects anything but canonical international
-// recipient identity. No guessing, no rewriting.
+// ValidateRecipient accepts the provider-neutral recipient union:
+// E.164 international identity (WhatsApp) or Telegram numeric chat
+// identity / @username (Phase 10). This is the minimal STOP-justified
+// Phase 10 capability change: enqueue must admit Telegram-shaped
+// recipients, and recipient administration (reports, operations, CLI)
+// shares this gate. Each ADAPTER still enforces its own strict subset
+// at send time (WhatsApp keeps strict E.164; Telegram keeps its own
+// canonicalizer), so widening enqueue acceptance can never cause a
+// misdirected send: unknown shapes block terminally at dispatch.
+// No guessing, no rewriting.
 func ValidateRecipient(recipient string) error {
+	switch {
+	case recipientPattern.MatchString(recipient):
+		return nil
+	case telegramRecipientNumericPattern.MatchString(recipient):
+		return nil
+	case telegramRecipientUsernamePattern.MatchString(recipient):
+		return nil
+	}
+	return fmt.Errorf("invalid recipient: want E.164 digits, Telegram numeric chat ID, or @username")
+}
+
+// ValidateWhatsAppRecipient enforces the frozen WhatsApp send-time
+// subset: optional leading +, then 7..15 digits. The WhatsApp adapter
+// calls this (not the widened union) so Phase 7A send semantics are
+// unchanged by the Phase 10 recipient union.
+func ValidateWhatsAppRecipient(recipient string) error {
 	if !recipientPattern.MatchString(recipient) {
 		return fmt.Errorf("invalid recipient: want optional + followed by 7..15 digits")
 	}

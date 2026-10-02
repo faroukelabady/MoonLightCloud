@@ -140,6 +140,11 @@ type Config struct {
 	// adapter configuration (Phase 7A). Disabled by default: no
 	// provider, no credentials, no network client.
 	WhatsAppNotifications WhatsAppNotificationConfig
+	// TelegramNotifications holds the optional second notification
+	// adapter configuration (Phase 10). Disabled by default: no
+	// provider, no credentials, no network client. The bot token is a
+	// Cloud-only runtime secret.
+	TelegramNotifications TelegramNotificationConfig
 	// BusinessReports holds the scheduled business-report scheduler
 	// configuration (Phase 7B). Disabled by default: no planner, no
 	// worker, no provider network.
@@ -231,6 +236,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.WhatsAppNotifications = whatsApp
+	telegram, err := loadTelegramNotificationConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	c.TelegramNotifications = telegram
 	reports, err := loadBusinessReports()
 	if err != nil {
 		return Config{}, err

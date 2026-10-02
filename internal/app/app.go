@@ -28,6 +28,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
+	"github.com/faroukelabady/MoonLightCloud/internal/notifications/telegram"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/whatsapp"
 	"github.com/faroukelabady/MoonLightCloud/internal/operations"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
@@ -201,8 +202,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			pool.Close()
 			return nil, err
 		}
-		a.NotificationDispatcher = notifications.NewDispatcher(
-			store, a.NotificationRegistry, notifications.SystemClock{}, commerceOwner(), log)
 		secret := cfg.WhatsAppNotifications.WebhookVerifyToken
 		appSecret := cfg.WhatsAppNotifications.AppSecret
 		key := string(provider.Key())
@@ -220,8 +219,34 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 				return "", false
 			}, log)
 	}
+	// Phase 10 second provider: Telegram registers on the same generic
+	// registry under its own logical key. No startup API request: the
+	// first network call happens at dispatch, so Cloud starts even if
+	// Telegram is temporarily unreachable.
+	if cfg.TelegramNotifications.Enabled {
+		provider, err := telegram.NewProvider(cfg.TelegramNotifications, nil)
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+		// A duplicate logical key across providers fails startup
+		// safely: no partial registration, no silent shadowing.
+		if err := a.NotificationRegistry.Register(provider.Key(), provider); err != nil {
+			pool.Close()
+			return nil, err
+		}
+	}
+	// The canonical dispatcher serves every registered provider: one
+	// worker, no Telegram-specific path. It runs whenever at least one
+	// provider is configured; with zero providers there is nothing to
+	// lease and the dispatcher stays nil.
+	if cfg.WhatsAppNotifications.Enabled || cfg.TelegramNotifications.Enabled {
+		a.NotificationDispatcher = notifications.NewDispatcher(
+			store, a.NotificationRegistry, notifications.SystemClock{}, commerceOwner(), log)
+	}
 	a.Log.Info("notification providers", "count", a.NotificationRegistry.Count(),
-		"whatsapp", cfg.WhatsAppNotifications.Enabled)
+		"whatsapp", cfg.WhatsAppNotifications.Enabled,
+		"telegram", cfg.TelegramNotifications.Enabled)
 	if cfg.BusinessReports.Enabled {
 		loc, err := businessreports.LoadCairo()
 		if err != nil {

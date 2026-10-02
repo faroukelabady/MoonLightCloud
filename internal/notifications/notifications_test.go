@@ -89,9 +89,20 @@ func TestValidationBounds(t *testing.T) {
 	if err := ValidateRecipient("01001234567"); err != nil {
 		t.Fatalf("digits-only shape passes verbatim: %v", err)
 	}
-	for _, bad := range []string{"12", "abc", "+", "20101234567890123", " 2010", ""} {
+	for _, bad := range []string{"abc", "+", "20101234567890123", " 2010", ""} {
 		if err := ValidateRecipient(bad); err == nil {
 			t.Fatalf("recipient %q must fail", bad)
+		}
+	}
+	// Phase 10 STOP expansion: the enqueue gate is the multi-provider
+	// union, so short numerics are Telegram-shaped and now enqueue.
+	// They can never be misdelivered: the WhatsApp adapter keeps
+	// strict E.164 at send time (terminal block), and Telegram
+	// rejects unknown chats the same way. 17-digit values stay
+	// rejected at enqueue (beyond any Bot API chat ID).
+	for _, telegramShaped := range []string{"12", "123456", "-1001", "@operations"} {
+		if err := ValidateRecipient(telegramShaped); err != nil {
+			t.Fatalf("telegram-shaped recipient %q: %v", telegramShaped, err)
 		}
 	}
 	for _, recipient := range []string{"201012345678", "+201012345678", "16505551234"} {
@@ -282,9 +293,27 @@ func TestServiceEnqueue(t *testing.T) {
 	}
 	short := testEnqueueRequest()
 	short.IdempotencyKey = "manual-test-004"
-	short.Recipient = "12"
+	short.Recipient = " 12"
 	if _, err := service.EnqueueTemplate(ctx, short); err == nil {
-		t.Fatal("short recipient must fail")
+		t.Fatal("whitespace-edged recipient must fail")
+	}
+	// Phase 10 STOP expansion: short numerics are Telegram-shaped and
+	// enqueue under the union; WhatsApp send-time strictness (proven in
+	// the WhatsApp adapter suite) terminally blocks them at dispatch.
+	telegramMapping := testMapping()
+	telegramMapping.ProviderKey = "telegram-main"
+	telegramMapping.ExternalTemplateName = "telegram_text_v1"
+	telegramMapping.ParameterNames = []string{"body"}
+	if err := mappings.UpsertTemplateMapping(ctx, telegramMapping); err != nil {
+		t.Fatal(err)
+	}
+	telegramShaped := testEnqueueRequest()
+	telegramShaped.IdempotencyKey = "manual-test-005"
+	telegramShaped.Recipient = "12"
+	telegramShaped.ProviderKey = "telegram-main"
+	telegramShaped.Parameters = map[string]string{"body": "hello"}
+	if _, err := service.EnqueueTemplate(ctx, telegramShaped); err != nil {
+		t.Fatalf("telegram-shaped recipient must enqueue: %v", err)
 	}
 }
 

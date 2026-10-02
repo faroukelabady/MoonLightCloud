@@ -161,7 +161,9 @@ func (p *Provider) renderRequest(req notifications.TemplateSendRequest) ([]byte,
 	if req.ProviderKey != p.key {
 		return nil, notifications.ValidationError("template request addressed to another provider instance")
 	}
-	if err := notifications.ValidateRecipient(req.Recipient); err != nil {
+	// Frozen Phase 7A send subset: the Phase 10 recipient union is
+	// enqueue-level only; WhatsApp sends keep strict E.164.
+	if err := notifications.ValidateWhatsAppRecipient(req.Recipient); err != nil {
 		return nil, notifications.ValidationError(err.Error())
 	}
 	resolved := req.Resolved
