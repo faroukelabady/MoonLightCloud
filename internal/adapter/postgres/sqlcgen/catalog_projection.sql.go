@@ -200,6 +200,43 @@ func (q *Queries) CatalogCategoryProductStores(ctx context.Context, topCategoryI
 	return items, nil
 }
 
+const catalogDefaultCategoryAlgorithm = `-- name: CatalogDefaultCategoryAlgorithm :one
+SELECT COALESCE(default_algorithm, 0) FROM catalog_categories
+WHERE category_id = $1 AND store_id = $2
+`
+
+type CatalogDefaultCategoryAlgorithmParams struct {
+	CategoryID pgtype.UUID `json:"category_id"`
+	StoreID    pgtype.UUID `json:"store_id"`
+}
+
+// Phase 9-R2 recovery: the canonical-identity algorithm version of a
+// shared default category's existing row for one Store (0 = none).
+func (q *Queries) CatalogDefaultCategoryAlgorithm(ctx context.Context, arg CatalogDefaultCategoryAlgorithmParams) (int16, error) {
+	row := q.db.QueryRow(ctx, catalogDefaultCategoryAlgorithm, arg.CategoryID, arg.StoreID)
+	var default_algorithm int16
+	err := row.Scan(&default_algorithm)
+	return default_algorithm, err
+}
+
+const catalogDefaultTagAlgorithm = `-- name: CatalogDefaultTagAlgorithm :one
+SELECT COALESCE(default_algorithm, 0) FROM catalog_tags
+WHERE tag_id = $1 AND store_id = $2
+`
+
+type CatalogDefaultTagAlgorithmParams struct {
+	TagID   pgtype.UUID `json:"tag_id"`
+	StoreID pgtype.UUID `json:"store_id"`
+}
+
+// Phase 9-R2 recovery: see CatalogDefaultCategoryAlgorithm.
+func (q *Queries) CatalogDefaultTagAlgorithm(ctx context.Context, arg CatalogDefaultTagAlgorithmParams) (int16, error) {
+	row := q.db.QueryRow(ctx, catalogDefaultTagAlgorithm, arg.TagID, arg.StoreID)
+	var default_algorithm int16
+	err := row.Scan(&default_algorithm)
+	return default_algorithm, err
+}
+
 const catalogEntityEventRevisions = `-- name: CatalogEntityEventRevisions :many
 
 SELECT e.event_id,
@@ -853,6 +890,29 @@ func (q *Queries) RearmBlockedCatalogProducts(ctx context.Context) error {
 	return err
 }
 
+const recoverDefaultCatalogBlocked = `-- name: RecoverDefaultCatalogBlocked :execrows
+UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
+    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
+WHERE status = 'blocked'
+  AND processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1',
+                    'catalog_product_projection.v1')
+  AND last_error_code IN ('STORE_SCOPE_CONFLICT', 'CATALOG_REVISION_CONFLICT')
+`
+
+// Phase 9-R2 F08 upgrade recovery. An event that was permanently blocked
+// by a pre-R2 catalog identity/scope defect becomes pending again once,
+// so it re-projects under the current identity model. Bounded to the
+// durable catalog projectors and the exact terminal codes the R1/R2
+// identity changes made obsolete; it never resets validation, cycle,
+// depth, graph-conflict, inventory/policy, sale, or return failures.
+func (q *Queries) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, recoverDefaultCatalogBlocked)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resetCatalogProductRetriesForGraph = `-- name: ResetCatalogProductRetriesForGraph :exec
 UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
     processed_at = NULL, last_error_code = NULL, last_error_message = NULL
@@ -885,16 +945,15 @@ const upsertCatalogCategory = `-- name: UpsertCatalogCategory :exec
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    source_payload_hash, source_received_at, store_id, default_algorithm
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    -- Phase 9-R1 F04: shared default reference identities stay Store-less
-    -- (global); every other identity preserves proven ownership.
-    store_id = CASE WHEN $11::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_categories.store_id) END,
+    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    default_algorithm = excluded.default_algorithm,
     projected_at = now()
 `
 
@@ -909,7 +968,7 @@ type UpsertCatalogCategoryParams struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
-	Shared            bool               `json:"shared"`
+	DefaultAlgorithm  int16              `json:"default_algorithm"`
 }
 
 // Phase 9B: store_id carries the event's own ingress Store context
@@ -917,6 +976,9 @@ type UpsertCatalogCategoryParams struct {
 // legacy event never wipes an adopted Store, and a scoped event adopts
 // a NULL row or reaffirms its own Store (cross-Store writes are fenced
 // in Go before this upsert runs).
+// Phase 9-R2: default_algorithm records which identity scheme wrote the
+// row (0 = raw seeded ID, 1 = Store-scoped canonical ID) so an existing
+// pre-R2 annotation can be detected and recovered.
 func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCategoryParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogCategory,
 		arg.CategoryID,
@@ -929,7 +991,7 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
 		arg.StoreID,
-		arg.Shared,
+		arg.DefaultAlgorithm,
 	)
 	return err
 }
@@ -993,17 +1055,16 @@ const upsertCatalogTag = `-- name: UpsertCatalogTag :exec
 INSERT INTO catalog_tags (
     tag_id, slug, is_active, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    source_payload_hash, source_received_at, store_id, default_algorithm
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (tag_id) DO UPDATE SET
     slug = excluded.slug, is_active = excluded.is_active,
     name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    -- Phase 9-R1 F04: shared default reference identities stay Store-less
-    -- (global); every other identity preserves proven ownership.
-    store_id = CASE WHEN $12::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_tags.store_id) END,
+    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    default_algorithm = excluded.default_algorithm,
     projected_at = now()
 `
 
@@ -1019,7 +1080,7 @@ type UpsertCatalogTagParams struct {
 	SourcePayloadHash []byte             `json:"source_payload_hash"`
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
-	Shared            bool               `json:"shared"`
+	DefaultAlgorithm  int16              `json:"default_algorithm"`
 }
 
 // Phase 9B store ownership: see UpsertCatalogCategory.
@@ -1036,7 +1097,7 @@ func (q *Queries) UpsertCatalogTag(ctx context.Context, arg UpsertCatalogTagPara
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
 		arg.StoreID,
-		arg.Shared,
+		arg.DefaultAlgorithm,
 	)
 	return err
 }

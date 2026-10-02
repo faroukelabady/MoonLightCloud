@@ -23,19 +23,21 @@ LIMIT $3;
 -- legacy event never wipes an adopted Store, and a scoped event adopts
 -- a NULL row or reaffirms its own Store (cross-Store writes are fenced
 -- in Go before this upsert runs).
+-- Phase 9-R2: default_algorithm records which identity scheme wrote the
+-- row (0 = raw seeded ID, 1 = Store-scoped canonical ID) so an existing
+-- pre-R2 annotation can be detected and recovered.
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    source_payload_hash, source_received_at, store_id, default_algorithm
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    -- Phase 9-R1 F04: shared default reference identities stay Store-less
-    -- (global); every other identity preserves proven ownership.
-    store_id = CASE WHEN @shared::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_categories.store_id) END,
+    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
+    default_algorithm = excluded.default_algorithm,
     projected_at = now();
 
 -- name: CatalogCategoryByID :one
@@ -54,6 +56,12 @@ ON CONFLICT (parent_id, child_id) DO UPDATE SET position = excluded.position;
 -- name: CatalogCategoryParents :many
 SELECT parent_id FROM catalog_category_edges WHERE child_id = $1 ORDER BY position, parent_id;
 
+-- name: CatalogDefaultCategoryAlgorithm :one
+-- Phase 9-R2 recovery: the canonical-identity algorithm version of a
+-- shared default category's existing row for one Store (0 = none).
+SELECT COALESCE(default_algorithm, 0) FROM catalog_categories
+WHERE category_id = $1 AND store_id = $2;
+
 -- name: AllCatalogCategoryEdges :many
 SELECT parent_id, child_id FROM catalog_category_edges ORDER BY parent_id, child_id;
 
@@ -62,18 +70,36 @@ SELECT parent_id, child_id FROM catalog_category_edges ORDER BY parent_id, child
 INSERT INTO catalog_tags (
     tag_id, slug, is_active, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    source_payload_hash, source_received_at, store_id, default_algorithm
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (tag_id) DO UPDATE SET
     slug = excluded.slug, is_active = excluded.is_active,
     name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    -- Phase 9-R1 F04: shared default reference identities stay Store-less
-    -- (global); every other identity preserves proven ownership.
-    store_id = CASE WHEN @shared::boolean THEN NULL ELSE COALESCE(excluded.store_id, catalog_tags.store_id) END,
+    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
+    default_algorithm = excluded.default_algorithm,
     projected_at = now();
+
+-- name: CatalogDefaultTagAlgorithm :one
+-- Phase 9-R2 recovery: see CatalogDefaultCategoryAlgorithm.
+SELECT COALESCE(default_algorithm, 0) FROM catalog_tags
+WHERE tag_id = $1 AND store_id = $2;
+
+-- name: RecoverDefaultCatalogBlocked :execrows
+-- Phase 9-R2 F08 upgrade recovery. An event that was permanently blocked
+-- by a pre-R2 catalog identity/scope defect becomes pending again once,
+-- so it re-projects under the current identity model. Bounded to the
+-- durable catalog projectors and the exact terminal codes the R1/R2
+-- identity changes made obsolete; it never resets validation, cycle,
+-- depth, graph-conflict, inventory/policy, sale, or return failures.
+UPDATE sync_event_processing SET status = 'pending', next_attempt_at = NULL,
+    processed_at = NULL, last_error_code = NULL, last_error_message = NULL
+WHERE status = 'blocked'
+  AND processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1',
+                    'catalog_product_projection.v1')
+  AND last_error_code IN ('STORE_SCOPE_CONFLICT', 'CATALOG_REVISION_CONFLICT');
 
 -- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,

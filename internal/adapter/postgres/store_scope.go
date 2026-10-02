@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -26,19 +27,21 @@ const (
 	ErrLegacyScopeAmbiguous = "LEGACY_SCOPE_AMBIGUOUS"
 )
 
-// Phase 9-R1 F04 shared default catalog identity.
+// Phase 9-R1/R2 default reference-catalog identity.
 //
 // Retail seeds the same reference catalog (fixed UUIDs) into every fresh
-// installation. Those identities are deliberately installation-invariant
-// reference data, not Store-owned aggregates: "Islamic", "Cats",
-// "tutankhamun" mean the same thing in every shop. Cloud therefore treats
-// exactly these enumerated IDs as a shared reference namespace (owned by
-// no Store); any Store may reference them and they never collide.
+// installation. Those IDs are installation-invariant *labels*, but their
+// mutable state (names, status, parents) is independently managed by each
+// Store. Cloud therefore treats exactly these enumerated IDs as
+// Store-scoped identities: the same raw ID under different Stores maps to
+// distinct current-state rows (see canonicalDefaultCategoryID). A Store's
+// independent revision stream then orders only that Store's own row.
 //
 // This is narrow and explicit. Store-created categories/tags keep their
-// per-event Store ownership and cross-Store same-ID takeovers still fail
-// with STORE_SCOPE_CONFLICT. Identity is derived from the fixed IDs, never
-// from mutable labels. No durable event bytes are rewritten.
+// global aggregate identity and cross-Store same-ID takeovers still fail
+// with STORE_SCOPE_CONFLICT. Identity comes from the fixed IDs and the
+// server-derived Store scope, never from mutable labels. No durable event
+// bytes are rewritten.
 var sharedCategoryIDs = map[string]struct{}{
 	"00000000-0000-0000-0000-000000000101": {},
 	"00000000-0000-0000-0000-000000000102": {},
@@ -69,6 +72,31 @@ func isSharedCategoryID(id string) bool {
 func isSharedTagID(id string) bool {
 	_, ok := sharedTagIDs[id]
 	return ok
+}
+
+// defaultNamespaceUUID is the fixed namespace used to derive a Store-scoped
+// canonical identity for a shared default reference ID. It is a constant
+// (not a random namespace), so the mapping is stable across rebuilds,
+// restarts, and every Cloud instance.
+var defaultNamespaceUUID = uuid.MustParse("d3f4a1b2-5c6d-4e7f-8a90-123456789abc")
+
+// canonicalDefaultCategoryID returns the Store-scoped projected identity
+// for a default reference category. A bare (legacy/unbound) event keeps the
+// raw seeded ID so pre-existing global projections remain addressable;
+// every scoped Store maps the seeded ID to a deterministic per-Store UUID.
+func canonicalDefaultCategoryID(rawID string, store pgtype.UUID) string {
+	if !store.Valid || !isSharedCategoryID(rawID) {
+		return rawID
+	}
+	return uuid.NewSHA1(defaultNamespaceUUID, []byte(uuidString(store)+":category:"+rawID)).String()
+}
+
+// canonicalDefaultTagID is canonicalDefaultCategoryID for default tags.
+func canonicalDefaultTagID(rawID string, store pgtype.UUID) string {
+	if !store.Valid || !isSharedTagID(rawID) {
+		return rawID
+	}
+	return uuid.NewSHA1(defaultNamespaceUUID, []byte(uuidString(store)+":tag:"+rawID)).String()
 }
 
 // storeUUID converts an ingress Store UUID string (nil = legacy) to a

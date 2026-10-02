@@ -248,13 +248,17 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 	f.ingest(t, f.devA, f.credA, "e0000480-0000-4000-8000-000000000005",
 		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
 
+	const productEvent = "e0000480-0000-4000-8000-000000000004"
+	const inventoryEvent = "e0000480-0000-4000-8000-000000000005"
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	results := map[string]catalog.ProjectResult{}
 	for _, tc := range []struct {
 		event string
 		typ   string
 	}{
-		{"e0000480-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1},
-		{"e0000480-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1},
+		{productEvent, catalog.EventProductSnapshotV1},
+		{inventoryEvent, catalog.EventInventoryProductSnapshotV1},
 	} {
 		wg.Add(1)
 		go func(event, typ string) {
@@ -275,6 +279,9 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 					res, err = store.ProjectProductInventory(context.Background(), rec, time.Now())
 				}
 				if err == nil && res.Outcome != catalog.OutcomeNotDue && res.Outcome != catalog.OutcomeRetryable {
+					mu.Lock()
+					results[event] = res
+					mu.Unlock()
 					return
 				}
 				time.Sleep(time.Duration(attempt+1) * 5 * time.Millisecond)
@@ -284,15 +291,111 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 	}
 	wg.Wait()
 
-	product := f.rowStore(t, "catalog_products", "product_id", prodP)
-	inventory := f.rowStore(t, "catalog_product_inventory", "product_id", prodP)
+	// A missing row is a legitimate outcome (the loser never committed);
+	// the scalar subquery returns NULL rather than pgx.ErrNoRows, so an
+	// unexpected database error still fails. The loser may have been
+	// permanently blocked.
+	product := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP)
+	inventory := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP)
 	if product != nil && *product == scopeStoreB && inventory != nil && *inventory == scopeStoreA {
 		t.Fatalf("contradiction committed: product=B inventory=A")
 	}
-	// Any committed pair must agree (or the inventory is absent).
+	// Any committed pair must agree (or one side is absent).
 	if product != nil && inventory != nil && *product != *inventory {
 		t.Fatalf("contradictory ownership: product=%v inventory=%v", *product, *inventory)
 	}
+	// Exactly one serialization winner: both dependency writes cannot
+	// commit, and at least one must reach a terminal outcome.
+	pres, pok := results[productEvent]
+	ires, iok := results[inventoryEvent]
+	if !pok || !iok {
+		t.Fatalf("missing terminal verdicts: product=%+v inventory=%+v", pres, ires)
+	}
+	productWon := pres.Outcome == catalog.OutcomeProcessed || pres.Outcome == catalog.OutcomeAlready
+	inventoryWon := ires.Outcome == catalog.OutcomeProcessed || ires.Outcome == catalog.OutcomeAlready
+	if productWon && inventoryWon {
+		t.Fatalf("both dependency writes committed: product=%+v inventory=%+v", pres, ires)
+	}
+	if !productWon && !inventoryWon {
+		t.Fatalf("no committed winner: product=%+v inventory=%+v", pres, ires)
+	}
+	if productWon && inventory != nil && *inventory == scopeStoreA {
+		t.Fatalf("product B left foreign inventory A: %v", *inventory)
+	}
+	if inventoryWon && product != nil && *product == scopeStoreB {
+		t.Fatalf("inventory A left foreign product B: %v", *product)
+	}
+}
+
+// optionalProjectionStore reads a projection root's store_id, returning nil
+// for an absent row and failing loudly on any other database error.
+func optionalProjectionStore(t *testing.T, f *scopeFixture, table, idCol, id string) *string {
+	t.Helper()
+	var store *string
+	if err := f.pool.QueryRow(context.Background(),
+		fmt.Sprintf(`SELECT (SELECT store_id::text FROM %s WHERE %s = $1)`, table, idCol), id).Scan(&store); err != nil {
+		t.Fatalf("optional store %s/%s: %v", table, id, err)
+	}
+	return store
+}
+
+// TestScope_AdoptionRaceDeterministicOrder exercises both winner orders
+// without timing: whichever writer commits first must block the other.
+func TestScope_AdoptionRaceDeterministicOrder(t *testing.T) {
+	t.Run("product first", func(t *testing.T) {
+		f := openScopeFixture(t)
+		rootC, tagC, prodP := scopeLegacyProduct(t, f, 481, "f02racepf")
+		project := func(event, typ string) catalog.ProjectResult {
+			store := NewDevices(f.pool, 5*time.Second)
+			rec, ok, err := store.LoadCatalogEvent(context.Background(), event)
+			if err != nil || !ok {
+				t.Fatalf("load %s: %v %v", event, ok, err)
+			}
+			switch typ {
+			case catalog.EventProductSnapshotV1:
+				res, err := store.ProjectProduct(context.Background(), rec, time.Now())
+				if err != nil {
+					t.Fatalf("project product: %v", err)
+				}
+				return res
+			default:
+				res, err := store.ProjectProductInventory(context.Background(), rec, time.Now())
+				if err != nil {
+					t.Fatalf("project inventory: %v", err)
+				}
+				return res
+			}
+		}
+		f.ingest(t, f.devB, f.credB, "e0000481-0000-4000-8000-000000000004",
+			catalog.EventProductSnapshotV1, productPayload(prodP, "f02racepf-SKU", "B", rootC, nil, []string{tagC}, 2))
+		f.ingest(t, f.devA, f.credA, "e0000481-0000-4000-8000-000000000005",
+			catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
+		requireOutcome(t, project("e0000481-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		res := project("e0000481-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1)
+		requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		if got := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP); got == nil || *got != scopeStoreB {
+			t.Fatalf("product B committed: %v", got)
+		}
+		if got := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP); got != nil {
+			t.Fatalf("foreign inventory must be absent: %v", *got)
+		}
+	})
+	t.Run("inventory first", func(t *testing.T) {
+		f := openScopeFixture(t)
+		rootC, tagC, prodP := scopeLegacyProduct(t, f, 482, "f02raceif")
+		f.ingest(t, f.devB, f.credB, "e0000482-0000-4000-8000-000000000004",
+			catalog.EventProductSnapshotV1, productPayload(prodP, "f02raceif-SKU", "B", rootC, nil, []string{tagC}, 2))
+		f.ingest(t, f.devA, f.credA, "e0000482-0000-4000-8000-000000000005",
+			catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
+		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
+		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		if got := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP); got == nil || *got != scopeStoreA {
+			t.Fatalf("inventory A committed: %v", got)
+		}
+		if got := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP); got != nil {
+			t.Fatalf("foreign product must be absent: %v", *got)
+		}
+	})
 }
 
 // TestScope_ExistingContradictionAvailability proves a pre-existing
