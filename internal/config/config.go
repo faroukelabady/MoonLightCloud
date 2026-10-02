@@ -136,6 +136,11 @@ type Config struct {
 	// (Phase 6B). Disabled by default: no provider, no credentials, no
 	// network client.
 	WooCommerce WooCommerceConfig
+	// Shopify holds the optional second commerce adapter configuration
+	// (Phase 11). Disabled by default: no provider, no credentials, no
+	// network client. Provider identity is the configured logical key;
+	// the same MoonLight product may map to both providers independently.
+	Shopify ShopifyConfig
 	// WhatsAppNotifications holds the optional first notification
 	// adapter configuration (Phase 7A). Disabled by default: no
 	// provider, no credentials, no network client.
@@ -231,6 +236,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.WooCommerce = woo
+	shopify, err := loadShopifyConfig()
+	if err != nil {
+		return Config{}, err
+	}
+	c.Shopify = shopify
+	if err := validateCommerceProviderKeys(woo, shopify); err != nil {
+		return Config{}, err
+	}
 	whatsApp, err := loadWhatsAppNotificationConfig()
 	if err != nil {
 		return Config{}, err

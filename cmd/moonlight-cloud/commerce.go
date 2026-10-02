@@ -10,25 +10,35 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	shopifyadapter "github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/woocommerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 )
 
 // newCommerceRegistry builds the provider registry from runtime
-// configuration. Disabled Woo registers nothing; enabled Woo registers
-// exactly one provider. Construction performs no network I/O, so Cloud
-// starts even when Woo is unreachable.
+// configuration. Disabled providers register nothing; each enabled
+// provider registers exactly one logical instance under its configured
+// key. Construction performs no network I/O, so Cloud starts even when
+// any provider is unreachable.
 func newCommerceRegistry(cfg config.Config) (*commerce.Registry, error) {
 	registry := commerce.NewRegistry()
-	if !cfg.WooCommerce.Enabled {
-		return registry, nil
+	if cfg.WooCommerce.Enabled {
+		provider, err := woocommerce.NewWooCommerceProvider(cfg.WooCommerce, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Register(provider.Key(), provider); err != nil {
+			return nil, err
+		}
 	}
-	provider, err := woocommerce.NewWooCommerceProvider(cfg.WooCommerce, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := registry.Register(provider.Key(), provider); err != nil {
-		return nil, err
+	if cfg.Shopify.Enabled {
+		provider, err := shopifyadapter.NewShopifyProvider(cfg.Shopify, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := registry.Register(provider.Key(), provider); err != nil {
+			return nil, err
+		}
 	}
 	return registry, nil
 }

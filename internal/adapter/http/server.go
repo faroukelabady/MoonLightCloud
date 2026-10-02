@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -110,10 +110,15 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.DeviceSummary)))
 	}
 	// Provider webhook ingestion is public-but-signed: HMAC authority
-	// only, never dashboard session or device tokens.
+	// only, never dashboard session or device tokens. Both commerce
+	// providers share the generic inbox and reconciliation pipeline.
 	if commerceWebhooks != nil {
 		mux.Handle("POST /api/v1/commerce/webhooks/woocommerce/{provider_key}",
 			http.HandlerFunc(commerceWebhooks.WooCommerceWebhook))
+	}
+	if shopifyWebhooks != nil {
+		mux.Handle("POST /api/v1/commerce/webhooks/shopify/{provider_key}",
+			http.HandlerFunc(shopifyWebhooks.ShopifyWebhook))
 	}
 	// WhatsApp notification callbacks are public-but-signed: verify-token
 	// (GET) or app-secret HMAC (POST) authority only, never dashboard

@@ -1089,6 +1089,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/commerce/webhooks/shopify/{provider_key}:
+    post:
+      summary: Shopify order webhook ingestion (signed, durable trigger)
+      operationId: commerceShopifyWebhook
+      parameters:
+        - name: provider_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      description: >-
+        Verifies X-Shopify-Hmac-SHA256 (base64 HMAC-SHA256 of the exact
+        raw body under the configured app client secret, constant-time
+        comparison, before any dedupe), binds X-Shopify-Shop-Domain to
+        the configured shop domain, validates X-Shopify-Topic
+        (orders/create, orders/updated, orders/cancelled, orders/delete;
+        the topic never comes from the body) and the X-Shopify-Webhook-Id
+        delivery identity, persists delivery metadata plus payload hash
+        (never the raw body, no customer PII), and returns 202.
+        Reconciliation happens asynchronously against the provider's
+        current order state via the same pipeline as every other
+        CommerceOrderProvider. Registered only when Shopify orders are
+        enabled. No dashboard, device, or report credential is accepted
+        here. Delivery identity dedupe key is
+        (provider_key, X-Shopify-Webhook-Id).
+      responses:
+        '202':
+          description: Delivery durably accepted (or idempotent identical duplicate).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [accepted]}
+        '400':
+          description: Unsupported topic, missing/invalid delivery identity, malformed JSON, or invalid order identity. No event persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, malformed, or mismatched webhook signature, or shop-domain mismatch (including validly signed deliveries for another shop). Nothing persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown provider key (or Shopify orders disabled).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Delivery ID already recorded with a different payload hash. Original unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: Body exceeds the 1 MiB webhook limit. No persistence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/notifications/webhooks/whatsapp/{provider_key}:
     get:
       summary: Meta webhook callback verification (verify token)
