@@ -59,7 +59,7 @@ edges are retained, but its obsolete Store annotation is released in the
 same transaction that writes that Store's canonical row. This also frees
 the old Store/slug claim. Unbound source history is never assigned a Store.
 
-After deploying R3, run:
+After deploying the R4 correction, run:
 
 ```
 moonlight-cloud projection recover-catalog
@@ -73,10 +73,30 @@ count means work was queued, not that projection has completed. Durable
 pending/retry state survives interruption; rerunning recovery is safe.
 Do not rely on a later unrelated catalog edit to complete this transition.
 
-Previously processed sources are included. An obsolete blocked default
+Previously processed sources are included. An obsolete ownership block
 requires concrete foreign raw-row provenance and the original ownership
-or equal-revision error shape; matching an error code alone is insufficient.
+or equal-revision error shape. R2 `tag identity collision` blocks qualify
+separately only for an enumerated default with an older, processed raw
+source from the authoritative event Store, matching raw/source/update slug,
+and algorithm/ownership markers proving the obsolete claim. The retained
+retired raw snapshot supplies the same provenance after canonical revision 1
+already exists. An unrelated Tag claiming that Store/slug, or a processed
+contradictory equal revision, prevents this recovery. Matching an error
+message or code alone is insufficient. Every eligible obsolete revision is
+queued within the same 100-event bound; newer canonical state never regresses.
 Genuine permanent conflicts and unbound processing remain unchanged.
+
+Verified raw retirement also completes inside identical or stale canonical
+projection transactions. Both raw and canonical entity locks serialize it
+with normal projection, and canonical source/Store/algorithm provenance is
+checked before a no-op retires compatibility state. Equal semantic conflicts
+remain blocked without retirement. Interruption rolls back retirement and
+leaves durable retry work; completed transitions stop qualifying. Zero means
+no further eligible transition work, not that all permanent errors are gone.
+Inspect processing errors even after recovery converges. Recovery selection
+and reset use one serializable transaction; concurrent projection can abort
+the entire batch with a serialization conflict. Retry the recovery command
+after projection settles; no partial reset is committed.
 Existing canonical rows can coexist with raw references during recovery;
 equal-revision replay only changes current reference representation when
 all other semantics match. The Product graph guard permits that narrow

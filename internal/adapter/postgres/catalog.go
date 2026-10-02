@@ -819,13 +819,16 @@ func (d Devices) RearmBlockedProducts(ctx context.Context) error {
 
 // RecoverDefaultCatalogBlocked re-arms at most 100 authoritative source
 // events for missing canonical defaults and raw current-state references.
-// Obsolete blocked default events require concrete foreign raw provenance;
-// an error code alone never authorizes reset. Repeat after catalog workers
-// converge until zero. Durable processing rows make interruption restart-safe.
+// Obsolete blocked defaults require concrete foreign ownership or same-Store
+// raw slug-collision provenance; an error code alone never authorizes reset.
+// Repeat after catalog workers converge until zero. Durable processing rows
+// make interruption restart-safe.
 func (d Devices) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
-	tx, err := d.pool.Begin(ctx)
+	// Serialize provenance selection with projection state changes. A race
+	// aborts the whole reset batch rather than rearming a newly genuine conflict.
+	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
 	}
@@ -1050,7 +1053,11 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 
 	// Entity lock before any revision decision (R04): concurrent revisions
 	// of this category serialize; different entities proceed in parallel.
-	if err := lockCatalogEntities(ctx, q, [2]string{"category", projectedID}); err != nil {
+	keys := [][2]string{{"category", projectedID}}
+	if sharedNode {
+		keys = append(keys, [2]string{"category", valid.CategoryID})
+	}
+	if err := lockCatalogEntities(ctx, q, keys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
@@ -1102,9 +1109,27 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			scopedParentIDs = append(scopedParentIDs, parent)
 		}
 	}
+	// Retirement is part of the same serialized transaction even when the
+	// canonical revision is already identical or newer. Conflicting equal
+	// state never reaches this completion path.
+	finishNoop := func() (catalog.ProjectResult, error) {
+		if sharedNode {
+			established, err := q.EstablishedDefaultCatalog(ctx, sqlcgen.EstablishedDefaultCatalogParams{
+				Kind: "category", CanonicalID: cuid, StoreID: eventWriteStore, RawID: valid.CategoryID,
+			})
+			if err == nil && established.Valid && established.Bool {
+				_, err = q.RetireRawDefaultCategory(ctx, sqlcgen.RetireRawDefaultCategoryParams{CategoryID: mustParseUUID(valid.CategoryID), StoreID: eventWriteStore})
+			}
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+			}
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
-		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		return finishNoop()
 	}
 	if !proceed {
 		// A newer repairable revision moots this one even at equal
@@ -1117,7 +1142,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
 		}
 		if supersededEqual {
-			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+			return finishNoop()
 		}
 		currentSnapshot, exists, err := currentCategorySnapshot(ctx, q, cuid)
 		if err != nil {
@@ -1135,7 +1160,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
 		} else if reflect.DeepEqual(catalog.NormalizeCategorySnapshot(withCategoryGraph(valid, projectedID, scopedParentIDs)), currentSnapshot) {
-			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+			return finishNoop()
 		} else {
 			proceed = true
 		}
@@ -1148,7 +1173,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
 	}
 	if superseded {
-		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		return finishNoop()
 	}
 
 	// Parent dependency: missing parents wait retryably, never terminally.
@@ -1524,7 +1549,11 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		return done, nil
 	}
 
-	if err := lockCatalogEntities(ctx, q, [2]string{"tag", projectedID}); err != nil {
+	keys := [][2]string{{"tag", projectedID}}
+	if sharedNode {
+		keys = append(keys, [2]string{"tag", valid.TagID})
+	}
+	if err := lockCatalogEntities(ctx, q, keys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
@@ -1557,9 +1586,27 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			return d.markCatalogBlocked(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "tag owned by another store")
 		}
 	}
+	// Retirement is part of the same serialized transaction even when the
+	// canonical revision is already identical or newer. Conflicting equal
+	// state never reaches this completion path.
+	finishNoop := func() (catalog.ProjectResult, error) {
+		if sharedNode {
+			established, err := q.EstablishedDefaultCatalog(ctx, sqlcgen.EstablishedDefaultCatalogParams{
+				Kind: "tag", CanonicalID: tuid, StoreID: eventWriteStore, RawID: valid.TagID,
+			})
+			if err == nil && established.Valid && established.Bool {
+				_, err = q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore})
+			}
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+			}
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
-		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		return finishNoop()
 	}
 	if !proceed {
 		supersededEqual, err := entitySuperseded(ctx, q,
@@ -1570,7 +1617,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
 		}
 		if supersededEqual {
-			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+			return finishNoop()
 		}
 		currentSnapshot, exists, err := currentTagSnapshot(ctx, q, tuid)
 		if err != nil {
@@ -1585,7 +1632,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
 		} else {
-			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+			return finishNoop()
 		}
 	}
 	superseded, err := entitySuperseded(ctx, q,
@@ -1596,7 +1643,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
 	}
 	if superseded {
-		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		return finishNoop()
 	}
 
 	// Phase 9-R1 F02: a tag adopting a Store must not remain attached to a

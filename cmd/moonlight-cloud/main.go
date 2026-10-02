@@ -367,7 +367,7 @@ func projectionCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("re-armed %d affected catalog events (batch limit 100; repeat after projection convergence until zero)\n", n)
+		fmt.Printf("re-armed %d affected catalog events (batch limit 100; repeat after projection convergence until zero; inspect remaining processing errors)\n", n)
 		return nil
 	default:
 		return fmt.Errorf("unknown projection subcommand %q", args[0])

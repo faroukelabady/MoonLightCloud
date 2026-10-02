@@ -326,15 +326,33 @@ WHERE t.tag_id = $1 AND p.store_id IS NOT NULL;
 -- longer claims a Store once that Store transitions to a canonical row.
 UPDATE catalog_categories c SET store_id = NULL, default_algorithm = 2
 WHERE c.category_id = $1 AND c.default_algorithm = 0
-  AND (c.store_id = $2 OR (c.store_id IS NULL AND EXISTS (
-       SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id AND e.store_id=$2)));
+  AND (c.store_id = $2 OR c.store_id IS NULL)
+  AND EXISTS (SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id
+    AND e.store_id=$2 AND e.event_type='catalog.category.snapshot.v1'
+    AND e.payload->>'category_id'=c.category_id::text);
 
 -- name: RetireRawDefaultTag :execrows
 -- Also releases the obsolete (Store, slug) claim before canonical replay.
 UPDATE catalog_tags t SET store_id = NULL, default_algorithm = 2
 WHERE t.tag_id = $1 AND t.default_algorithm = 0
-  AND (t.store_id = $2 OR (t.store_id IS NULL AND EXISTS (
-       SELECT 1 FROM sync_events e WHERE e.event_id=t.source_event_id AND e.store_id=$2)));
+  AND (t.store_id = $2 OR t.store_id IS NULL)
+  AND EXISTS (SELECT 1 FROM sync_events e WHERE e.event_id=t.source_event_id
+    AND e.store_id=$2 AND e.event_type='catalog.tag.snapshot.v1'
+    AND e.payload->>'tag_id'=t.tag_id::text);
+
+-- name: EstablishedDefaultCatalog :one
+-- A no-op may retire compatibility state only for a proven canonical row.
+SELECT EXISTS (
+ SELECT 1 FROM catalog_categories c JOIN sync_events e ON e.event_id=c.source_event_id
+ WHERE sqlc.arg(kind)::text='category' AND c.category_id=sqlc.arg(canonical_id)::uuid
+ AND c.store_id=sqlc.arg(store_id)::uuid AND e.store_id=c.store_id
+ AND c.default_algorithm=1 AND e.payload->>'category_id'=sqlc.arg(raw_id)::text
+) OR EXISTS (
+ SELECT 1 FROM catalog_tags t JOIN sync_events e ON e.event_id=t.source_event_id
+ WHERE sqlc.arg(kind)::text='tag' AND t.tag_id=sqlc.arg(canonical_id)::uuid
+ AND t.store_id=sqlc.arg(store_id)::uuid AND e.store_id=t.store_id
+ AND t.default_algorithm=1 AND e.payload->>'tag_id'=sqlc.arg(raw_id)::text
+) AS established;
 
 -- name: DefaultCatalogRecoveryCandidates :many
 -- Only authoritative scoped events are replayed. Never reset genuine
@@ -378,6 +396,42 @@ WITH defaults AS (
      WHERE t.default_algorithm=1 AND t.store_id=d.store_id AND s.payload->>'tag_id'=d.payload->>'tag_id'
        AND t.source_revision >= (d.payload->>'catalog_revision')::bigint)
    OR EXISTS(SELECT 1 FROM catalog_tags t WHERE t.tag_id::text=d.payload->>'tag_id' AND t.store_id=d.store_id AND t.default_algorithm=0)))
+ UNION
+ -- R2 tried to insert the canonical Tag while the same Store's older raw
+ -- default still occupied its slug. The retained raw source proves the
+ -- obsolete collision even after retirement (algorithm 2). Other slug
+ -- owners, equal revisions and unbound/custom identities never qualify.
+ SELECT e.event_id,p.processor,e.received_at
+ FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
+ JOIN catalog_tags raw ON raw.tag_id::text=e.payload->>'tag_id'
+ JOIN sync_events source ON source.event_id=raw.source_event_id
+ JOIN sync_event_processing settled ON settled.event_id=source.event_id
+   AND settled.processor='catalog_tag_projection.v1' AND settled.status='processed'
+ WHERE e.event_type='catalog.tag.snapshot.v1' AND e.store_id IS NOT NULL
+ AND p.processor='catalog_tag_projection.v1' AND p.status='blocked'
+ AND p.last_error_code='CATALOG_REVISION_CONFLICT' AND p.last_error_message='tag identity collision'
+ AND e.payload->>'tag_id'=ANY(sqlc.arg(tag_ids)::text[])
+ AND source.event_type=e.event_type AND source.store_id=e.store_id
+ AND source.payload->>'tag_id'=e.payload->>'tag_id'
+ AND raw.default_algorithm IN (0,2)
+ AND ((raw.default_algorithm=0 AND raw.store_id=e.store_id)
+   OR (raw.default_algorithm=2 AND raw.store_id IS NULL))
+ AND raw.slug=e.payload->>'slug' AND source.payload->>'slug'=raw.slug
+ AND raw.source_revision=(source.payload->>'catalog_revision')::bigint
+ AND raw.source_revision < (e.payload->>'catalog_revision')::bigint
+ AND NOT EXISTS (
+  SELECT 1 FROM catalog_tags other WHERE other.store_id=e.store_id AND other.slug=raw.slug
+    AND other.tag_id<>raw.tag_id AND NOT (other.default_algorithm=1 AND EXISTS (
+      SELECT 1 FROM sync_events canonical WHERE canonical.event_id=other.source_event_id
+      AND canonical.store_id=e.store_id AND canonical.event_type=e.event_type
+      AND canonical.payload->>'tag_id'=e.payload->>'tag_id')))
+ AND NOT EXISTS (
+  SELECT 1 FROM sync_events own JOIN sync_event_processing terminal ON terminal.event_id=own.event_id
+  AND terminal.processor=p.processor AND terminal.status='processed'
+  WHERE own.store_id=e.store_id AND own.event_type=e.event_type
+  AND own.payload->>'tag_id'=e.payload->>'tag_id'
+  AND own.payload->>'catalog_revision'=e.payload->>'catalog_revision'
+  AND own.payload<>e.payload)
  UNION
  SELECT e.event_id,p.processor,e.received_at FROM catalog_categories c
  JOIN sync_events e ON e.event_id=c.source_event_id AND e.store_id=c.store_id
