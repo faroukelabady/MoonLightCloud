@@ -9,7 +9,7 @@ import (
 
 func TestFreshTo26RecipientBounds(t *testing.T) {
 	conn, ctx := openRaw(t)
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 26); err != nil {
 		t.Fatal(err)
 	}
 	if got := version(t, conn, ctx); got != 26 {

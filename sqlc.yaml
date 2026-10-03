@@ -28,6 +28,8 @@ sql:
       - "db/migrations/00023_store_scoped_projections.sql"
       - "db/migrations/00024_store_scoped_commerce.sql"
       - "db/migrations/00025_store_scoped_default_catalog.sql"
+      - "db/migrations/00026_notification_recipient_username_bound.sql"
+      - "db/migrations/00027_commerce_mutation_barriers.sql"
     gen:
       go:
         package: "sqlcgen"

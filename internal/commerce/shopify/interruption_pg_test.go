@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,10 +39,10 @@ func TestR1InFlightCancellation(t *testing.T) {
 	pa, _ := NewShopifyProvider(testConfig(), harnessClient(t, h), coordA)
 	pb, _ := NewShopifyProvider(testConfig(), harnessClient(t, h), coordB)
 	maps := newStubMappings()
-	source := &r1MutableSource{desired: fixedDesired("prod-1", "PAP-001")}
+	source := &r1MutableSource{desired: fixedDesired("019c0000-0000-7000-8000-000000000011", "PAP-001")}
 	sa := commerce.NewCommerceService(newRegistryWith(t, pa), r1CoordinatedMappings{maps, coordA}, source, nil)
 	sb := commerce.NewCommerceService(newRegistryWith(t, pb), r1CoordinatedMappings{maps, coordB}, source, nil)
-	initial, e := sa.SyncProduct(ctx, "shopify-main", "prod-1")
+	initial, e := sa.SyncProduct(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -69,25 +70,67 @@ func TestR1InFlightCancellation(t *testing.T) {
 	})
 	oldCtx, oldCancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { _, e := sa.SyncProduct(oldCtx, "shopify-main", "prod-1"); done <- e }()
+	go func() {
+		_, e := sa.SyncProduct(oldCtx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
+		done <- e
+	}()
 	<-received
 	oldCancel()
 	if e := <-done; e == nil {
 		t.Fatal("cancelled call succeeded")
 	}
-	fresh := fixedDesired("prod-1", "PAP-001")
+	fresh := fixedDesired("019c0000-0000-7000-8000-000000000011", "PAP-001")
 	fresh.Product.Names = []commerce.LocalizedName{{Locale: "en", Name: "NEW-TITLE"}}
 	fresh.CatalogRevision, fresh.PolicyRevision, fresh.InventoryRevision = 9, 9, 9
 	source.set(fresh)
-	if _, e := sb.SyncProduct(ctx, "shopify-main", "prod-1"); e != nil {
-		t.Fatal(e)
+	// Every intended delivery is protected by committed evidence visible to
+	// an independent connection before the old response is available.
+	blocked, err := coordB.GetProductMutationBarrier(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
+	if err != nil || blocked.OperationID == "" || blocked.State != "uncertain" {
+		t.Fatalf("missing durable uncertainty: %+v %v", blocked, err)
 	}
-	if got := h.remoteState(initial.ExternalProductID).title; got != "NEW-TITLE" {
-		t.Fatal("new operation did not complete", got)
+	before := len(h.recorded())
+	if _, err := sb.SyncProduct(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011"); err == nil || !strings.Contains(err.Error(), "COMMERCE_MUTATION_UNCERTAIN") {
+		t.Fatalf("newer work bypassed uncertainty: %v", err)
+	}
+	if len(h.recorded()) != before {
+		t.Fatal("blocked newer work reached provider")
+	}
+	if err := coordB.ResolveProductMutationBarrier(ctx, "shopify-main", blocked.ProductID, blocked.OperationID, "remote_completed", false); err == nil {
+		t.Fatal("unconfirmed resolution accepted")
+	}
+	tag, err := b.Exec(ctx, "UPDATE commerce_product_mutation_barriers SET created_at=now()-interval '30 days' WHERE operation_id=$1", blocked.OperationID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatal("age fixture", err)
+	}
+	// A new coordinator represents process restart. Neither elapsed time nor
+	// matching remote state releases the old barrier.
+	restarted := postgres.NewDevices(b, 5*time.Second)
+	if err := restarted.WithProductSync(ctx, "shopify-main", blocked.ProductID, func(context.Context) error { t.Fatal("restart callback ran"); return nil }); err == nil {
+		t.Fatal("restart erased uncertainty")
 	}
 	releaseOld()
 	<-applied
+	if got := h.remoteState(initial.ExternalProductID).title; got != "OLD-TITLE" {
+		t.Fatal("old request did not actually apply", got)
+	}
+	if _, err := sb.SyncProduct(ctx, "shopify-main", blocked.ProductID); err == nil {
+		t.Fatal("current remote snapshot automatically resolved uncertainty")
+	}
+	// The fixture's applied signal is definitive provider-side completion
+	// evidence, not merely a current Product read. Operator confirmation now
+	// permits an explicit fresh canonical sync; no automatic resend occurs.
+	if err := restarted.ResolveProductMutationBarrier(ctx, "shopify-main", blocked.ProductID, blocked.OperationID, "remote_completed", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sb.SyncProduct(ctx, "shopify-main", blocked.ProductID); err != nil {
+		t.Fatal(err)
+	}
 	if got := h.remoteState(initial.ExternalProductID).title; got != "NEW-TITLE" {
-		t.Fatalf("F2 OPEN: cancelled already-received old mutation applied after newer completion: title=%q", got)
+		t.Fatal("fresh state did not converge", got)
+	}
+	var count int
+	if err := b.QueryRow(ctx, "SELECT count(*) FROM commerce_product_mutation_barriers WHERE operation_id=$1 AND state='resolved' AND resolution='remote_completed'", blocked.OperationID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("resolution audit missing", err)
 	}
 }

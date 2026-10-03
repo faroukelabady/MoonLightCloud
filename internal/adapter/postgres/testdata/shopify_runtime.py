@@ -1,11 +1,12 @@
 """Local TLS fake Shopify for explicit OCI tests; no live merchant access."""
-import json, ssl, sys, threading
+import json, ssl, sys, threading, hashlib
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 certificate,key,port=sys.argv[1:]
 lock=threading.RLock()
-state={'product':None,'quantity':0,'active':False,'published':False,'creations':0,'cache':{},'fail_order':False,'fail_update':False,'drop_create':False,'unsafe_updates':0,'requests':0,'revision':1}
+release_update=threading.Event();release_update.set()
+state={'settled_fingerprints':[],'pause_update':False,'waiting_update':False,'product':None,'quantity':0,'active':False,'published':False,'creations':0,'cache':{},'fail_order':False,'fail_update':False,'drop_create':False,'unsafe_updates':0,'requests':0,'revision':1}
 def money(s): return {'shopMoney':{'amount':s,'currencyCode':'EGP'}}
 def variant():
  return {'id':'gid://shopify/ProductVariant/501','sku':state['product']['sku'],'inventoryItem':{'id':'gid://shopify/InventoryItem/502','tracked':True,'inventoryLevels':{'nodes':[{'updatedAt':(datetime(2026,1,1,tzinfo=timezone.utc)+timedelta(seconds=state['revision'])).isoformat(),'location':{'id':'gid://shopify/Location/10'},'quantities':[{'name':'available','quantity':state['quantity']}]}] if state['active'] else []}}}
@@ -23,9 +24,18 @@ class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   with lock:self.send({k:v for k,v in state.items() if k!='cache'})
  def do_POST(self):
-  body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+  raw=self.rfile.read(int(self.headers['Content-Length']));body=json.loads(raw)
+  fingerprint=hashlib.sha256(raw).hexdigest()
+  if self.path!='/control' and 'MoonlightProductUpdate' in body.get('query',''):
+   with lock:paused=state['pause_update'];state['waiting_update']=paused
+   if paused:release_update.wait()
+   with lock:state['waiting_update']=False
   with lock:
-   if self.path=='/control':state.update(body);state['revision']+=1;self.send({'ok':True});return
+   if self.path=='/control':
+    if 'release_update' in body:
+     if body.pop('release_update'):release_update.set()
+     else:release_update.clear()
+    state.update(body);state['revision']+=1;self.send({'ok':True});return
    if self.headers.get('X-Shopify-Access-Token')!='local-runtime-token':self.send({'errors':[{'message':'denied'}]},401);return
    state['requests']+=1
    q,v=body['query'],body.get('variables',{})
@@ -36,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
     p=v['input'];var=p['variants'][0];assert 'sku' in var
     state['product']={'sku':var['sku'],'title':p['title'],'desc':p['descriptionHtml'],'price':var['price'],'status':p['status'],'fields':{m['key']:m['value'] for m in p['metafields']}}
     state['creations']+=1;data={'productSet':{'product':{'id':'gid://shopify/Product/500','variants':{'nodes':[{'id':'gid://shopify/ProductVariant/501','sku':var['sku']}]}},'userErrors':[]}}
-    if state['drop_create']:state['drop_create']=False;self.connection.shutdown(2);self.connection.close();return
+    if state['drop_create']:state['settled_fingerprints'].append(fingerprint);state['drop_create']=False;self.connection.shutdown(2);self.connection.close();return
    elif op=='Product':data={'product':product()}
    elif op=='InventoryVariant':data={'productVariant':variant()}
    elif op=='VariantsBySKU':
@@ -49,7 +59,7 @@ class Handler(BaseHTTPRequestHandler):
    elif op=='ProductUpdate':
     assert 'ProductInput!' in q
     if state['quantity']!=0:state['unsafe_updates']+=1
-    if state['fail_update']:self.send({'errors':[{'message':'injected later stage failure'}]},503);return
+    if state['fail_update']:state['settled_fingerprints'].append(fingerprint);self.send({'errors':[{'message':'injected later stage failure'}]},503);return
     p=v['input'];state['product']['title']=p['title'];state['product']['desc']=p['descriptionHtml'];state['product']['status']=p.get('status',state['product']['status']);data={'productUpdate':{'product':{'id':'gid://shopify/Product/500'},'userErrors':[]}}
    elif op=='ManagedVariantUpdate':
     p=v['variants'][0];assert 'sku' not in p and 'sku' in p['inventoryItem']
@@ -82,6 +92,7 @@ class Handler(BaseHTTPRequestHandler):
     lines=[{'id':'gid://shopify/LineItem/'+str(10000+i),'title':'local order line','sku':state['product']['sku'],'quantity':1,'originalTotalSet':money('1.00'),'discountedTotalSet':money('90071992547409.93' if i==50 else '1.00'),'taxLines':[],'product':{'id':'gid://shopify/Product/500'}} for i in range(51)]
     data={'order':{'id':v['id'],'legacyResourceId':oid,'name':'#local','createdAt':'2026-09-20T10:00:00Z','updatedAt':'2026-09-20T11:00:00Z','displayFinancialStatus':'PAID','displayFulfillmentStatus':'UNFULFILLED','currencyCode':'EGP','totalPriceSet':money('90071992547409.93'),'totalShippingPriceSet':money('0.00'),'totalTaxSet':money('0.00'),'totalDiscountsSet':money('0.00'),'lineItems':connection(lines,v.get('after'))}}
    else:self.send({'errors':[{'message':'unknown contract'}]});return
+   state['settled_fingerprints'].append(fingerprint)
    self.send({'data':data})
 class TestServer(ThreadingHTTPServer):
  def get_request(self):

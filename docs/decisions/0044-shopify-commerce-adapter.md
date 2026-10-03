@@ -20,7 +20,8 @@ Phase 11 adds Shopify as the second concrete commerce provider alongside
 WooCommerce with **no second commerce subsystem**, no schema change, and
 no MoonLightRetail change. The frozen Phase 10 pair is Retail
 `6afe50a079f560c12f2f2080e42d4922efe96f6e` / Cloud
-`ee58687449d8da737c7ce2708a6decdede7671cd`; Cloud schema stays 26.
+`ee58687449d8da737c7ce2708a6decdede7671cd`; The original Phase 11 schema was 26; the R1 uncertainty amendment below
+requires schema 27.
 
 ## Decision
 
@@ -128,33 +129,51 @@ unchanged observed state keep their physical key; a freshly observed level
 version gets a new correction key. `CHANGE_FROM_QUANTITY_STALE` and
 `COMPARE_QUANTITY_STALE` are retryable; unrelated validation remains permanent.
 
-### R1 coordination and remaining F2 interruption failure
+### R1 durable mutation uncertainty barrier (F2)
 
-R1 holds a PostgreSQL transaction advisory lock for the entire (provider,
-Product ID) sequence: canonical desired-state read, remote writes, mapping
-persistence and inventory restoration. Desired state is read after acquiring
-the lock. Independent instances serialize through PostgreSQL. The callback
-has a two-minute deadline; failure/cancellation releases the lock, and each
-Shopify request checks that the database coordination session is alive.
-Inventory-only changes are protected by separate remote `inventory_revision`
-checks. Remote catalog/policy checks are additional freshness checks, not
-atomic conditions on subsequent Product mutations.
+The whole (provider key, Product ID) sequence still holds a PostgreSQL
+transaction advisory lock and reads canonical desired state only after
+acquisition. Before each Shopify mutation, an independent autocommit
+connection stores a UUIDv7 operation ID and request fingerprint in
+`commerce_product_mutation_barriers`. The coordinator session is checked
+again after that commit and before HTTP. Request bodies, credentials and
+provider descriptions are not stored.
 
-This narrowly extends shared `CommerceService` orchestration and the
-PostgreSQL repository with an optional coordination capability. Provider
-interfaces, schema and dependencies remain unchanged. PostgreSQL-backed
-sync serializes both providers, isolated by provider key; Woo adapter
-requests retain their existing behavior. Standalone Shopify mutations
-require an injected coordinator or a matching coordinated context.
+Only definitive, well-formed response evidence for the requested mutation
+releases its exact operation record. Explicit refusal/validation/throttle
+outcomes and proven connect/TLS failure before headers permit release.
+Cancellation, timeout, connection loss, 5xx, response-read failure, malformed
+or incomplete success, oversized response, or unverifiable served version
+retain the record. Uncertainty is independent of the existing ProviderError
+retryability classification. No new provider interface or queue is introduced.
 
-**F2 remains open.** An independent local TLS/PostgreSQL probe received an
-old Product update, cancelled its caller (releasing coordination), completed
-a newer operation on another instance, then applied the old remote request.
-The title regressed. Cancellation cannot retract an already-received remote
-mutation. Returning a retryable error is not durable reconciliation. No
-unresolved-operation quarantine or durable recovery subsystem is implemented.
-Ordinary barrier tests pass, but do not prove this interruption guarantee.
-The candidate must not be declared frozen.
+`in_flight` and `uncertain` both block subsequent same-provider/Product sync
+before any provider call. There is no TTL, lease expiry, startup reset or
+same-key automatic replay. A crash may leave `in_flight`; it is deliberately
+not assumed safe. Other Products and provider keys remain independent. The
+callback has a two-minute bound; retaining durable evidence does not retain
+a database connection or advisory lock forever.
+
+Operator recovery uses `commerce product-sync-status` and
+`commerce resolve-product-sync`, naming the exact operation UUID and an
+explicit confirmed settlement outcome. Resolution acquires the same
+canonical UUID advisory lock, is identity-fenced, and retains an audit row.
+It is idempotent for the same operation/outcome and conflicts on contradictory
+outcomes. It never syncs automatically. A fresh explicit `sync-product` reads
+current canonical state after confirmed resolution.
+
+The operator must independently establish that the original remote request
+has finished or was not applied. Current Product values, elapsed time,
+connection cancellation and a process restart are not settlement evidence.
+If that fact cannot be established, leave the Product blocked. Manual
+confirmation is a trusted local operator assertion, not an automatic verifier
+of Shopify request completion.
+
+This fail-closed availability tradeoff was explicitly approved. The original
+received-write cancellation race and actual OCI SIGKILL/restart tests now
+prove newer intent is blocked until confirmed settlement, then converges.
+F2's former interleaving and interruption paths are covered without claiming
+that cancellation can retract a remote request.
 
 ### Complete connections and explicit API support
 
@@ -199,12 +218,21 @@ Retail Sales/Returns, never mutate inventory, never enter financial
 reporting, and never choose the MoonLight Store: Store ownership derives
 from product mappings exactly as in Phase 9C.
 
-### No schema change, no Retail change
+### Append-only schema amendment, no Retail change
 
-Generic mappings/orders/webhook persistence already support a second
-provider. Migrations `00001–00026` are untouched; `TargetVersion`
-stays 26. MoonLightRetail remains at the frozen Phase 10 SHA and knows
-nothing about Shopify.
+R1 adds only migration `00027_commerce_mutation_barriers.sql` and changes
+`TargetVersion` to 27. Migrations 00001–00026 remain byte-identical. The table
+has no destructive foreign keys into rebuildable projections. Active barriers
+and operator resolution history are durable operational state requiring backup.
+Down migration refuses any retained barrier/history; empty-table development
+rollback preserves v26 data. No dependency or Retail change is required.
+
+Cutover requires stopping all old product-sync writers and confirming any
+legacy in-flight requests have settled before enabling the new writers. Old
+writers do not know the new barrier protocol; mixed-version product writes
+are not supported. Startup schema checks refuse old binaries at schema 27,
+but already-running old writers must also be stopped. Read-only queries keep
+their existing shapes. Do not fabricate uncertainty clearance from a timeout.
 
 ## Consequences
 
@@ -216,6 +244,6 @@ nothing about Shopify.
   publication explicitly; Cloud startup contacts Shopify zero times.
 - The pinned API version needs a deliberate quarterly upgrade runbook
   (`docs/operations/shopify.md`); `latest`/`unstable` are refused.
-- R1 ordinary cross-instance ordering is improved, but the already-received
-  remote mutation interruption failure remains open. No automatic durable
-  reconvergence guarantee is claimed.
+- Uncertain Shopify writes deliberately block that provider/Product until
+  verified operator resolution. No automatic repair or retry through an active
+  barrier is promised. Exact request settlement is an operational prerequisite.

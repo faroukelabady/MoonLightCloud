@@ -298,6 +298,17 @@ type CommerceProductMapping struct {
 	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
+type CommerceProductMutationBarrier struct {
+	OperationID        pgtype.UUID        `json:"operation_id"`
+	ProviderKey        string             `json:"provider_key"`
+	ProductID          pgtype.UUID        `json:"product_id"`
+	RequestFingerprint string             `json:"request_fingerprint"`
+	State              string             `json:"state"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ResolvedAt         pgtype.Timestamptz `json:"resolved_at"`
+	Resolution         pgtype.Text        `json:"resolution"`
+}
+
 type Device struct {
 	ID         pgtype.UUID        `json:"id"`
 	Name       string             `json:"name"`

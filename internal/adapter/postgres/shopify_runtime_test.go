@@ -147,8 +147,30 @@ func TestR1ShopifyOCIRuntime(t *testing.T) {
 	syncProduct := func(success bool) {
 		run(success, "commerce", "sync-product", "--provider", "shopify-main", "--product", productID)
 	}
+	// Only the fake provider's settled-fingerprint signal authorizes test
+	// operator resolution. A GET of current Product values is not such proof.
+	resolveKnownFixture := func(resolution string) {
+		var operation, fingerprint string
+		if err := env.pool.QueryRow(ctx, `SELECT operation_id::text,request_fingerprint FROM commerce_product_mutation_barriers WHERE provider_key='shopify-main' AND product_id=$1 AND state IN ('in_flight','uncertain')`, productID).Scan(&operation, &fingerprint); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range state()["settled_fingerprints"].([]any) {
+			if f == fingerprint {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("fake provider has not confirmed request settlement")
+		}
+		run(true, "commerce", "product-sync-status", "--provider", "shopify-main", "--product", productID)
+		run(false, "commerce", "resolve-product-sync", "--provider", "shopify-main", "--product", productID, "--operation", operation, "--resolution", resolution)
+		run(true, "commerce", "resolve-product-sync", "--provider", "shopify-main", "--product", productID, "--operation", operation, "--resolution", resolution, "--confirm-remote-settled")
+	}
 	control(`{"drop_create":true}`)
 	syncProduct(false)
+	syncProduct(false) // lost response remains blocked even in another process
+	resolveKnownFixture("remote_completed")
 	syncProduct(true)
 	check := func(qty float64, published bool) {
 		s := state()
@@ -173,6 +195,8 @@ func TestR1ShopifyOCIRuntime(t *testing.T) {
 	control(`{"quantity":20,"fail_update":true}`)
 	syncProduct(false)
 	check(0, true)
+	syncProduct(false) // 5xx is uncertain, not automatic resend permission
+	resolveKnownFixture("remote_not_applied")
 	control(`{"quantity":30,"fail_update":false}`)
 	syncProduct(true)
 	check(10, true)
@@ -190,6 +214,45 @@ func TestR1ShopifyOCIRuntime(t *testing.T) {
 			check(0, false)
 		}
 	}
+	// Kill the actual CLI process after the fake received a Product mutation.
+	// The durable in_flight row must survive without defer/cleanup execution.
+	interrupted := fmt.Sprintf("moonlight-11r1-interrupted-%d", time.Now().UnixNano())
+	defer func() { _ = exec.Command("podman", "rm", "-f", interrupted).Run() }()
+	control(`{"pause_update":true,"release_update":false}`)
+	startArgs := append([]string{}, args...)
+	startArgs = append(startArgs, "-d", "--name", interrupted, image, "commerce", "sync-product", "--provider", "shopify-main", "--product", productID)
+	if out, err := exec.CommandContext(ctx, "podman", startArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("interrupted CLI start: %s %v", out, err)
+	}
+	waitFor(t, 5*time.Second, func() bool { return state()["waiting_update"] == true }, "remote received Product update")
+	var operation string
+	if err := env.pool.QueryRow(ctx, `SELECT operation_id::text FROM commerce_product_mutation_barriers WHERE provider_key='shopify-main' AND product_id=$1 AND state='in_flight'`, productID).Scan(&operation); err != nil {
+		t.Fatal("barrier missing before actual process death", err)
+	}
+	if out, err := exec.CommandContext(ctx, "podman", "kill", "--signal", "KILL", interrupted).CombinedOutput(); err != nil {
+		t.Fatalf("actual process kill: %s %v", out, err)
+	}
+	_ = exec.Command("podman", "rm", interrupted).Run()
+	event := commerceIDs(t, 0x11904, "policy")["policy"]
+	ingestCatalog(t, env, event, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:04:00Z", policyPayload(productID, 4, true, false, nil))
+	projectCatalogOnce(t, env, event)
+	requests := state()["requests"]
+	syncProduct(false)
+	if state()["requests"] != requests {
+		t.Fatal("restart made provider calls through durable barrier")
+	}
+	control(`{"pause_update":false,"release_update":true}`)
+	waitFor(t, 5*time.Second, func() bool { return state()["waiting_update"] == false }, "provider request actually settled")
+	syncProduct(false) // remote settlement does not auto-clear the durable record
+	resolveKnownFixture("remote_completed")
+	syncProduct(true)
+	check(0, false)
+	event = commerceIDs(t, 0x11905, "policy")["policy"]
+	ingestCatalog(t, env, event, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:05:00Z", policyPayload(productID, 5, true, true, nil))
+	projectCatalogOnce(t, env, event)
+	syncProduct(true)
+	check(10, true)
+	t.Log("actual CLI SIGKILL after provider receipt: in_flight barrier retained; restarted newer intent blocked with zero provider calls; confirmed operator resolution and fresh canonical sync PASS")
 	name := fmt.Sprintf("moonlight-11r1-runtime-%d", time.Now().UnixNano())
 	stop := func() { _ = exec.Command("podman", "rm", "-f", name).Run() }
 	defer stop()

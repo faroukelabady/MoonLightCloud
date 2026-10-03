@@ -294,7 +294,7 @@ func TestTelegramR1V25To26Preservation(t *testing.T) {
 		t.Fatal("history fixture", err)
 	}
 	before := r1DatabaseState(t, env)
-	if err = migrate.Up(ctx, conn); err != nil {
+	if err = migrate.UpTo(ctx, conn, 26); err != nil {
 		t.Fatal(err)
 	}
 	version, err := migrate.Current(ctx, conn)
@@ -311,7 +311,7 @@ func TestTelegramR1V25To26Preservation(t *testing.T) {
 	if err = migrate.DownTo(ctx, conn, 25); err != nil {
 		t.Fatal(err)
 	}
-	if err = migrate.Up(ctx, conn); err != nil {
+	if err = migrate.UpTo(ctx, conn, 26); err != nil {
 		t.Fatal(err)
 	}
 	maximum := "@" + strings.Repeat("a", 32)

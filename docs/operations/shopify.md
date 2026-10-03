@@ -159,17 +159,58 @@ set `DRAFT` (that would silently unpublish unrelated channels).
   evidence. Correction keys bind logical intent to the observed level
   version, quantity and target. Four attempts bound convergence.
 
-## Concurrent synchronization and remaining F2
+## Concurrent synchronization and durable uncertainty
 
-Production product sync serializes the entire provider/Product sequence
-using a PostgreSQL transaction advisory lock, then reads canonical desired
-state. A two-minute deadline bounds occupancy; each Shopify call checks its
-coordination session. Inventory revisions are checked separately.
+Product sync serializes the whole provider/Product sequence with PostgreSQL,
+then reads canonical desired state. Each mutation's barrier is committed before
+HTTP, outside the advisory transaction. A two-minute callback deadline bounds
+connection/lock occupancy. A response loss or process death cannot erase the
+committed send evidence.
 
-An already-received remote request can apply after caller cancellation
-releases that lock. The R1 interruption probe reproduced newer title
-regression. **F2 remains open.** A retryable error or operator rerun is not
-durable reconciliation. Do not treat the candidate as interruption-safe.
+An active `in_flight` or `uncertain` barrier blocks same-provider/Product sync
+before network access. No TTL, startup reset or repeated operation key releases
+it. Malformed/incomplete outcomes, timeouts, cancellations, 5xx and response
+read failures remain blocked. Definitive acknowledged outcomes release only
+the exact request record. Other Products/provider keys are unaffected.
+
+Inspect the active request:
+
+```sh
+moonlight-cloud commerce product-sync-status --provider shopify-main --product PRODUCT_UUID
+```
+
+Only after independently confirming the exact remote request has completed
+(or was never applied), record that settlement:
+
+```sh
+moonlight-cloud commerce resolve-product-sync \
+  --provider shopify-main --product PRODUCT_UUID --operation OPERATION_UUID \
+  --resolution remote_completed --confirm-remote-settled
+moonlight-cloud commerce sync-product --provider shopify-main --product PRODUCT_UUID
+```
+
+Use `remote_not_applied` only with evidence of that outcome. Current Product
+values, waiting, local cancellation, or restart are not proof. If settlement
+cannot be established, leave the Product blocked. The confirmation is a trusted
+operator assertion; the command does not independently verify Shopify's internal
+request lifecycle. There is no force/expiry bypass or automatic resend.
+
+Resolution serializes with live work, records durable history, and names the
+exact request UUID. Replaying the same resolution is idempotent; a contradictory
+resolution fails. Resolving an old request cannot clear a newer barrier.
+
+### Schema 27 deployment and rollback
+
+Migration 00027 is append-only; 00001–00026 and existing business rows remain
+unchanged. Stop old product-sync writers and establish legacy request settlement
+before migrating and enabling the new writers. Do not overlap old/new product
+mutation protocols; already-running old binaries cannot enforce the barrier.
+Schema checks prevent restarting old binaries against 27.
+
+Back up `commerce_product_mutation_barriers`. Do not delete it during projection
+rebuilds or to retry a request. Rollback refuses active uncertainty or retained
+resolution history; only an empty-table development rollback is automatic.
+Production downgrade requires an explicit preservation/restore plan.
 
 ## Order ingestion
 

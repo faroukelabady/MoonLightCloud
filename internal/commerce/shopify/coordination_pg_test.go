@@ -64,12 +64,12 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 				t.Fatal(err)
 			}
 			maps := newStubMappings()
-			source := &r1MutableSource{desired: fixedDesired("prod-1", "PAP-001")}
+			source := &r1MutableSource{desired: fixedDesired("019c0000-0000-7000-8000-000000000011", "PAP-001")}
 			source.desired.InventoryRevision = 3
 			source.desired.Availability.OnlineAvailable = 5
 			sa := commerce.NewCommerceService(newRegistryWith(t, pa), r1CoordinatedMappings{maps, coordA}, source, nil)
 			sb := commerce.NewCommerceService(newRegistryWith(t, pb), r1CoordinatedMappings{maps, coordB}, source, nil)
-			initial, err := sa.SyncProduct(ctx, "shopify-main", "prod-1")
+			initial, err := sa.SyncProduct(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,13 +112,16 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 				h.serve(w, r)
 			})
 			doneOld := make(chan error, 1)
-			go func() { _, err := sa.SyncProduct(ctx, "shopify-main", "prod-1"); doneOld <- err }()
+			go func() {
+				_, err := sa.SyncProduct(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
+				doneOld <- err
+			}()
 			select {
 			case <-entered:
 			case <-ctx.Done():
 				t.Fatal("old request never reached barrier")
 			}
-			fresh := fixedDesired("prod-1", "PAP-001")
+			fresh := fixedDesired("019c0000-0000-7000-8000-000000000011", "PAP-001")
 			fresh.Product.Names = []commerce.LocalizedName{{Locale: "en", Name: "NEW-TITLE"}}
 			fresh.Product.Descriptions = map[string]string{"en": "new-description"}
 			fresh.Product.Prices = []commerce.Money{{Currency: "EGP", AmountMinor: 70000}}
@@ -133,7 +136,10 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 			}
 			source.set(fresh)
 			doneNew := make(chan error, 1)
-			go func() { _, err := sb.SyncProduct(ctx, "shopify-main", "prod-1"); doneNew <- err }()
+			go func() {
+				_, err := sb.SyncProduct(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011")
+				doneNew <- err
+			}()
 			// Observe actual database lock contention, not a timing-based assumption.
 			for {
 				var waiting int
@@ -178,7 +184,7 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 				t.Fatal("publication/inventory fence regressed")
 			}
 			// A stale prepared adapter request arriving after newer completion must fail.
-			stale := inventoryRequest(initial.ExternalProductID, "prod-1", 5, true)
+			stale := inventoryRequest(initial.ExternalProductID, "019c0000-0000-7000-8000-000000000011", 5, true)
 			stale.InventoryRevision = 3
 			stale.CatalogRevision, stale.PolicyRevision = fresh.CatalogRevision, fresh.PolicyRevision
 			if err := pa.SetInventory(ctx, stale); err == nil {
@@ -193,7 +199,8 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 
 func TestR1CoordinationCancellation(t *testing.T) {
 	database := testutil.Isolated(t)
-	ctx := context.Background()
+	ctx, timeout := context.WithTimeout(context.Background(), 10*time.Second)
+	defer timeout()
 	pool, err := pgxpool.New(ctx, database)
 	if err != nil {
 		t.Fatal(err)
@@ -203,19 +210,33 @@ func TestR1CoordinationCancellation(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- coord.WithProductSync(ctx, "shopify-main", "p", func(context.Context) error { close(entered); <-release; return nil })
+		done <- coord.WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error {
+			close(entered)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("coordinator did not enter callback: %v", err)
+	case <-ctx.Done():
+		t.Fatal("coordinator callback timed out")
+	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := coord.WithProductSync(cancelled, "shopify-main", "p", func(context.Context) error { t.Fatal("cancelled waiter ran"); return nil }); err == nil {
+	if err := coord.WithProductSync(cancelled, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error { t.Fatal("cancelled waiter ran"); return nil }); err == nil {
 		t.Fatal("cancelled waiter succeeded")
 	}
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := coord.WithProductSync(ctx, "shopify-main", "p", func(context.Context) error { return nil }); err != nil {
+	if err := coord.WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error { return nil }); err != nil {
 		t.Fatal("lock not released", err)
 	}
 }
@@ -240,7 +261,7 @@ func TestR1LostCoordinationSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = coord.WithProductSync(ctx, "shopify-main", "prod-1", func(held context.Context) error {
+	err = coord.WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(held context.Context) error {
 		var pid int
 		if err := b.QueryRow(ctx, `SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`).Scan(&pid); err != nil {
 			t.Fatal(err)
@@ -249,7 +270,7 @@ func TestR1LostCoordinationSession(t *testing.T) {
 		if err := b.QueryRow(ctx, "SELECT pg_terminate_backend($1)", pid).Scan(&killed); err != nil || !killed {
 			t.Fatal("session termination fixture", err)
 		}
-		_, err := p.UpsertProduct(held, upsertRequest("prod-1", "PAP-001", true))
+		_, err := p.UpsertProduct(held, upsertRequest("019c0000-0000-7000-8000-000000000011", "PAP-001", true))
 		return err
 	})
 	if err == nil {
@@ -258,7 +279,7 @@ func TestR1LostCoordinationSession(t *testing.T) {
 	if got := len(h.recorded()); got != 0 {
 		t.Fatal("provider network occurred after lost session", got)
 	}
-	if err := postgres.NewDevices(b, 5*time.Second).WithProductSync(ctx, "shopify-main", "prod-1", func(context.Context) error { return nil }); err != nil {
+	if err := postgres.NewDevices(b, 5*time.Second).WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error { return nil }); err != nil {
 		t.Fatal("lost lock did not release", err)
 	}
 }

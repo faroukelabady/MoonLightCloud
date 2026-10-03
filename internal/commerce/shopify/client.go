@@ -3,14 +3,19 @@ package shopify
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
@@ -121,8 +126,45 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	request.Header.Set("User-Agent", c.userAgent)
 	request.Header.Set("X-Shopify-Access-Token", c.token)
 
+	var token string
+	mutation := strings.HasPrefix(strings.TrimSpace(document), "mutation ")
+	if mutation {
+		digest := sha256.Sum256(payload)
+		token, err = commerce.BeginProductMutation(ctx, fmt.Sprintf("%x", digest))
+		if err != nil {
+			return err
+		}
+	}
+	complete := func() error {
+		if token == "" {
+			return nil
+		}
+		return commerce.CompleteProductMutation(ctx, token)
+	}
+	if ctx.Err() != nil {
+		if err := complete(); err != nil {
+			return err
+		}
+		return ctx.Err()
+	}
+	var beforeWriteFailure, headersWritten atomic.Bool
+	trace := &httptrace.ClientTrace{ConnectDone: func(_, _ string, e error) {
+		if e != nil {
+			beforeWriteFailure.Store(true)
+		}
+	}, TLSHandshakeDone: func(_ tls.ConnectionState, e error) {
+		if e != nil {
+			beforeWriteFailure.Store(true)
+		}
+	}, WroteHeaders: func() { headersWritten.Store(true) }}
+	request = request.WithContext(httptrace.WithClientTrace(ctx, trace))
 	response, err := c.http.Do(request)
 	if err != nil {
+		if beforeWriteFailure.Load() && !headersWritten.Load() {
+			if releaseErr := complete(); releaseErr != nil {
+				return releaseErr
+			}
+		}
 		return classifyTransport(ctx, err)
 	}
 	defer response.Body.Close()
@@ -135,6 +177,13 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 		return commerce.TemporaryError("shopify response exceeds body limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		// These explicit refusal statuses establish no mutation was authorized.
+		switch response.StatusCode {
+		case 400, 401, 403, 404, 409, 422, 429:
+			if err := complete(); err != nil {
+				return err
+			}
+		}
 		return c.classifyStatus(response.StatusCode, response.Header.Get("Retry-After"), raw)
 	}
 	if response.Header.Get("X-Shopify-API-Version") != c.version {
@@ -146,7 +195,18 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	if err := decoder.Decode(&envelope); err != nil {
 		return commerce.TemporaryError("shopify malformed success response")
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return commerce.TemporaryError("shopify malformed success response")
+	}
 	if len(envelope.Errors) > 0 {
+		for _, e := range envelope.Errors {
+			if e.Message == "" {
+				return commerce.TemporaryError("shopify incomplete error response")
+			}
+		}
+		if err := complete(); err != nil {
+			return err
+		}
 		return c.classifyGraphQLErrors(envelope)
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
@@ -155,6 +215,14 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	if out != nil {
 		if err := json.Unmarshal(envelope.Data, out); err != nil {
 			return commerce.TemporaryError("shopify malformed success response")
+		}
+	}
+	if mutation {
+		if !mutationOutcomeComplete(document, envelope.Data) {
+			return commerce.TemporaryError("shopify incomplete mutation outcome")
+		}
+		if err := complete(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -174,7 +242,7 @@ func (c *Client) classifyGraphQLErrors(envelope gqlEnvelope) error {
 		return commerce.AuthenticationError(message)
 	default:
 		// HTTP 200 with an error body is not a validated success; retry
-		// with the same idempotent operation key is always safe.
+		// only definitive remote error evidence releases the durable barrier.
 		return commerce.TemporaryError(message)
 	}
 }
@@ -248,7 +316,8 @@ func graphQLErrorMessage(raw []byte) string {
 
 // classifyTransport maps transport failures. Caller cancellation is
 // preserved; refused redirects (no-follow policy), timeouts, and network
-// failures are temporary: the same operation key retries safely.
+// failures retain their error classification; uncertain mutations remain
+// durably blocked independently of that retryability classification.
 func classifyTransport(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()

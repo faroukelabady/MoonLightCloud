@@ -381,15 +381,19 @@ func projectionCmd(args []string) error {
 // the bounded safe result.
 func commerceCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order ...")
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order|product-sync-status|resolve-product-sync ...")
 	}
 	switch args[0] {
+	case "product-sync-status":
+		return commerceMutationBarrierCmd(args[1:], stdout, stderr, false)
+	case "resolve-product-sync":
+		return commerceMutationBarrierCmd(args[1:], stdout, stderr, true)
 	case "sync-product":
 		return commerceSyncProductCmd(args[1:], stdout, stderr)
 	case "sync-order":
 		return commerceSyncOrderCmd(args[1:], stdout, stderr)
 	default:
-		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order ...")
+		return fmt.Errorf("usage: moonlight-cloud commerce sync-product|sync-order|product-sync-status|resolve-product-sync ...")
 	}
 }
 
@@ -455,6 +459,7 @@ func runCommerceSyncOrder(ctx context.Context, orderService *orders.OrderService
 // commerceEnv holds one CLI invocation's database pool and wired
 // commerce services. The pool stays open until close runs.
 type commerceEnv struct {
+	store          postgres.Devices
 	pool           interface{ Close() }
 	productService *commerce.CommerceService
 	registry       *commerce.Registry
@@ -488,6 +493,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	return &commerceEnv{
 		pool:           pool,
+		store:          store,
 		productService: newCommerceService(store, registry, logger),
 		registry:       registry,
 		orderService:   orders.NewOrderService(registry, store, logger),

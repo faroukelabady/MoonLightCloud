@@ -39,3 +39,13 @@ podman exec moonlightcloud-postgres-1 pg_dump -U moonlight moonlight_dev > /tmp/
 The Compose volume mounts the image-recommended parent path
 (`/var/lib/postgresql`); the postgres:18 image keeps versioned PGDATA
 below it. Never mount `.../data` directly.
+
+## Commerce mutation barriers (schema 27)
+
+`commerce_product_mutation_barriers` stores durable uncertain Shopify request
+evidence and confirmed operator-resolution history. Include it in database
+backups and restores. It is operational state, not a rebuildable projection.
+Do not purge, reset, or restore it independently of the associated commerce
+state: erasing an active barrier can authorize a newer write while an older
+remote request is still pending. Successful acknowledged requests remove their
+active row; resolved uncertainty retains audit history. No retention job is added.

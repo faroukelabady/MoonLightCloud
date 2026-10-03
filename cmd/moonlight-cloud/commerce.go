@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"log/slog"
 
@@ -75,5 +77,70 @@ func runCommerceSync(ctx context.Context, service *commerce.CommerceService, out
 		result.ProviderKey, productID, result.Outcome, result.ExternalProductID,
 		result.MappingCreated, result.InventoryUpdated,
 		result.ProductOperationKey, result.InventoryOperationKey)
+	return nil
+}
+
+// This is an explicit local operator action, never an automatic retry path.
+// Current remote state or elapsed time is not evidence of request settlement.
+func commerceMutationBarrierCmd(args []string, stdout, stderr io.Writer, resolve bool) error {
+	name := "commerce product-sync-status"
+	if resolve {
+		name = "commerce resolve-product-sync"
+	}
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	provider := fs.String("provider", "", "provider key")
+	product := fs.String("product", "", "MoonLight product UUID")
+	var operation, resolution *string
+	var confirmed *bool
+	if resolve {
+		operation = fs.String("operation", "", "exact blocked operation UUID")
+		resolution = fs.String("resolution", "", "remote_completed or remote_not_applied")
+		confirmed = fs.Bool("confirm-remote-settled", false, "operator independently verified this remote request has finished or was never applied; current state or elapsed time is insufficient")
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments")
+	}
+	key, err := commerce.ValidateProviderKey(*provider)
+	if err != nil {
+		return fmt.Errorf("invalid provider key")
+	}
+	productUUID, err := uuid.Parse(*product)
+	if err != nil {
+		return fmt.Errorf("product_id must be a UUID")
+	}
+	if resolve {
+		if _, err := uuid.Parse(*operation); err != nil {
+			return fmt.Errorf("operation_id must be a UUID")
+		}
+		if !*confirmed || (*resolution != "remote_completed" && *resolution != "remote_not_applied") {
+			return fmt.Errorf("explicit remote settlement confirmation required")
+		}
+	}
+	env, err := openCommerceEnv(stderr)
+	if err != nil {
+		return err
+	}
+	defer env.close()
+	ctx := context.Background()
+	if resolve {
+		if err := env.store.ResolveProductMutationBarrier(ctx, key, productUUID.String(), *operation, *resolution, *confirmed); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "provider=%s product=%s operation=%s resolution=%s recorded; run sync-product explicitly to re-read canonical desired state\n", key, productUUID.String(), *operation, *resolution)
+		return nil
+	}
+	status, err := env.store.GetProductMutationBarrier(ctx, key, productUUID.String())
+	if err != nil {
+		return err
+	}
+	if status.OperationID == "" {
+		fmt.Fprintf(stdout, "provider=%s product=%s barrier=none\n", key, productUUID.String())
+		return nil
+	}
+	fmt.Fprintf(stdout, "provider=%s product=%s operation=%s state=%s code=COMMERCE_MUTATION_UNCERTAIN\n", key, productUUID.String(), status.OperationID, status.State)
 	return nil
 }

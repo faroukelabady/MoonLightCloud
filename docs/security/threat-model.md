@@ -43,3 +43,21 @@ is solved for features that do not exist yet.
 
 Dashboard users, customer accounts, payments, commerce data, business
 projections — no code, no mitigations claimed.
+
+## Phase 11 R1 — Shopify mutation uncertainty
+
+The Phase 1B scope above remains historical. Shopify product synchronization
+adds these controls; see [ADR 0044](../decisions/0044-shopify-commerce-adapter.md)
+and the [operator procedure](../operations/shopify.md).
+
+| Threat | Mitigation and limitation |
+|---|---|
+| Cancelled or crashed writer applies remotely after newer intent | Commit an exact-operation barrier before every mutation; active uncertainty blocks all same-provider/Product synchronization across instances and restarts |
+| Incomplete response or failed local completion write permits resend | Retain the barrier; neither elapsed time nor a current Product read clears it |
+| Late worker or stale operator releases newer work | Completion and resolution bind the operation, provider and canonical Product UUID; operator resolution takes the same sequence lock; replay cannot release another operation |
+| Operator incorrectly asserts remote settlement | Resolution requires an explicit closed outcome and confirmation through the privileged local CLI, with durable audit history. This is trusted operator evidence, not an automated provider-status proof; if settlement cannot be established, keep the Product blocked |
+| Upgrade or restore discards uncertainty | Quiesce old mutation writers before cutover; back up barriers with commerce state; downgrade refuses retained barrier/history. Mixed-version product mutation writers are unsupported |
+
+Barrier records contain identifiers, a request fingerprint and bounded state,
+never credentials or raw request bodies. The design deliberately trades
+automatic recovery availability for prevention of uncertain mutation replay.

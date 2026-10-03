@@ -222,5 +222,13 @@ func TestHTTPStatusClassification(t *testing.T) {
 type fixtureCoordinator struct{}
 
 func (fixtureCoordinator) WithProductSync(ctx context.Context, key commerce.ProviderKey, product string, work func(context.Context) error) error {
-	return work(commerce.CoordinatedProductContext(ctx, key, product))
+	return work(commerce.WithProductMutationBarrier(commerce.CoordinatedProductContext(ctx, key, product), fixtureMutationBarrier{}))
 }
+
+// Wire-only fixtures do not claim durable uncertainty proof.
+type fixtureMutationBarrier struct{}
+
+func (fixtureMutationBarrier) Begin(context.Context, string) (string, error) {
+	return "fixture-token", nil
+}
+func (fixtureMutationBarrier) Complete(context.Context, string) error { return nil }
