@@ -83,6 +83,9 @@ type shopifyHarness struct {
 	redirectTo string // one-shot: next request is answered 302 here
 	// concurrent hook fires before applying inventorySetQuantities
 	beforeInventorySet func(h *shopifyHarness)
+	// beforeOp fires before applying any operation (tests simulate a
+	// concurrent operation completing mid-flight by mutating state here).
+	beforeOp func(operation string, h *shopifyHarness)
 }
 
 func newHarness(t *testing.T) *shopifyHarness {
@@ -203,6 +206,11 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload map[string]any
+	// beforeOp fires before applying any operation; the test closure is
+	// responsible for one-shot behaviour (it sees every operation name).
+	if h.beforeOp != nil {
+		h.beforeOp(operation, h)
+	}
 	switch {
 	case strings.Contains(body.Query, "MoonlightShopCurrency"):
 		payload = map[string]any{"data": map[string]any{"shop": map[string]any{"currencyCode": h.shopCurrency}}}

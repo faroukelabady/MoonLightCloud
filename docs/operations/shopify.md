@@ -154,15 +154,41 @@ set `DRAFT` (that would silently unpublish unrelated channels).
   failure is always "unavailable", never oversold.
 - New products are created at quantity 0; inactive / not-ready /
   zero-allocation states always write 0.
-- Compare-and-set: zero writes are unconditional (always safe);
-  positive writes are conditional on the remote still holding this
-  operation's safe-zero (`changeFromQuantity`). An older positive
-  operation can never silently overwrite a proven newer quantity; the
-  write fails and a retry reconverges to fresh desired state.
+- Compare-and-set: zero writes are CAS against the observed quantity
+  (always detect drift); positive writes are conditional on the remote
+  still holding this operation's safe-zero (`changeFromQuantity`). An
+  older positive operation can never silently overwrite a proven newer
+  quantity; the write fails and a retry reconverges to fresh desired
+  state.
 - Idempotency: every activation/quantity mutation carries a
   deterministic Shopify idempotency key derived from the frozen MoonLight
   operation identity. Same desired state → same key (replayed as one
   remote write); changed desired state → new key.
+
+## Concurrent synchronization (per-product freshness fence)
+
+Concurrent `commerce sync-product` runs for the same product are
+ordered by a remote freshness fence in the `moonlight` ownership
+metafields (`catalog_revision`, `policy_revision`,
+`product_operation_key`). Behavior:
+
+- an operation older than the remote fence **fails retryably before any
+  write** ("shopify product superseded by a newer operation") — it never
+  regresses newer price/title/description/publication/revision metadata
+  or inventory;
+- the fence is re-compared before **every** child write; inventory
+  writes are additionally CAS-guarded;
+- success is only reported after post-write fence verification, so
+  **success implies currency**; a failure is the reconvergence trigger —
+  re-run the sync (the CLI reports the failure as retryable) and it
+  re-reads fresh desired state.
+
+Bounded residual: for two operations that start against the same remote
+state and interleave within a single fence-check→write round-trip, one
+child write can slip before the loser detects the race and fails
+retryably; its retry repairs the state. Hard cross-process linearizability
+would require a durable per-product generation column (schema change,
+not part of Phase 11).
 
 ## Order ingestion
 

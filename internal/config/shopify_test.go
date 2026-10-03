@@ -106,6 +106,12 @@ func TestShopifyConfigMatrix(t *testing.T) {
 	invalid["malformed api version"] = clone(func(e map[string]string) {
 		e["COMMERCE_SHOPIFY_API_VERSION"] = "2026-10-01"
 	})
+	invalid["version month out of range"] = clone(func(e map[string]string) {
+		e["COMMERCE_SHOPIFY_API_VERSION"] = "2026-13"
+	})
+	invalid["domain too long"] = clone(func(e map[string]string) {
+		e["COMMERCE_SHOPIFY_SHOP_DOMAIN"] = strings.Repeat("a", 60) + "." + strings.Repeat("b", 60) + "." + strings.Repeat("c", 60) + "." + strings.Repeat("d", 60) + ".myshopify.com"
+	})
 	invalid["missing location"] = clone(func(e map[string]string) {
 		e["COMMERCE_SHOPIFY_LOCATION_ID"] = ""
 	})

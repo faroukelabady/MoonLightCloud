@@ -120,6 +120,21 @@ func TestInventoryIdempotencyKeyDerivation(t *testing.T) {
 	if err := provider.SetInventory(context.Background(), reqA); err != nil {
 		t.Fatal(err)
 	}
+	// Already-converged desired state performs no write at all.
+	if err := provider.SetInventory(context.Background(), reqA); err != nil {
+		t.Fatal(err)
+	}
+	if keys := h.keysFor("set"); len(keys) != 1 {
+		t.Fatalf("already-converged state wrote again: %v", keys)
+	}
+	// The same operation identity always derives the same idempotency
+	// key: re-establishing the same desired state replays one key.
+	update := upsertRequest("prod-1", "PAP-001", true)
+	update.ExistingExternal = &commerce.ProviderProductRef{ExternalProductID: created.ExternalProductID}
+	update.OperationKey = "opkey-same-state"
+	if _, err := provider.UpsertProduct(context.Background(), update); err != nil {
+		t.Fatal(err)
+	}
 	if err := provider.SetInventory(context.Background(), reqA); err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +142,13 @@ func TestInventoryIdempotencyKeyDerivation(t *testing.T) {
 	if len(keys) < 2 {
 		t.Fatalf("set calls = %d", len(keys))
 	}
-	if keys[len(keys)-1] != keys[len(keys)-2] {
+	if keys[len(keys)-1] != keys[0] {
 		t.Fatalf("same operation key produced different idempotency keys: %v", keys)
 	}
 	reqB := inventoryRequest(created.ExternalProductID, "prod-1", 6, true)
 	reqB.OperationKey = "inv-changed-state"
 	// Frozen flow: UpsertProduct safe-zeros before the restore write.
-	update := upsertRequest("prod-1", "PAP-001", true)
+	update = upsertRequest("prod-1", "PAP-001", true)
 	update.ExistingExternal = &commerce.ProviderProductRef{ExternalProductID: created.ExternalProductID}
 	update.OperationKey = "opkey-changed-state"
 	if _, err := provider.UpsertProduct(context.Background(), update); err != nil {

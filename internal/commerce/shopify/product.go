@@ -3,11 +3,15 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 )
+
+// searchSafeSKU matches SKUs that cannot alter Shopify search syntax.
+var searchSafeSKU = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // UpsertProduct converges one Shopify product to the desired MoonLight
 // state (Phase 11):
@@ -88,6 +92,22 @@ func (p *ShopifyProvider) updateMapped(ctx context.Context, req commerce.Product
 
 // convergeExisting runs the mapped convergence against an already-loaded
 // owned product (shared by update and recovery paths).
+//
+// Ordering guarantees (freeze-review F2 remediation): the remote
+// ownership metafields carry a per-product freshness fence
+// (catalog/policy revisions + deterministic operation key). The fence is
+// re-read and compared immediately before EVERY child write — a stale
+// operation aborts retryably at the first write it attempts after a
+// newer operation stamped the remote product. Inventory writes are
+// additionally CAS-guarded. Post-write verification then confirms no
+// newer operation superseded us, so success implies currency and the
+// caller's retry re-reads fresh desired state (durable reconvergence).
+//
+// The documented residual: Shopify exposes no conditional product
+// mutation, so a single child write can interleave inside the fence
+// check→write round-trip of a same-instant concurrent pair; the loser
+// still fails retryably at the next stage (at most one write slips), and
+// its retry reconverges to fresh desired state.
 func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.ProductUpsertRequest, desired desiredContent, product *gqlProduct, externalID string, verifyOwnership bool) (commerce.ProductUpsertResult, error) {
 	productGID := FormatGID(ResourceProduct, externalID)
 	if product.ID != "" {
@@ -103,13 +123,32 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 		return commerce.ProductUpsertResult{}, commerce.ConflictError(
 			"shopify product owned by another product or provider")
 	}
+	fence, err := fenceFrom(values)
+	if err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
+	// Stale-start fence: remote revisions newer than this operation's
+	// desired revisions prove a newer operation already converged. Abort
+	// retryably BEFORE any remote write (including safe-zero): a stale
+	// full sequence can never overwrite proven-newer state.
+	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) {
+		return commerce.ProductUpsertResult{}, errSuperseded()
+	}
 	variant, err := managedVariant(product, desired.sku, values[metafieldManagedVariantID])
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
+	variantID, err := parseVariantGID(variant.ID)
+	if err != nil {
+		return commerce.ProductUpsertResult{}, commerce.ConflictError("shopify managed variant identity malformed")
+	}
 
-	// Safe-zero FIRST: metadata/publication failures below can never
-	// leave stale positive provider stock.
+	// Safe-zero FIRST (CAS-guarded): metadata/publication failures below
+	// can never leave stale positive provider stock, and a stale zero can
+	// never blind-zero a drifted quantity.
+	if err := p.checkFence(ctx, productGID, req); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	if err := p.setManagedQuantity(ctx, variant, 0, idempotencyKey("safe-zero", req.OperationKey)); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
@@ -126,17 +165,29 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 		// impact is documented in docs/operations/shopify.md.
 		updateInput["status"] = "ACTIVE"
 	}
+	if err := p.checkFence(ctx, productGID, req); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	if err := p.productUpdate(ctx, updateInput); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	variantID, err := parseVariantGID(variant.ID)
-	if err != nil {
-		return commerce.ProductUpsertResult{}, commerce.ConflictError("shopify managed variant identity malformed")
+	if err := p.checkFence(ctx, productGID, req); err != nil {
+		return commerce.ProductUpsertResult{}, err
 	}
 	if err := p.updateManagedVariant(ctx, productGID, variant.ID, desired.sku, desired.price); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
+	// The ownership fence stamp is a child write like any other: compared
+	// immediately before writing so it can never lower a newer fence
+	// without the caller learning it raced (the post-write verify then
+	// fails retryably).
+	if err := p.checkFence(ctx, productGID, req); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	if err := p.setOwnership(ctx, productGID, ownershipMetafields(productGID, req, variantID)); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
+	if err := p.checkFence(ctx, productGID, req); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
 
@@ -145,7 +196,55 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if err := p.setPublication(ctx, productGID, req.Published); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
+	// Post-write supersession verification: success implies currency. If
+	// a newer operation wrote the fence after us, our writes are already
+	// stale — fail retryably so the caller re-reads fresh desired state
+	// and reconverges instead of reporting success over regressed state.
+	if err := p.verifyFence(ctx, productGID, req); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	return commerce.ProductUpsertResult{ExternalProductID: externalID}, nil
+}
+
+// checkFence re-reads the remote ownership fence immediately before one
+// child write and fails retryably when a newer operation owns the remote
+// product.
+func (p *ShopifyProvider) checkFence(ctx context.Context, productGID string, req commerce.ProductUpsertRequest) error {
+	fence, err := p.loadFence(ctx, productGID)
+	if err != nil {
+		return err
+	}
+	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) {
+		return errSuperseded()
+	}
+	return nil
+}
+
+// verifyFence re-reads the remote ownership fence and fails retryably
+// when a different (newer) operation owns the remote product.
+func (p *ShopifyProvider) verifyFence(ctx context.Context, productGID string, req commerce.ProductUpsertRequest) error {
+	fence, err := p.loadFence(ctx, productGID)
+	if err != nil {
+		return err
+	}
+	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) ||
+		fence.supersededBy(req.OperationKey) {
+		return errSuperseded()
+	}
+	return nil
+}
+
+// loadFence reads only the ownership metafields: the lightweight
+// freshness-fence probe used before every child write.
+func (p *ShopifyProvider) loadFence(ctx context.Context, productGID string) (remoteFence, error) {
+	var out productQueryResponse
+	if err := p.client.do(ctx, docProductQuery, map[string]any{"id": productGID}, &out); err != nil {
+		return remoteFence{}, err
+	}
+	if out.Product == nil {
+		return remoteFence{}, commerce.ConflictError("shopify product no longer exists")
+	}
+	return fenceFrom(ownership(out.Product.Metafields.Nodes))
 }
 
 // createWithRecovery runs exact-SKU preflight: empty → create; exactly
@@ -289,11 +388,14 @@ func (p *ShopifyProvider) loadProduct(ctx context.Context, productGID string) (*
 }
 
 // lookupBySKU searches variants by SKU and filters by exact equality:
-// search syntax is never trusted as exact identity. Bounded to the
-// first page.
+// search syntax is never trusted as exact identity. The search term is
+// escaped so exotic SKUs cannot alter the search expression (a broken
+// expression could hide the true match during recovery), and the page is
+// bounded but generous enough that a match is unlikely to be paged out.
 func (p *ShopifyProvider) lookupBySKU(ctx context.Context, sku string) ([]gqlVariantWithProduct, error) {
 	var out variantsBySKUResponse
-	if err := p.client.do(ctx, docVariantsBySKU, map[string]any{"query": "sku:" + sku}, &out); err != nil {
+	query := "sku:" + quoteSearchTerm(sku)
+	if err := p.client.do(ctx, docVariantsBySKU, map[string]any{"query": query}, &out); err != nil {
 		return nil, err
 	}
 	exact := make([]gqlVariantWithProduct, 0, len(out.ProductVariants.Nodes))
@@ -303,6 +405,17 @@ func (p *ShopifyProvider) lookupBySKU(ctx context.Context, sku string) ([]gqlVar
 		}
 	}
 	return exact, nil
+}
+
+// quoteSearchTerm renders one SKU for Shopify search syntax. Values
+// outside a conservative unquoted charset are double-quoted with
+// backslash-escaping so they cannot introduce search operators.
+func quoteSearchTerm(sku string) string {
+	if searchSafeSKU.MatchString(sku) {
+		return sku
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(sku)
+	return `"` + escaped + `"`
 }
 
 // productUpdate applies targeted product field updates. Omitted fields

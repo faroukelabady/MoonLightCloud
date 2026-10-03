@@ -18,14 +18,14 @@ import (
 // location is ever mutated: on-hand, committed, reserved, incoming, and
 // other locations are untouched.
 //
-// Compare-and-set policy (Phase 11 §72):
-//   - zero writes are unconditional (changeFromQuantity null): zero is
-//     always safe to write and can never oversell;
-//   - positive writes are conditional on the remote still holding the
-//     safe-zero this logical operation established
-//     (changeFromQuantity 0). An older positive operation can therefore
-//     never silently overwrite a proven newer quantity: the write fails
-//     and a retry reconverges to fresh desired state.
+// Ordering/compare policy (Phase 11 F2 remediation):
+//   - the remote ownership fence (catalog/policy revisions) is checked
+//     first: a stale operation aborts retryably before any write;
+//   - zero writes CAS from the observed quantity (a stale zero can never
+//     blind-zero a drifted or newer positive quantity);
+//   - positive writes CAS from the safe-zero this operation establishes
+//     (changeFromQuantity 0): an older positive operation can never
+//     silently overwrite a proven newer quantity.
 //
 // Every mutation carries a deterministic idempotency key derived from
 // the frozen MoonLight operation identity: identical desired state
@@ -60,6 +60,17 @@ func (p *ShopifyProvider) SetInventory(ctx context.Context, req commerce.Invento
 	if !ownershipMatches(values, req.ProductID, req.ProviderKey) {
 		return commerce.ConflictError("shopify product owned by another product or provider")
 	}
+	fence, err := fenceFrom(values)
+	if err != nil {
+		return err
+	}
+	// Stale-start fence: a newer operation's revisions are already
+	// stamped on the remote product. Never write stale availability over
+	// proven-newer state — the caller retries and re-reads fresh desired
+	// state.
+	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) {
+		return errSuperseded()
+	}
 	variant, err := recordedVariant(product, values[metafieldManagedVariantID])
 	if err != nil {
 		return err
@@ -91,15 +102,19 @@ func recordedVariant(product *gqlProduct, recordedVariantID string) (gqlVariant,
 	return gqlVariant{}, commerce.ConflictError("shopify managed variant not found on mapped product")
 }
 
-// setManagedQuantity converges managed availability for one variant:
-// activation at the configured location first (initial available 0),
-// then the absolute quantity write.
+// setManagedQuantity converges managed availability for one variant.
+// Every write is compare-and-set against the quantity observed in this
+// call's own read, so drift between read and write is always detected:
 //
-// changeFrom semantics are decided here: zero is written unconditionally,
-// positive writes require the remote to still hold 0 (the safe-zero this
-// logical operation established).
+//   - zero writes CAS from the observed quantity: a stale zero can never
+//     blind-zero a drifted or newer positive quantity;
+//   - positive writes CAS from 0 — the safe-zero this operation
+//     establishes. If the level is not at our safe-zero (standalone
+//     SetInventory, or external interference), one bounded safe-zero
+//     re-establishes the precondition first: the caller is known
+//     non-stale from the freshness fence, so zeroing is safe.
 func (p *ShopifyProvider) setManagedQuantity(ctx context.Context, variant gqlVariant, quantity int64, baseKey string) error {
-	itemID, active, err := p.inventoryState(variant)
+	itemID, active, observed, err := p.inventoryState(variant)
 	if err != nil {
 		return err
 	}
@@ -107,28 +122,40 @@ func (p *ShopifyProvider) setManagedQuantity(ctx context.Context, variant gqlVar
 		if err := p.activateInventory(ctx, itemID, baseKey+"-activate"); err != nil {
 			return err
 		}
+		observed = 0
 	}
-	var changeFrom *int64
 	if quantity > 0 {
+		if observed == quantity {
+			return nil // already converged
+		}
+		if observed != 0 {
+			// Re-establish this operation's safe-zero precondition.
+			from := observed
+			if err := p.setAvailable(ctx, itemID, 0, &from, baseKey+"-zero"); err != nil {
+				return err
+			}
+			observed = 0
+		}
 		zero := int64(0)
-		changeFrom = &zero
+		return p.setAvailable(ctx, itemID, quantity, &zero, baseKey+"-set")
 	}
-	return p.setAvailable(ctx, itemID, quantity, changeFrom, baseKey+"-set")
+	from := observed
+	return p.setAvailable(ctx, itemID, 0, &from, baseKey+"-set")
 }
 
-// inventoryState resolves the managed inventory item id and whether it
-// is active at the configured location. Malformed or untracked items
-// fail closed.
-func (p *ShopifyProvider) inventoryState(variant gqlVariant) (string, bool, error) {
+// inventoryState resolves the managed inventory item id, whether it is
+// active at the configured location, and the currently observed
+// available quantity there. Malformed or untracked items fail closed.
+func (p *ShopifyProvider) inventoryState(variant gqlVariant) (string, bool, int64, error) {
 	if variant.InventoryItem == nil || variant.InventoryItem.ID == "" {
-		return "", false, commerce.ConflictError("shopify managed variant has no inventory item")
+		return "", false, 0, commerce.ConflictError("shopify managed variant has no inventory item")
 	}
 	itemID, err := ParseGID(variant.InventoryItem.ID, ResourceInventoryItem)
 	if err != nil {
-		return "", false, commerce.ConflictError("shopify inventory item identity malformed")
+		return "", false, 0, commerce.ConflictError("shopify inventory item identity malformed")
 	}
 	if !variant.InventoryItem.Tracked {
-		return "", false, commerce.ConflictError("shopify managed inventory item is not tracked")
+		return "", false, 0, commerce.ConflictError("shopify managed inventory item is not tracked")
 	}
 	for _, level := range variant.InventoryItem.Levels.Nodes {
 		locationID, err := ParseGID(level.Location.ID, ResourceLocation)
@@ -136,10 +163,16 @@ func (p *ShopifyProvider) inventoryState(variant gqlVariant) (string, bool, erro
 			continue
 		}
 		if strings.EqualFold(locationID, mustLocationID(p.locationGID)) {
-			return itemID, true, nil
+			observed := int64(0)
+			for _, quantity := range level.Quantities {
+				if quantity.Name == "available" {
+					observed = quantity.Quantity
+				}
+			}
+			return itemID, true, observed, nil
 		}
 	}
-	return itemID, false, nil
+	return itemID, false, 0, nil
 }
 
 // mustLocationID returns the canonical decimal of the configured

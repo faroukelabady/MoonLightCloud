@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -111,6 +112,9 @@ func validateShopDomain(domain string) error {
 	if domain == "" || domain != strings.ToLower(domain) {
 		return errInvalidDomain
 	}
+	if len(domain) > 253 {
+		return errInvalidDomain
+	}
 	for _, r := range domain {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '.':
@@ -154,6 +158,10 @@ func validateAPIVersion(version string) error {
 	if version[:4] < "2024" {
 		return errInvalidVersion
 	}
+	month := version[5:7]
+	if month < "01" || month > "12" {
+		return errInvalidVersion
+	}
 	return nil
 }
 
@@ -164,6 +172,77 @@ func (p *ShopifyProvider) Key() commerce.ProviderKey { return p.key }
 // endpoint returns the constructed Admin GraphQL endpoint (diagnostics
 // only; never carries credentials).
 func (p *ShopifyProvider) endpoint() string { return p.client.endpoint }
+
+// remoteFence is the durable ordering state carried in the moonlight
+// ownership metafields. It gives concurrent SyncProduct operations a
+// per-product freshness fence without any new durable table: the remote
+// product itself records the catalog/policy revisions of the last
+// converged operation plus its deterministic operation key.
+//
+// Guarantees (Phase 11 remediation of the freeze-review F2 finding):
+//   - a stale operation (remote revisions newer than its own) aborts
+//     retryably BEFORE any remote write;
+//   - writes are CAS-guarded where Shopify supports it (inventory);
+//   - after writing, the operation verifies the fence still names its
+//     own operation key; supersession yields a retryable failure, so
+//     success always implies currency and the caller's retry re-reads
+//     fresh desired state.
+type remoteFence struct {
+	catalogRevision int64
+	policyRevision  int64
+	operationKey    string
+}
+
+// fenceFrom parses the fence from ownership metafield values. Missing
+// revision keys mean no fence (legacy/foreign-created state): the
+// operation proceeds and stamps its own fence.
+func fenceFrom(values map[string]string) (remoteFence, error) {
+	fence := remoteFence{operationKey: values[metafieldProductOperation]}
+	catalog, err := parseRevision(values[metafieldCatalogRevision])
+	if err != nil {
+		return remoteFence{}, err
+	}
+	policy, err := parseRevision(values[metafieldPolicyRevision])
+	if err != nil {
+		return remoteFence{}, err
+	}
+	fence.catalogRevision = catalog
+	fence.policyRevision = policy
+	return fence, nil
+}
+
+// parseRevision parses one fence revision; empty means "no fence" (0).
+func parseRevision(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, commerce.ConflictError("shopify ownership revision metadata is malformed")
+	}
+	return parsed, nil
+}
+
+// supersedes reports whether the remote fence proves a newer desired
+// state than the caller's revisions: the caller is stale.
+func (f remoteFence) supersedes(catalogRevision, policyRevision int64) bool {
+	return f.catalogRevision > catalogRevision || f.policyRevision > policyRevision
+}
+
+// supersededBy reports whether the fence names a different completed
+// operation than ours. Operation keys are deterministic in the desired
+// state, so a different key always means a genuinely different (newer)
+// operation wrote after us.
+func (f remoteFence) supersededBy(operationKey string) bool {
+	return f.operationKey != "" && f.operationKey != operationKey
+}
+
+// errSuperseded is the retryable failure returned when a newer operation
+// owns the remote product. The caller's retry re-reads fresh desired
+// state and reconverges; no stale write ever completes with success.
+func errSuperseded() error {
+	return commerce.TemporaryError("shopify product superseded by a newer operation")
+}
 
 // ensureShopCurrency verifies the shop's currency against the
 // configured provider currency exactly once per process, lazily before

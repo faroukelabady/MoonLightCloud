@@ -109,10 +109,16 @@ func (c ShopifyConfig) validate() error {
 	if !shopDomainPattern.MatchString(c.ShopDomain) {
 		return fmt.Errorf("invalid COMMERCE_SHOPIFY_SHOP_DOMAIN: expected a canonical <shop>.myshopify.com domain")
 	}
+	if len(c.ShopDomain) > 253 {
+		return fmt.Errorf("invalid COMMERCE_SHOPIFY_SHOP_DOMAIN: expected a canonical <shop>.myshopify.com domain")
+	}
 	if !shopifyAPIVersionPattern.MatchString(c.APIVersion) {
 		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: expected YYYY-MM (pin a supported stable version)")
 	}
 	if major, err := strconv.Atoi(c.APIVersion[:4]); err != nil || major < 2024 {
+		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: unsupported version handle")
+	}
+	if month, err := strconv.Atoi(c.APIVersion[5:7]); err != nil || month < 1 || month > 12 {
 		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: unsupported version handle")
 	}
 	if c.AccessToken == "" {

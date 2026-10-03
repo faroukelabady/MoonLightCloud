@@ -72,6 +72,8 @@ func boundField(field string, limit int) string {
 	return truncateASCII(field, limit)
 }
 
+// truncateASCII strips control characters and truncates on a rune
+// boundary: multi-byte UTF-8 is never split mid-character.
 func truncateASCII(value string, limit int) string {
 	value = strings.Map(func(r rune) rune {
 		if r < 32 || r == 127 {
@@ -80,8 +82,9 @@ func truncateASCII(value string, limit int) string {
 		return r
 	}, value)
 	value = strings.TrimSpace(value)
-	if len(value) > limit {
-		value = value[:limit]
+	runes := []rune(value)
+	if len(runes) > limit {
+		value = string(runes[:limit])
 	}
 	return value
 }

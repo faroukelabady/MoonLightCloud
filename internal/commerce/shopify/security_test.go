@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // Phase 11 §16/§17/§201: a hostile Shopify error reflecting the
@@ -78,4 +79,22 @@ func jsonString(value string) string {
 		panic(err)
 	}
 	return string(encoded)
+}
+
+// Phase 11 NOTE-4: remote text truncation never splits multi-byte UTF-8
+// runes — operator-visible errors stay valid UTF-8 at any limit.
+func TestTruncationIsRuneSafe(t *testing.T) {
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	// 190 ASCII filler puts the multibyte run exactly across the 200-rune
+	// message boundary.
+	message := strings.Repeat("x", 190) + strings.Repeat("ص", 40)
+	h.setFailure("MoonlightProduct", 500, `{"errors":[{"message":`+jsonString(message)+`}]}`)
+	_, err := provider.loadProduct(context.Background(), "gid://shopify/Product/1")
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if !utf8.ValidString(err.Error()) {
+		t.Fatalf("truncation split a multi-byte rune: %q", err.Error())
+	}
 }

@@ -234,3 +234,88 @@ func TestGetOrderLineWithDeletedProductStaysUnresolved(t *testing.T) {
 		t.Fatalf("deleted product resolved to %q", snapshot.Lines[0].ExternalProductID)
 	}
 }
+
+// Phase 11 F-02: the legacy resource id (when present) must agree with
+// the GID suffix — the two are documented to name the same number, so
+// disagreement is a contradiction and fails closed.
+func TestGetOrderLegacyIDMismatchConflicts(t *testing.T) {
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	raw := sampleOrder()
+	raw["legacyResourceId"] = "9999999999998"
+	h.preloadOrder("5231234567890", raw)
+	_, err := provider.GetOrder(context.Background(), "5231234567890")
+	code, blocked := orders.IsBlocked(err)
+	if !blocked || code != orders.CodeOrderConflict {
+		t.Fatalf("want ORDER_CONFLICT, got %v", err)
+	}
+}
+
+// Phase 11 F-04: one internally consistent money set — a bag naming a
+// currency other than the order currency is refused (shop-money side
+// only; mixing cannot sneak in through a bag).
+func TestOrderMoneyBagCurrencyGuard(t *testing.T) {
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	raw := sampleOrder()
+	total := raw["totalPriceSet"].(map[string]any)
+	total["shopMoney"].(map[string]any)["currencyCode"] = "USD"
+	h.preloadOrder("5231234567890", raw)
+	_, err := provider.GetOrder(context.Background(), "5231234567890")
+	code, blocked := orders.IsBlocked(err)
+	if !blocked || code != orders.CodeOrderInvalid {
+		t.Fatalf("want ORDER_INVALID, got %v", err)
+	}
+}
+
+// Phase 11 NOTE-5: orders/cancelled reconciles through the update path
+// into the canonical cancelled state (cancellation is state, not
+// deletion; no Retail Return is ever fabricated).
+func TestCancelledOrderReconcilesThroughUpdatePath(t *testing.T) {
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	raw := sampleOrder()
+	raw["cancelledAt"] = "2026-09-21T09:30:00Z"
+	raw["displayFinancialStatus"] = "VOIDED"
+	h.preloadOrder("5231234567890", raw)
+
+	// The frozen processor routes cancellation to ReconcileOrder (not
+	// deletion) because ParseWebhookTopic maps orders/cancelled to
+	// order.updated — proven in the webhook suite — so reconciliation
+	// must land the canonical cancelled state here.
+	store := &recordingOrderStore{}
+	service := orders.NewOrderService(newRegistryWith(t, provider), store, nil)
+	result, err := service.ReconcileOrder(context.Background(), "shopify-main", "5231234567890")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Canonical != orders.StatusCancelled {
+		t.Fatalf("canonical = %s, want CANCELLED", result.Canonical)
+	}
+	if store.projected == nil || store.projected.Canonical != orders.StatusCancelled {
+		t.Fatalf("projected = %+v", store.projected)
+	}
+	if store.projected.ProviderDeleted {
+		t.Fatal("cancellation must not read as deletion")
+	}
+}
+
+// recordingOrderStore captures one projection for assertions.
+type recordingOrderStore struct {
+	generation orders.ReconcileGeneration
+	projected  *orders.OrderSnapshot
+}
+
+func (s *recordingOrderStore) BeginOrderReconcile(_ context.Context, _, _ string) (orders.ReconcileGeneration, error) {
+	s.generation++
+	return s.generation, nil
+}
+
+func (s *recordingOrderStore) ReconcileProjectedOrder(_ context.Context, snapshot orders.OrderSnapshot, _ [32]byte, _ orders.ReconcileGeneration) (orders.ReconcileOutcome, error) {
+	s.projected = &snapshot
+	return orders.ReconcileOutcome{Revision: 1, Changed: true}, nil
+}
+
+func (s *recordingOrderStore) LoadProjectedOrder(_ context.Context, _, _ string) (orders.OrderSnapshot, int64, bool, error) {
+	return orders.OrderSnapshot{}, 0, false, nil
+}

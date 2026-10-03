@@ -120,13 +120,54 @@ managed variant's `available` quantity at
 (`inventoryActivate` at 0, then `inventorySetQuantities` absolute).
 
 Compare-and-set uses the `2026-04+` `changeFromQuantity` shape:
-**zero writes are unconditional** (always safe), **positive writes are
-conditional on the remote still holding this operation's safe-zero** —
+**zero writes are CAS against the observed quantity** (a stale zero can
+never blind-zero a drifted or newer positive quantity), **positive
+writes are CAS against the safe-zero this operation establishes** —
 an older positive operation can never silently overwrite a proven newer
 quantity. Every inventory mutation carries a deterministic Shopify
 idempotency key (`@idempotent`) derived from the frozen
 `InventoryOperationKey`/`ProductOperationKey`; identical desired state
 replays as one remote write.
+
+### Per-product freshness fence (freeze-review F2 remediation)
+
+Concurrent `SyncProduct` operations for one product are ordered by a
+**remote freshness fence** carried in the `moonlight` ownership
+metafields: `catalog_revision` + `policy_revision` (desired-state
+revisions from the frozen source) and `product_operation_key` (the
+deterministic operation key — equal desired state always derives the
+same key, so a different key always means a genuinely different
+operation). No new durable table is required.
+
+Guarantees:
+
+1. **Stale start rejected**: an operation whose desired revisions are
+   older than the remote fence aborts *retryably* before any remote
+   write (including safe-zero). A stale full sequence running after a
+   newer operation completed writes nothing.
+2. **Per-child-write compare**: the fence is re-read and compared
+   immediately before every child write (safe-zero, content, managed
+   variant, fence stamp, publication). A newer operation landing mid-flow
+   aborts the stale one at its next write.
+3. **CAS-guarded inventory**: zero writes CAS against the observed
+   quantity; positive writes CAS against this operation's safe-zero.
+   Within our own write ordering a visible newer positive quantity
+   always implies a visible newer fence (availability is restored only
+   after the fence stamp), so stale zeros/restores cannot land.
+4. **Success implies currency**: after the writes, the fence is
+   re-verified; supersession (newer revisions or a different operation
+   key) fails retryably. The retry re-reads fresh desired state — the
+   failure is the durable reconvergence trigger.
+
+Residual (documented, bounded): Shopify exposes no conditional product
+mutation in the documented contract (`productUpdate`/
+`productVariantsBulkUpdate`/`metafieldsSet` are unconditional), so for
+two operations that start against the same remote state and interleave
+within one fence check→write round-trip, a single child write can slip
+past the loser's check; the loser still fails retryably at its next
+stage and its retry reconverges. Hard linearizability across processes
+would require a durable per-product generation column (a schema
+decision, deferred) or Shopify-side conditional mutations.
 
 ### Order read-only direction and webhooks
 
@@ -161,10 +202,12 @@ nothing about Shopify.
   publication explicitly; Cloud startup contacts Shopify zero times.
 - The pinned API version needs a deliberate quarterly upgrade runbook
   (`docs/operations/shopify.md`); `latest`/`unstable` are refused.
-- Residual concurrency note: two *concurrent* `SyncProduct` calls for
-  one product can interleave (the frozen orchestration has no per-product
-  fence); compare-and-set guarantees no silent overwrite of proven newer
-  positive quantities, and retries reconverge to fresh desired state.
-  Cross-operation ordering remains an orchestration concern (reported as
-  a Phase 11 finding; possible future hardening: per-product operation
-  fencing in `CommerceService`).
+- Residual concurrency note (freeze-review F2 remediated): concurrent
+  `SyncProduct` operations are ordered by the remote freshness fence
+  (pre-write stale rejection, per-child-write compare, CAS-guarded
+  inventory, post-write supersession verification — see above). The
+  bounded residual is a single child write slipping inside one
+  fence-check→write round-trip for two same-instant starters; the loser
+  fails retryably and its retry reconverges. Hard cross-process
+  linearizability would need a durable per-product generation column
+  (schema decision, deferred).

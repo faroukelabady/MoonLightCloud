@@ -18,8 +18,12 @@ var errInvalidDomain = errors.New("invalid shopify shop domain")
 // errInvalidVersion is the internal failure for unpinned API versions.
 var errInvalidVersion = errors.New("invalid shopify api version")
 
-// bounded strips control characters and truncates remote-controlled
-// text for normalized snapshot fields.
+// errMixedCurrency is the internal failure for a money bag naming a
+// currency other than the order's single currency.
+var errMixedCurrency = errors.New("mixed shopify money currencies")
+
+// bounded strips control characters and truncates remote-controlled text
+// for normalized snapshot fields on a rune boundary.
 func bounded(value string, limit int) string {
 	cleaned := strings.Map(func(r rune) rune {
 		if r < 32 || r == 127 {
@@ -27,8 +31,9 @@ func bounded(value string, limit int) string {
 		}
 		return r
 	}, strings.TrimSpace(value))
-	if len(cleaned) > limit {
-		cleaned = cleaned[:limit]
+	runes := []rune(cleaned)
+	if len(runes) > limit {
+		cleaned = string(runes[:limit])
 	}
 	return cleaned
 }

@@ -36,13 +36,32 @@ func (p *ShopifyProvider) GetOrder(ctx context.Context, externalOrderID string) 
 			Code: orders.CodeOrderNotFound, Message: "shopify order not found"}
 	}
 	// Identity: the response must name the requested order. A different
-	// identity is a conflict, never a silent projection.
+	// identity is a conflict, never a silent projection. The legacy
+	// resource id (when present) must agree with the GID suffix — the two
+	// are documented to name the same number, so disagreement is a
+	// contradiction and fails closed.
 	responseID, err := CanonicalExternalID(out.Order.ID, ResourceOrder)
 	if err != nil || responseID != canonical {
 		return orders.OrderSnapshot{}, &orders.BlockedError{
 			Code: orders.CodeOrderConflict, Message: "order identity mismatch"}
 	}
+	if legacy := strings.TrimSpace(out.Order.LegacyResourceID); legacy != "" {
+		if canonicalLegacy, err := CanonicalDecimalID(legacy); err != nil || canonicalLegacy != responseID {
+			return orders.OrderSnapshot{}, &orders.BlockedError{
+				Code: orders.CodeOrderConflict, Message: "order identity mismatch"}
+		}
+	}
 	return p.normalizeOrder(canonical, out.Order)
+}
+
+// parseShopMoney converts one shop-money bag to exact minor units,
+// refusing bags that name a currency other than the order's single
+// currency (shop-money side only; presentment money is never read).
+func parseShopMoney(bag gqlMoneyBag, currency string) (int64, error) {
+	if currencyCode := strings.ToUpper(strings.TrimSpace(bag.ShopMoney.CurrencyCode)); currencyCode != "" && currencyCode != currency {
+		return 0, errMixedCurrency
+	}
+	return orders.ParseMinorUnits(bag.ShopMoney.Amount, currency)
 }
 
 // normalizeOrder maps the trusted Shopify order projection into the
@@ -55,7 +74,7 @@ func (p *ShopifyProvider) normalizeOrder(canonicalID string, remote *gqlOrder) (
 			Code: orders.CodeOrderInvalid, Message: "order currency missing"}
 	}
 	money := func(bag gqlMoneyBag) (int64, error) {
-		return orders.ParseMinorUnits(bag.ShopMoney.Amount, currency)
+		return parseShopMoney(bag, currency)
 	}
 	total, err := money(remote.TotalPriceSet)
 	if err != nil {
@@ -171,19 +190,19 @@ func normalizeLine(line gqlLineItem, currency string) (orders.OrderLine, error) 
 		return orders.OrderLine{}, &orders.BlockedError{
 			Code: orders.CodeOrderInvalid, Message: "invalid line item identity"}
 	}
-	subtotal, err := orders.ParseMinorUnits(line.OriginalTotalSet.ShopMoney.Amount, currency)
+	subtotal, err := parseShopMoney(line.OriginalTotalSet, currency)
 	if err != nil {
 		return orders.OrderLine{}, &orders.BlockedError{
 			Code: orders.CodeOrderInvalid, Message: "invalid line money"}
 	}
-	total, err := orders.ParseMinorUnits(line.DiscountedTotalSet.ShopMoney.Amount, currency)
+	total, err := parseShopMoney(line.DiscountedTotalSet, currency)
 	if err != nil {
 		return orders.OrderLine{}, &orders.BlockedError{
 			Code: orders.CodeOrderInvalid, Message: "invalid line money"}
 	}
 	var lineTax int64
 	for _, taxLine := range line.TaxLines {
-		amount, err := orders.ParseMinorUnits(taxLine.PriceSet.ShopMoney.Amount, currency)
+		amount, err := parseShopMoney(taxLine.PriceSet, currency)
 		if err != nil {
 			return orders.OrderLine{}, &orders.BlockedError{
 				Code: orders.CodeOrderInvalid, Message: "invalid line money"}

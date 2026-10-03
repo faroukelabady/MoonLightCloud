@@ -36,7 +36,7 @@ const (
 }`
 
 	docVariantsBySKU = `query MoonlightVariantsBySKU($query: String!) {
-  productVariants(first: 10, query: $query) {
+  productVariants(first: 50, query: $query) {
     nodes {
       id
       sku

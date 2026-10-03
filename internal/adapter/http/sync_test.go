@@ -96,7 +96,11 @@ func TestSyncBatchErrors(t *testing.T) {
 		{"wrong media", token, `{"events":[]}`, "text/plain", 415},
 		{"missing media", token, `{"events":[]}`, "", 415},
 		{"malformed", token, `{"events":[]}`, "application/json", 400},
-		{"unsupported type", token, `{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{}}]}`, "application/json", 422},
+		// The unsupported-type case must use an event type no test ever
+		// registers: the event-type registry is process-global, so a type
+		// registered by another test in this package would make this case
+		// pass/fail depending on test order and -count repetition.
+		{"unsupported type", token, `{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"unsupported.type.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{}}]}`, "application/json", 422},
 		{"mismatch device", token, `{"events":[` + strings.Replace(good, `"payload"`, `"device_id":"99999999-9999-7999-8999-999999999999","payload"`, 1) + `]}`, "application/json", 403},
 	}
 	_ = good
