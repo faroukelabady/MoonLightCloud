@@ -139,3 +139,65 @@ custom-range flows assert URL/report/input agreement against the mocks,
 deterministic in `Africa/Cairo` at any wall-clock time. Tests that need
 failure states (503, unsafe >2^53 money, blocked returns) install their
 own one-shot routes on top of the base mocks.
+
+## Phase 12 — Analytics, Top-N, Online comparison & Catalog Health
+
+### Top Products / Top Categories / Top Tags
+
+Rankings are server-side and deterministic: net line sales (line sales −
+line refunds) per currency bucket in a currency scope, units-desc in the
+All mode, with complete identity tie-breaks. `limit` (1..100, explicit
+validation, default 10 on the widgets) bounds rows AFTER ranking and
+never changes ranking semantics. Money stays exact minor units (string
+representation; >2^53 renders exactly). Historical sale-time snapshots
+are the attribution source: renaming a Product/Category/Tag never
+rewrites history.
+
+**Tag totals overlap** (non-additive): one sale line tagged A and B
+contributes its full attributable amount to both rows. Tag totals must
+NEVER be summed to derive total business revenue. Rows are grouped by
+canonical historical Tag identity — the same Tag slug in two Stores stays
+two rows.
+
+### Online Orders vs Finalized Retail Sales
+
+The comparison view shows two explicitly separate sources:
+
+- **Finalized Retail Sales** — canonical Sales/Returns financial truth.
+- **Online Orders** — operational provider order state (WooCommerce,
+  Shopify), read from durable `commerce_online_orders` rows.
+
+Online orders are operational provider orders and are **not**
+automatically additional recognized MoonLight revenue beyond finalized
+Retail Sales — an online order may later be represented by a finalized
+Sale or otherwise duplicate business activity. The two are never summed
+into a revenue total. Online money is exact minor units per currency
+bucket (no FX). "Active" order value covers exactly
+PENDING/PROCESSING/ON_HOLD/COMPLETED; cancelled, deleted, refunded,
+failed and unknown orders appear only in the status breakdown. Provider
+refunds never become MoonLight Return totals.
+
+### Catalog Health
+
+Diagnostic-only, **read-only**, built exclusively from durable MoonLight
+state (current catalog/integration state, never historical Sale
+snapshots):
+
+- it does **not** live-query providers (Woo/Shopify/Telegram/WhatsApp);
+- it never writes provider or database state, never adopts Stores, and
+  never settles/clears mutation barriers (barriers are an
+  operator-attention signal only);
+- missing mappings are reported only for online-eligible products
+  (active + sell_online) — intentionally offline products are not
+  failures;
+- a mapping never means the remote product is "Published" (labels:
+  Mapped / Eligible / Unmapped / Sync ambiguous / Availability not ready);
+- provider states are never merged into one flag.
+
+Retail inventory remains authoritative; provider stock is downstream
+published state. Stable reason codes (CATALOG_MISSING_SKU,
+CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY,
+COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS,
+COMMERCE_STORE_CONFLICT) are the API contract; bilingual labels may
+evolve. Detail rows are bounded and carry IDs + stable codes only — no
+credentials, PII, raw provider errors or SQL.

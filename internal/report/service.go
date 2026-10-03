@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -459,7 +460,50 @@ type Request struct {
 	// compatible). Non-nil selects exactly one proven Store; legacy NULL
 	// rows never match a specific scope.
 	Store *StoreScope
+	// Limit bounds Top-N breakdown responses after the deterministic
+	// ranking (0 = unbounded, the backward-compatible default). It never
+	// changes ranking semantics: rows are sorted exactly as before and
+	// then truncated, so equal rows keep their stable order.
+	Limit int
 	now   time.Time
+}
+
+// MaxTopNLimit is the largest accepted breakdown limit. Top-N surfaces
+// are bounded (Phase 12); the documented default is 10.
+const MaxTopNLimit = 100
+
+// ParseLimit validates the optional Top-N limit query value. Empty
+// selects the unbounded backward-compatible behavior (0). Anything else
+// must be an explicit integer within 1..100: malformed, zero, negative
+// and over-maximum values are explicit 400s (never silently clamped).
+func ParseLimit(raw string) (int, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		// Whitespace-only junk is not "absent": limits are explicit.
+		return 0, apperr.New(apperr.InvalidInput, "limit must be an integer within [1, 100]")
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, apperr.New(apperr.InvalidInput, "limit must be an integer within [1, 100]")
+	}
+	if parsed < 1 || parsed > MaxTopNLimit {
+		return 0, apperr.New(apperr.InvalidInput, "limit must be within [1, 100]")
+	}
+	return parsed, nil
+}
+
+// applyLimit truncates deterministically ranked rows to the requested
+// bound. Ranking order is already final at this point (complete identity
+// tie-breakers mean two rows never compare equal), so truncation is
+// stable across reruns and pagination.
+func applyLimit(rows []BreakdownRow, limit int) []BreakdownRow {
+	if limit <= 0 || len(rows) <= limit {
+		return rows
+	}
+	return rows[:limit]
 }
 
 // StoreScope is the canonical report ownership selector shared by HTTP
@@ -927,7 +971,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
-		out.Rows = sortProductRows(byKey, order, req.Currency)
+		out.Rows = applyLimit(sortProductRows(byKey, order, req.Currency), req.Limit)
 	case DimensionRootCategory, DimensionSubcategory:
 		var rows []CategoryRow
 		var refundRows []RefundCategoryRow
@@ -990,7 +1034,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
-		out.Rows = sortCategoryRows(byKey, order, req.Currency)
+		out.Rows = applyLimit(sortCategoryRows(byKey, order, req.Currency), req.Limit)
 	case DimensionTag:
 		rows, err := s.scopedSalesByTag(ctx, req)
 		if err != nil {
@@ -1051,7 +1095,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
 		}
-		out.Rows = sortCategoryRows(byKey, order, req.Currency)
+		out.Rows = applyLimit(sortCategoryRows(byKey, order, req.Currency), req.Limit)
 	case DimensionCashier:
 		rows, err := s.scopedSalesByCashier(ctx, req)
 		if err != nil {
@@ -1117,7 +1161,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			}
 			sortSaleCurrencyTotals(row.CurrencyTotals)
 		}
-		out.Rows = sortCashierRows(byKey, order)
+		out.Rows = applyLimit(sortCashierRows(byKey, order), req.Limit)
 	case DimensionChannel:
 		rows, err := s.scopedSalesByChannel(ctx, req)
 		if err != nil {
@@ -1183,6 +1227,7 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		sort.Slice(out.Rows, func(i, j int) bool {
 			return ptrStr(out.Rows[i].Channel) < ptrStr(out.Rows[j].Channel)
 		})
+		out.Rows = applyLimit(out.Rows, req.Limit)
 	default:
 		return Breakdown{}, apperr.New(apperr.InvalidInput, "unsupported dimension")
 	}

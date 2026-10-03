@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
@@ -50,6 +51,15 @@ func (h DashboardDataHandlers) observe(r *http.Request, name string, req report.
 		"store_id", req.ScopeStoreID(),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
+}
+
+// limitSlice applies the optional explicit Top-N bound (0 = unbounded).
+// Ranking already happened server-side; this only truncates.
+func limitSlice[T any](rows []T, limit int) []T {
+	if limit > 0 && len(rows) > limit {
+		return rows[:limit]
+	}
+	return rows
 }
 
 // scopeJSON echoes the applied Store scope in dashboard responses so
@@ -115,12 +125,19 @@ func (h DashboardDataHandlers) Products(w http.ResponseWriter, r *http.Request) 
 		WriteError(w, r, err)
 		return
 	}
+	limit, err := report.ParseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	req.Limit = limit
 	if mode(r) == "all" {
 		rows, err := h.dash.ProductsNormalized(r.Context(), req)
 		if err != nil {
 			WriteError(w, r, err)
 			return
 		}
+		rows = limitSlice(rows, limit)
 		out := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
 			out = append(out, map[string]any{
@@ -192,12 +209,19 @@ func (h DashboardDataHandlers) Categories(w http.ResponseWriter, r *http.Request
 	if kind != report.DimensionRootCategory && kind != report.DimensionSubcategory {
 		kind = report.DimensionRootCategory
 	}
+	limit, err := report.ParseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	req.Limit = limit
 	if mode(r) == "all" {
 		rows, err := h.dash.CategoriesNormalized(r.Context(), req, kind)
 		if err != nil {
 			WriteError(w, r, err)
 			return
 		}
+		rows = limitSlice(rows, limit)
 		out := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
 			out = append(out, map[string]any{
@@ -428,4 +452,94 @@ func scopeOrNullReq(r *http.Request) any {
 		return nil
 	}
 	return scope.StoreID
+}
+
+// Tags serves GET /api/v1/dashboard/tags — the bounded Top Tags surface.
+// It ranks through the CANONICAL report breakdown (historical Tag
+// snapshots; the frozen financial query is the only ranking authority):
+// rows are grouped by canonical historical Tag identity (never merged by
+// slug across Stores), ranked deterministically and truncated to the
+// requested limit. Tag totals OVERLAP by design (a sale line tagged A+B
+// contributes its full attributable amount to both rows) and must never
+// be summed to derive business revenue — the UI states this explicitly.
+func (h DashboardDataHandlers) Tags(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	req, err := h.parse(r)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if req.Limit, err = report.ParseLimit(r.URL.Query().Get("limit")); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	res, err := h.rep.Breakdown(r.Context(), req, report.DimensionTag)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	h.observe(r, "tags", req, start)
+	// Dashboard exact-money representation: minor units as strings (large
+	// int64 values must never become unsafe JSON numbers).
+	writeJSON(w, http.StatusOK, dashboard.TagListFrom(res))
+}
+
+// OrderAnalytics serves GET /api/v1/dashboard/orders/summary — the
+// operational online-vs-store comparison source. Provider orders are
+// operational commerce truth and are NEVER combined with canonical
+// finalized Retail Sales (a provider order may duplicate business
+// activity already represented by a finalized Sale).
+func (h DashboardDataHandlers) OrderAnalytics(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	req, err := h.parse(r)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	res, err := h.dash.OrderAnalytics(r.Context(), req, r.URL.Query().Get("provider_key"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	h.observe(r, "order_analytics", req, start)
+	writeJSON(w, http.StatusOK, res)
+}
+
+// CatalogHealth serves GET /api/v1/dashboard/catalog-health — bounded,
+// read-only, durable-state diagnostics. Zero provider calls, zero writes,
+// zero adoption, zero barrier settlement (Phase 12 §44/§57/§66/§169).
+func (h DashboardDataHandlers) CatalogHealth(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	q := r.URL.Query()
+	// Catalog health is CURRENT catalog/integration state (never
+	// historical Sale snapshots): the report period does not scope it.
+	// The selector's period/currency are accepted for validation
+	// consistency but do not filter health rows.
+	period := q.Get("period")
+	if period == "" {
+		period = "today"
+	}
+	req, err := h.rep.ParseRequest(period, q.Get("from_date"), q.Get("to_date"), q.Get("currency"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	if req.Store, err = report.ParseStoreScope(q.Get("store_id")); err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	limit := 0
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		if limit, err = report.ParseLimit(raw); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+	}
+	res, err := h.dash.CatalogHealth(r.Context(), req, q.Get("provider_key"), q.Get("reason"), limit)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	h.observe(r, "catalog_health", req, start)
+	writeJSON(w, http.StatusOK, res)
 }

@@ -382,6 +382,12 @@ function query(p: PeriodParams): string {
 	return q.toString();
 }
 
+// providerQuery appends the optional provider filter for operational
+// analytics and catalog health ("" = all durable providers).
+export function providerQuery(provider: string): string {
+	return provider ? `&provider_key=${encodeURIComponent(provider)}` : '';
+}
+
 // storeQuery appends the Store ownership scope. Empty selects the global
 // scope (all Stores plus legacy rows, backward compatible).
 export function storeQuery(store: string): string {
@@ -393,6 +399,74 @@ export function storeQuery(store: string): string {
 export function isStoreID(value: string): boolean {
 	return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
 }
+
+
+// ---- Phase 12: Top Tags / Online analytics / Catalog health ----
+
+export type TagCurrencyBucket = {
+	currency: string;
+	line_sales_minor: string;
+	line_refund_minor: string;
+	net_minor: string;
+};
+export type TagRow = {
+	tag_id?: string;
+	tag_slug?: string;
+	name_ar?: string;
+	name_en?: string;
+	units: number;
+	units_returned: number;
+	currencies: TagCurrencyBucket[];
+};
+export type TagListResponse = {
+	generated_at: string;
+	timezone: string;
+	store_id: string | null;
+	rows: TagRow[];
+	overlap_note: string;
+};
+export type OrderCurrencyTotal = {
+	currency: string;
+	orders: number;
+	value_minor: string;
+	active_orders: number;
+	active_value_minor: string;
+};
+export type OrderAnalyticsStatusCount = { canonical_status: string; orders: number };
+export type OrderProviderCount = {
+	provider_key: string;
+	currency: string;
+	orders: number;
+	value_minor: string;
+};
+export type OrderAnalyticsResponse = {
+	generated_at: string;
+	store_id: string | null;
+	provider_key: string;
+	active_statuses: string[];
+	currency_totals: OrderCurrencyTotal[];
+	status_counts: OrderAnalyticsStatusCount[];
+	provider_totals: OrderProviderCount[];
+};
+export type CatalogHealthCount = { reason_code: string; products: number };
+export type CatalogHealthItem = {
+	reason_code: string;
+	provider_key: string;
+	product_id?: string;
+	sku?: string;
+	name?: string;
+	store_id?: string;
+};
+export type CatalogHealthResponse = {
+	generated_at: string;
+	store_id: string | null;
+	provider_key: string;
+	reason_codes: string[];
+	counts: CatalogHealthCount[];
+	detail: CatalogHealthItem[];
+	detail_limit: number;
+	detail_truncated: boolean;
+};
 
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 	const res = await fetch(path, { signal, credentials: 'same-origin' });
@@ -429,12 +503,18 @@ export const dashboardApi = {
 	daily: (p: PeriodParams, mode: DailyMode, store: string, s?: AbortSignal) =>
 		get<DailyResponse>(`/api/v1/dashboard/daily?${query(p)}&mode=${mode}${storeQuery(store)}`, s),
 	products: (p: PeriodParams, mode: BreakdownMode, currency: string, store: string, s?: AbortSignal) =>
-		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}${storeQuery(store)}`, s),
+		get<{ rows: ProductRow[] }>(`/api/v1/dashboard/products?${query(p)}&mode=${mode}&currency=${currency}&limit=10${storeQuery(store)}`, s),
 	categories: (p: PeriodParams, kind: CategoryKind, mode: BreakdownMode, currency: string, store: string, s?: AbortSignal) =>
-		get<{ rows: CategoryRow[] }>(`/api/v1/dashboard/categories?${query(p)}&kind=${kind}&mode=${mode}&currency=${currency}${storeQuery(store)}`, s),
+		get<{ rows: CategoryRow[] }>(`/api/v1/dashboard/categories?${query(p)}&kind=${kind}&mode=${mode}&currency=${currency}&limit=10${storeQuery(store)}`, s),
 	branches: (p: PeriodParams, store: string, s?: AbortSignal) =>
 		get<{ rows: BranchRow[] }>(`/api/v1/dashboard/branches?${query(p)}${storeQuery(store)}`, s),
 	syncHealth: (s?: AbortSignal) => get<SyncHealth>('/api/v1/dashboard/sync-health', s),
+	tags: (p: PeriodParams, currency: string, store: string, limit: number, s?: AbortSignal) =>
+		get<TagListResponse>(`/api/v1/dashboard/tags?${query(p)}&currency=${currency}${storeQuery(store)}&limit=${limit}`, s),
+	orderSummary: (p: PeriodParams, store: string, provider: string, s?: AbortSignal) =>
+		get<OrderAnalyticsResponse>(`/api/v1/dashboard/orders/summary?${query(p)}${storeQuery(store)}${providerQuery(provider)}`, s),
+	catalogHealth: (store: string, provider: string, s?: AbortSignal) =>
+		get<CatalogHealthResponse>(`/api/v1/dashboard/catalog-health?limit=50${storeQuery(store)}${providerQuery(provider)}`, s),
 	activity: (store: string, s?: AbortSignal) => get<{ items: ActivityItem[] }>(`/api/v1/dashboard/activity?limit=20${storeQuery(store)}`, s),
 	latestSales: (store: string, s?: AbortSignal) => get<{ sales: LatestSale[] }>(`/api/v1/dashboard/sales/latest?limit=8${storeQuery(store)}`, s),
 	orders: (status: string, provider: string, cursor: string | null | undefined, store: string, s?: AbortSignal) =>

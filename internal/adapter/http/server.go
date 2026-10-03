@@ -67,6 +67,12 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Overview)))
 	mux.Handle("GET /api/v1/dashboard/daily",
 		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Daily)))
+	mux.Handle("GET /api/v1/dashboard/tags",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Tags)))
+	mux.Handle("GET /api/v1/dashboard/orders/summary",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.OrderAnalytics)))
+	mux.Handle("GET /api/v1/dashboard/catalog-health",
+		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.CatalogHealth)))
 	mux.Handle("GET /api/v1/dashboard/products",
 		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Products)))
 	mux.Handle("GET /api/v1/dashboard/categories",

@@ -94,6 +94,13 @@ func (h ReportHandlers) SalesBreakdown(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// Optional additive Top-N bound: explicit validation only (1..100),
+	// never silent clamping. Ranking semantics are unchanged — rows are
+	// ranked by the existing deterministic rules and then truncated.
+	if req.Limit, err = report.ParseLimit(r.URL.Query().Get("limit")); err != nil {
+		WriteError(w, r, err)
+		return
+	}
 	res, err := h.svc.Breakdown(r.Context(), req, dim)
 	if err != nil {
 		WriteError(w, r, err)

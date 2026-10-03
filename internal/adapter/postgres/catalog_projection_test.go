@@ -122,10 +122,17 @@ func projectCatalogOnce(t *testing.T, env *saleEnv, eventID string) catalog.Proj
 	default:
 		t.Fatalf("unexpected type %s", rec.EventType)
 	}
-	// Retryable dependency waits surface as transient errors by design
-	// (mirroring the sale/return projectors); the outcome is authoritative.
-	if err != nil && res.Outcome != catalog.OutcomeRetryable {
-		t.Fatalf("project catalog: %v", err)
+	// Retryable dependency waits and permitted serialization aborts
+	// surface as transient errors by design (mirroring the sale/return
+	// projectors); the outcome is authoritative (Phase 12 F12).
+	if err != nil && catalogAttemptRetryable(res, err) {
+		if res.Outcome == 0 {
+			res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
+		}
+		return res
+	}
+	if err != nil {
+		t.Fatalf("project catalog: %v (sqlstate=%s)", err, sqlStateOf(err))
 	}
 	return res
 }
@@ -1196,12 +1203,25 @@ func driveCatalogToTerminal(t *testing.T, env *saleEnv, eventID string, maxRound
 			res, perr = store.ProjectCategory(ctx, rec, time.Now())
 		case catalog.EventTagSnapshotV1:
 			res, perr = store.ProjectTag(ctx, rec, time.Now())
+		case catalog.EventProductSalesPolicySnapshotV1:
+			res, perr = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
+		case catalog.EventInventoryProductSnapshotV1:
+			res, perr = store.ProjectProductInventory(ctx, rec, time.Now())
 		default:
 			res, perr = store.ProjectProduct(ctx, rec, time.Now())
 		}
 		last = res
-		if perr != nil && res.Outcome != catalog.OutcomeRetryable {
-			t.Fatalf("event %s: %v", eventID, perr)
+		// Phase 12 F12: only explicitly permitted transient attempts are
+		// retried (production durable-retry pair, or the production
+		// serialization abort classifier 40001/40P01); genuine errors
+		// fail immediately with SQLSTATE context.
+		if perr != nil && catalogAttemptRetryable(res, perr) {
+			if res.Outcome == 0 {
+				res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
+				last = res
+			}
+		} else if perr != nil {
+			t.Fatalf("event %s: %v (sqlstate=%s)", eventID, perr, sqlStateOf(perr))
 		}
 		if res.Outcome == catalog.OutcomeProcessed || res.Outcome == catalog.OutcomeBlocked {
 			return res, rounds

@@ -6,6 +6,7 @@ package postgres
 // identities; independent revision streams never arbitrate one row.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -118,15 +119,11 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 		wg.Add(1)
 		go func(event string) {
 			defer wg.Done()
-			for attempt := 0; attempt < 30; attempt++ {
-				expireBackoff(t, f, event)
-				res := f.projectCatalog(t, event, catalog.EventTagSnapshotV1)
-				if res.Outcome != catalog.OutcomeNotDue && res.Outcome != catalog.OutcomeRetryable {
-					return
-				}
-				time.Sleep(time.Duration(attempt+1) * 5 * time.Millisecond)
-			}
-			t.Errorf("project %s never verdict", event)
+			// Real concurrency preserved: both goroutines race real
+			// connections over the same default identity. The bounded
+			// driver re-attempts ONLY permitted transient aborts
+			// (40001/40P01) exactly like production durable retry.
+			projectCatalogTerminal(t, f, event, catalog.EventTagSnapshotV1)
 		}(e)
 	}
 	wg.Wait()
@@ -311,5 +308,87 @@ func TestR2_PreFixBlockedRecovery(t *testing.T) {
 	}
 	if statusOf(e3, catalog.ProcessorTagProjectionV1) != "blocked" {
 		t.Fatal("validation failure must NOT be reset")
+	}
+}
+
+// TestR2_AbortRetryPreservesDurablePayloads is the Phase 12 F12
+// production-invariant probe: after any PERMITTED serialization abort and
+// bounded re-attempt, the final state is canonical and the durable payload
+// metadata (historical label bytes, source revision, payload fingerprint)
+// is unchanged — a retry never causes semantic payload drift. Both stores
+// race real connections; no serialization of the race is introduced.
+func TestR2_AbortRetryPreservesDurablePayloads(t *testing.T) {
+	f := openScopeFixture(t)
+	init := tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1)
+	for i, d := range []struct{ dev, cred string }{{f.devA, f.credA}, {f.devB, f.credB}} {
+		f.ingest(t, d.dev, d.cred, r2EventID(200+i), catalog.EventTagSnapshotV1, init)
+		requireOutcome(t, f.projectCatalog(t, r2EventID(200+i), catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
+	}
+	payloadA := tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "A concurrent"}, 2)
+	payloadB := tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "B concurrent"}, 2)
+	f.ingest(t, f.devA, f.credA, r2EventID(210), catalog.EventTagSnapshotV1, payloadA)
+	f.ingest(t, f.devB, f.credB, r2EventID(211), catalog.EventTagSnapshotV1, payloadB)
+	var wg sync.WaitGroup
+	for _, e := range []string{r2EventID(210), r2EventID(211)} {
+		wg.Add(1)
+		go func(event string) {
+			defer wg.Done()
+			projectCatalogTerminal(t, f, event, catalog.EventTagSnapshotV1)
+		}(e)
+	}
+	wg.Wait()
+
+	type row struct {
+		nameEN, nameAR, slug string
+		rev                  int64
+		hash                 []byte
+	}
+	read := func(scope string) row {
+		t.Helper()
+		var r row
+		var hash []byte
+		if err := f.pool.QueryRow(context.Background(),
+			`SELECT COALESCE(name_en, ''), COALESCE(name_ar, ''), COALESCE(slug, ''), source_revision, source_payload_hash
+			 FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scope),
+		).Scan(&r.nameEN, &r.nameAR, &r.slug, &r.rev, &hash); err != nil {
+			t.Fatalf("read %s: %v", scope, err)
+		}
+		r.hash = hash
+		return r
+	}
+	for scope, want := range map[string]string{scopeStoreA: "A concurrent", scopeStoreB: "B concurrent"} {
+		first := read(scope)
+		if first.nameEN != want {
+			t.Fatalf("%s label drifted: %q want %q", scope, first.nameEN, want)
+		}
+		if first.slug != "gold" {
+			t.Fatalf("%s slug drifted: %q", scope, first.slug)
+		}
+		if first.rev != 2 {
+			t.Fatalf("%s revision drifted: %d", scope, first.rev)
+		}
+		if len(first.hash) != 32 {
+			t.Fatalf("%s payload fingerprint malformed: %d bytes", scope, len(first.hash))
+		}
+		// Re-read after convergence: durable payload bytes unchanged.
+		again := read(scope)
+		if again.nameEN != first.nameEN || again.nameAR != first.nameAR ||
+			again.slug != first.slug || again.rev != first.rev ||
+			!bytes.Equal(again.hash, first.hash) {
+			t.Fatalf("%s durable payload drifted across retries: %+v -> %+v", scope, first, again)
+		}
+	}
+	// No partial/duplicate writes: exactly one canonical row per scope.
+	var rowsA, rowsB int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreA)).Scan(&rowsA); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreB)).Scan(&rowsB); err != nil {
+		t.Fatal(err)
+	}
+	if rowsA != 1 || rowsB != 1 {
+		t.Fatalf("duplicate/partial rows: A=%d B=%d", rowsA, rowsB)
 	}
 }

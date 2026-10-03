@@ -758,6 +758,188 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/tags:
+    get:
+      summary: Top Tags (bounded, historical Tag snapshots, non-additive)
+      operationId: dashboardTags
+      security:
+        - dashboardSession: []
+      description: >-
+        Bounded Top-N Tag ranking through the canonical report breakdown:
+        rows are grouped by canonical historical Tag identity (never merged
+        by slug across Stores), attributed from sale-time Tag snapshots,
+        ranked deterministically (net line sales per currency bucket in a
+        currency scope; units otherwise, with a complete identity
+        tie-break) and truncated to limit. Tag totals OVERLAP by design —
+        a sale line tagged A and B contributes its full attributable amount
+        to both rows — and must never be summed to derive total revenue.
+        Money is exact minor units per currency bucket; currencies are
+        never summed and never FX-converted. Retail financial values only:
+        provider online orders are never included here.
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/ReportCurrency'
+        - $ref: '#/components/parameters/StoreScope'
+        - $ref: '#/components/parameters/TopNLimit'
+      responses:
+        '200':
+          description: Ranked Tag rows with per-currency exact-money buckets (strings) and the mandatory non-additive disclosure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardTagList'
+        '400':
+          description: Invalid period, dates, currency, store_id or limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/orders/summary:
+    get:
+      summary: Online-order operational analytics (NOT Retail financial revenue)
+      operationId: dashboardOrderAnalytics
+      security:
+        - dashboardSession: []
+      description: >-
+        Operational aggregation of durable provider online-order state
+        (WooCommerce, Shopify, provider-neutral) over a period. These are
+        OPERATIONAL metrics — order counts, order value, status
+        distribution — and are NEVER added to canonical finalized Retail
+        Sales revenue: an online order may later be represented by a
+        finalized Sale or otherwise duplicate business activity. Money is
+        exact minor units serialized as strings, per currency bucket (no
+        FX, no cross-currency sums). "Active" metrics cover exactly the
+        PENDING/PROCESSING/ON_HOLD/COMPLETED status set; cancelled,
+        deleted, refunded, failed and unknown orders appear only in the
+        status breakdown. Read-only durable state: no provider is contacted.
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/StoreScope'
+        - name: provider_key
+          in: query
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+          description: Narrow to one provider instance (empty = all durable providers; no fallback).
+        - name: currency
+          in: query
+          schema:
+            type: string
+            enum: [EGP, USD]
+          description: Narrow to one currency bucket (empty = all buckets, never summed).
+      responses:
+        '200':
+          description: Operational order analytics; never combined with Retail financial totals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOrderAnalytics'
+        '400':
+          description: Invalid period, dates, currency, store_id or provider_key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-health:
+    get:
+      summary: Catalog health (bounded, read-only durable state)
+      operationId: dashboardCatalogHealth
+      security:
+        - dashboardSession: []
+      description: >-
+        Diagnostic catalog/integration health built ONLY from durable
+        MoonLight state. It never queries providers live, never writes
+        provider or database state, never adopts Stores, never settles or
+        clears Phase 11 mutation barriers, and never auto-fixes anything.
+        Missing mappings are reported only for online-eligible products
+        (active + sell_online); intentionally offline products are not
+        failures. Provider states are never merged into one flag, and
+        MoonLight never claims remote "published" state without durable
+        evidence (labels are Mapped / Eligible / Unmapped / Sync ambiguous
+        / Availability not ready). Retail inventory remains authoritative;
+        provider stock is downstream published state. Detail rows are
+        bounded (detail_limit) and carry IDs plus stable reason codes only —
+        no raw provider errors, credentials, PII or SQL.
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+        - name: provider_key
+          in: query
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+          description: Narrow provider-scoped reasons to one provider instance (empty = all durable providers).
+        - name: reason
+          in: query
+          schema:
+            type: string
+            enum:
+              - CATALOG_MISSING_SKU
+              - CATALOG_MISSING_CATEGORY
+              - AVAILABILITY_NOT_READY
+              - COMMERCE_MAPPING_MISSING
+              - COMMERCE_SYNC_AMBIGUOUS
+              - COMMERCE_STORE_CONFLICT
+          description: Narrow detail rows to one stable health reason code (empty = all).
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: Bounded detail list size (default 50). Explicit validation, never silent clamping.
+      responses:
+        '200':
+          description: Bounded health summary counts plus bounded detail rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardCatalogHealth'
+        '400':
+          description: Invalid store_id, provider_key, reason or limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/products:
     get:
       summary: Top products (native per-currency or All normalized)
@@ -1577,6 +1759,17 @@ components:
         verification. REPORTING_API_TOKEN is never valid here and never
         reaches the browser.
   parameters:
+    TopNLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+      description: >-
+        Bounded Top-N size (explicit validation: 1..100; malformed, zero,
+        negative and over-maximum values are rejected with 400 — never
+        silently clamped). Ranking semantics never change with limit.
     ReportPeriod:
       name: period
       in: query
@@ -3038,6 +3231,134 @@ components:
         provider_status: {type: string}
         canonical_status: {type: string}
         observed_at: {type: string, format: date-time}
+    DashboardTagList:
+      type: object
+      description: >-
+        Bounded Top Tags from canonical historical Tag snapshots. Rows are
+        grouped by canonical historical Tag identity (never merged by slug
+        across Stores) and ranked deterministically. Tag totals OVERLAP by
+        design (a sale line tagged A and B contributes its full
+        attributable amount to both rows): overlap_note is mandatory and
+        totals must never be summed to derive business revenue. Money is
+        exact minor units serialized as strings, per currency bucket.
+      required: [generated_at, timezone, store_id, rows, overlap_note]
+      properties:
+        generated_at: {type: string, format: date-time}
+        timezone: {type: string}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+        overlap_note: {type: string}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [units, units_returned, currencies]
+            properties:
+              tag_id: {type: string, format: uuid}
+              tag_slug: {type: string}
+              name_ar: {type: string}
+              name_en: {type: string}
+              units: {type: integer, format: int64}
+              units_returned: {type: integer, format: int64}
+              currencies:
+                type: array
+                items:
+                  type: object
+                  required: [currency, line_sales_minor, line_refund_minor, net_minor]
+                  properties:
+                    currency: {type: string, enum: [EGP, USD]}
+                    line_sales_minor: {type: string, description: "exact money: integer minor units as string"}
+                    line_refund_minor: {type: string, description: "exact money: integer minor units as string"}
+                    net_minor: {type: string, description: "exact money: signed, never clamped"}
+    DashboardOrderAnalytics:
+      type: object
+      description: >-
+        Operational provider-order aggregate. Retail financial values and
+        online-order operational values are distinct sources and are never
+        combined into a revenue total.
+      required: [generated_at, store_id, provider_key, active_statuses, currency_totals, status_counts, provider_totals]
+      properties:
+        generated_at: {type: string, format: date-time}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+        provider_key: {type: string}
+        active_statuses:
+          type: array
+          items: {type: string}
+          description: Exact canonical-status set counted in active_* metrics.
+        currency_totals:
+          type: array
+          items:
+            type: object
+            required: [currency, orders, value_minor, active_orders, active_value_minor]
+            properties:
+              currency: {type: string, enum: [EGP, USD]}
+              orders: {type: integer, format: int64}
+              value_minor: {type: string, description: "exact money: integer minor units as string"}
+              active_orders: {type: integer, format: int64}
+              active_value_minor: {type: string, description: "exact money: integer minor units as string"}
+        status_counts:
+          type: array
+          items:
+            type: object
+            required: [canonical_status, orders]
+            properties:
+              canonical_status: {type: string}
+              orders: {type: integer, format: int64}
+        provider_totals:
+          type: array
+          items:
+            type: object
+            required: [provider_key, currency, orders, value_minor]
+            properties:
+              provider_key: {type: string}
+              currency: {type: string, enum: [EGP, USD]}
+              orders: {type: integer, format: int64}
+              value_minor: {type: string, description: "exact money: integer minor units as string"}
+    DashboardCatalogHealth:
+      type: object
+      description: >-
+        Read-only catalog/integration diagnostics from durable MoonLight
+        state only (no live provider reads, no writes, no barrier settlement).
+      required: [generated_at, store_id, provider_key, reason_codes, counts, detail, detail_limit, detail_truncated]
+      properties:
+        generated_at: {type: string, format: date-time}
+        store_id:
+          type: string
+          format: uuid
+          nullable: true
+        provider_key: {type: string}
+        reason_codes:
+          type: array
+          items: {type: string}
+        counts:
+          type: array
+          items:
+            type: object
+            required: [reason_code, products]
+            properties:
+              reason_code:
+                type: string
+                enum: [CATALOG_MISSING_SKU, CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY, COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS, COMMERCE_STORE_CONFLICT]
+              products: {type: integer, format: int64}
+        detail:
+          type: array
+          items:
+            type: object
+            required: [reason_code, provider_key]
+            properties:
+              reason_code: {type: string}
+              provider_key: {type: string}
+              product_id: {type: string, format: uuid}
+              sku: {type: string}
+              name: {type: string}
+              store_id: {type: string, format: uuid}
+        detail_limit: {type: integer}
+        detail_truncated: {type: boolean}
     DashboardProductList:
       type: object
       required: [timezone, period, mode, unit, rows]

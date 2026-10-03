@@ -216,11 +216,24 @@ func r3Project(t *testing.T, f *scopeFixture, id, typ string) catalog.ProjectRes
 		res, err = d.ProjectCategory(context.Background(), e, time.Now())
 	case catalog.EventTagSnapshotV1:
 		res, err = d.ProjectTag(context.Background(), e, time.Now())
-	case catalog.EventProductSnapshotV1:
+	case catalog.EventProductSalesPolicySnapshotV1:
+		res, err = d.ProjectProductSalesPolicy(context.Background(), e, time.Now())
+	case catalog.EventInventoryProductSnapshotV1:
+		res, err = d.ProjectProductInventory(context.Background(), e, time.Now())
+	default:
 		res, err = d.ProjectProduct(context.Background(), e, time.Now())
 	}
-	if err != nil && res.Outcome != catalog.OutcomeRetryable {
-		t.Fatalf("projection: %v", err)
+	// Phase 12 F12: only explicitly permitted transient attempts are
+	// tolerated (production durable-retry pair, or the production-classified
+	// serialization abort 40001/40P01). Genuine errors still fail here.
+	if err != nil && catalogAttemptRetryable(res, err) {
+		if res.Outcome == 0 {
+			res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
+		}
+		return res
+	}
+	if err != nil {
+		t.Fatalf("projection: %v (sqlstate=%s)", err, sqlStateOf(err))
 	}
 	return res
 }

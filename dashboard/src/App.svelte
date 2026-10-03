@@ -10,6 +10,10 @@
 	import CategoryCard from './components/CategoryCard.svelte';
 	import type { CategoryDisplayRow } from './components/CategoryCard.svelte';
 	import BranchCard from './components/BranchCard.svelte';
+	import TagCard from './components/TagCard.svelte';
+	import OnlineComparison from './components/OnlineComparison.svelte';
+	import CatalogHealthCard from './components/CatalogHealthCard.svelte';
+	import type { TagListResponse, OrderAnalyticsResponse, CatalogHealthResponse } from './lib/api.js';
 	import SyncHealthCard from './components/SyncHealthCard.svelte';
 	import ActivityCard from './components/ActivityCard.svelte';
 	import LatestSalesCard from './components/LatestSalesCard.svelte';
@@ -197,6 +201,16 @@
 	let categories: CategoryDisplayRow[] = $state([]);
 	let catKind: CategoryKind = $state('root_category');
 	let categoriesState: WidgetState = $state('loading');
+	let tagList: TagListResponse | null = $state(null);
+	let tagState: WidgetState = $state('loading');
+	let tagErr: number | null = $state(null);
+	let online: OrderAnalyticsResponse | null = $state(null);
+	let onlineState: WidgetState = $state('loading');
+	let onlineErr: number | null = $state(null);
+	let health: CatalogHealthResponse | null = $state(null);
+	let healthState: WidgetState = $state('loading');
+	let healthErr: number | null = $state(null);
+	let healthProvider = $state('');
 	let branches: BranchRow[] = $state([]);
 	let branchesState: WidgetState = $state('loading');
 	let syncHealth: SyncHealth | null = $state(null);
@@ -432,8 +446,27 @@
 				orderCounts = v.status_counts;
 				orderInbox = v.webhook_inbox;
 				ordersState = emptyOf(v.orders);
-			}, (s) => (ordersState = s), (n) => (ordersErr = n))
+			}, (s) => (ordersState = s), (n) => (ordersErr = n)),
+			done(dashboardApi.tags(params, currency === 'all' ? '' : currency, store, 10, signal), (v) => {
+				tagList = v;
+				tagState = v.rows.length === 0 ? 'empty' : 'loaded';
+			}, (s) => (tagState = s), (n) => (tagErr = n)),
+			done(dashboardApi.orderSummary(params, store, '', signal), (v) => {
+				online = v;
+				onlineState =
+					v.currency_totals.length === 0 && v.status_counts.length === 0 ? 'empty' : 'loaded';
+			}, (s) => (onlineState = s), (n) => (onlineErr = n)),
+			done(dashboardApi.catalogHealth(store, healthProvider, signal), (v) => {
+				health = v;
+				const total = v.counts.reduce((acc, c) => acc + c.products, 0);
+				healthState = total === 0 && v.detail.length === 0 ? 'empty' : 'loaded';
+			}, (s) => (healthState = s), (n) => (healthErr = n))
 		]);
+	}
+
+	function setHealthProvider(p: string) {
+		healthProvider = p;
+		void reloadAll();
 	}
 
 	function trendUnit(): string {
@@ -564,9 +597,19 @@
 						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
 					</div>
 				{/if}
+				{#if route === 'sync'}
+					<div class="cell a-sync">
+						<CatalogHealthCard data={health} status={healthState} errStatus={healthErr} onretry={retryAll} provider={healthProvider} onprovider={setHealthProvider} />
+					</div>
+				{/if}
 				{#if route === 'overview' || route === 'categories'}
 					<div class="cell a-cat">
 						<CategoryCard rows={categories} kind={catKind} onkind={setCatKind} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
+					</div>
+				{/if}
+				{#if route === 'categories'}
+					<div class="cell a-cat">
+						<TagCard data={tagList} status={tagState} errStatus={tagErr} onretry={retryAll} currency={currency} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'products'}
@@ -598,6 +641,11 @@
 				{#if route === 'overview' || route === 'sales'}
 					<div class="cell a-branch">
 						<BranchCard rows={branches} status={branchesState} errStatus={branchesErr} onretry={retryAll} />
+					</div>
+				{/if}
+				{#if route === 'sales'}
+					<div class="cell a-branch">
+						<OnlineComparison online={online} retail={overview} status={onlineState} errStatus={onlineErr} onretry={retryAll} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}
