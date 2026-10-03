@@ -147,6 +147,16 @@ or incomplete success, oversized response, or unverifiable served version
 retain the record. Uncertainty is independent of the existing ProviderError
 retryability classification. No new provider interface or queue is introduced.
 
+R2 amendment (settlement is decided separately from classification): for
+top-level GraphQL errors the barrier is retained unless the ENTIRE response
+carries validated evidence of a documented pre-execution refusal — every
+error entry a uniform `THROTTLED` (cost admission rejects before execution)
+or authorization rejection (`ACCESS_DENIED`/`UNAUTHENTICATED`/`FORBIDDEN`),
+with no data. `INTERNAL_SERVER_ERROR`, unknown or missing codes, mixed
+error arrays, partial data and malformed error evidence all retain the
+barrier, whatever error the caller receives. A retryable classification
+never authorizes removing durable uncertainty evidence.
+
 `in_flight` and `uncertain` both block subsequent same-provider/Product sync
 before any provider call. There is no TTL, lease expiry, startup reset or
 same-key automatic replay. A crash may leave `in_flight`; it is deliberately
@@ -230,8 +240,12 @@ rollback preserves v26 data. No dependency or Retail change is required.
 Cutover requires stopping all old product-sync writers and confirming any
 legacy in-flight requests have settled before enabling the new writers. Old
 writers do not know the new barrier protocol; mixed-version product writes
-are not supported. Startup schema checks refuse old binaries at schema 27,
-but already-running old writers must also be stopped. Read-only queries keep
+are not supported. The startup schema check refuses an old `serve` binary
+at schema 27, but that check covers `serve` only: older commerce CLI
+binaries open PostgreSQL and wire services without a schema check and
+without the barrier, so old CLI artifacts, automation and manual mutation
+writers must be retired or disabled explicitly. Already-running old writers
+must also be stopped. Read-only queries keep
 their existing shapes. Do not fabricate uncertainty clearance from a timeout.
 
 ## Consequences

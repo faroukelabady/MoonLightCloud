@@ -204,8 +204,19 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 				return commerce.TemporaryError("shopify incomplete error response")
 			}
 		}
-		if err := complete(); err != nil {
-			return err
+		// Error classification (what the caller receives) and settlement
+		// (whether the remote mutation definitively did or did not apply)
+		// are separate decisions. A retryable classification never
+		// authorizes removing durable uncertainty evidence: the barrier is
+		// released only when the ENTIRE response carries affirmative,
+		// validated evidence that the mutation was refused before
+		// execution. Internal execution failures, unknown or missing
+		// error codes, mixed arrays, and partial data all leave the
+		// mutation uncertain and retain the barrier.
+		if mutation && definitiveGraphQLRefusal(envelope) {
+			if err := complete(); err != nil {
+				return err
+			}
 		}
 		return c.classifyGraphQLErrors(envelope)
 	}
@@ -228,8 +239,47 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	return nil
 }
 
+// definitiveGraphQLRefusal reports whether the ENTIRE response
+// establishes that the operation was refused before execution, so no
+// remote mutation can have applied. Only documented pre-execution
+// refusals qualify (official Shopify GraphQL error contract):
+//
+//   - THROTTLED: cost-based admission rejects the request before
+//     execution begins (the throttle bucket must hold the requested cost
+//     before execution; throttled responses carry no actual query cost);
+//   - ACCESS_DENIED / UNAUTHENTICATED / FORBIDDEN: authorization and
+//     scope rejection — the operation is refused, not partially run.
+//
+// Every error entry must carry one of these codes and a message, and the
+// response must carry no data (any data means execution may have begun).
+// Anything else — INTERNAL_SERVER_ERROR, unknown codes, missing codes,
+// mixed arrays, partial data, malformed evidence — leaves execution
+// uncertain and must retain the barrier.
+func definitiveGraphQLRefusal(envelope gqlEnvelope) bool {
+	if len(envelope.Errors) == 0 {
+		return false
+	}
+	if len(envelope.Data) > 0 && string(envelope.Data) != "null" {
+		return false
+	}
+	for _, e := range envelope.Errors {
+		if e.Message == "" || e.Extensions.Code == "" {
+			return false
+		}
+		switch e.Extensions.Code {
+		case "THROTTLED", "ACCESS_DENIED", "UNAUTHENTICATED", "FORBIDDEN":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // classifyGraphQLErrors maps top-level GraphQL errors (HTTP 200) into
-// the frozen taxonomy. THROTTLED is retryable with a bounded
+// the frozen taxonomy for the caller. It never decides settlement: the
+// durable mutation barrier is governed by definitiveGraphQLRefusal
+// separately, so classification (including retryability) cannot erase
+// uncertainty evidence. THROTTLED is retryable with a bounded
 // deterministic hint derived from throttle metadata when present.
 func (c *Client) classifyGraphQLErrors(envelope gqlEnvelope) error {
 	first := envelope.Errors[0]
@@ -241,8 +291,8 @@ func (c *Client) classifyGraphQLErrors(envelope gqlEnvelope) error {
 	case "ACCESS_DENIED", "UNAUTHENTICATED", "FORBIDDEN":
 		return commerce.AuthenticationError(message)
 	default:
-		// HTTP 200 with an error body is not a validated success; retry
-		// only definitive remote error evidence releases the durable barrier.
+		// HTTP 200 with an error body is not a validated success; the
+		// mutation outcome is unknown and stays durably blocked.
 		return commerce.TemporaryError(message)
 	}
 }

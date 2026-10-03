@@ -205,7 +205,23 @@ Migration 00027 is append-only; 00001–00026 and existing business rows remain
 unchanged. Stop old product-sync writers and establish legacy request settlement
 before migrating and enabling the new writers. Do not overlap old/new product
 mutation protocols; already-running old binaries cannot enforce the barrier.
-Schema checks prevent restarting old binaries against 27.
+
+**What the schema check does and does not protect.** The schema-version
+check refuses startup of an old `serve` binary against schema 27. That
+protection covers `serve` only: older commerce CLI binaries open PostgreSQL
+and wire their services **without** verifying the schema version and without
+honoring the mutation barrier. Migration alone therefore does not disable any
+older executable. During cutover you must additionally:
+
+- retire or disable old CLI artifacts, scheduled jobs, scripts, and any
+  manual mutation writers (for example ad-hoc `commerce sync-product`
+  automation);
+- quiesce already-running old writers before migrating;
+- confirm outstanding legacy remote requests are settled on the Shopify
+  side before enabling barrier-aware writers;
+- treat mixed old/new mutation writers as unsupported at all times.
+
+Only the new barrier-aware writers may run against schema 27.
 
 Back up `commerce_product_mutation_barriers`. Do not delete it during projection
 rebuilds or to retry a request. Rollback refuses active uncertainty or retained
