@@ -49,7 +49,7 @@ All values are environment configuration (`internal/config/shopify.go`):
 | `COMMERCE_SHOPIFY_ENABLED` | `true` | disabled by default |
 | `COMMERCE_SHOPIFY_PROVIDER_KEY` | `shopify-main` | logical instance key (1–64 `[a-z0-9_-]`); never the vendor name. Future instances: `shopify-egypt`, `shopify-secondary` |
 | `COMMERCE_SHOPIFY_SHOP_DOMAIN` | `example.myshopify.com` | canonical domain only: no scheme, userinfo, port, path, query, fragment, whitespace. The endpoint is constructed internally |
-| `COMMERCE_SHOPIFY_API_VERSION` | `2026-10` | pinned `YYYY-MM`; `latest`/`unstable` refused |
+| `COMMERCE_SHOPIFY_API_VERSION` | `2026-10` | only supported `2026-10`; other handles refused |
 | `COMMERCE_SHOPIFY_ACCESS_TOKEN` | | Admin API token (secret) |
 | `COMMERCE_SHOPIFY_CLIENT_SECRET` | | webhook HMAC secret (secret; required when orders enabled, must differ from the token) |
 | `COMMERCE_SHOPIFY_CURRENCY` | `EGP` | provider price currency: exactly one MoonLight price is selected, never a fallback |
@@ -154,43 +154,31 @@ set `DRAFT` (that would silently unpublish unrelated channels).
   failure is always "unavailable", never oversold.
 - New products are created at quantity 0; inactive / not-ready /
   zero-allocation states always write 0.
-- Compare-and-set: zero writes are CAS against the observed quantity
-  (always detect drift); positive writes are conditional on the remote
-  still holding this operation's safe-zero (`changeFromQuantity`). An
-  older positive operation can never silently overwrite a proven newer
-  quantity; the write fails and a retry reconverges to fresh desired
-  state.
-- Idempotency: every activation/quantity mutation carries a
-  deterministic Shopify idempotency key derived from the frozen MoonLight
-  operation identity. Same desired state → same key (replayed as one
-  remote write); changed desired state → new key.
+- Inventory writes use observed-quantity CAS and re-read the physical level
+  after every response. Cached idempotency success is not current stock
+  evidence. Correction keys bind logical intent to the observed level
+  version, quantity and target. Four attempts bound convergence.
 
-## Concurrent synchronization (per-product freshness fence)
+## Concurrent synchronization and remaining F2
 
-Concurrent `commerce sync-product` runs for the same product are
-ordered by a remote freshness fence in the `moonlight` ownership
-metafields (`catalog_revision`, `policy_revision`,
-`product_operation_key`). Behavior:
+Production product sync serializes the entire provider/Product sequence
+using a PostgreSQL transaction advisory lock, then reads canonical desired
+state. A two-minute deadline bounds occupancy; each Shopify call checks its
+coordination session. Inventory revisions are checked separately.
 
-- an operation older than the remote fence **fails retryably before any
-  write** ("shopify product superseded by a newer operation") — it never
-  regresses newer price/title/description/publication/revision metadata
-  or inventory;
-- the fence is re-compared before **every** child write; inventory
-  writes are additionally CAS-guarded;
-- success is only reported after post-write fence verification, so
-  **success implies currency**; a failure is the reconvergence trigger —
-  re-run the sync (the CLI reports the failure as retryable) and it
-  re-reads fresh desired state.
-
-Bounded residual: for two operations that start against the same remote
-state and interleave within a single fence-check→write round-trip, one
-child write can slip before the loser detects the race and fails
-retryably; its retry repairs the state. Hard cross-process linearizability
-would require a durable per-product generation column (schema change,
-not part of Phase 11).
+An already-received remote request can apply after caller cancellation
+releases that lock. The R1 interruption probe reproduced newer title
+regression. **F2 remains open.** A retryable error or operator rerun is not
+durable reconciliation. Do not treat the candidate as interruption-safe.
 
 ## Order ingestion
+
+Order lines and fuzzy SKU searches are complete paginated reads: 50 nodes
+per page, at most 40 pages / 2,000 nodes, one MiB per response and two
+minutes per connection. Invalid progress/incomplete retrieval fails without
+partial projection or speculative creation. These fixed safety limits must
+be reviewed when exceeded; excess input is never silently truncated.
+
 
 Direction is strictly **Shopify → MoonLightCloud read/projection**.
 There are no Shopify order/fulfillment/refund/payment writes.
@@ -314,7 +302,9 @@ for ≥12 months. Before changing `COMMERCE_SHOPIFY_API_VERSION`:
    (`MOONLIGHT_SHOPIFY_E2E=1`, see below).
 4. Bump the pinned version deliberately; never float to `latest`. A
    retired version silently falls forward on Shopify's side — treat any
-   `X-Shopify-API-Version` response mismatch as an operational warning.
+   missing or mismatched `X-Shopify-API-Version` as a rejected response.
+   This build supports only `2026-10`; another release requires a deliberate
+   code/configuration contract update.
 
 Notable past changes: idempotency keys became required on
 `inventoryActivate`/`inventorySetQuantities` as of `2026-04`

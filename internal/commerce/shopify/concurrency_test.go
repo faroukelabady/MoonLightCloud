@@ -220,6 +220,9 @@ func TestSafeZeroIsCompareAndSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := provider.SetInventory(context.Background(), inventoryRequest(created.ExternalProductID, "prod-1", 5, true)); err != nil {
+		t.Fatal(err)
+	}
 	// A newer writer lands 20 between the stale operation's read and its
 	// safe-zero write.
 	h.mu.Lock()

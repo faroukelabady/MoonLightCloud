@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
@@ -28,9 +29,16 @@ import (
 //     silently overwrite a proven newer quantity.
 //
 // Every mutation carries a deterministic idempotency key derived from
-// the frozen MoonLight operation identity: identical desired state
-// replays as one remote write, changed desired state gets a new key.
+// logical intent plus observed physical state. Cached responses are verified
+// against a fresh inventory-level read before convergence is reported.
 func (p *ShopifyProvider) SetInventory(ctx context.Context, req commerce.InventoryUpdateRequest) error {
+	if !commerce.ProductSyncHeld(ctx, p.key, req.ProductID) {
+		if p.coordinator == nil {
+			return commerce.ValidationError("shopify inventory mutation requires database coordination")
+		}
+		return p.coordinator.WithProductSync(ctx, p.key, req.ProductID, func(held context.Context) error { return p.SetInventory(held, req) })
+	}
+
 	if req.ProviderKey != p.key {
 		return apperr.New(apperr.InvalidInput, "provider key mismatch")
 	}
@@ -75,8 +83,18 @@ func (p *ShopifyProvider) SetInventory(ctx context.Context, req commerce.Invento
 	if err != nil {
 		return err
 	}
+	inventoryRevision, err := parseRevision(values["inventory_revision"])
+	if err != nil {
+		return err
+	}
+	if inventoryRevision > req.InventoryRevision {
+		return errSuperseded()
+	}
 	baseKey := idempotencyKey("inventory", req.OperationKey)
-	return p.setManagedQuantity(ctx, variant, quantity, baseKey)
+	if err := p.setManagedQuantity(ctx, variant, quantity, baseKey); err != nil {
+		return err
+	}
+	return p.setOwnership(ctx, product.ID, []map[string]any{{"ownerId": product.ID, "namespace": metafieldNamespace, "key": "inventory_revision", "type": "single_line_text_field", "value": fmt.Sprint(req.InventoryRevision)}})
 }
 
 // recordedVariant resolves the MoonLight-managed variant by the durable
@@ -119,28 +137,56 @@ func (p *ShopifyProvider) setManagedQuantity(ctx context.Context, variant gqlVar
 		return err
 	}
 	if !active {
-		if err := p.activateInventory(ctx, itemID, baseKey+"-activate"); err != nil {
+		if err := p.activateInventory(ctx, itemID, idempotencyKey("activate-"+itemID, baseKey)); err != nil {
 			return err
 		}
-		observed = 0
+		loaded, err := p.loadInventoryVariant(ctx, variant.ID)
+		if err != nil {
+			return err
+		}
+		variant = loaded
+		_, active, observed, err = p.inventoryState(variant)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return commerce.TemporaryError("shopify inventory activation not physically confirmed")
+		}
 	}
-	if quantity > 0 {
+	// A logical key can replay an old success. Each bounded correction uses a
+	// stable key for its observed state/target/attempt, then reads the physical
+	// quantity again. No risky caller stage proceeds on a cached response alone.
+	for attempt := 0; attempt < 4; attempt++ {
 		if observed == quantity {
-			return nil // already converged
+			return nil
 		}
-		if observed != 0 {
-			// Re-establish this operation's safe-zero precondition.
-			from := observed
-			if err := p.setAvailable(ctx, itemID, 0, &from, baseKey+"-zero"); err != nil {
-				return err
-			}
-			observed = 0
+		target := quantity
+		if quantity > 0 && observed != 0 {
+			target = 0
 		}
-		zero := int64(0)
-		return p.setAvailable(ctx, itemID, quantity, &zero, baseKey+"-set")
+		from := observed
+		version, err := p.inventoryVersion(variant)
+		if err != nil {
+			return err
+		}
+		key := idempotencyKey(fmt.Sprintf("physical-%s-%s-%d-%d", itemID, version, observed, target), baseKey)
+		if err := p.setAvailable(ctx, itemID, target, &from, key); err != nil {
+			return err
+		}
+		loaded, err := p.loadInventoryVariant(ctx, variant.ID)
+		if err != nil {
+			return err
+		}
+		variant = loaded
+		_, _, observed, err = p.inventoryState(loaded)
+		if err != nil {
+			return err
+		}
 	}
-	from := observed
-	return p.setAvailable(ctx, itemID, 0, &from, baseKey+"-set")
+	if observed == quantity {
+		return nil
+	}
+	return commerce.TemporaryError("SHOPIFY_INVENTORY_NOT_CONVERGED")
 }
 
 // inventoryState resolves the managed inventory item id, whether it is
@@ -238,7 +284,7 @@ func (p *ShopifyProvider) setAvailable(ctx context.Context, itemID string, quant
 		first := payload.UserErrors[0]
 		code := boundField(p.client.scrub.scrub(first.Code), codeLimit)
 		message := boundField(p.client.scrub.scrub(first.Message), messageLimit)
-		if strings.EqualFold(code, "CONFLICT") {
+		if strings.EqualFold(code, "CONFLICT") || strings.EqualFold(code, "CHANGE_FROM_QUANTITY_STALE") || strings.EqualFold(code, "COMPARE_QUANTITY_STALE") {
 			// Compare-and-set detected a concurrent quantity change:
 			// retryable, because the caller's retry recomputes fresh
 			// desired state before writing again.
@@ -252,4 +298,32 @@ func (p *ShopifyProvider) setAvailable(ctx context.Context, itemID string, quant
 		return commerce.TemporaryError("shopify inventory response missing adjustment group")
 	}
 	return nil
+}
+
+func (p *ShopifyProvider) loadInventoryVariant(ctx context.Context, gid string) (gqlVariant, error) {
+	var out struct {
+		Variant *gqlVariant `json:"productVariant"`
+	}
+	if err := p.client.do(ctx, docInventoryVariant, map[string]any{"id": gid}, &out); err != nil {
+		return gqlVariant{}, err
+	}
+	if out.Variant == nil || out.Variant.ID != gid {
+		return gqlVariant{}, commerce.ConflictError("shopify managed variant unavailable")
+	}
+	return *out.Variant, nil
+}
+
+func (p *ShopifyProvider) inventoryVersion(variant gqlVariant) (string, error) {
+	if variant.InventoryItem == nil {
+		return "", commerce.ConflictError("shopify inventory item missing")
+	}
+	for _, level := range variant.InventoryItem.Levels.Nodes {
+		if level.Location.ID == p.locationGID {
+			if _, err := time.Parse(time.RFC3339Nano, level.UpdatedAt); err != nil {
+				return "", commerce.TemporaryError("shopify inventory state version missing")
+			}
+			return level.UpdatedAt, nil
+		}
+	}
+	return "", commerce.ConflictError("shopify inventory location missing")
 }

@@ -31,6 +31,15 @@ var searchSafeSKU = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 // later stage fails. The separate CommerceService.SetInventory call
 // restores current Phase 5C availability afterwards.
 func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.ProductUpsertRequest) (commerce.ProductUpsertResult, error) {
+	if !commerce.ProductSyncHeld(ctx, p.key, req.ProductID) {
+		if p.coordinator == nil {
+			return commerce.ProductUpsertResult{}, commerce.ValidationError("shopify product mutation requires database coordination")
+		}
+		var result commerce.ProductUpsertResult
+		err := p.coordinator.WithProductSync(ctx, p.key, req.ProductID, func(held context.Context) error { var err error; result, err = p.UpsertProduct(held, req); return err })
+		return result, err
+	}
+
 	if req.ProviderKey != p.key {
 		return commerce.ProductUpsertResult{}, apperr.New(apperr.InvalidInput, "provider key mismatch")
 	}
@@ -93,21 +102,11 @@ func (p *ShopifyProvider) updateMapped(ctx context.Context, req commerce.Product
 // convergeExisting runs the mapped convergence against an already-loaded
 // owned product (shared by update and recovery paths).
 //
-// Ordering guarantees (freeze-review F2 remediation): the remote
-// ownership metafields carry a per-product freshness fence
-// (catalog/policy revisions + deterministic operation key). The fence is
-// re-read and compared immediately before EVERY child write — a stale
-// operation aborts retryably at the first write it attempts after a
-// newer operation stamped the remote product. Inventory writes are
-// additionally CAS-guarded. Post-write verification then confirms no
-// newer operation superseded us, so success implies currency and the
-// caller's retry re-reads fresh desired state (durable reconvergence).
-//
-// The documented residual: Shopify exposes no conditional product
-// mutation, so a single child write can interleave inside the fence
-// check→write round-trip of a same-instant concurrent pair; the loser
-// still fails retryably at the next stage (at most one write slips), and
-// its retry reconverges to fresh desired state.
+// Production callers serialize the complete sequence with PostgreSQL
+// coordination. Remote revision checks reject stale prepared work, but are
+// not atomic conditions on Product mutations. An already-received remote
+// write can outlive cancellation and the database lock; F2 remains open for
+// that interruption window (see ADR-0044).
 func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.ProductUpsertRequest, desired desiredContent, product *gqlProduct, externalID string, verifyOwnership bool) (commerce.ProductUpsertResult, error) {
 	productGID := FormatGID(ResourceProduct, externalID)
 	if product.ID != "" {
@@ -177,10 +176,7 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if err := p.updateManagedVariant(ctx, productGID, variant.ID, desired.sku, desired.price); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	// The ownership fence stamp is a child write like any other: compared
-	// immediately before writing so it can never lower a newer fence
-	// without the caller learning it raced (the post-write verify then
-	// fails retryably).
+	// Check freshness before stamping; this is not remote compare-and-set.
 	if err := p.checkFence(ctx, productGID, req); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
@@ -196,10 +192,8 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if err := p.setPublication(ctx, productGID, req.Published); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	// Post-write supersession verification: success implies currency. If
-	// a newer operation wrote the fence after us, our writes are already
-	// stale — fail retryably so the caller re-reads fresh desired state
-	// and reconverges instead of reporting success over regressed state.
+	// Detect visible supersession. Returning an error does not undo a remote
+	// side effect and is not durable reconciliation.
 	if err := p.verifyFence(ctx, productGID, req); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
@@ -393,18 +387,37 @@ func (p *ShopifyProvider) loadProduct(ctx context.Context, productGID string) (*
 // expression could hide the true match during recovery), and the page is
 // bounded but generous enough that a match is unlikely to be paged out.
 func (p *ShopifyProvider) lookupBySKU(ctx context.Context, sku string) ([]gqlVariantWithProduct, error) {
-	var out variantsBySKUResponse
+	ctx, cancel := context.WithTimeout(ctx, paginationTimeout)
+	defer cancel()
 	query := "sku:" + quoteSearchTerm(sku)
-	if err := p.client.do(ctx, docVariantsBySKU, map[string]any{"query": query}, &out); err != nil {
-		return nil, err
-	}
-	exact := make([]gqlVariantWithProduct, 0, len(out.ProductVariants.Nodes))
-	for _, variant := range out.ProductVariants.Nodes {
-		if variant.SKU == sku {
-			exact = append(exact, variant)
+	exact := []gqlVariantWithProduct{}
+	seen := map[string]bool{}
+	var after any
+	total := 0
+	for page := 0; page < maxConnectionPages; page++ {
+		var out variantsBySKUResponse
+		if err := p.client.do(ctx, docVariantsBySKU, map[string]any{"query": query, "after": after}, &out); err != nil {
+			return nil, err
 		}
+		total += len(out.ProductVariants.Nodes)
+		if total > maxConnectionNodes || len(out.ProductVariants.Nodes) > 50 {
+			return nil, paginationError()
+		}
+		for _, variant := range out.ProductVariants.Nodes {
+			if variant.SKU == sku {
+				exact = append(exact, variant)
+			}
+		}
+		next, more, err := nextPage(out.ProductVariants.PageInfo, len(out.ProductVariants.Nodes), seen)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			return exact, nil
+		}
+		after = next
 	}
-	return exact, nil
+	return nil, paginationError()
 }
 
 // quoteSearchTerm renders one SKU for Shopify search syntax. Values
@@ -443,9 +456,9 @@ func (p *ShopifyProvider) updateManagedVariant(ctx context.Context, productGID, 
 	if err := p.client.do(ctx, docManagedVariantUpdate, map[string]any{
 		"productId": productGID,
 		"variants": []map[string]any{{
-			"id":    variantGID,
-			"sku":   sku,
-			"price": price,
+			"id":            variantGID,
+			"inventoryItem": map[string]any{"sku": sku},
+			"price":         price,
 		}},
 	}, &out); err != nil {
 		return err
@@ -484,8 +497,8 @@ func (p *ShopifyProvider) setPublication(ctx context.Context, productGID string,
 	}
 	var out publishResponse
 	if err := p.client.do(ctx, document, map[string]any{
-		"id":            productGID,
-		"publicationId": p.publicationID,
+		"id":    productGID,
+		"input": []map[string]any{{"publicationId": p.publicationID}},
 	}, &out); err != nil {
 		return err
 	}

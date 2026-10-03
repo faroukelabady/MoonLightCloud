@@ -178,7 +178,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		}
 	}
 	if cfg.Shopify.Enabled {
-		provider, err := shopifyadapter.NewShopifyProvider(cfg.Shopify, nil)
+		provider, err := shopifyadapter.NewShopifyProvider(cfg.Shopify, nil, store)
 		if err != nil {
 			pool.Close()
 			return nil, err

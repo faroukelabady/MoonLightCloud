@@ -24,8 +24,10 @@ func (p *ShopifyProvider) GetOrder(ctx context.Context, externalOrderID string) 
 			Code: orders.CodeOrderInvalid, Message: "invalid external order id"}
 	}
 	orderGID := FormatGID(ResourceOrder, canonical)
+	ctx, cancel := context.WithTimeout(ctx, paginationTimeout)
+	defer cancel()
 	var out orderQueryResponse
-	if err := p.client.do(ctx, docOrder, map[string]any{"id": orderGID}, &out); err != nil {
+	if err := p.client.do(ctx, docOrder, map[string]any{"id": orderGID, "after": nil}, &out); err != nil {
 		// Transport/status failures surface classified and retryable;
 		// only a null order projection proves absence. A transient
 		// failure must never read as deletion.
@@ -51,6 +53,40 @@ func (p *ShopifyProvider) GetOrder(ctx context.Context, externalOrderID string) 
 				Code: orders.CodeOrderConflict, Message: "order identity mismatch"}
 		}
 	}
+	lines := append([]gqlLineItem(nil), out.Order.LineItems.Nodes...)
+	seen := map[string]bool{}
+	for page := 0; ; page++ {
+		if len(lines) > maxConnectionNodes || len(out.Order.LineItems.Nodes) > 50 {
+			return orders.OrderSnapshot{}, paginationError()
+		}
+		cursor, more, err := nextPage(out.Order.LineItems.PageInfo, len(out.Order.LineItems.Nodes), seen)
+		if err != nil {
+			return orders.OrderSnapshot{}, err
+		}
+		if !more {
+			break
+		}
+		if page+1 >= maxConnectionPages {
+			return orders.OrderSnapshot{}, paginationError()
+		}
+		var next orderQueryResponse
+		if err := p.client.do(ctx, docOrder, map[string]any{"id": orderGID, "after": cursor}, &next); err != nil {
+			return orders.OrderSnapshot{}, err
+		}
+		if next.Order == nil || next.Order.ID != out.Order.ID || next.Order.UpdatedAt != out.Order.UpdatedAt {
+			return orders.OrderSnapshot{}, paginationError()
+		}
+		lines = append(lines, next.Order.LineItems.Nodes...)
+		out.Order.LineItems = next.Order.LineItems
+	}
+	identities := map[string]bool{}
+	for _, line := range lines {
+		if line.ID == "" || identities[line.ID] {
+			return orders.OrderSnapshot{}, paginationError()
+		}
+		identities[line.ID] = true
+	}
+	out.Order.LineItems.Nodes = lines
 	return p.normalizeOrder(canonical, out.Order)
 }
 

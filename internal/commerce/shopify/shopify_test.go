@@ -14,7 +14,7 @@ import (
 
 func newTestProvider(t *testing.T, h *shopifyHarness) *ShopifyProvider {
 	t.Helper()
-	provider, err := NewShopifyProvider(testConfig(), harnessClient(t, h))
+	provider, err := NewShopifyProvider(testConfig(), harnessClient(t, h), fixtureCoordinator{})
 	if err != nil {
 		t.Fatalf("NewShopifyProvider: %v", err)
 	}
@@ -215,4 +215,12 @@ func TestHTTPStatusClassification(t *testing.T) {
 			t.Fatalf("status %d: got %v want kind %s", tc.status, err, tc.kind)
 		}
 	}
+}
+
+// Serial adapter fixtures test wire behavior; distributed coordination is tested
+// separately with independent instances and real PostgreSQL.
+type fixtureCoordinator struct{}
+
+func (fixtureCoordinator) WithProductSync(ctx context.Context, key commerce.ProviderKey, product string, work func(context.Context) error) error {
+	return work(commerce.CoordinatedProductContext(ctx, key, product))
 }

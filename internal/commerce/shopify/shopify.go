@@ -54,6 +54,7 @@ type ShopifyProvider struct {
 	locationGID   string
 	publicationID string
 	client        *Client
+	coordinator   commerce.ProductSyncCoordinator
 
 	// lazyCurrency guards the one-time shop currency verification (§37):
 	// performed before the first price-changing product operation, never
@@ -66,7 +67,7 @@ type ShopifyProvider struct {
 // failures at first sync) and builds the bounded transport. The injected
 // *http.Client may carry a test TLS transport; redirect policy and
 // timeout are always enforced inside the client.
-func NewShopifyProvider(cfg config.ShopifyConfig, httpClient *http.Client) (*ShopifyProvider, error) {
+func NewShopifyProvider(cfg config.ShopifyConfig, httpClient *http.Client, coordinators ...commerce.ProductSyncCoordinator) (*ShopifyProvider, error) {
 	if !cfg.Enabled {
 		return nil, apperr.New(apperr.InvalidInput, "shopify adapter is disabled")
 	}
@@ -97,8 +98,13 @@ func NewShopifyProvider(cfg config.ShopifyConfig, httpClient *http.Client) (*Sho
 		timeout = config.DefaultShopifyHTTPTimeout
 	}
 	endpoint := "https://" + cfg.ShopDomain + "/admin/api/" + cfg.APIVersion + "/graphql.json"
+	var coordinator commerce.ProductSyncCoordinator
+	if len(coordinators) > 0 {
+		coordinator = coordinators[0]
+	}
 	return &ShopifyProvider{
-		key: key, currency: cfg.Currency,
+		coordinator: coordinator,
+		key:         key, currency: cfg.Currency,
 		locationGID: cfg.LocationID, publicationID: cfg.PublicationID,
 		client: newClient(endpoint, cfg.AccessToken, cfg.ClientSecret, timeout, httpClient),
 	}, nil
@@ -144,22 +150,7 @@ func validateShopDomain(domain string) error {
 // (YYYY-MM, year >= 2024). "latest" and "unstable" are refused: the
 // production version is pinned deliberately.
 func validateAPIVersion(version string) error {
-	if len(version) != 7 || version[4] != '-' {
-		return errInvalidVersion
-	}
-	for i, r := range version {
-		if i == 4 {
-			continue
-		}
-		if r < '0' || r > '9' {
-			return errInvalidVersion
-		}
-	}
-	if version[:4] < "2024" {
-		return errInvalidVersion
-	}
-	month := version[5:7]
-	if month < "01" || month > "12" {
+	if version != config.SupportedShopifyAPIVersion {
 		return errInvalidVersion
 	}
 	return nil
@@ -173,20 +164,9 @@ func (p *ShopifyProvider) Key() commerce.ProviderKey { return p.key }
 // only; never carries credentials).
 func (p *ShopifyProvider) endpoint() string { return p.client.endpoint }
 
-// remoteFence is the durable ordering state carried in the moonlight
-// ownership metafields. It gives concurrent SyncProduct operations a
-// per-product freshness fence without any new durable table: the remote
-// product itself records the catalog/policy revisions of the last
-// converged operation plus its deterministic operation key.
-//
-// Guarantees (Phase 11 remediation of the freeze-review F2 finding):
-//   - a stale operation (remote revisions newer than its own) aborts
-//     retryably BEFORE any remote write;
-//   - writes are CAS-guarded where Shopify supports it (inventory);
-//   - after writing, the operation verifies the fence still names its
-//     own operation key; supersession yields a retryable failure, so
-//     success always implies currency and the caller's retry re-reads
-//     fresh desired state.
+// remoteFence records catalog/policy revisions and logical operation identity.
+// It rejects stale starts and detects visible supersession; it does not
+// atomically fence subsequent unconditional Shopify Product mutations.
 type remoteFence struct {
 	catalogRevision int64
 	policyRevision  int64

@@ -73,6 +73,15 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	if err != nil {
 		return SyncResult{}, err
 	}
+	if coordinator, ok := s.mappings.(ProductSyncCoordinator); ok && !ProductSyncHeld(ctx, key, productID) {
+		var result SyncResult
+		err := coordinator.WithProductSync(ctx, key, productID, func(held context.Context) error {
+			var err error
+			result, err = s.SyncProduct(held, providerKey, productID)
+			return err
+		})
+		return result, err
+	}
 	desired, err := s.source.GetDesiredCommerceProduct(ctx, productID)
 	if err != nil {
 		return SyncResult{}, err

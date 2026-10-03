@@ -25,6 +25,7 @@ const (
           tracked
           inventoryLevels(first: 20) {
             nodes {
+              updatedAt
               location { id }
               quantities(names: ["available"]) { name quantity }
             }
@@ -35,8 +36,9 @@ const (
   }
 }`
 
-	docVariantsBySKU = `query MoonlightVariantsBySKU($query: String!) {
-  productVariants(first: 50, query: $query) {
+	docVariantsBySKU = `query MoonlightVariantsBySKU($query: String!, $after: String) {
+  productVariants(first: 50, query: $query, after: $after) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       id
       sku
@@ -70,23 +72,23 @@ const (
   }
 }`
 
-	docMetafieldsSet = `mutation MoonlightMetafieldsSet($metafields: [MetafieldInput!]!) {
+	docMetafieldsSet = `mutation MoonlightMetafieldsSet($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) {
     metafields { id namespace key }
     userErrors { field message }
   }
 }`
 
-	docPublish = `mutation MoonlightPublish($id: ID!, $publicationId: ID!) {
-  publishablePublish(id: $id, publicationId: $publicationId) {
-    publishable { id }
+	docPublish = `mutation MoonlightPublish($id: ID!, $input: [PublicationInput!]!) {
+  publishablePublish(id: $id, input: $input) {
+    publishable { ... on Product { id } }
     userErrors { field message }
   }
 }`
 
-	docUnpublish = `mutation MoonlightUnpublish($id: ID!, $publicationId: ID!) {
-  publishableUnpublish(id: $id, publicationId: $publicationId) {
-    publishable { id }
+	docUnpublish = `mutation MoonlightUnpublish($id: ID!, $input: [PublicationInput!]!) {
+  publishableUnpublish(id: $id, input: $input) {
+    publishable { ... on Product { id } }
     userErrors { field message }
   }
 }`
@@ -105,7 +107,7 @@ const (
   }
 }`
 
-	docOrder = `query MoonlightOrder($id: ID!) {
+	docOrder = `query MoonlightOrder($id: ID!, $after: String) {
   order(id: $id) {
     id
     legacyResourceId
@@ -130,7 +132,8 @@ const (
     customer { firstName lastName email phone }
     billingAddress { firstName lastName company address1 address2 city provinceCode zip countryCodeV2 phone }
     shippingAddress { firstName lastName company address1 address2 city provinceCode zip countryCodeV2 phone }
-    lineItems(first: 50) {
+    lineItems(first: 50, after: $after) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         id
         title
@@ -163,7 +166,8 @@ type gqlMetafield struct {
 }
 
 type gqlInventoryLevel struct {
-	Location struct {
+	UpdatedAt string `json:"updatedAt"`
+	Location  struct {
 		ID string `json:"id"`
 	} `json:"location"`
 	Quantities []struct {
@@ -272,7 +276,8 @@ type gqlOrder struct {
 	BillingAddress  *gqlAddress `json:"billingAddress"`
 	ShippingAddress *gqlAddress `json:"shippingAddress"`
 	LineItems       struct {
-		Nodes []gqlLineItem `json:"nodes"`
+		Nodes    []gqlLineItem `json:"nodes"`
+		PageInfo *pageInfo     `json:"pageInfo"`
 	} `json:"lineItems"`
 }
 
@@ -374,7 +379,8 @@ type productQueryResponse struct {
 
 type variantsBySKUResponse struct {
 	ProductVariants struct {
-		Nodes []gqlVariantWithProduct `json:"nodes"`
+		Nodes    []gqlVariantWithProduct `json:"nodes"`
+		PageInfo *pageInfo               `json:"pageInfo"`
 	} `json:"productVariants"`
 }
 
@@ -387,3 +393,13 @@ type shopCurrencyResponse struct {
 		CurrencyCode string `json:"currencyCode"`
 	} `json:"shop"`
 }
+
+type pageInfo struct {
+	HasNextPage *bool   `json:"hasNextPage"`
+	EndCursor   *string `json:"endCursor"`
+}
+
+const docInventoryVariant = `query MoonlightInventoryVariant($id: ID!) {
+ productVariant(id: $id) { id sku inventoryItem { id tracked inventoryLevels(first: 20) { nodes { updatedAt
+              location { id } quantities(names: ["available"]) { name quantity } } } } }
+}`

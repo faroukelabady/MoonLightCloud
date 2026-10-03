@@ -2,10 +2,12 @@ package shopify
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,10 +121,10 @@ func newHarness(t *testing.T) *shopifyHarness {
 // targeting is observable.
 func harnessClient(t *testing.T, h *shopifyHarness) *http.Client {
 	t.Helper()
-	client := h.server.Client()
+	client := *h.server.Client()
 	base := client.Transport
 	client.Transport = &harnessTransport{h: h, base: base}
-	return client
+	return &client
 }
 
 type harnessTransport struct {
@@ -195,6 +197,10 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateWireContract(body.Query, body.Variables); err != nil {
+		writeGQL(w, 200, `{"errors":[{"message":"invalid GraphQL contract"}]}`)
+		return
+	}
 	operation := operationName(body.Query)
 	if status, ok := h.failStatus[operation]; ok {
 		payload := h.failBody[operation]
@@ -234,6 +240,20 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 		payload = h.opVariantsBySKU(body.Variables)
 	case strings.Contains(body.Query, "MoonlightOrder"):
 		payload = h.opOrder(body.Variables)
+	case strings.Contains(body.Query, "MoonlightInventoryVariant"):
+		var variant any
+		for _, product := range h.products {
+			if data, ok := h.opProductQuery(map[string]any{"id": product.gid})["data"].(map[string]any); ok {
+				raw := data["product"].(map[string]any)
+				for _, node := range raw["variants"].(map[string]any)["nodes"].([]any) {
+					v := node.(map[string]any)
+					if str(v["id"]) == str(body.Variables["id"]) {
+						variant = v
+					}
+				}
+			}
+		}
+		payload = map[string]any{"data": map[string]any{"productVariant": variant}}
 	case strings.Contains(body.Query, "MoonlightProduct"):
 		payload = h.opProductQuery(body.Variables)
 	default:
@@ -253,7 +273,7 @@ func operationName(query string) string {
 		"MoonlightShopCurrency", "MoonlightProductCreate", "MoonlightProductUpdate",
 		"MoonlightManagedVariantUpdate", "MoonlightMetafieldsSet", "MoonlightPublish",
 		"MoonlightUnpublish", "MoonlightInventoryActivate", "MoonlightInventorySet",
-		"MoonlightVariantsBySKU", "MoonlightOrder", "MoonlightProduct",
+		"MoonlightVariantsBySKU", "MoonlightOrder", "MoonlightInventoryVariant", "MoonlightProduct",
 	} {
 		if strings.Contains(query, name) {
 			return name
@@ -362,7 +382,8 @@ func (h *shopifyHarness) opVariantUpdate(vars map[string]any) map[string]any {
 		}
 		for _, variant := range product.variants {
 			if strings.HasSuffix(variant.gid, variantID) {
-				variant.sku = str(entry["sku"])
+				item, _ := entry["inventoryItem"].(map[string]any)
+				variant.sku = str(item["sku"])
 				variant.price = str(entry["price"])
 				updated = append(updated, map[string]any{"id": variant.gid, "sku": variant.sku})
 			}
@@ -401,7 +422,12 @@ func (h *shopifyHarness) opMetafieldsSet(vars map[string]any) map[string]any {
 
 func (h *shopifyHarness) opPublish(vars map[string]any, publish bool) map[string]any {
 	productID, _ := ParseGID(str(vars["id"]), ResourceProduct)
-	publicationID := str(vars["publicationId"])
+	inputs, _ := vars["input"].([]any)
+	publicationID := ""
+	if len(inputs) == 1 {
+		input, _ := inputs[0].(map[string]any)
+		publicationID = str(input["publicationId"])
+	}
 	product := h.products[productID]
 	if product == nil {
 		return map[string]any{"data": map[string]any{"publishablePublish": map[string]any{
@@ -544,7 +570,10 @@ func (h *shopifyHarness) opVariantsBySKU(vars map[string]any) map[string]any {
 			}
 		}
 	}
-	return map[string]any{"data": map[string]any{"productVariants": map[string]any{"nodes": nodes}}}
+	sort.Slice(nodes, func(i, j int) bool {
+		return str(nodes[i].(map[string]any)["id"]) < str(nodes[j].(map[string]any)["id"])
+	})
+	return map[string]any{"data": map[string]any{"productVariants": fixturePage(nodes, vars)}}
 }
 
 func (h *shopifyHarness) opProductQuery(vars map[string]any) map[string]any {
@@ -562,6 +591,7 @@ func (h *shopifyHarness) opProductQuery(vars map[string]any) map[string]any {
 		for location, quantity := range variant.levels {
 			levels = append(levels, map[string]any{
 				"location":   map[string]any{"id": location},
+				"updatedAt":  time.Unix(h.nextID, 0).UTC().Format(time.RFC3339Nano),
 				"quantities": []any{map[string]any{"name": "available", "quantity": quantity}},
 			})
 		}
@@ -592,7 +622,17 @@ func (h *shopifyHarness) opOrder(vars map[string]any) map[string]any {
 	if order == nil {
 		return map[string]any{"data": map[string]any{"order": nil}}
 	}
-	return map[string]any{"data": map[string]any{"order": order.raw}}
+	raw := map[string]any{}
+	for key, value := range order.raw {
+		raw[key] = value
+	}
+	connection, _ := raw["lineItems"].(map[string]any)
+	nodes, _ := connection["nodes"].([]any)
+	raw["lineItems"] = fixturePage(nodes, vars)
+	if connection["pageInfo"] != nil {
+		raw["lineItems"] = connection
+	}
+	return map[string]any{"data": map[string]any{"order": raw}}
 }
 
 func metafieldNodes(values map[string]string) []any {
@@ -713,4 +753,20 @@ func str(value any) string {
 		return text
 	}
 	return ""
+}
+
+func fixturePage(nodes []any, vars map[string]any) map[string]any {
+	start := 0
+	if cursor := str(vars["after"]); cursor != "" {
+		start, _ = strconv.Atoi(cursor)
+	}
+	end := start + 50
+	if end > len(nodes) {
+		end = len(nodes)
+	}
+	if start > end {
+		start = end
+	}
+	cursor := fmt.Sprint(end)
+	return map[string]any{"nodes": nodes[start:end], "pageInfo": map[string]any{"hasNextPage": end < len(nodes), "endCursor": cursor}}
 }

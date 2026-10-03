@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -51,11 +50,6 @@ const (
 // a single host label chain under myshopify.com. No scheme, userinfo,
 // port, path, query, fragment, whitespace, or control characters.
 var shopDomainPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,61}[a-z0-9](\.[a-z0-9][a-z0-9-]{0,61}[a-z0-9])*\.myshopify\.com$`)
-
-// shopifyAPIVersionPattern accepts the date-based version handle shape
-// ("YYYY-MM"). "latest" and "unstable" are refused: production must pin
-// a deliberate stable version.
-var shopifyAPIVersionPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}$`)
 
 // shopifyGIDPattern accepts canonical Shopify GraphQL IDs of the form
 // gid://shopify/<Type>/<decimal>. Type and digits are checked strictly
@@ -112,14 +106,8 @@ func (c ShopifyConfig) validate() error {
 	if len(c.ShopDomain) > 253 {
 		return fmt.Errorf("invalid COMMERCE_SHOPIFY_SHOP_DOMAIN: expected a canonical <shop>.myshopify.com domain")
 	}
-	if !shopifyAPIVersionPattern.MatchString(c.APIVersion) {
-		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: expected YYYY-MM (pin a supported stable version)")
-	}
-	if major, err := strconv.Atoi(c.APIVersion[:4]); err != nil || major < 2024 {
-		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: unsupported version handle")
-	}
-	if month, err := strconv.Atoi(c.APIVersion[5:7]); err != nil || month < 1 || month > 12 {
-		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: unsupported version handle")
+	if c.APIVersion != SupportedShopifyAPIVersion {
+		return fmt.Errorf("invalid COMMERCE_SHOPIFY_API_VERSION: expected supported stable release")
 	}
 	if c.AccessToken == "" {
 		return fmt.Errorf("COMMERCE_SHOPIFY_ACCESS_TOKEN is required")
@@ -196,3 +184,6 @@ func (c ShopifyConfig) GraphQLEndpoint() string {
 func (c ShopifyConfig) NormalizedShopDomain() string {
 	return strings.ToLower(strings.TrimSpace(c.ShopDomain))
 }
+
+// SupportedShopifyAPIVersion is the release whose request contracts are verified.
+const SupportedShopifyAPIVersion = "2026-10"

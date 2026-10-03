@@ -38,6 +38,7 @@ type Client struct {
 	endpoint  string
 	token     string
 	userAgent string
+	version   string
 	scrub     *secretScrubber
 }
 
@@ -56,6 +57,7 @@ func newClient(endpoint, accessToken, clientSecret string, timeout time.Duration
 	return &Client{
 		http: httpClient, endpoint: endpoint, token: accessToken,
 		userAgent: "moonlight-cloud-commerce/1.0",
+		version:   strings.Split(strings.TrimSuffix(endpoint, "/graphql.json"), "/")[len(strings.Split(strings.TrimSuffix(endpoint, "/graphql.json"), "/"))-1],
 		scrub:     newSecretScrubber(accessToken, clientSecret),
 	}
 }
@@ -100,6 +102,9 @@ type gqlEnvelope struct {
 // the decoded payload), missing data, and malformed JSON are separate
 // failure layers. Context cancellation is preserved unwrapped.
 func (c *Client) do(ctx context.Context, document string, variables map[string]any, out any) error {
+	if err := commerce.ProductSyncGuard(ctx); err != nil {
+		return err
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -131,6 +136,9 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return c.classifyStatus(response.StatusCode, response.Header.Get("Retry-After"), raw)
+	}
+	if response.Header.Get("X-Shopify-API-Version") != c.version {
+		return commerce.ValidationError("shopify served API version does not match supported pin")
 	}
 	var envelope gqlEnvelope
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -267,9 +275,12 @@ func parseRetryAfter(header string) time.Duration {
 	if value == "" {
 		return 0
 	}
-	if seconds, err := strconv.Atoi(value); err == nil {
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
 		if seconds < 0 {
 			return 0
+		}
+		if seconds >= int64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
 		}
 		wait := time.Duration(seconds) * time.Second
 		if wait > maxRetryAfter {

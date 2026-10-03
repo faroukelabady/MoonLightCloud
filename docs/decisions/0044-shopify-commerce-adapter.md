@@ -43,9 +43,9 @@ kind with a bounded deterministic hint).
 `commerce.CommerceProvider` (and the optional
 `orders.CommerceOrderProvider` capability) — no
 `ShopifyProductProvider`, `SetShopifyInventory`, or other Shopify-shaped
-domain surface. `CommerceService.SyncProduct`, operation-key semantics,
+domain surface. `CommerceService.SyncProduct` (with the R1 coordination below), operation-key semantics,
 `commerce_product_mappings`, the availability formula, and
-`orders.OrderService`/`Processor` reconciliation are used unchanged.
+`orders.OrderService`/`Processor` reconciliation retain their contracts.
 Provider-specific GraphQL exists only inside the adapter.
 
 ### External identity normalization (Shopify GID ⇄ canonical decimal)
@@ -119,55 +119,69 @@ managed variant's `available` quantity at
 `COMMERCE_SHOPIFY_LOCATION_ID` is ever mutated
 (`inventoryActivate` at 0, then `inventorySetQuantities` absolute).
 
-Compare-and-set uses the `2026-04+` `changeFromQuantity` shape:
-**zero writes are CAS against the observed quantity** (a stale zero can
-never blind-zero a drifted or newer positive quantity), **positive
-writes are CAS against the safe-zero this operation establishes** —
-an older positive operation can never silently overwrite a proven newer
-quantity. Every inventory mutation carries a deterministic Shopify
-idempotency key (`@idempotent`) derived from the frozen
-`InventoryOperationKey`/`ProductOperationKey`; identical desired state
-replays as one remote write.
+Inventory compare-and-set uses `changeFromQuantity`. Physical correction
+keys bind the logical operation key to item identity, observed quantity,
+target and inventory-level `updatedAt`. After
+every response the physical inventory level is re-read: cached success is
+not current stock evidence. Four attempts bound convergence. Retries against
+unchanged observed state keep their physical key; a freshly observed level
+version gets a new correction key. `CHANGE_FROM_QUANTITY_STALE` and
+`COMPARE_QUANTITY_STALE` are retryable; unrelated validation remains permanent.
 
-### Per-product freshness fence (freeze-review F2 remediation)
+### R1 coordination and remaining F2 interruption failure
 
-Concurrent `SyncProduct` operations for one product are ordered by a
-**remote freshness fence** carried in the `moonlight` ownership
-metafields: `catalog_revision` + `policy_revision` (desired-state
-revisions from the frozen source) and `product_operation_key` (the
-deterministic operation key — equal desired state always derives the
-same key, so a different key always means a genuinely different
-operation). No new durable table is required.
+R1 holds a PostgreSQL transaction advisory lock for the entire (provider,
+Product ID) sequence: canonical desired-state read, remote writes, mapping
+persistence and inventory restoration. Desired state is read after acquiring
+the lock. Independent instances serialize through PostgreSQL. The callback
+has a two-minute deadline; failure/cancellation releases the lock, and each
+Shopify request checks that the database coordination session is alive.
+Inventory-only changes are protected by separate remote `inventory_revision`
+checks. Remote catalog/policy checks are additional freshness checks, not
+atomic conditions on subsequent Product mutations.
 
-Guarantees:
+This narrowly extends shared `CommerceService` orchestration and the
+PostgreSQL repository with an optional coordination capability. Provider
+interfaces, schema and dependencies remain unchanged. PostgreSQL-backed
+sync serializes both providers, isolated by provider key; Woo adapter
+requests retain their existing behavior. Standalone Shopify mutations
+require an injected coordinator or a matching coordinated context.
 
-1. **Stale start rejected**: an operation whose desired revisions are
-   older than the remote fence aborts *retryably* before any remote
-   write (including safe-zero). A stale full sequence running after a
-   newer operation completed writes nothing.
-2. **Per-child-write compare**: the fence is re-read and compared
-   immediately before every child write (safe-zero, content, managed
-   variant, fence stamp, publication). A newer operation landing mid-flow
-   aborts the stale one at its next write.
-3. **CAS-guarded inventory**: zero writes CAS against the observed
-   quantity; positive writes CAS against this operation's safe-zero.
-   Within our own write ordering a visible newer positive quantity
-   always implies a visible newer fence (availability is restored only
-   after the fence stamp), so stale zeros/restores cannot land.
-4. **Success implies currency**: after the writes, the fence is
-   re-verified; supersession (newer revisions or a different operation
-   key) fails retryably. The retry re-reads fresh desired state — the
-   failure is the durable reconvergence trigger.
+**F2 remains open.** An independent local TLS/PostgreSQL probe received an
+old Product update, cancelled its caller (releasing coordination), completed
+a newer operation on another instance, then applied the old remote request.
+The title regressed. Cancellation cannot retract an already-received remote
+mutation. Returning a retryable error is not durable reconciliation. No
+unresolved-operation quarantine or durable recovery subsystem is implemented.
+Ordinary barrier tests pass, but do not prove this interruption guarantee.
+The candidate must not be declared frozen.
 
-Residual (documented, bounded): Shopify exposes no conditional product
-mutation in the documented contract (`productUpdate`/
-`productVariantsBulkUpdate`/`metafieldsSet` are unconditional), so for
-two operations that start against the same remote state and interleave
-within one fence check→write round-trip, a single child write can slip
-past the loser's check; the loser still fails retryably at its next
-stage and its retry reconverges. Hard linearizability across processes
-would require a durable per-product generation column (a schema
-decision, deferred) or Shopify-side conditional mutations.
+### Complete connections and explicit API support
+
+Order lines and fuzzy SKU candidates use complete pagination: 50 nodes per
+page, at most 40 pages / 2,000 nodes, one MiB per response and two minutes
+per connection. Missing metadata, stalled/repeated cursors, duplicate order
+line identities, changed order revision, network failure or bounds exhaustion
+fail safely. Partial orders never replace authoritative projections;
+incomplete SKU searches never authorize creation. Exact equality and
+ownership checks apply after complete retrieval.
+
+Only stable API `2026-10` is supported. Missing/mismatched served
+`X-Shopify-API-Version` is rejected. Strict fixtures validate relevant input
+shapes and selections, including distinct creation/bulk-update SKU fields.
+Official sources:
+
+- [Metafield input](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/metafieldsSet).
+- [Publication input/result](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/publishablePublish).
+- [Bulk variant input](https://shopify.dev/docs/api/admin-graphql/2026-10/input-objects/ProductVariantsBulkInput).
+- [Creation variant input](https://shopify.dev/docs/api/admin-graphql/2026-10/input-objects/ProductVariantSetInput).
+- [Inventory-level version](https://shopify.dev/docs/api/admin-graphql/2026-10/objects/InventoryLevel).
+- [Inventory error codes](https://shopify.dev/docs/api/admin-graphql/2026-10/enums/InventorySetQuantitiesUserErrorCode).
+- [API version metadata](https://shopify.dev/docs/api/usage/versioning).
+
+Lineage: `67f479ef8f7dc767ea009d96b5897097fb5c6c17` is the original
+Phase 11 candidate. The actual Phase 10 baseline is
+`ee58687449d8da737c7ce2708a6decdede7671cd`.
 
 ### Order read-only direction and webhooks
 
@@ -202,12 +216,6 @@ nothing about Shopify.
   publication explicitly; Cloud startup contacts Shopify zero times.
 - The pinned API version needs a deliberate quarterly upgrade runbook
   (`docs/operations/shopify.md`); `latest`/`unstable` are refused.
-- Residual concurrency note (freeze-review F2 remediated): concurrent
-  `SyncProduct` operations are ordered by the remote freshness fence
-  (pre-write stale rejection, per-child-write compare, CAS-guarded
-  inventory, post-write supersession verification — see above). The
-  bounded residual is a single child write slipping inside one
-  fence-check→write round-trip for two same-instant starters; the loser
-  fails retryably and its retry reconverges. Hard cross-process
-  linearizability would need a durable per-product generation column
-  (schema decision, deferred).
+- R1 ordinary cross-instance ordering is improved, but the already-received
+  remote mutation interruption failure remains open. No automatic durable
+  reconvergence guarantee is claimed.

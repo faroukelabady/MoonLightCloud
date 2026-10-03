@@ -142,8 +142,8 @@ func TestInventoryIdempotencyKeyDerivation(t *testing.T) {
 	if len(keys) < 2 {
 		t.Fatalf("set calls = %d", len(keys))
 	}
-	if keys[len(keys)-1] != keys[0] {
-		t.Fatalf("same operation key produced different idempotency keys: %v", keys)
+	if keys[len(keys)-1] == keys[0] {
+		t.Fatalf("fresh physical correction reused cached success key: %v", keys)
 	}
 	reqB := inventoryRequest(created.ExternalProductID, "prod-1", 6, true)
 	reqB.OperationKey = "inv-changed-state"
@@ -297,8 +297,8 @@ func TestActivationIdempotencyKeyStable(t *testing.T) {
 	if len(activationKeys) < 2 {
 		t.Fatalf("activation calls = %d", len(activationKeys))
 	}
-	if activationKeys[len(activationKeys)-1] != activationKeys[len(activationKeys)-2] {
-		t.Fatalf("same operation identity produced different activation keys: %v", activationKeys)
+	if activationKeys[len(activationKeys)-1] == activationKeys[len(activationKeys)-2] {
+		t.Fatalf("different inventory items reused an activation key: %v", activationKeys)
 	}
 }
 
