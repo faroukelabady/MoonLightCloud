@@ -74,9 +74,13 @@ type gqlRequest struct {
 	Variables map[string]any `json:"variables,omitempty"`
 }
 
-// gqlError is one top-level GraphQL error entry.
+// gqlError is one top-level GraphQL error entry. Path is retained as raw
+// evidence: its presence (in any form) marks field-level execution and
+// disqualifies pre-execution-refusal settlement; malformed or
+// contradictory path evidence fails closed the same way.
 type gqlError struct {
-	Message    string `json:"message"`
+	Message    string          `json:"message"`
+	Path       json.RawMessage `json:"path"`
 	Extensions struct {
 		Code string `json:"code"`
 	} `json:"extensions"`
@@ -208,11 +212,12 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 		// (whether the remote mutation definitively did or did not apply)
 		// are separate decisions. A retryable classification never
 		// authorizes removing durable uncertainty evidence: the barrier is
-		// released only when the ENTIRE response carries affirmative,
-		// validated evidence that the mutation was refused before
-		// execution. Internal execution failures, unknown or missing
-		// error codes, mixed arrays, and partial data all leave the
-		// mutation uncertain and retain the barrier.
+		// released only when the COMPLETE response carries validated
+		// evidence of a documented pre-execution refusal. Execution
+		// evidence (any data key, any error path), unknown or missing
+		// error codes, mixed arrays, incomplete messages and malformed
+		// responses all leave the mutation uncertain and retain the
+		// barrier.
 		if mutation && definitiveGraphQLRefusal(envelope) {
 			if err := complete(); err != nil {
 				return err
@@ -239,10 +244,12 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 	return nil
 }
 
-// definitiveGraphQLRefusal reports whether the ENTIRE response
-// establishes that the operation was refused before execution, so no
-// remote mutation can have applied. Only documented pre-execution
-// refusals qualify (official Shopify GraphQL error contract):
+// definitiveGraphQLRefusal reports whether the COMPLETE response is a
+// definitive pre-execution refusal, so no remote mutation can have
+// applied. Only the documented request-error shape qualifies (GraphQL
+// request-error result contract: a request refused before execution
+// carries errors and NO data key at all, and request errors carry no
+// path):
 //
 //   - THROTTLED: cost-based admission rejects the request before
 //     execution begins (the throttle bucket must hold the requested cost
@@ -250,20 +257,31 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 //   - ACCESS_DENIED / UNAUTHENTICATED / FORBIDDEN: authorization and
 //     scope rejection — the operation is refused, not partially run.
 //
-// Every error entry must carry one of these codes and a message, and the
-// response must carry no data (any data means execution may have begun).
-// Anything else — INTERNAL_SERVER_ERROR, unknown codes, missing codes,
-// mixed arrays, partial data, malformed evidence — leaves execution
-// uncertain and must retain the barrier.
+// Settlement evidence rules — every one fails closed:
+//
+//   - any data key disqualifies, INCLUDING explicit `data: null`
+//     (present data describes an execution result);
+//   - any error path disqualifies (field-level execution evidence);
+//     malformed or contradictory path evidence disqualifies too (the raw
+//     path is retained and any presence is treated as evidence);
+//   - every error entry must carry a message and one of the approved
+//     codes — missing codes, incomplete messages and mixed uncertain
+//     entries disqualify.
+//
+// A recognized code alone never settles; the caller's error
+// classification (Authentication/Temporary/…) never settles either.
 func definitiveGraphQLRefusal(envelope gqlEnvelope) bool {
 	if len(envelope.Errors) == 0 {
 		return false
 	}
-	if len(envelope.Data) > 0 && string(envelope.Data) != "null" {
+	if len(envelope.Data) > 0 {
 		return false
 	}
 	for _, e := range envelope.Errors {
 		if e.Message == "" || e.Extensions.Code == "" {
+			return false
+		}
+		if len(e.Path) > 0 {
 			return false
 		}
 		switch e.Extensions.Code {

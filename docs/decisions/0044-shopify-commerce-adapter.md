@@ -148,14 +148,16 @@ retain the record. Uncertainty is independent of the existing ProviderError
 retryability classification. No new provider interface or queue is introduced.
 
 R2 amendment (settlement is decided separately from classification): for
-top-level GraphQL errors the barrier is retained unless the ENTIRE response
-carries validated evidence of a documented pre-execution refusal — every
-error entry a uniform `THROTTLED` (cost admission rejects before execution)
-or authorization rejection (`ACCESS_DENIED`/`UNAUTHENTICATED`/`FORBIDDEN`),
-with no data. `INTERNAL_SERVER_ERROR`, unknown or missing codes, mixed
-error arrays, partial data and malformed error evidence all retain the
-barrier, whatever error the caller receives. A retryable classification
-never authorizes removing durable uncertainty evidence.
+top-level GraphQL errors the barrier is retained unless the COMPLETE
+response carries validated evidence of a documented pre-execution refusal
+— every error entry a uniform `THROTTLED` (cost admission rejects before
+execution) or authorization rejection (`ACCESS_DENIED`/`UNAUTHENTICATED`/
+`FORBIDDEN`), with **no data key at all** and **no error path on any
+entry**. `INTERNAL_SERVER_ERROR`, unknown or missing codes, mixed error
+arrays, partial data, `data: null`, and any execution path (or malformed/
+contradictory path evidence) all retain the barrier, whatever error the
+caller receives. A retryable classification never authorizes removing
+durable uncertainty evidence.
 
 `in_flight` and `uncertain` both block subsequent same-provider/Product sync
 before any provider call. There is no TTL, lease expiry, startup reset or
