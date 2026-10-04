@@ -201,3 +201,31 @@ COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS,
 COMMERCE_STORE_CONFLICT) are the API contract; bilingual labels may
 evolve. Detail rows are bounded and carry IDs + stable codes only — no
 credentials, PII, raw provider errors or SQL.
+
+### Phase12-R1 analytics scope and limits
+
+Top Tags keeps separate Sale-time identities (Tag ID, historical slug and both
+historical names). Native currency mode ranks by canonical net line sales; All
+mode ranks by units with separate currency buckets. Tag groups overlap because
+one Sale line may contribute to several Tags; do not sum them into revenue.
+
+Online order values and every online count/breakdown apply the selected Store,
+period, provider and optional currency. Finalized Retail transaction count is
+separately labeled as all Retail currencies; its displayed monetary buckets
+honor the currency selection. Online values never become Retail revenue or FX.
+Overflow fails with a bounded error instead of returning wrapped money.
+
+Catalog Health describes current durable catalog/integration state, independent
+of the reporting period. Its summary counts remain complete; detail stays
+bounded and explicitly truncated. Provider choices use the same complete durable
+provider universe as mapping diagnostics, independent of the selected provider
+or first detail page. A specific Store without projected Products does not fall
+back to global choices. This is diagnostic evidence, not live provider state:
+reads never contact providers, adopt Store ownership or settle mutation barriers.
+
+Top-N limits bound response size, not aggregation work. Canonical Sale/Return
+aggregation remains complete before deterministic ranking and truncation. The
+current representative fixture assessment is recorded in the remediation report;
+this remains a nonblocking scaling observation, not a claim that aggregation is
+bounded by the response limit. No cache, background aggregation or new financial
+SQL was added.

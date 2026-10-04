@@ -202,7 +202,7 @@ func expireBackoff(t *testing.T, f *scopeFixture, eventID string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(),
 		`UPDATE sync_event_processing SET next_attempt_at=NULL WHERE event_id=$1`, eventID); err != nil {
-		t.Fatal(err)
+		reportCatalogWorkerError(t, err)
 	}
 }
 

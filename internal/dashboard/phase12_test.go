@@ -18,7 +18,7 @@ type stubAnalyticsRepo struct {
 	lastLimit                           int
 }
 
-func (s *stubAnalyticsRepo) DashboardOrderAnalytics(_ context.Context, providerKey, storeID string, _, _ time.Time) ([]OrderAnalyticsRowRaw, error) {
+func (s *stubAnalyticsRepo) DashboardOrderAnalytics(_ context.Context, providerKey, storeID, currency string, _, _ time.Time) ([]OrderAnalyticsRowRaw, error) {
 	s.lastProvider, s.lastStore = providerKey, storeID
 	return s.orders, nil
 }
@@ -170,4 +170,8 @@ func TestCatalogHealthCodesAndBounds(t *testing.T) {
 	if _, err := svc.CatalogHealth(context.Background(), req, "Bad Key!", "", 0); err == nil {
 		t.Fatal("bad provider accepted")
 	}
+}
+
+func (*stubAnalyticsRepo) CatalogHealthProviders(context.Context, string) ([]string, error) {
+	return []string{}, nil
 }

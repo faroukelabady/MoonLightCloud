@@ -458,6 +458,7 @@ export type CatalogHealthItem = {
 	store_id?: string;
 };
 export type CatalogHealthResponse = {
+	providers?: string[];
 	generated_at: string;
 	store_id: string | null;
 	provider_key: string;
@@ -511,8 +512,8 @@ export const dashboardApi = {
 	syncHealth: (s?: AbortSignal) => get<SyncHealth>('/api/v1/dashboard/sync-health', s),
 	tags: (p: PeriodParams, currency: string, store: string, limit: number, s?: AbortSignal) =>
 		get<TagListResponse>(`/api/v1/dashboard/tags?${query(p)}&currency=${currency}${storeQuery(store)}&limit=${limit}`, s),
-	orderSummary: (p: PeriodParams, store: string, provider: string, s?: AbortSignal) =>
-		get<OrderAnalyticsResponse>(`/api/v1/dashboard/orders/summary?${query(p)}${storeQuery(store)}${providerQuery(provider)}`, s),
+	orderSummary: (p: PeriodParams, store: string, provider: string, currency: string, s?: AbortSignal) =>
+		get<OrderAnalyticsResponse>(`/api/v1/dashboard/orders/summary?${query(p)}${storeQuery(store)}${providerQuery(provider)}&currency=${encodeURIComponent(currency)}`, s),
 	catalogHealth: (store: string, provider: string, s?: AbortSignal) =>
 		get<CatalogHealthResponse>(`/api/v1/dashboard/catalog-health?limit=50${storeQuery(store)}${providerQuery(provider)}`, s),
 	activity: (store: string, s?: AbortSignal) => get<{ items: ActivityItem[] }>(`/api/v1/dashboard/activity?limit=20${storeQuery(store)}`, s),

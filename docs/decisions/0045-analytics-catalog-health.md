@@ -124,12 +124,12 @@ SERIALIZABLE transactions with advisory entity locks; SQLSTATE 40001
 (serialization_failure) / 40P01 (deadlock_detected) are classified
 transient by `isSerializationFailure`, and `persistCatalogRetry`
 commits durable retry state returning
-(OutcomeRetryable, transient error). There is NO in-process production
+(OutcomeRetryable, ErrProjection or ErrCatalogDependencyWait, an Unavailable error with the exact message `projection transient failure` and cause `catalog projection transient failure`). There is NO in-process production
 retry: rows are rediscovered by scan. Tests now model exactly that
 contract through `catalogAttemptRetryable`: the durable-retry pair or a
 production-classified serialization abort is re-attempted within a
 finite budget (exhaustion = test failure with SQLSTATE diagnostics);
-every other error fails immediately. Race pressure and all semantic
+No-error NotDue waits are handled separately; an OutcomeRetryable label alone never authorizes retry. Every other error fails immediately, including undefined-column loader errors. Worker helpers return structured results to the parent; only the parent makes fatal failure decisions. Race pressure and all semantic
 assertions are preserved.
 
 ## Consequences

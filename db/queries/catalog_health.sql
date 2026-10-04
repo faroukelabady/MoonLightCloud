@@ -23,6 +23,7 @@ WHERE created_at >= @start_utc
   AND created_at < @end_utc
   AND (@provider_key::text = '' OR provider_key = @provider_key::text)
   AND (@store_id::text = '' OR store_id = @store_id::uuid)
+  AND (@currency::text = '' OR currency = @currency::text)
 GROUP BY provider_key, canonical_status, currency;
 
 -- name: CatalogHealthSummary :many
@@ -159,3 +160,17 @@ FROM (
 WHERE (@reason::text = '' OR reason_code = @reason::text)
 ORDER BY reason_code, provider_key, sku, product_id
 LIMIT @limit_n::int;
+
+-- name: CatalogHealthProviders :many
+-- Same complete durable provider universe as mapping-health predicates.
+-- A specific Store must have projected Products; unknown Store never falls
+-- back to a global list. Choices ignore provider selection/detail truncation.
+SELECT provider_key FROM (
+ SELECT provider_key FROM commerce_product_mappings
+ UNION
+ SELECT provider_key FROM commerce_product_mutation_barriers
+) providers
+WHERE (@store_id::text = '' OR EXISTS (
+ SELECT 1 FROM catalog_products p WHERE p.store_id = @store_id::uuid
+))
+ORDER BY provider_key;

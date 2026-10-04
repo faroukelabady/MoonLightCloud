@@ -421,15 +421,23 @@ func TestR4_RecoveryRacingProjection(t *testing.T) {
 		var wg sync.WaitGroup
 		start := make(chan struct{})
 		var recoveryErr error
+		var projection catalogWorkerResult
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			<-start
 			_, recoveryErr = NewDevices(f.pool, 5*time.Second).RecoverDefaultCatalogBlocked(ctx)
 		}()
-		go func() { defer wg.Done(); <-start; r3Project(t, f, newer, catalog.EventTagSnapshotV1) }()
+		go func() {
+			defer wg.Done()
+			<-start
+			projection = catalogWorkerAttempt(NewDevices(f.pool, 5*time.Second), newer, catalog.EventTagSnapshotV1)
+		}()
 		close(start)
 		wg.Wait()
+		if projection.Err != nil && !catalogAttemptRetryable(projection.Result, projection.Err) {
+			t.Fatal(projection.Err)
+		}
 		if recoveryErr != nil {
 			t.Logf("serialized recovery abort, retrying: %v", recoveryErr)
 		}

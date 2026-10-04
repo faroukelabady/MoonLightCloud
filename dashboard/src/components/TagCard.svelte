@@ -24,7 +24,7 @@
 	// report ranking); rows carry historical Tag snapshot identity.
 </script>
 
-<Card ar="أعلى الوسوم (صافي المبيعات)" en="Top Tags by Net Sales">
+<Card ar={currency === 'all' ? 'أعلى الوسوم (عدد الوحدات)' : 'أعلى الوسوم (صافي المبيعات)'} en={currency === 'all' ? 'Top Tags by Units' : 'Top Tags by Net Sales'}>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -45,7 +45,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each data.rows as row, i (row.tag_id ?? `${row.tag_slug}-${i}`)}
+					{#each data.rows as row, i (JSON.stringify([row.tag_id, row.tag_slug, row.name_ar, row.name_en]))}
 						<tr>
 							<td class="num">{i + 1}</td>
 							<td>
@@ -78,8 +78,8 @@
 			</table>
 		</div>
 		<p class="note" role="note">
-			{data.overlap_note}<br />
-			<span class="th-en">Tag totals overlap (one line can carry several tags) and must never be summed to derive total business revenue.</span>
+			قد يساهم بند البيع في عدة وسوم، لذا تتداخل مجموعات الوسوم ويجب عدم جمع إجمالياتها لحساب إيراد النشاط.<br />
+			<span class="th-en">Tag totals overlap (one line can carry several tags) and must not be summed to derive total business revenue.</span>
 		</p>
 	{/if}
 </Card>

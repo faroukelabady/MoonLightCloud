@@ -39,7 +39,7 @@
 	let providers = $derived(
 		Array.from(
 			new Set([
-				...(data?.detail ?? []).map((d) => d.provider_key).filter((p) => p),
+				...(data?.providers ?? []),
 				...(data?.provider_key ? [data.provider_key] : [])
 			])
 		).sort()
@@ -47,6 +47,7 @@
 </script>
 
 <Card ar="صحة الكتالوج (تشخيص)" en="Catalog Health (diagnostics)">
+	<p class="note" role="note">صحة الكتالوج تعكس الحالة الحالية للكتالوج والتكامل؛ فترة التقرير المختارة لا ترشح هذه النتائج.<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span></p>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}

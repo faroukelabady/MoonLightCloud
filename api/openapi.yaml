@@ -3277,7 +3277,9 @@ components:
       description: >-
         Operational provider-order aggregate. Retail financial values and
         online-order operational values are distinct sources and are never
-        combined into a revenue total.
+        combined into a revenue total. All counts and value breakdowns apply
+        the selected Store, provider, period and optional currency scope.
+        Aggregate overflow returns a bounded internal error, never wrapped money.
       required: [generated_at, store_id, provider_key, active_statuses, currency_totals, status_counts, provider_totals]
       properties:
         generated_at: {type: string, format: date-time}
@@ -3324,7 +3326,8 @@ components:
       description: >-
         Read-only catalog/integration diagnostics from durable MoonLight
         state only (no live provider reads, no writes, no barrier settlement).
-      required: [generated_at, store_id, provider_key, reason_codes, counts, detail, detail_limit, detail_truncated]
+        The selected reporting period does not filter current health state.
+      required: [generated_at, store_id, provider_key, reason_codes, counts, detail, detail_limit, detail_truncated, providers]
       properties:
         generated_at: {type: string, format: date-time}
         store_id:
@@ -3332,6 +3335,10 @@ components:
           format: uuid
           nullable: true
         provider_key: {type: string}
+        providers:
+          type: array
+          description: Complete observed durable provider choices for this Store scope, independent of detail limit and selected provider.
+          items: {type: string}
         reason_codes:
           type: array
           items: {type: string}

@@ -344,7 +344,7 @@
 		const signal = freshSignal();
 		const epoch = scopeEpoch;
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
-			ordersState = 'loading';
+			ordersState = tagState = onlineState = healthState = 'loading';
 		const done = async <T>(
 			p: Promise<T>,
 			apply: (v: T) => void,
@@ -451,7 +451,7 @@
 				tagList = v;
 				tagState = v.rows.length === 0 ? 'empty' : 'loaded';
 			}, (s) => (tagState = s), (n) => (tagErr = n)),
-			done(dashboardApi.orderSummary(params, store, '', signal), (v) => {
+			done(dashboardApi.orderSummary(params, store, '', currency === 'all' ? '' : currency, signal), (v) => {
 				online = v;
 				onlineState =
 					v.currency_totals.length === 0 && v.status_counts.length === 0 ? 'empty' : 'loaded';
@@ -542,11 +542,13 @@
 		readRoute();
 		// Back/Forward is a scope transition like any other: the shared
 		// handler resets scope-dependent state before reloading.
-		window.addEventListener('popstate', () => applyRouteTransition());
+		const onHistory = () => applyRouteTransition();
+		window.addEventListener('popstate', onHistory);
 		void (async () => {
 			await checkSession();
 			if (authed) await initAuthenticated();
 		})();
+		return () => window.removeEventListener('popstate', onHistory);
 	});
 </script>
 
@@ -645,7 +647,7 @@
 				{/if}
 				{#if route === 'sales'}
 					<div class="cell a-branch">
-						<OnlineComparison online={online} retail={overview} status={onlineState} errStatus={onlineErr} onretry={retryAll} />
+						<OnlineComparison online={online} retail={overview} status={overviewState === 'error' || onlineState === 'error' ? 'error' : overviewState === 'loading' || onlineState === 'loading' ? 'loading' : onlineState} errStatus={overviewState === 'error' ? overviewErr : onlineErr} {currency} onretry={retryAll} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

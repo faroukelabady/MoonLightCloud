@@ -1320,6 +1320,13 @@ func sortCategoryRows(byKey map[string]*BreakdownRow, order []string, currencySc
 		if out[i].Units != out[j].Units {
 			return out[i].Units > out[j].Units
 		}
+		// Tags have their own complete historical identity, distinct from Category IDs.
+		if ptrStr(out[i].TagID) != ptrStr(out[j].TagID) {
+			return ptrStr(out[i].TagID) < ptrStr(out[j].TagID)
+		}
+		if ptrStr(out[i].TagSlug) != ptrStr(out[j].TagSlug) {
+			return ptrStr(out[i].TagSlug) < ptrStr(out[j].TagSlug)
+		}
 		// Complete historical-identity tie-breaker: kind, ID, both names.
 		// Two distinct rows never compare equal, so response order cannot
 		// depend on SQL arrival order.

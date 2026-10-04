@@ -121,6 +121,41 @@ func (q *Queries) CatalogHealthDetail(ctx context.Context, arg CatalogHealthDeta
 	return items, nil
 }
 
+const catalogHealthProviders = `-- name: CatalogHealthProviders :many
+SELECT provider_key FROM (
+ SELECT provider_key FROM commerce_product_mappings
+ UNION
+ SELECT provider_key FROM commerce_product_mutation_barriers
+) providers
+WHERE ($1::text = '' OR EXISTS (
+ SELECT 1 FROM catalog_products p WHERE p.store_id = $1::uuid
+))
+ORDER BY provider_key
+`
+
+// Same complete durable provider universe as mapping-health predicates.
+// A specific Store must have projected Products; unknown Store never falls
+// back to a global list. Choices ignore provider selection/detail truncation.
+func (q *Queries) CatalogHealthProviders(ctx context.Context, storeID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, catalogHealthProviders, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var provider_key string
+		if err := rows.Scan(&provider_key); err != nil {
+			return nil, err
+		}
+		items = append(items, provider_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const catalogHealthSummary = `-- name: CatalogHealthSummary :many
 SELECT reason_code, count(*)::bigint AS products
 FROM (
@@ -241,6 +276,7 @@ WHERE created_at >= $1
   AND created_at < $2
   AND ($3::text = '' OR provider_key = $3::text)
   AND ($4::text = '' OR store_id = $4::uuid)
+  AND ($5::text = '' OR currency = $5::text)
 GROUP BY provider_key, canonical_status, currency
 `
 
@@ -249,6 +285,7 @@ type DashboardOrderAnalyticsParams struct {
 	EndUtc      pgtype.Timestamptz `json:"end_utc"`
 	ProviderKey string             `json:"provider_key"`
 	StoreID     string             `json:"store_id"`
+	Currency    string             `json:"currency"`
 }
 
 type DashboardOrderAnalyticsRow struct {
@@ -277,6 +314,7 @@ func (q *Queries) DashboardOrderAnalytics(ctx context.Context, arg DashboardOrde
 		arg.EndUtc,
 		arg.ProviderKey,
 		arg.StoreID,
+		arg.Currency,
 	)
 	if err != nil {
 		return nil, err

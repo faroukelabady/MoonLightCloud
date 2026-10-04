@@ -15,12 +15,12 @@ import (
 // strings (storeID "" = global ALL+legacy; providerKey "" = all durable
 // providers; reason "" = all reasons).
 
-func (d Devices) DashboardOrderAnalytics(ctx context.Context, providerKey, storeID string, startUTC, endUTC time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
+func (d Devices) DashboardOrderAnalytics(ctx context.Context, providerKey, storeID, currency string, startUTC, endUTC time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardOrderAnalytics(ctx, sqlcgen.DashboardOrderAnalyticsParams{
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC),
-		ProviderKey: providerKey, StoreID: storeID,
+		ProviderKey: providerKey, StoreID: storeID, Currency: currency,
 	})
 	if err != nil {
 		return nil, reportErr("order analytics", err)
@@ -69,4 +69,14 @@ func (d Devices) CatalogHealthDetailRows(ctx context.Context, storeID, providerK
 		})
 	}
 	return out, nil
+}
+
+func (d Devices) CatalogHealthProviders(ctx context.Context, storeID string) ([]string, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).CatalogHealthProviders(ctx, storeID)
+	if err != nil {
+		return nil, reportErr("catalog health providers", err)
+	}
+	return rows, nil
 }

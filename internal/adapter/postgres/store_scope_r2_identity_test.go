@@ -115,6 +115,7 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 	f.ingest(t, f.devB, f.credB, r2EventID(111), catalog.EventTagSnapshotV1,
 		tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "B concurrent"}, 2))
 	var wg sync.WaitGroup
+	done := make(chan catalogWorkerResult, 2)
 	for _, e := range []string{r2EventID(110), r2EventID(111)} {
 		wg.Add(1)
 		go func(event string) {
@@ -123,10 +124,16 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 			// connections over the same default identity. The bounded
 			// driver re-attempts ONLY permitted transient aborts
 			// (40001/40P01) exactly like production durable retry.
-			projectCatalogTerminal(t, f, event, catalog.EventTagSnapshotV1)
+			done <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
 		}(e)
 	}
 	wg.Wait()
+	for i := 0; i < 2; i++ {
+		result := <-done
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+	}
 	labelA, labelB := "", ""
 	if err := f.pool.QueryRow(context.Background(), `SELECT name_en FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreA)).Scan(&labelA); err != nil {
 		t.Fatal(err)
@@ -329,14 +336,21 @@ func TestR2_AbortRetryPreservesDurablePayloads(t *testing.T) {
 	f.ingest(t, f.devA, f.credA, r2EventID(210), catalog.EventTagSnapshotV1, payloadA)
 	f.ingest(t, f.devB, f.credB, r2EventID(211), catalog.EventTagSnapshotV1, payloadB)
 	var wg sync.WaitGroup
+	done := make(chan catalogWorkerResult, 2)
 	for _, e := range []string{r2EventID(210), r2EventID(211)} {
 		wg.Add(1)
 		go func(event string) {
 			defer wg.Done()
-			projectCatalogTerminal(t, f, event, catalog.EventTagSnapshotV1)
+			done <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
 		}(e)
 	}
 	wg.Wait()
+	for i := 0; i < 2; i++ {
+		result := <-done
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+	}
 
 	type row struct {
 		nameEN, nameAR, slug string

@@ -11,13 +11,15 @@
 		retail,
 		status,
 		errStatus,
-		onretry
+		onretry,
+		currency = 'all'
 	}: {
 		online: OrderAnalyticsResponse | null;
 		retail: OverviewResponse | null;
 		status: 'loading' | 'loaded' | 'empty' | 'error';
 		errStatus: number | null;
 		onretry: () => void;
+		currency?: 'all' | 'EGP' | 'USD';
 	} = $props();
 
 	function cur(c: string): 'EGP' | 'USD' {
@@ -37,8 +39,8 @@
 			<section aria-label="Finalized Retail Sales / المبيعات النهائية">
 				<h3>المبيعات النهائية (نقدية)<br /><span class="th-en">Finalized Retail Sales</span></h3>
 				{#if retail}
-					<p class="num">{formatInt(retail.summary.transaction_count)} <span class="th-en">transactions</span></p>
-					{#each retail.summary.currency_totals as total (total.currency)}
+					<p class="num">{formatInt(retail.summary.transaction_count)} <span class="th-en">transactions (all Retail currencies) / معاملات بكل العملات</span></p>
+					{#each retail.summary.currency_totals.filter((t) => currency === 'all' || t.currency === currency) as total (total.currency)}
 						<p class="num" dir="ltr">
 							{formatMinor(total.net_sales_minor, cur(total.currency))}
 							<span class="th-en">net {total.currency}</span>
@@ -48,7 +50,7 @@
 			</section>
 			<section aria-label="Online Orders / الطلبات عبر الإنترنت">
 				<h3>الطلبات عبر الإنترنت (تشغيلية)<br /><span class="th-en">Online Orders (operational)</span></h3>
-				{#each online.currency_totals as total (total.currency)}
+				{#each online.currency_totals.filter((t) => currency === 'all' || t.currency === currency) as total (total.currency)}
 					<p class="num" dir="ltr">
 						{formatMinor(total.value_minor, cur(total.currency))}
 						<span class="th-en">order value {total.currency} · {formatInt(total.orders)} orders</span>

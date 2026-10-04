@@ -33,7 +33,7 @@ func (phase12Repo) SalesByTag(context.Context, time.Time, time.Time, string) ([]
 func (phase12Repo) RefundsByTag(context.Context, time.Time, time.Time, string) ([]report.RefundTagRow, error) {
 	return []report.RefundTagRow{}, nil
 }
-func (phase12Repo) DashboardOrderAnalytics(context.Context, string, string, time.Time, time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
+func (phase12Repo) DashboardOrderAnalytics(context.Context, string, string, string, time.Time, time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
 	return []dashboard.OrderAnalyticsRowRaw{}, nil
 }
 func (phase12Repo) CatalogHealthSummaryRows(context.Context, string, string) ([]dashboard.CatalogHealthCountRaw, error) {
@@ -133,4 +133,8 @@ func indexOf(body, needle string) int {
 		}
 	}
 	return -1
+}
+
+func (phase12Repo) CatalogHealthProviders(context.Context, string) ([]string, error) {
+	return []string{}, nil
 }

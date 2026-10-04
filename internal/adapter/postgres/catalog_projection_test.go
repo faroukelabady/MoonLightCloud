@@ -102,39 +102,11 @@ func catalogStore(env *saleEnv) Devices {
 
 func projectCatalogOnce(t *testing.T, env *saleEnv, eventID string) catalog.ProjectResult {
 	t.Helper()
-	store := catalogStore(env)
-	rec, ok, err := store.LoadCatalogEvent(context.Background(), eventID)
-	if err != nil || !ok {
-		t.Fatalf("load catalog event: %v %v", ok, err)
+	result := catalogWorkerAttempt(catalogStore(env), eventID, "")
+	if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
+		reportCatalogWorkerError(t, result.Err)
 	}
-	var res catalog.ProjectResult
-	switch rec.EventType {
-	case catalog.EventCategorySnapshotV1:
-		res, err = store.ProjectCategory(context.Background(), rec, time.Now())
-	case catalog.EventTagSnapshotV1:
-		res, err = store.ProjectTag(context.Background(), rec, time.Now())
-	case catalog.EventProductSnapshotV1:
-		res, err = store.ProjectProduct(context.Background(), rec, time.Now())
-	case catalog.EventProductSalesPolicySnapshotV1:
-		res, err = store.ProjectProductSalesPolicy(context.Background(), rec, time.Now())
-	case catalog.EventInventoryProductSnapshotV1:
-		res, err = store.ProjectProductInventory(context.Background(), rec, time.Now())
-	default:
-		t.Fatalf("unexpected type %s", rec.EventType)
-	}
-	// Retryable dependency waits and permitted serialization aborts
-	// surface as transient errors by design (mirroring the sale/return
-	// projectors); the outcome is authoritative (Phase 12 F12).
-	if err != nil && catalogAttemptRetryable(res, err) {
-		if res.Outcome == 0 {
-			res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
-		}
-		return res
-	}
-	if err != nil {
-		t.Fatalf("project catalog: %v (sqlstate=%s)", err, sqlStateOf(err))
-	}
-	return res
+	return result.Result
 }
 
 func catalogStatus(t *testing.T, env *saleEnv, processor, eventID string) (string, string) {
@@ -1183,52 +1155,9 @@ func TestCatalogCoordinatedRebuild(t *testing.T) {
 // rounds used; runaway ping-pong fails the test instead of hanging it.
 func driveCatalogToTerminal(t *testing.T, env *saleEnv, eventID string, maxRounds int) (catalog.ProjectResult, int) {
 	t.Helper()
-	store := catalogStore(env)
-	ctx := context.Background()
-	var last catalog.ProjectResult
-	rounds := 0
-	for rounds = 1; rounds <= maxRounds; rounds++ {
-		if _, err := env.pool.Exec(ctx,
-			`UPDATE sync_event_processing SET next_attempt_at = NULL WHERE event_id=$1 AND status='retry'`, eventID); err != nil {
-			t.Fatal(err)
-		}
-		rec, ok, err := store.LoadCatalogEvent(ctx, eventID)
-		if err != nil || !ok {
-			t.Fatal("load")
-		}
-		var res catalog.ProjectResult
-		var perr error
-		switch rec.EventType {
-		case catalog.EventCategorySnapshotV1:
-			res, perr = store.ProjectCategory(ctx, rec, time.Now())
-		case catalog.EventTagSnapshotV1:
-			res, perr = store.ProjectTag(ctx, rec, time.Now())
-		case catalog.EventProductSalesPolicySnapshotV1:
-			res, perr = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
-		case catalog.EventInventoryProductSnapshotV1:
-			res, perr = store.ProjectProductInventory(ctx, rec, time.Now())
-		default:
-			res, perr = store.ProjectProduct(ctx, rec, time.Now())
-		}
-		last = res
-		// Phase 12 F12: only explicitly permitted transient attempts are
-		// retried (production durable-retry pair, or the production
-		// serialization abort classifier 40001/40P01); genuine errors
-		// fail immediately with SQLSTATE context.
-		if perr != nil && catalogAttemptRetryable(res, perr) {
-			if res.Outcome == 0 {
-				res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
-				last = res
-			}
-		} else if perr != nil {
-			t.Fatalf("event %s: %v (sqlstate=%s)", eventID, perr, sqlStateOf(perr))
-		}
-		if res.Outcome == catalog.OutcomeProcessed || res.Outcome == catalog.OutcomeBlocked {
-			return res, rounds
-		}
-	}
-	t.Fatalf("event %s did not reach terminal state in %d rounds (last %+v)", eventID, maxRounds, last)
-	return last, rounds
+	result := runCatalogWorker(catalogStore(env), eventID, "", maxRounds)
+	reportCatalogWorkerError(t, result.Err)
+	return result.Result, result.Attempts
 }
 
 // TestCatalogConcurrentRevisionsDeterministic forces two product revisions
@@ -2229,27 +2158,20 @@ func TestInventoryConcurrentRevisionsDeterministic(t *testing.T) {
 	ev6 := rev(6, 14, "60")
 
 	start := make(chan struct{})
-	done := make(chan catalog.ProjectResult, 2)
+	done := make(chan catalogWorkerResult, 2)
 	for _, event := range []string{ev5, ev6} {
 		go func(event string) {
-			store := catalogStore(env)
-			ctx := context.Background()
 			<-start
-			rec, ok, err := store.LoadCatalogEvent(ctx, event)
-			if err != nil || !ok {
-				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "LOAD"}
-				return
-			}
-			res, err := store.ProjectProductInventory(ctx, rec, time.Now())
-			if err != nil && res.Outcome != catalog.OutcomeRetryable {
-				done <- catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: "ERR"}
-				return
-			}
-			done <- res
+			done <- catalogWorkerAttempt(catalogStore(env), event, catalog.EventInventoryProductSnapshotV1)
 		}(event)
 	}
 	close(start)
-	results := []catalog.ProjectResult{<-done, <-done}
+	results := []catalogWorkerResult{<-done, <-done}
+	for _, result := range results {
+		if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
+			t.Fatalf("inventory worker: %v", result.Err)
+		}
+	}
 	for _, event := range []string{ev5, ev6} {
 		driveCatalogToTerminal(t, env, event, 10)
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
@@ -104,10 +105,18 @@ const catalogRetryBudget = 30
 // must too. Every OTHER error is a genuine defect and must fail
 // immediately: no broad pg-error, transaction-error or 40xxx catching.
 func catalogAttemptRetryable(res catalog.ProjectResult, err error) bool {
-	if res.Outcome == catalog.OutcomeRetryable {
+	if err == nil {
+		return false
+	} // No-error waits are a separate outcome contract.
+	if isSerializationFailure(err) {
 		return true
 	}
-	return err != nil && isSerializationFailure(err)
+	var app *apperr.Error
+	return res.Outcome == catalog.OutcomeRetryable &&
+		(res.ErrorCode == ErrProjection || res.ErrorCode == ErrCatalogDependencyWait) &&
+		errors.As(err, &app) && app.Kind == apperr.Unavailable &&
+		app.Message == "projection transient failure" && app.Err != nil &&
+		app.Err.Error() == "catalog projection transient failure" && errors.Unwrap(app.Err) == nil
 }
 
 // sqlStateOf extracts the PostgreSQL SQLSTATE for diagnostics when the
@@ -134,51 +143,11 @@ func sqlStateOf(err error) string {
 // SQLSTATE context; it is never suppressed or retried.
 func (f *scopeFixture) projectCatalog(t *testing.T, eventID, eventType string) catalog.ProjectResult {
 	t.Helper()
-	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadCatalogEvent(context.Background(), eventID)
-	if err != nil || !ok {
-		t.Errorf("load %s: found=%v err=%v (sqlstate=%s)", eventID, ok, err, sqlStateOf(err))
-		return catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
+	result := catalogWorkerAttempt(NewDevices(f.pool, 5*time.Second), eventID, eventType)
+	if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
+		reportCatalogWorkerError(t, result.Err)
 	}
-	now := time.Now()
-	attempt := func(kind string, res catalog.ProjectResult, err error) catalog.ProjectResult {
-		t.Helper()
-		// Retryable dependency waits and permitted serialization aborts
-		// surface as transient errors by design (mirroring the sale/return
-		// projectors); the outcome is authoritative. A raw commit-path
-		// abort carries a zero outcome: synthesize the production
-		// durable-retry contract so callers see the canonical pair.
-		if err != nil && catalogAttemptRetryable(res, err) {
-			if res.Outcome == 0 {
-				res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
-			}
-			return res
-		}
-		if err != nil {
-			t.Errorf("project %s %s: %v (sqlstate=%s, outcome=%v)", kind, eventID, err, sqlStateOf(err), res.Outcome)
-		}
-		return res
-	}
-	switch eventType {
-	case catalog.EventCategorySnapshotV1:
-		res, err := store.ProjectCategory(context.Background(), rec, now)
-		return attempt("category", res, err)
-	case catalog.EventTagSnapshotV1:
-		res, err := store.ProjectTag(context.Background(), rec, now)
-		return attempt("tag", res, err)
-	case catalog.EventProductSnapshotV1:
-		res, err := store.ProjectProduct(context.Background(), rec, now)
-		return attempt("product", res, err)
-	case catalog.EventProductSalesPolicySnapshotV1:
-		res, err := store.ProjectProductSalesPolicy(context.Background(), rec, now)
-		return attempt("policy", res, err)
-	case catalog.EventInventoryProductSnapshotV1:
-		res, err := store.ProjectProductInventory(context.Background(), rec, now)
-		return attempt("inventory", res, err)
-	default:
-		t.Errorf("unknown catalog event %s", eventType)
-		return catalog.ProjectResult{}
-	}
+	return result.Result
 }
 
 // projectCatalogTerminal drives one catalog event to a terminal outcome
@@ -191,26 +160,9 @@ func (f *scopeFixture) projectCatalog(t *testing.T, eventID, eventType string) c
 // touches no shared state beyond the event row itself.
 func projectCatalogTerminal(t *testing.T, f *scopeFixture, eventID, eventType string) catalog.ProjectResult {
 	t.Helper()
-	var last catalog.ProjectResult
-	for attempt := 1; attempt <= catalogRetryBudget; attempt++ {
-		expireBackoff(t, f, eventID)
-		res := f.projectCatalog(t, eventID, eventType)
-		last = res
-		switch res.Outcome {
-		case catalog.OutcomeProcessed, catalog.OutcomeAlready, catalog.OutcomeBlocked:
-			return res
-		case catalog.OutcomeRetryable, catalog.OutcomeNotDue:
-			// Permitted transient abort (40001/40P01) or dependency wait:
-			// production would park durable retry state and re-discover the
-			// row; re-attempt the same work within the finite budget.
-			continue
-		default:
-			t.Errorf("catalog event %s (%s): non-terminal outcome %+v after attempt %d", eventID, eventType, res, attempt)
-			return res
-		}
-	}
-	t.Errorf("catalog event %s (%s) did not verdict within %d attempts (last %+v)", eventID, eventType, catalogRetryBudget, last)
-	return last
+	result := runCatalogWorker(NewDevices(f.pool, 5*time.Second), eventID, eventType, catalogRetryBudget)
+	reportCatalogWorkerError(t, result.Err)
+	return result.Result
 }
 
 func (f *scopeFixture) projectSale(t *testing.T, eventID string) sale.ProjectResult {

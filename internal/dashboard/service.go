@@ -288,7 +288,8 @@ type Repository interface {
 	// Phase 12 operational analytics + catalog health (read-only, durable
 	// state only). storeID "" = global (ALL + legacy); providerKey "" =
 	// all durable providers. Never contacts a provider, never mutates.
-	DashboardOrderAnalytics(ctx context.Context, providerKey, storeID string, startUTC, endUTC time.Time) ([]OrderAnalyticsRowRaw, error)
+	DashboardOrderAnalytics(ctx context.Context, providerKey, storeID, currency string, startUTC, endUTC time.Time) ([]OrderAnalyticsRowRaw, error)
+	CatalogHealthProviders(ctx context.Context, storeID string) ([]string, error)
 	CatalogHealthSummaryRows(ctx context.Context, storeID, providerKey string) ([]CatalogHealthCountRaw, error)
 	CatalogHealthDetailRows(ctx context.Context, storeID, providerKey, reason string, limit int) ([]CatalogHealthRowRaw, error)
 }
@@ -1293,6 +1294,7 @@ type CatalogHealth struct {
 	ReasonCodes     []string             `json:"reason_codes"`
 	Counts          []CatalogHealthCount `json:"counts"`
 	Detail          []CatalogHealthItem  `json:"detail"`
+	Providers       []string             `json:"providers"`
 	DetailLimit     int                  `json:"detail_limit"`
 	DetailTruncated bool                 `json:"detail_truncated"`
 }
@@ -1308,7 +1310,7 @@ func (s Service) OrderAnalytics(ctx context.Context, req report.Request, provide
 			return OrderAnalytics{}, apperr.New(apperr.InvalidInput, "provider_key must match ^[a-z0-9][a-z0-9_-]{0,63}$")
 		}
 	}
-	rows, err := s.repo.DashboardOrderAnalytics(ctx, providerKey, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC)
+	rows, err := s.repo.DashboardOrderAnalytics(ctx, providerKey, req.ScopeStoreID(), req.Currency, req.Period.StartUTC, req.Period.EndUTC)
 	if err != nil {
 		return OrderAnalytics{}, err
 	}
@@ -1332,13 +1334,25 @@ func (s Service) OrderAnalytics(ctx context.Context, req report.Request, provide
 			b = &bucket{}
 			currencies[r.Currency] = b
 		}
-		b.orders += r.Orders
-		b.value += r.ValueMinor
-		if activeOrderStatus(r.CanonicalStatus) {
-			b.activeOrders += r.Orders
-			b.activeValue += r.ValueMinor
+		if err := addAnalytics(&b.orders, r.Orders); err != nil {
+			return OrderAnalytics{}, err
 		}
-		sizes[r.CanonicalStatus] += r.Orders
+		if err := addAnalytics(&b.value, r.ValueMinor); err != nil {
+			return OrderAnalytics{}, err
+		}
+		if activeOrderStatus(r.CanonicalStatus) {
+			if err := addAnalytics(&b.activeOrders, r.Orders); err != nil {
+				return OrderAnalytics{}, err
+			}
+			if err := addAnalytics(&b.activeValue, r.ValueMinor); err != nil {
+				return OrderAnalytics{}, err
+			}
+		}
+		count := sizes[r.CanonicalStatus]
+		if err := addAnalytics(&count, r.Orders); err != nil {
+			return OrderAnalytics{}, err
+		}
+		sizes[r.CanonicalStatus] = count
 		pb := providers[r.ProviderKey]
 		if pb == nil {
 			pb = map[string]*bucket{}
@@ -1349,8 +1363,12 @@ func (s Service) OrderAnalytics(ctx context.Context, req report.Request, provide
 			p = &bucket{}
 			pb[r.Currency] = p
 		}
-		p.orders += r.Orders
-		p.value += r.ValueMinor
+		if err := addAnalytics(&p.orders, r.Orders); err != nil {
+			return OrderAnalytics{}, err
+		}
+		if err := addAnalytics(&p.value, r.ValueMinor); err != nil {
+			return OrderAnalytics{}, err
+		}
 	}
 	for _, currency := range sortedKeys(currencies) {
 		b := currencies[currency]
@@ -1408,10 +1426,14 @@ func (s Service) CatalogHealth(ctx context.Context, req report.Request, provider
 	if err != nil {
 		return CatalogHealth{}, err
 	}
+	providers, err := s.repo.CatalogHealthProviders(ctx, req.ScopeStoreID())
+	if err != nil {
+		return CatalogHealth{}, err
+	}
 	out := CatalogHealth{
 		GeneratedAt: req.GeneratedAt(), StoreID: req.StoreIDOrNil(), ProviderKey: providerKey,
 		ReasonCodes: CatalogHealthReasonCodes,
-		Counts:      []CatalogHealthCount{}, Detail: []CatalogHealthItem{},
+		Counts:      []CatalogHealthCount{}, Detail: []CatalogHealthItem{}, Providers: append([]string{}, providers...),
 		DetailLimit: limit,
 	}
 	byCode := map[string]int64{}
@@ -1511,4 +1533,15 @@ func TagListFrom(res report.Breakdown) TagList {
 		out.Rows = append(out.Rows, tr)
 	}
 	return out
+}
+
+// addAnalytics fails before publishing any aggregate that cannot fit int64.
+func addAnalytics(total *int64, value int64) error {
+	const max = int64(^uint64(0) >> 1)
+	const min = -max - 1
+	if value > 0 && *total > max-value || value < 0 && *total < min-value {
+		return apperr.New(apperr.Internal, "online analytics arithmetic overflow")
+	}
+	*total += value
+	return nil
 }

@@ -205,37 +205,11 @@ func TestR3_ParentAdditionProtectsProductTop(t *testing.T) {
 
 func r3Project(t *testing.T, f *scopeFixture, id, typ string) catalog.ProjectResult {
 	t.Helper()
-	d := NewDevices(f.pool, 5*time.Second)
-	e, ok, err := d.LoadCatalogEvent(context.Background(), id)
-	if err != nil || !ok {
-		t.Fatalf("load: %v", err)
+	result := catalogWorkerAttempt(NewDevices(f.pool, 5*time.Second), id, typ)
+	if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
+		reportCatalogWorkerError(t, result.Err)
 	}
-	var res catalog.ProjectResult
-	switch typ {
-	case catalog.EventCategorySnapshotV1:
-		res, err = d.ProjectCategory(context.Background(), e, time.Now())
-	case catalog.EventTagSnapshotV1:
-		res, err = d.ProjectTag(context.Background(), e, time.Now())
-	case catalog.EventProductSalesPolicySnapshotV1:
-		res, err = d.ProjectProductSalesPolicy(context.Background(), e, time.Now())
-	case catalog.EventInventoryProductSnapshotV1:
-		res, err = d.ProjectProductInventory(context.Background(), e, time.Now())
-	default:
-		res, err = d.ProjectProduct(context.Background(), e, time.Now())
-	}
-	// Phase 12 F12: only explicitly permitted transient attempts are
-	// tolerated (production durable-retry pair, or the production-classified
-	// serialization abort 40001/40P01). Genuine errors still fail here.
-	if err != nil && catalogAttemptRetryable(res, err) {
-		if res.Outcome == 0 {
-			res = catalog.ProjectResult{Outcome: catalog.OutcomeRetryable}
-		}
-		return res
-	}
-	if err != nil {
-		t.Fatalf("projection: %v (sqlstate=%s)", err, sqlStateOf(err))
-	}
-	return res
+	return result.Result
 }
 
 // Parent additions to subcategories and redundant removals are harmless
@@ -291,14 +265,8 @@ func TestR3_ParentAdditionRacingProduct(t *testing.T) {
 				wg.Add(1)
 				go func(id, typ string) {
 					defer wg.Done()
-					for attempt := 0; attempt < 30; attempt++ {
-						expireBackoff(t, f, id)
-						res := r3Project(t, f, id, typ)
-						if res.Outcome == catalog.OutcomeProcessed || res.Outcome == catalog.OutcomeBlocked {
-							return
-						}
-					}
-					t.Error("race did not settle")
+					result := runCatalogWorker(NewDevices(f.pool, 5*time.Second), id, typ, catalogRetryBudget)
+					reportCatalogWorkerError(t, result.Err)
 				}(entry.id, entry.typ)
 			}
 			wg.Wait()
