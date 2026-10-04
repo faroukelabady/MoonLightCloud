@@ -53,41 +53,42 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg                    config.Config
-	Log                    *slog.Logger
-	Pool                   *pgxpool.Pool
-	Devices                auth.Service
-	Sync                   sync.Service
-	Reports                report.Service
-	Dashboard              dashboard.Service
-	Projector              *sale.Projector
-	SaleStore              sale.Store
-	ReturnProjector        *returnrefund.Projector
-	ReturnStore            returnrefund.Store
-	CatalogStore           catalog.Store
-	CategoryProjector      *catalog.Projector
-	TagProjector           *catalog.Projector
-	ProductProjector       *catalog.Projector
-	PolicyProjector        *catalog.Projector
-	InventoryProjector     *catalog.Projector
-	Catalog                catalog.Service
-	CommerceRegistry       *commerce.Registry
-	CommerceService        *commerce.CommerceService
-	ReevaluationWorker     *commerce.ReevaluationWorker
-	OrderService           *orders.OrderService
-	OrderProcessor         *orders.Processor
-	NotificationRegistry   *notifications.Registry
-	NotificationDispatcher *notifications.Dispatcher
-	ReportService          *businessreports.Service
-	ReportPlanner          *businessreports.Planner
-	ReportRunner           *businessreports.Runner
-	DeviceControl          *devicecontrol.Service
-	OperationsService      *operations.Service
-	OperationsReader       *operations.OpsReader
-	OperationsEngine       *operations.Engine
-	Handler                http.Handler
-	Health                 adapterhttp.Health
-	Version                adapterhttp.Version
+	Cfg                           config.Config
+	Log                           *slog.Logger
+	Pool                          *pgxpool.Pool
+	Devices                       auth.Service
+	Sync                          sync.Service
+	Reports                       report.Service
+	Dashboard                     dashboard.Service
+	Projector                     *sale.Projector
+	SaleStore                     sale.Store
+	ReturnProjector               *returnrefund.Projector
+	ReturnStore                   returnrefund.Store
+	CatalogStore                  catalog.Store
+	CategoryProjector             *catalog.Projector
+	TagProjector                  *catalog.Projector
+	ProductProjector              *catalog.Projector
+	PolicyProjector               *catalog.Projector
+	InventoryProjector            *catalog.Projector
+	ProductConfigurationProjector *catalog.Projector
+	Catalog                       catalog.Service
+	CommerceRegistry              *commerce.Registry
+	CommerceService               *commerce.CommerceService
+	ReevaluationWorker            *commerce.ReevaluationWorker
+	OrderService                  *orders.OrderService
+	OrderProcessor                *orders.Processor
+	NotificationRegistry          *notifications.Registry
+	NotificationDispatcher        *notifications.Dispatcher
+	ReportService                 *businessreports.Service
+	ReportPlanner                 *businessreports.Planner
+	ReportRunner                  *businessreports.Runner
+	DeviceControl                 *devicecontrol.Service
+	OperationsService             *operations.Service
+	OperationsReader              *operations.OpsReader
+	OperationsEngine              *operations.Engine
+	Handler                       http.Handler
+	Health                        adapterhttp.Health
+	Version                       adapterhttp.Version
 }
 
 // authDeviceStatus adapts the existing device lifecycle to the control
@@ -147,6 +148,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
 	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
 	a.InventoryProjector = catalog.NewProductInventoryProjector(store, clock.System{}, log)
+	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(store, clock.System{}, log)
 	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -503,6 +505,9 @@ func (a *App) notifyProjectors() {
 	a.ProductProjector.Notify()
 	a.PolicyProjector.Notify()
 	a.InventoryProjector.Notify()
+	if a.ProductConfigurationProjector != nil {
+		a.ProductConfigurationProjector.Notify()
+	}
 }
 
 // ProjectReturnOne loads one return inbox event and runs a single atomic
@@ -558,3 +563,15 @@ func (a *App) checkReady(ctx context.Context) error {
 
 // Close shuts the pool down gracefully.
 func (a *App) Close() { a.Pool.Close() }
+
+// ValidateCatalogProductConfigurationsPayload is the ingestion-time gate
+// for catalog.product.configuration.snapshot.v1 (Phase 15): event-local
+// validation only, before durable ACK.
+func ValidateCatalogProductConfigurationsPayload(raw json.RawMessage) error {
+	decoded, err := catalog.DecodeProductConfigurationsSnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductConfigurationsSnapshot(decoded)
+	return err
+}

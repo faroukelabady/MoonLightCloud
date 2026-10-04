@@ -3,6 +3,10 @@ package commerce
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
@@ -17,6 +21,7 @@ type CatalogReader interface {
 	GetCategory(ctx context.Context, id string) (catalog.Category, error)
 	GetTag(ctx context.Context, id string) (catalog.Tag, error)
 	GetProductSalesPolicy(ctx context.Context, id string) (catalog.ProductSalesPolicy, error)
+	GetProductConfigurations(ctx context.Context, id string) ([]catalog.ProductConfiguration, error)
 	GetProductAvailability(ctx context.Context, id string) (catalog.ProductAvailability, error)
 }
 
@@ -35,6 +40,11 @@ type DesiredProduct struct {
 	CatalogRevision   int64
 	PolicyRevision    int64
 	InventoryRevision int64
+	// Configurations carries the complete current option set and its
+	// deterministic identity (Phase 15 §48) for provider operation keys.
+	Configurations            []CommerceConfiguration
+	ConfigurationsFingerprint string
+	ConfigurationsVersion     string
 	// CategoryPolicyFingerprint is the deterministic ELIGIBILITY identity
 	// of the Product's relevant Category ONLINE policy context (Phase 13),
 	// and CategoryPolicyVersion its revision-digest generation marker.
@@ -162,6 +172,26 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 	desired.Published = product.IsActive && policyFound && policy.SellOnline && onlinePolicy.Allowed
 	desired.CategoryPolicyFingerprint = onlinePolicy.PolicyFingerprint
 	desired.CategoryPolicyVersion = onlinePolicy.PolicyVersion
+	// Phase 15: complete option set (enabled and disabled) with its
+	// deterministic identity. Publication of every choice remains gated
+	// by the Product's effective eligibility above (§33-§36).
+	configurationState, err := s.reader.GetProductConfigurations(ctx, productID)
+	if err != nil {
+		return DesiredProduct{}, err
+	}
+	desired.Configurations = make([]CommerceConfiguration, 0, len(configurationState))
+	for _, configuration := range configurationState {
+		desired.Configurations = append(desired.Configurations, CommerceConfiguration{
+			ConfigurationID: configuration.ID, Kind: configuration.Kind,
+			StyleCode: configuration.StyleCode, StyleNameAR: configuration.StyleNameAR, StyleNameEN: configuration.StyleNameEN,
+			ColorCode: configuration.ColorCode, ColorNameAR: configuration.ColorNameAR, ColorNameEN: configuration.ColorNameEN,
+			PriceDeltaEGPMinor: configuration.PriceDeltaEGPCents, PriceDeltaUSDMinor: configuration.PriceDeltaUSDCents,
+			Enabled: configuration.Enabled, Position: configuration.Position,
+			ConfigurationRevision: configuration.Revision,
+		})
+	}
+	desired.Product.Configurations = desired.Configurations
+	desired.ConfigurationsFingerprint, desired.ConfigurationsVersion = configurationIdentity(configurationState)
 	if !desired.Published {
 		// Provider-facing quantity follows existing disabled-product
 		// semantics: not published means zero availability toward the
@@ -178,4 +208,55 @@ func isNotFound(err error) bool {
 		return appErr.Kind == apperr.NotFound
 	}
 	return false
+}
+
+// configurationIdentity derives the deterministic option-state identity
+// (Phase 15 §48/§50): the fingerprint covers published option semantics
+// (ids, codes, published labels, deltas, enabled, position) while the
+// version digest covers per-configuration revisions — a pure label
+// rename rotates the version but NOT the fingerprint, so Retail-only
+// bookkeeping never masquerades as a remote option change (§50).
+func configurationIdentity(configurations []catalog.ProductConfiguration) (fingerprint, version string) {
+	parts := make([]string, 0, len(configurations))
+	versions := make([]string, 0, len(configurations))
+	for _, configuration := range configurations {
+		labelEN := ""
+		if configuration.StyleNameEN != nil {
+			labelEN = *configuration.StyleNameEN
+		}
+		colorEN := ""
+		if configuration.ColorNameEN != nil {
+			colorEN = *configuration.ColorNameEN
+		}
+		usd := "-"
+		if configuration.PriceDeltaUSDCents != nil {
+			usd = strconv.FormatInt(*configuration.PriceDeltaUSDCents, 10)
+		}
+		parts = append(parts, strings.Join([]string{
+			configuration.ID, configuration.Kind, configuration.StyleCode,
+			configuration.StyleNameAR, labelEN, configuration.ColorCode,
+			configuration.ColorNameAR, colorEN,
+			strconv.FormatInt(configuration.PriceDeltaEGPCents, 10), usd,
+			strconv.FormatBool(configuration.Enabled),
+			strconv.Itoa(configuration.Position),
+		}, ":"))
+		versions = append(versions, configuration.ID+":"+strconv.FormatInt(configuration.Revision, 10))
+	}
+	sort.Strings(parts)
+	sort.Strings(versions)
+	return strings.Join(parts, "|"), strings.Join(versions, "|")
+}
+
+// ConfiguredPrice computes the customer-facing configured price
+// (§38-§40): exact int64 minor units, base + delta with overflow
+// rejection (never wraparound; never float; never FX).
+func ConfiguredPrice(base, delta int64) (int64, error) {
+	if delta < 0 {
+		return 0, fmt.Errorf("configured price: negative delta")
+	}
+	total := base + delta
+	if total < base {
+		return 0, fmt.Errorf("configured price: overflow")
+	}
+	return total, nil
 }

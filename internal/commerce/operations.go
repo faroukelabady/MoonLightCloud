@@ -17,11 +17,12 @@ import (
 // across an enabled->disabled->enabled cycle, so that cycle can never
 // reuse the original generation's provider idempotency key. No
 // timestamps, random IDs, or attempt counters.
-func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion string) string {
+func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion, configurationsFingerprint, configurationsVersion string) string {
 	return operationKey("product",
 		string(providerKey), productID,
 		revisionBytes(catalogRevision), revisionBytes(policyRevision),
 		boolBytes(published), categoryPolicyFingerprint, categoryPolicyVersion,
+		configurationsFingerprint, configurationsVersion,
 	)
 }
 
@@ -29,11 +30,12 @@ func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevis
 // desired inventory state: product ID, the revisions behind the computed
 // availability (catalog lifecycle, sales policy, inventory), the derived
 // quantity, and publication state.
-func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion string) string {
+func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion, configurationsFingerprint, configurationsVersion string) string {
 	return operationKey("inventory",
 		string(providerKey), productID,
 		revisionBytes(catalogRevision), revisionBytes(policyRevision), revisionBytes(inventoryRevision),
 		revisionBytes(quantity), boolBytes(published), categoryPolicyFingerprint, categoryPolicyVersion,
+		configurationsFingerprint, configurationsVersion,
 	)
 }
 

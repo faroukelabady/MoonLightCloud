@@ -12,6 +12,61 @@ func validateWireContract(document string, vars map[string]any) error {
 	compact := strings.Join(strings.Fields(document), " ")
 	fail := func() error { return fmt.Errorf("invalid Shopify 2026-10 contract") }
 	switch operationName(document) {
+	case "MoonlightFrameComponentSet":
+		if !strings.Contains(compact, "$input: ProductSetInput!") || !strings.Contains(compact, "productSet(synchronous: true, input: $input)") {
+			return fail()
+		}
+		input, ok := vars["input"].(map[string]any)
+		if !ok || input["title"] == nil || input["variants"] == nil {
+			return fail()
+		}
+		values, ok := input["variants"].([]any)
+		if !ok || len(values) == 0 {
+			return fail()
+		}
+		for _, raw := range values {
+			entry, ok := raw.(map[string]any)
+			if !ok || entry["inventoryItem"] == nil {
+				return fail()
+			}
+		}
+	case "MoonlightBundleUpdate":
+		if !strings.Contains(compact, "$input: ProductBundleUpdateInput!") || !strings.Contains(compact, "productBundleUpdate(input: $input)") {
+			return fail()
+		}
+		input, ok := vars["input"].(map[string]any)
+		if !ok || input["productId"] == nil || input["components"] == nil {
+			return fail()
+		}
+		values, ok := input["components"].([]any)
+		if !ok || len(values) == 0 {
+			return fail()
+		}
+		for _, raw := range values {
+			entry, ok := raw.(map[string]any)
+			if !ok || entry["productId"] == nil {
+				return fail()
+			}
+		}
+	case "MoonlightVariantPrices":
+		if !strings.Contains(compact, "$variants: [ProductVariantsBulkInput!]!") {
+			return fail()
+		}
+		values, ok := vars["variants"].([]any)
+		if !ok || len(values) == 0 {
+			return fail()
+		}
+		for _, raw := range values {
+			entry, ok := raw.(map[string]any)
+			if !ok || entry["id"] == nil || entry["price"] == nil {
+				return fail()
+			}
+			// Price-only updates never touch inventory identity (the
+			// managed-variant contract keeps that authority).
+			if entry["inventoryItem"] != nil {
+				return fail()
+			}
+		}
 	case "MoonlightMetafieldsSet":
 		if !strings.Contains(compact, "$metafields: [MetafieldsSetInput!]!") || !strings.Contains(compact, "metafieldsSet(metafields: $metafields)") {
 			return fail()

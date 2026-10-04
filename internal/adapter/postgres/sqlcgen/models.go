@@ -102,21 +102,45 @@ type CatalogCategoryEdge struct {
 }
 
 type CatalogProduct struct {
-	ProductID         pgtype.UUID        `json:"product_id"`
-	Sku               string             `json:"sku"`
-	Name              string             `json:"name"`
-	Description       pgtype.Text        `json:"description"`
-	TopCategoryID     pgtype.UUID        `json:"top_category_id"`
-	WidthCm           pgtype.Int4        `json:"width_cm"`
-	HeightCm          pgtype.Int4        `json:"height_cm"`
-	IsActive          bool               `json:"is_active"`
-	SourceRevision    int64              `json:"source_revision"`
-	SourceEventID     pgtype.UUID        `json:"source_event_id"`
-	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
-	SourcePayloadHash []byte             `json:"source_payload_hash"`
-	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
-	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
-	StoreID           pgtype.UUID        `json:"store_id"`
+	ProductID             pgtype.UUID        `json:"product_id"`
+	Sku                   string             `json:"sku"`
+	Name                  string             `json:"name"`
+	Description           pgtype.Text        `json:"description"`
+	TopCategoryID         pgtype.UUID        `json:"top_category_id"`
+	WidthCm               pgtype.Int4        `json:"width_cm"`
+	HeightCm              pgtype.Int4        `json:"height_cm"`
+	IsActive              bool               `json:"is_active"`
+	SourceRevision        int64              `json:"source_revision"`
+	SourceEventID         pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash     []byte             `json:"source_payload_hash"`
+	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
+	ConfigurationRevision int64              `json:"configuration_revision"`
+}
+
+type CatalogProductConfiguration struct {
+	ConfigurationID       pgtype.UUID        `json:"configuration_id"`
+	ProductID             pgtype.UUID        `json:"product_id"`
+	Kind                  string             `json:"kind"`
+	StyleCode             string             `json:"style_code"`
+	StyleNameAr           string             `json:"style_name_ar"`
+	StyleNameEn           pgtype.Text        `json:"style_name_en"`
+	ColorCode             string             `json:"color_code"`
+	ColorNameAr           string             `json:"color_name_ar"`
+	ColorNameEn           pgtype.Text        `json:"color_name_en"`
+	PriceDeltaEgpMinor    int64              `json:"price_delta_egp_minor"`
+	PriceDeltaUsdMinor    pgtype.Int8        `json:"price_delta_usd_minor"`
+	Enabled               bool               `json:"enabled"`
+	Position              int32              `json:"position"`
+	ConfigurationRevision int64              `json:"configuration_revision"`
+	SourceRevision        int64              `json:"source_revision"`
+	SourceEventID         pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash     []byte             `json:"source_payload_hash"`
+	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
 }
 
 type CatalogProductInventory struct {
@@ -247,21 +271,31 @@ type CommerceOnlineOrderAddress struct {
 }
 
 type CommerceOnlineOrderLine struct {
-	ProviderKey        string      `json:"provider_key"`
-	ExternalOrderID    string      `json:"external_order_id"`
-	ExternalLineID     int64       `json:"external_line_id"`
-	ExternalProductID  string      `json:"external_product_id"`
-	VariationID        int64       `json:"variation_id"`
-	Sku                string      `json:"sku"`
-	Name               string      `json:"name"`
-	Quantity           int64       `json:"quantity"`
-	SubtotalMinor      int64       `json:"subtotal_minor"`
-	SubtotalTaxMinor   int64       `json:"subtotal_tax_minor"`
-	TotalMinor         int64       `json:"total_minor"`
-	TotalTaxMinor      int64       `json:"total_tax_minor"`
-	MoonlightProductID pgtype.UUID `json:"moonlight_product_id"`
-	Mapped             bool        `json:"mapped"`
-	UnsupportedReason  string      `json:"unsupported_reason"`
+	ProviderKey                  string      `json:"provider_key"`
+	ExternalOrderID              string      `json:"external_order_id"`
+	ExternalLineID               int64       `json:"external_line_id"`
+	ExternalProductID            string      `json:"external_product_id"`
+	VariationID                  int64       `json:"variation_id"`
+	Sku                          string      `json:"sku"`
+	Name                         string      `json:"name"`
+	Quantity                     int64       `json:"quantity"`
+	SubtotalMinor                int64       `json:"subtotal_minor"`
+	SubtotalTaxMinor             int64       `json:"subtotal_tax_minor"`
+	TotalMinor                   int64       `json:"total_minor"`
+	TotalTaxMinor                int64       `json:"total_tax_minor"`
+	MoonlightProductID           pgtype.UUID `json:"moonlight_product_id"`
+	Mapped                       bool        `json:"mapped"`
+	UnsupportedReason            string      `json:"unsupported_reason"`
+	ConfigurationID              pgtype.UUID `json:"configuration_id"`
+	FrameStyleCode               pgtype.Text `json:"frame_style_code"`
+	FrameStyleNameAr             pgtype.Text `json:"frame_style_name_ar"`
+	FrameStyleNameEn             pgtype.Text `json:"frame_style_name_en"`
+	FrameColorCode               pgtype.Text `json:"frame_color_code"`
+	FrameColorNameAr             pgtype.Text `json:"frame_color_name_ar"`
+	FrameColorNameEn             pgtype.Text `json:"frame_color_name_en"`
+	ConfigurationPriceDeltaMinor pgtype.Int8 `json:"configuration_price_delta_minor"`
+	ProviderConfigurationID      pgtype.Text `json:"provider_configuration_id"`
+	ConfigurationUnresolved      bool        `json:"configuration_unresolved"`
 }
 
 type CommerceOnlineOrderReconcileFence struct {
@@ -298,6 +332,17 @@ type CommerceOnlineOrderWebhookEvent struct {
 	LeaseUntil      pgtype.Timestamptz `json:"lease_until"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	LeaseGeneration int64              `json:"lease_generation"`
+}
+
+type CommerceProductConfigurationMapping struct {
+	ProviderKey             string             `json:"provider_key"`
+	ProductID               pgtype.UUID        `json:"product_id"`
+	ConfigurationID         pgtype.UUID        `json:"configuration_id"`
+	ExternalProductID       string             `json:"external_product_id"`
+	ExternalConfigurationID string             `json:"external_configuration_id"`
+	StoreID                 pgtype.UUID        `json:"store_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CommerceProductMapping struct {

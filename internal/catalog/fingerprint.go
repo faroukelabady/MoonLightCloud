@@ -211,3 +211,13 @@ func NormalizeProductInventorySnapshot(v ProductInventorySnapshot) NormalizedPro
 func FingerprintProductInventory(v ProductInventorySnapshot) [32]byte {
 	return fingerprint(NormalizeProductInventorySnapshot(v))
 }
+
+// FingerprintProductConfigurations hashes the normalized configuration
+// state (Phase 15 §48): deterministic over configuration IDs, codes,
+// labels as published, price deltas, enabled, position and per-row
+// revisions — canonical ordering, no timestamps or row order. It is the
+// stored source_payload_hash for configuration events and participates
+// in provider operation identity through DesiredProduct.
+func FingerprintProductConfigurations(snapshot ProductConfigurationsSnapshot) [32]byte {
+	return fingerprint(NormalizeProductConfigurations(snapshot))
+}

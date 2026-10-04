@@ -156,6 +156,9 @@ func serve(args []string) error {
 	go a.ProductProjector.Run(projCtx)
 	go a.PolicyProjector.Run(projCtx)
 	go a.InventoryProjector.Run(projCtx)
+	if a.ProductConfigurationProjector != nil {
+		go a.ProductConfigurationProjector.Run(projCtx)
+	}
 	if a.OrderProcessor != nil {
 		go a.OrderProcessor.Run(projCtx)
 	}

@@ -318,24 +318,26 @@ func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEn
 
 const catalogProductByID = `-- name: CatalogProductByID :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
+    configuration_revision
 FROM catalog_products WHERE product_id = $1
 `
 
 type CatalogProductByIDRow struct {
-	ProductID         pgtype.UUID `json:"product_id"`
-	Sku               string      `json:"sku"`
-	Name              string      `json:"name"`
-	Description       pgtype.Text `json:"description"`
-	TopCategoryID     pgtype.UUID `json:"top_category_id"`
-	WidthCm           pgtype.Int4 `json:"width_cm"`
-	HeightCm          pgtype.Int4 `json:"height_cm"`
-	IsActive          bool        `json:"is_active"`
-	SourceRevision    int64       `json:"source_revision"`
-	SourceEventID     pgtype.UUID `json:"source_event_id"`
-	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
-	SourcePayloadHash []byte      `json:"source_payload_hash"`
-	StoreID           pgtype.UUID `json:"store_id"`
+	ProductID             pgtype.UUID `json:"product_id"`
+	Sku                   string      `json:"sku"`
+	Name                  string      `json:"name"`
+	Description           pgtype.Text `json:"description"`
+	TopCategoryID         pgtype.UUID `json:"top_category_id"`
+	WidthCm               pgtype.Int4 `json:"width_cm"`
+	HeightCm              pgtype.Int4 `json:"height_cm"`
+	IsActive              bool        `json:"is_active"`
+	SourceRevision        int64       `json:"source_revision"`
+	SourceEventID         pgtype.UUID `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID `json:"source_device_id"`
+	SourcePayloadHash     []byte      `json:"source_payload_hash"`
+	StoreID               pgtype.UUID `json:"store_id"`
+	ConfigurationRevision int64       `json:"configuration_revision"`
 }
 
 func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID) (CatalogProductByIDRow, error) {
@@ -355,6 +357,7 @@ func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID)
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
 		&i.StoreID,
+		&i.ConfigurationRevision,
 	)
 	return i, err
 }

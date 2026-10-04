@@ -2889,3 +2889,213 @@ func (d Devices) CatalogProductOnlinePolicy(ctx context.Context, id string) (cat
 	}
 	return policy, nil
 }
+
+// ProjectProductConfigurations projects one Phase 15 configuration
+// snapshot (the complete ONLINE product-option set of one Product at one
+// aggregate configuration revision). One atomic claim+project
+// SERIALIZABLE transaction: aggregate revision gate under the frozen
+// rules (stale no-ops; equal revisions compare normalized semantic
+// state; contradictions block), replace-set of configuration rows, and —
+// when effective option state actually changed — a durable commerce
+// re-evaluation intent in the SAME transaction (crash-safe; no provider
+// I/O inside the transaction).
+func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductConfigurationsSnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductConfigurationsSnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	puid, perr := parseUUID(valid.ProductID)
+	if perr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrValidation, "product_id must be a UUID")
+	}
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+	if err := lockCatalogEntities(ctx, q, [2]string{"product", valid.ProductID}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+	// The Product must already exist: configurations never invent
+	// Products (§7) and never carry their own identity.
+	productRow, err := q.CatalogProductByID(ctx, puid)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+	storedRows, err := q.CatalogProductConfigurationsByProduct(ctx, puid)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration state read failed")
+	}
+	storedRevision := productRow.ConfigurationRevision
+	if valid.ConfigurationRevision < storedRevision {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if valid.ConfigurationRevision == storedRevision {
+		if !reflect.DeepEqual(catalog.NormalizeProductConfigurations(valid), normalizeStoredConfigurations(puid, storedRows, storedRevision)) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	fingerprint := catalog.FingerprintProductConfigurations(valid)
+	if err := q.DeleteCatalogProductConfigurations(ctx, puid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration replace failed")
+	}
+	for _, entry := range valid.Configurations {
+		cuid, cerr := parseUUID(entry.ConfigurationID)
+		if cerr != nil {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrValidation, "configuration_id must be a UUID")
+		}
+		params := sqlcgen.UpsertCatalogProductConfigurationParams{
+			ConfigurationID: cuid, ProductID: puid, Kind: entry.Kind,
+			StyleCode: entry.StyleCode, StyleNameAr: entry.StyleNameAR,
+			ColorCode: entry.ColorCode, ColorNameAr: entry.ColorNameAR,
+			PriceDeltaEgpMinor: entry.PriceDeltaEGPCents,
+			Enabled:            entry.Enabled, Position: int32(entry.Position),
+			ConfigurationRevision: entry.ConfigurationRevision,
+			SourceRevision:        valid.ConfigurationRevision, SourceEventID: attempt.euid,
+			SourceDeviceID: attempt.duid, SourcePayloadHash: fingerprint[:],
+			SourceReceivedAt: pgTime(event.ReceivedAt),
+		}
+		if entry.StyleNameEN != nil {
+			params.StyleNameEn = pgText(*entry.StyleNameEN)
+		}
+		if entry.ColorNameEN != nil {
+			params.ColorNameEn = pgText(*entry.ColorNameEN)
+		}
+		if entry.PriceDeltaUSDCents != nil {
+			params.PriceDeltaUsdMinor = pgtype.Int8{Int64: *entry.PriceDeltaUSDCents, Valid: true}
+		}
+		if err := q.UpsertCatalogProductConfiguration(ctx, params); err != nil {
+			_ = tx.Rollback(ctx)
+			if isUniqueViolation(err) {
+				return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "configuration identity collision")
+			}
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration upsert failed")
+		}
+	}
+	if _, err := q.BumpCatalogProductConfigurationRevision(ctx, sqlcgen.BumpCatalogProductConfigurationRevisionParams{
+		ProductID: puid, ConfigurationRevision: valid.ConfigurationRevision,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration revision write failed")
+	}
+	// Durable commerce re-evaluation (§147): coalesced per Product in the
+	// projection transaction. The worker reads CURRENT state at run time
+	// (§149), so rapid mutation sequences converge to the latest durable
+	// projection (§150).
+	if err := q.EnqueueProductReevaluation(ctx, sqlcgen.EnqueueProductReevaluationParams{
+		ProductID: puid, Reason: "product_configuration",
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error())
+	}
+	_ = productRow
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
+// normalizeStoredConfigurations reconstructs comparison form from the
+// projected configuration rows (frozen equal-revision semantics).
+func normalizeStoredConfigurations(productID pgtype.UUID, rows []sqlcgen.CatalogProductConfigurationsByProductRow, storedRevision int64) catalog.NormalizedProductConfigurations {
+	entries := make([]catalog.ProductConfigurationEntry, 0, len(rows))
+	for _, row := range rows {
+		entry := catalog.ProductConfigurationEntry{
+			ConfigurationID: uuidString(row.ConfigurationID), Kind: row.Kind,
+			StyleCode: row.StyleCode, StyleNameAR: row.StyleNameAr,
+			ColorCode: row.ColorCode, ColorNameAR: row.ColorNameAr,
+			PriceDeltaEGPCents: row.PriceDeltaEgpMinor,
+			Enabled:            row.Enabled, Position: int(row.Position),
+			ConfigurationRevision: row.ConfigurationRevision,
+		}
+		if row.StyleNameEn.Valid {
+			value := row.StyleNameEn.String
+			entry.StyleNameEN = &value
+		}
+		if row.ColorNameEn.Valid {
+			value := row.ColorNameEn.String
+			entry.ColorNameEN = &value
+		}
+		if row.PriceDeltaUsdMinor.Valid {
+			value := row.PriceDeltaUsdMinor.Int64
+			entry.PriceDeltaUSDCents = &value
+		}
+		entries = append(entries, entry)
+	}
+	return catalog.NormalizeProductConfigurations(catalog.ProductConfigurationsSnapshot{
+		ProductID: uuidString(productID), Configurations: entries,
+		ConfigurationRevision: storedRevision,
+	})
+}
+
+// CatalogProductConfigurations reads one Product's projected ONLINE
+// configurations (Phase 15). Read-only durable Cloud state.
+func (d Devices) CatalogProductConfigurations(ctx context.Context, id string) ([]catalog.ProductConfiguration, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(id)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).CatalogProductConfigurationsByProduct(ctx, uid)
+	if err != nil {
+		return nil, reportErr("catalog product configurations", err)
+	}
+	out := make([]catalog.ProductConfiguration, 0, len(rows))
+	for _, row := range rows {
+		entry := catalog.ProductConfiguration{
+			ID: uuidString(row.ConfigurationID), Kind: row.Kind,
+			StyleCode: row.StyleCode, StyleNameAR: row.StyleNameAr,
+			ColorCode: row.ColorCode, ColorNameAR: row.ColorNameAr,
+			PriceDeltaEGPCents: row.PriceDeltaEgpMinor,
+			Enabled:            row.Enabled, Position: int(row.Position), Revision: row.ConfigurationRevision,
+		}
+		if row.StyleNameEn.Valid {
+			value := row.StyleNameEn.String
+			entry.StyleNameEN = &value
+		}
+		if row.ColorNameEn.Valid {
+			value := row.ColorNameEn.String
+			entry.ColorNameEN = &value
+		}
+		if row.PriceDeltaUsdMinor.Valid {
+			value := row.PriceDeltaUsdMinor.Int64
+			entry.PriceDeltaUSDCents = &value
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}

@@ -23,6 +23,16 @@ func mutationOutcomeComplete(document string, data json.RawMessage) bool {
 		root, primary = "inventoryActivate", "inventoryLevel"
 	case docInventorySet:
 		root, primary = "inventorySetQuantities", "inventoryAdjustmentGroup"
+	// Phase 15 §101: bundle-surface mutations settle under the SAME
+	// frozen definitive-evidence standard (F2): an acknowledged response
+	// with the primary resource present and no user errors is the only
+	// release evidence.
+	case docFrameComponentSet:
+		root, primary = "productSet", "product"
+	case docBundleUpdate:
+		root, primary = "productBundleUpdate", "productBundleOperation"
+	case docVariantPrices:
+		root, primary = "productVariantsBulkUpdate", "productVariants"
 	default:
 		return false
 	}

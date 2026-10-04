@@ -117,37 +117,37 @@ func TestRegistryConcurrent(t *testing.T) {
 }
 
 func TestOperationKeys(t *testing.T) {
-	published := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v")
-	again := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v")
+	published := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v", "cf", "cv")
+	again := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v", "cf", "cv")
 	if published == "" || published != again {
 		t.Fatal("same state must yield a stable non-empty key")
 	}
 	changes := map[string]string{
-		"catalog revision": ProductOperationKey("primary", "product-1", 13, 4, true, "f", "v"),
-		"policy revision":  ProductOperationKey("primary", "product-1", 12, 5, true, "f", "v"),
-		"publication":      ProductOperationKey("primary", "product-1", 12, 4, false, "f", "v"),
-		"provider key":     ProductOperationKey("website", "product-1", 12, 4, true, "f", "v"),
-		"product id":       ProductOperationKey("primary", "product-2", 12, 4, true, "f", "v"),
+		"catalog revision": ProductOperationKey("primary", "product-1", 13, 4, true, "f", "v", "cf", "cv"),
+		"policy revision":  ProductOperationKey("primary", "product-1", 12, 5, true, "f", "v", "cf", "cv"),
+		"publication":      ProductOperationKey("primary", "product-1", 12, 4, false, "f", "v", "cf", "cv"),
+		"provider key":     ProductOperationKey("website", "product-1", 12, 4, true, "f", "v", "cf", "cv"),
+		"product id":       ProductOperationKey("primary", "product-2", 12, 4, true, "f", "v", "cf", "cv"),
 	}
 	for what, key := range changes {
 		if key == published {
 			t.Fatalf("%s must change the product key", what)
 		}
 	}
-	inventory := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v")
+	inventory := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v", "cf", "cv")
 	if inventory == "" || inventory == published {
 		t.Fatal("inventory key must be distinct and non-empty")
 	}
-	if again := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v"); again != inventory {
+	if again := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v", "cf", "cv"); again != inventory {
 		t.Fatal("same inventory state must be stable")
 	}
 	invChanges := map[string]string{
-		"catalog revision":   InventoryOperationKey("primary", "product-1", 13, 4, 27, 10, true, "f", "v"),
-		"policy revision":    InventoryOperationKey("primary", "product-1", 12, 5, 27, 10, true, "f", "v"),
-		"inventory revision": InventoryOperationKey("primary", "product-1", 12, 4, 28, 10, true, "f", "v"),
-		"quantity":           InventoryOperationKey("primary", "product-1", 12, 4, 27, 9, true, "f", "v"),
-		"provider key":       InventoryOperationKey("website", "product-1", 12, 4, 27, 10, true, "f", "v"),
-		"product id":         InventoryOperationKey("primary", "product-2", 12, 4, 27, 10, true, "f", "v"),
+		"catalog revision":   InventoryOperationKey("primary", "product-1", 13, 4, 27, 10, true, "f", "v", "cf", "cv"),
+		"policy revision":    InventoryOperationKey("primary", "product-1", 12, 5, 27, 10, true, "f", "v", "cf", "cv"),
+		"inventory revision": InventoryOperationKey("primary", "product-1", 12, 4, 28, 10, true, "f", "v", "cf", "cv"),
+		"quantity":           InventoryOperationKey("primary", "product-1", 12, 4, 27, 9, true, "f", "v", "cf", "cv"),
+		"provider key":       InventoryOperationKey("website", "product-1", 12, 4, 27, 10, true, "f", "v", "cf", "cv"),
+		"product id":         InventoryOperationKey("primary", "product-2", 12, 4, 27, 10, true, "f", "v", "cf", "cv"),
 	}
 	for what, key := range invChanges {
 		if key == inventory {
@@ -215,6 +215,16 @@ func (s *stubMappings) GetProductMapping(_ context.Context, key ProviderKey, pro
 		return ProductMapping{}, apperr.New(apperr.NotFound, "no mapping")
 	}
 	return mapping, nil
+}
+
+func (s *stubMappings) GetProductConfigurationMapping(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappings) FindConfigurationByExternal(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappings) UpsertProductConfigurationMapping(_ context.Context, providerKey ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{ProviderKey: providerKey, ProductID: productID, ConfigurationID: configurationID, ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID}, nil
 }
 
 func (s *stubMappings) FindByExternalProductID(_ context.Context, key ProviderKey, externalID string) (ProductMapping, error) {
@@ -653,4 +663,8 @@ func TestRegistryRejectsTypedNilProvider(t *testing.T) {
 	if _, err := registry.Get("typed-nil"); !UnknownProvider(err) {
 		t.Fatalf("absent key stays unknown: %v", err)
 	}
+}
+
+func errMappingNotFoundStub() error {
+	return apperr.New(apperr.NotFound, "no mapping stub")
 }

@@ -113,7 +113,8 @@ ON CONFLICT (product_id) DO UPDATE SET
 
 -- name: CatalogProductByID :one
 SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
+    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
+    configuration_revision
 FROM catalog_products WHERE product_id = $1;
 
 -- name: CatalogProductBySKU :one

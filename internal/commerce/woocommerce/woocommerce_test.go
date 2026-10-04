@@ -117,7 +117,7 @@ func testUpsertReq(product commerce.CommerceProduct, published bool, existing *c
 		Product: product, Published: published,
 		CatalogRevision: product.CatalogRevision, PolicyRevision: product.PolicyRevision,
 		OperationKey: commerce.ProductOperationKey(testProviderKey, product.ProductID,
-			product.CatalogRevision, product.PolicyRevision, published, "f", "v"),
+			product.CatalogRevision, product.PolicyRevision, published, "f", "v", "cf", "cv"),
 	}
 }
 
@@ -126,7 +126,7 @@ func testInventoryReq(productID, external string, quantity int64, ready bool) co
 		ProviderKey: testProviderKey, ProductID: productID, ExternalProductID: external,
 		AvailableQuantity: quantity, InventoryRevision: 27,
 		CatalogRevision: 12, PolicyRevision: 4, Ready: ready,
-		OperationKey: commerce.InventoryOperationKey(testProviderKey, productID, 12, 4, 27, quantity, true, "f", "v"),
+		OperationKey: commerce.InventoryOperationKey(testProviderKey, productID, 12, 4, 27, quantity, true, "f", "v", "cf", "cv"),
 	}
 }
 

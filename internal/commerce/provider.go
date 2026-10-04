@@ -79,7 +79,39 @@ type CommerceProduct struct {
 	AllocationLimit *int
 	CatalogRevision int64
 	PolicyRevision  int64
+	// Configurations carries the complete current option set (enabled
+	// and disabled). Adapters publish enabled choices and converge
+	// disabled ones out of customer selection WITHOUT deleting mapping
+	// state. Products without configurations keep the simple
+	// representation (§113).
+	Configurations []CommerceConfiguration
 }
+
+// CommerceConfiguration is one provider-neutral ONLINE product option
+// (Phase 15): a valid frame configuration attached to the canonical
+// MoonLight Product. It is NEVER a Product — no SKU, no stock, no
+// inventory identity. Configured price = base Product price + delta per
+// currency (exact int64 minor units; no floats, no FX).
+type CommerceConfiguration struct {
+	ConfigurationID       string
+	Kind                  string // "frame"
+	StyleCode             string
+	StyleNameAR           string
+	StyleNameEN           *string
+	ColorCode             string
+	ColorNameAR           string
+	ColorNameEN           *string
+	PriceDeltaEGPMinor    int64
+	PriceDeltaUSDMinor    *int64
+	Enabled               bool
+	Position              int
+	ConfigurationRevision int64
+}
+
+// NoFrameConfigurationID is the stable mapping-key sentinel for the
+// implicit NO-FRAME choice (§18): it never identifies a MoonLight
+// configuration row and no Product identity is derived from it.
+const NoFrameConfigurationID = "00000000-0000-0000-0000-000000000000"
 
 // ProviderProductRef is the minimal external identity an adapter returns.
 // Variant/category/media/order identifiers are future phases.
@@ -100,10 +132,14 @@ type ProductUpsertRequest struct {
 	OperationKey     string
 }
 
-// ProductUpsertResult carries the external identity. Provider
-// revision/version metadata is not needed by the 6A abstraction.
+// ProductUpsertResult carries the external identity plus (Phase 15) the
+// provider-side identity of each published configuration choice —
+// keyed by MoonLight configuration ID, with NoFrameConfigurationID for
+// the implicit NO-FRAME choice. Persisted as durable configuration
+// mappings by the service seam (never label-matched).
 type ProductUpsertResult struct {
 	ExternalProductID string
+	Configurations    map[string]string
 }
 
 // InventoryUpdateRequest asks the adapter to set provider-facing

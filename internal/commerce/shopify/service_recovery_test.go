@@ -38,6 +38,16 @@ func (s *stubMappings) GetProductMapping(_ context.Context, key commerce.Provide
 	return commerce.ProductMapping{ProviderKey: key, ProductID: productID, ExternalProductID: external}, nil
 }
 
+func (s *stubMappings) GetProductConfigurationMapping(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappings) FindConfigurationByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappings) UpsertProductConfigurationMapping(_ context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{ProviderKey: providerKey, ProductID: productID, ConfigurationID: configurationID, ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID}, nil
+}
+
 func (s *stubMappings) FindByExternalProductID(_ context.Context, key commerce.ProviderKey, externalID string) (commerce.ProductMapping, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -264,4 +274,8 @@ func firstProductID(h *shopifyHarness) string {
 		return id
 	}
 	return ""
+}
+
+func errMappingNotFoundStub() error {
+	return apperr.New(apperr.NotFound, "no mapping stub")
 }

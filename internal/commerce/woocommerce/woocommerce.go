@@ -105,10 +105,27 @@ func (p *WooCommerceProvider) UpsertProduct(ctx context.Context, req commerce.Pr
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
+	var result commerce.ProductUpsertResult
+	var err2 error
 	if req.ExistingExternal != nil {
-		return p.updateMapped(ctx, req, payload)
+		result, err2 = p.updateMapped(ctx, req, payload)
+	} else {
+		result, err2 = p.createWithRecovery(ctx, req, payload)
 	}
-	return p.createWithRecovery(ctx, req, payload)
+	if err2 != nil {
+		return commerce.ProductUpsertResult{}, err2
+	}
+	// Phase 15 §84-§92: converge frame variations on the SAME remote
+	// product (identity stable across simple<->framed, §116). Variation
+	// ownership is metadata-proven; foreign variations are untouched.
+	if len(req.Product.Configurations) > 0 {
+		identities, err := p.syncWooVariations(ctx, result.ExternalProductID, req.Product)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		result.Configurations = identities
+	}
+	return result, nil
 }
 
 // updateMapped verifies remote ownership of a mapped Woo ID, then PUTs

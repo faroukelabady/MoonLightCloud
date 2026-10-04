@@ -58,11 +58,13 @@ type fakeOrder struct {
 }
 
 type shopifyHarness struct {
-	mu       sync.Mutex
-	server   *httptest.Server
-	token    string
-	secret   string
-	requests []recordedRequest
+	bundleAttaches     []map[string]any
+	frameComponentSets []map[string]any
+	mu                 sync.Mutex
+	server             *httptest.Server
+	token              string
+	secret             string
+	requests           []recordedRequest
 
 	products    map[string]*fakeProduct
 	orders      map[string]*fakeOrder
@@ -254,6 +256,65 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		payload = map[string]any{"data": map[string]any{"productVariant": variant}}
+	case strings.Contains(body.Query, "MoonlightVariantPrices"):
+		payload = map[string]any{"data": map[string]any{"productVariantsBulkUpdate": map[string]any{
+			"productVariants": []any{}, "userErrors": []any{},
+		}}}
+	case strings.Contains(body.Query, "MoonlightBundleUpdate"):
+		h.bundleAttaches = append(h.bundleAttaches, body.Variables)
+		payload = map[string]any{"data": map[string]any{"productBundleUpdate": map[string]any{
+			"productBundleOperation": map[string]any{"id": "gid://shopify/ProductBundleOperation/1", "status": "CREATED"},
+			"userErrors":             []any{},
+		}}}
+	case strings.Contains(body.Query, "MoonlightBundleOperation"):
+		payload = map[string]any{"data": map[string]any{"productOperation": map[string]any{
+			"id": "gid://shopify/ProductBundleOperation/1", "status": "COMPLETE",
+			"product": map[string]any{"id": "gid://shopify/Product/9000000001"}, "userErrors": []any{},
+		}}}
+	case strings.Contains(body.Query, "MoonlightFrameComponentSet"):
+		h.frameComponentSets = append(h.frameComponentSets, body.Variables)
+		variants := []any{}
+		if input, ok := body.Variables["input"].(map[string]any); ok {
+			if raw, ok := input["variants"].([]any); ok {
+				for index, entry := range raw {
+					variants = append(variants, map[string]any{
+						"id":   fmt.Sprintf("gid://shopify/ProductVariant/91000000%02d", index),
+						"name": variantNameFrom(entry.(map[string]any)),
+					})
+				}
+			}
+		}
+		payload = map[string]any{"data": map[string]any{"productSet": map[string]any{
+			"product": map[string]any{
+				"id":       "gid://shopify/Product/9000000000",
+				"variants": map[string]any{"nodes": variants},
+			},
+			"userErrors": []any{},
+		}}}
+	case strings.Contains(body.Query, "MoonlightBundleVariants"):
+		nodes := []any{}
+		for _, set := range h.frameComponentSets {
+			if input, ok := set["input"].(map[string]any); ok {
+				if raw, ok := input["variants"].([]any); ok {
+					for index, entry := range raw {
+						nodes = append(nodes, map[string]any{
+							"id":   fmt.Sprintf("gid://shopify/ProductVariant/92000000%02d", index),
+							"name": variantNameFrom(entry.(map[string]any)),
+						})
+					}
+				}
+			}
+		}
+		payload = map[string]any{"data": map[string]any{"product": map[string]any{
+			"id":       str(body.Variables["id"]),
+			"variants": map[string]any{"nodes": nodes},
+		}}}
+	case strings.Contains(body.Query, "MoonlightBundleBase"):
+		nodes := []any{map[string]any{"namespace": "moonlight", "key": "base_component_id", "value": "gid://shopify/Product/8800000000"}}
+		payload = map[string]any{"data": map[string]any{"product": map[string]any{
+			"id":         str(body.Variables["id"]),
+			"metafields": map[string]any{"nodes": nodes},
+		}}}
 	case strings.Contains(body.Query, "MoonlightProduct"):
 		payload = h.opProductQuery(body.Variables)
 	default:
@@ -278,6 +339,25 @@ func operationName(query string) string {
 		if strings.Contains(query, name) {
 			return name
 		}
+	}
+	// Phase 15 bundle surface.
+	if strings.Contains(query, "MoonlightVariantPrices") {
+		return "MoonlightVariantPrices"
+	}
+	if strings.Contains(query, "MoonlightBundleUpdate") {
+		return "bundle_update"
+	}
+	if strings.Contains(query, "MoonlightBundleOperation") {
+		return "bundle_operation"
+	}
+	if strings.Contains(query, "MoonlightFrameComponentSet") {
+		return "frame_component_set"
+	}
+	if strings.Contains(query, "MoonlightBundleVariants") {
+		return "bundle_variants"
+	}
+	if strings.Contains(query, "MoonlightBundleBase") {
+		return "bundle_base"
 	}
 	return "unknown"
 }
@@ -769,4 +849,24 @@ func fixturePage(nodes []any, vars map[string]any) map[string]any {
 	}
 	cursor := fmt.Sprint(end)
 	return map[string]any{"nodes": nodes[start:end], "pageInfo": map[string]any{"hasNextPage": end < len(nodes), "endCursor": cursor}}
+}
+
+// variantNameFrom renders the "Style / Color" name from a frame
+// component variant input (matches the adapter's stable convention).
+func variantNameFrom(entry map[string]any) string {
+	values, _ := entry["optionValues"].([]any)
+	style, color := "", ""
+	for _, raw := range values {
+		value := raw.(map[string]any)
+		if str(value["optionName"]) == "Frame Style" {
+			style = str(value["name"])
+		}
+		if str(value["optionName"]) == "Frame Color" {
+			color = str(value["name"])
+		}
+	}
+	if style == "No Frame" {
+		return "No Frame"
+	}
+	return style + " / " + color
 }

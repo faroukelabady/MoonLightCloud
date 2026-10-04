@@ -119,7 +119,8 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	if mapped {
 		existing = &ProviderProductRef{ExternalProductID: mapping.ExternalProductID}
 	}
-	productKey := ProductOperationKey(key, productID, desired.CatalogRevision, desired.PolicyRevision, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion)
+	productKey := ProductOperationKey(key, productID, desired.CatalogRevision, desired.PolicyRevision, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion,
+		desired.ConfigurationsFingerprint, desired.ConfigurationsVersion)
 	upserted, err := provider.UpsertProduct(ctx, ProductUpsertRequest{
 		ProviderKey: key, ProductID: productID, ExistingExternal: existing,
 		Product: desired.Product, Published: desired.Published,
@@ -159,10 +160,21 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 		result.MappingCreated = true
 	}
 
+	// Phase 15 §64: persist provider configuration identity durably; a
+	// failure here stops before SetInventory and a retry re-adopts the
+	// owned remote representation (never a duplicate variation).
+	for configurationID, externalConfigurationID := range upserted.Configurations {
+		if _, err := s.mappings.UpsertProductConfigurationMapping(ctx, key, productID, configurationID,
+			upserted.ExternalProductID, externalConfigurationID); err != nil {
+			return SyncResult{}, err
+		}
+	}
+
 	quantity := int64(desired.Availability.OnlineAvailable)
 	inventoryKey := InventoryOperationKey(key, productID,
 		desired.CatalogRevision, desired.PolicyRevision, desired.InventoryRevision,
-		quantity, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion)
+		quantity, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion,
+		desired.ConfigurationsFingerprint, desired.ConfigurationsVersion)
 	if err := provider.SetInventory(ctx, InventoryUpdateRequest{
 		ProviderKey: key, ProductID: productID, ExternalProductID: upserted.ExternalProductID,
 		AvailableQuantity: quantity,

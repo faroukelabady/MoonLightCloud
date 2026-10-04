@@ -563,28 +563,42 @@ INSERT INTO commerce_online_order_lines (
     provider_key, external_order_id, external_line_id,
     external_product_id, variation_id, sku, name, quantity,
     subtotal_minor, subtotal_tax_minor, total_minor, total_tax_minor,
-    moonlight_product_id, mapped, unsupported_reason
+    moonlight_product_id, mapped, unsupported_reason,
+    configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
+    frame_color_code, frame_color_name_ar, frame_color_name_en,
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 )
 `
 
 type InsertCommerceOrderLineParams struct {
-	ProviderKey        string      `json:"provider_key"`
-	ExternalOrderID    string      `json:"external_order_id"`
-	ExternalLineID     int64       `json:"external_line_id"`
-	ExternalProductID  string      `json:"external_product_id"`
-	VariationID        int64       `json:"variation_id"`
-	Sku                string      `json:"sku"`
-	Name               string      `json:"name"`
-	Quantity           int64       `json:"quantity"`
-	SubtotalMinor      int64       `json:"subtotal_minor"`
-	SubtotalTaxMinor   int64       `json:"subtotal_tax_minor"`
-	TotalMinor         int64       `json:"total_minor"`
-	TotalTaxMinor      int64       `json:"total_tax_minor"`
-	MoonlightProductID pgtype.UUID `json:"moonlight_product_id"`
-	Mapped             bool        `json:"mapped"`
-	UnsupportedReason  string      `json:"unsupported_reason"`
+	ProviderKey                  string      `json:"provider_key"`
+	ExternalOrderID              string      `json:"external_order_id"`
+	ExternalLineID               int64       `json:"external_line_id"`
+	ExternalProductID            string      `json:"external_product_id"`
+	VariationID                  int64       `json:"variation_id"`
+	Sku                          string      `json:"sku"`
+	Name                         string      `json:"name"`
+	Quantity                     int64       `json:"quantity"`
+	SubtotalMinor                int64       `json:"subtotal_minor"`
+	SubtotalTaxMinor             int64       `json:"subtotal_tax_minor"`
+	TotalMinor                   int64       `json:"total_minor"`
+	TotalTaxMinor                int64       `json:"total_tax_minor"`
+	MoonlightProductID           pgtype.UUID `json:"moonlight_product_id"`
+	Mapped                       bool        `json:"mapped"`
+	UnsupportedReason            string      `json:"unsupported_reason"`
+	ConfigurationID              pgtype.UUID `json:"configuration_id"`
+	FrameStyleCode               pgtype.Text `json:"frame_style_code"`
+	FrameStyleNameAr             pgtype.Text `json:"frame_style_name_ar"`
+	FrameStyleNameEn             pgtype.Text `json:"frame_style_name_en"`
+	FrameColorCode               pgtype.Text `json:"frame_color_code"`
+	FrameColorNameAr             pgtype.Text `json:"frame_color_name_ar"`
+	FrameColorNameEn             pgtype.Text `json:"frame_color_name_en"`
+	ConfigurationPriceDeltaMinor pgtype.Int8 `json:"configuration_price_delta_minor"`
+	ProviderConfigurationID      pgtype.Text `json:"provider_configuration_id"`
+	ConfigurationUnresolved      bool        `json:"configuration_unresolved"`
 }
 
 func (q *Queries) InsertCommerceOrderLine(ctx context.Context, arg InsertCommerceOrderLineParams) error {
@@ -604,6 +618,16 @@ func (q *Queries) InsertCommerceOrderLine(ctx context.Context, arg InsertCommerc
 		arg.MoonlightProductID,
 		arg.Mapped,
 		arg.UnsupportedReason,
+		arg.ConfigurationID,
+		arg.FrameStyleCode,
+		arg.FrameStyleNameAr,
+		arg.FrameStyleNameEn,
+		arg.FrameColorCode,
+		arg.FrameColorNameAr,
+		arg.FrameColorNameEn,
+		arg.ConfigurationPriceDeltaMinor,
+		arg.ProviderConfigurationID,
+		arg.ConfigurationUnresolved,
 	)
 	return err
 }
@@ -759,15 +783,33 @@ type ListCommerceOrderLinesParams struct {
 	ExternalOrderID string `json:"external_order_id"`
 }
 
-func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOrderLinesParams) ([]CommerceOnlineOrderLine, error) {
+type ListCommerceOrderLinesRow struct {
+	ProviderKey        string      `json:"provider_key"`
+	ExternalOrderID    string      `json:"external_order_id"`
+	ExternalLineID     int64       `json:"external_line_id"`
+	ExternalProductID  string      `json:"external_product_id"`
+	VariationID        int64       `json:"variation_id"`
+	Sku                string      `json:"sku"`
+	Name               string      `json:"name"`
+	Quantity           int64       `json:"quantity"`
+	SubtotalMinor      int64       `json:"subtotal_minor"`
+	SubtotalTaxMinor   int64       `json:"subtotal_tax_minor"`
+	TotalMinor         int64       `json:"total_minor"`
+	TotalTaxMinor      int64       `json:"total_tax_minor"`
+	MoonlightProductID pgtype.UUID `json:"moonlight_product_id"`
+	Mapped             bool        `json:"mapped"`
+	UnsupportedReason  string      `json:"unsupported_reason"`
+}
+
+func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOrderLinesParams) ([]ListCommerceOrderLinesRow, error) {
 	rows, err := q.db.Query(ctx, listCommerceOrderLines, arg.ProviderKey, arg.ExternalOrderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CommerceOnlineOrderLine{}
+	items := []ListCommerceOrderLinesRow{}
 	for rows.Next() {
-		var i CommerceOnlineOrderLine
+		var i ListCommerceOrderLinesRow
 		if err := rows.Scan(
 			&i.ProviderKey,
 			&i.ExternalOrderID,

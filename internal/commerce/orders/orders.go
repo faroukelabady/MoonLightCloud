@@ -193,6 +193,21 @@ type OrderLine struct {
 	MoonlightProduct  *string
 	Mapped            bool
 	UnsupportedReason string
+	// Phase 15 §55-§60: immutable ONLINE option selection snapshot.
+	// Current configuration rows are NEVER authority for past
+	// purchases: labels and deltas are copied at ingestion; later
+	// rename/price/disable can never rewrite history. Unknown provider
+	// configuration identities are preserved raw and marked unresolved.
+	ConfigurationID              *string
+	FrameStyleCode               *string
+	FrameStyleNameAR             *string
+	FrameStyleNameEN             *string
+	FrameColorCode               *string
+	FrameColorNameAR             *string
+	FrameColorNameEN             *string
+	ConfigurationPriceDeltaMinor *int64
+	ProviderConfigurationID      string
+	ConfigurationUnresolved      bool
 }
 
 // OrderSnapshot is the normalized immutable provider order state used

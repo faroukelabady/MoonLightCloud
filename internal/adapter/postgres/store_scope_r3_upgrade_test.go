@@ -103,7 +103,7 @@ func testR3RealUpgrade(t *testing.T) {
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(806), catalog.ProcessorCategoryProjectionV1)
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(807), catalog.ProcessorProductProjectionV1)
 	var legacyBefore string
-	if err = pool.QueryRow(ctx, `SELECT to_jsonb(p)::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
 		t.Fatal(err)
 	}
 	// A real pre-fix foreign default block must be distinguishable from
@@ -230,7 +230,7 @@ func testR3RealUpgrade(t *testing.T) {
 	}
 
 	var legacyAfter string
-	if err = restarted.QueryRow(ctx, `SELECT to_jsonb(p)::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
+	if err = restarted.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
 		t.Fatalf("legacy current state changed: %v", err)
 	}
 	if err = restarted.QueryRow(ctx, `SELECT count(*) FROM catalog_category_edges WHERE parent_id=$1 AND child_id=$2`, root, legacyChild).Scan(&rawRefs); err != nil || rawRefs != 1 {

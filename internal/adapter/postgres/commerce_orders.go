@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -365,10 +366,38 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 		line.MoonlightProduct = nil
 		line.Mapped = false
 		line.UnsupportedReason = ""
-		if line.VariationID != 0 {
-			line.UnsupportedReason = "variation"
-			unmapped++
-			continue
+		if line.ProviderConfigurationID != "" || line.VariationID != 0 {
+			// Phase 15 §117/§118: a provider configuration identity is
+			// resolved through the durable configuration mapping — never
+			// by displayed labels. The BASE product still resolves below;
+			// an unknown configuration stays truthful (raw identity +
+			// unresolved flag, §60) instead of guessing.
+			configurationID := line.ProviderConfigurationID
+			if configurationID == "" {
+				configurationID = strconv.FormatInt(line.VariationID, 10)
+				line.ProviderConfigurationID = configurationID
+			}
+			mapping, err := q.FindCommerceProductConfigurationMappingByExternal(ctx, sqlcgen.FindCommerceProductConfigurationMappingByExternalParams{
+				ProviderKey: snapshot.ProviderKey, ExternalProductID: line.ExternalProductID,
+				ExternalConfigurationID: configurationID,
+			})
+			if err != nil {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return orders.OrderSnapshot{}, nil, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+				}
+				line.ConfigurationUnresolved = true
+			} else {
+				// Snapshot the selection AT INGESTION (§56/§129): the
+				// projected configuration is copied into the order line,
+				// never joined later.
+				resolved := uuidString(mapping.ConfigurationID)
+				line.ConfigurationID = &resolved
+				if row, err := q.CatalogProductConfigurationByID(ctx, mapping.ConfigurationID); err == nil {
+					snapshotConfiguration(line, row)
+				} else if !errors.Is(err, pgx.ErrNoRows) {
+					return orders.OrderSnapshot{}, nil, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+				}
+			}
 		}
 		if line.ExternalProductID == "" {
 			unmapped++
@@ -392,6 +421,30 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 	snapshot.UnmappedLines = unmapped
 	snapshot.MappingComplete = unmapped == 0
 	return snapshot, lineStores, nil
+}
+
+// snapshotConfiguration copies the selection into the order line at
+// ingestion (§56/§57/§58): historical display and pricing survive later
+// rename, delta changes and disabling.
+func snapshotConfiguration(line *orders.OrderLine, row sqlcgen.CatalogProductConfigurationByIDRow) {
+	styleCode := row.StyleCode
+	line.FrameStyleCode = &styleCode
+	styleAR := row.StyleNameAr
+	line.FrameStyleNameAR = &styleAR
+	if row.StyleNameEn.Valid {
+		value := row.StyleNameEn.String
+		line.FrameStyleNameEN = &value
+	}
+	colorCode := row.ColorCode
+	line.FrameColorCode = &colorCode
+	colorAR := row.ColorNameAr
+	line.FrameColorNameAR = &colorAR
+	if row.ColorNameEn.Valid {
+		value := row.ColorNameEn.String
+		line.FrameColorNameEN = &value
+	}
+	delta := row.PriceDeltaEgpMinor
+	line.ConfigurationPriceDeltaMinor = &delta
 }
 
 // deriveOrderStore resolves the single proven Store for a reconciled
@@ -517,7 +570,7 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 			}
 			productUID = parsed
 		}
-		if err := q.InsertCommerceOrderLine(ctx, sqlcgen.InsertCommerceOrderLineParams{
+		params := sqlcgen.InsertCommerceOrderLineParams{
 			ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
 			ExternalLineID: line.ExternalLineID, ExternalProductID: line.ExternalProductID,
 			VariationID: line.VariationID, Sku: line.SKU, Name: line.Name,
@@ -525,8 +578,24 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 			SubtotalMinor: line.SubtotalMinor, SubtotalTaxMinor: line.SubtotalTaxMinor,
 			TotalMinor: line.TotalMinor, TotalTaxMinor: line.TotalTaxMinor,
 			MoonlightProductID: productUID, Mapped: line.Mapped,
-			UnsupportedReason: line.UnsupportedReason,
-		}); err != nil {
+			UnsupportedReason:            line.UnsupportedReason,
+			ProviderConfigurationID:      textFromPtr(optionalString(line.ProviderConfigurationID)),
+			ConfigurationUnresolved:      line.ConfigurationUnresolved,
+			FrameStyleCode:               textFromPtr(line.FrameStyleCode),
+			FrameStyleNameAr:             textFromPtr(line.FrameStyleNameAR),
+			FrameStyleNameEn:             textFromPtr(line.FrameStyleNameEN),
+			FrameColorCode:               textFromPtr(line.FrameColorCode),
+			FrameColorNameAr:             textFromPtr(line.FrameColorNameAR),
+			FrameColorNameEn:             textFromPtr(line.FrameColorNameEN),
+			ConfigurationPriceDeltaMinor: int8FromPtr(line.ConfigurationPriceDeltaMinor),
+		}
+		if line.ConfigurationID != nil {
+			cuid, err := parseUUID(*line.ConfigurationID)
+			if err == nil {
+				params.ConfigurationID = cuid
+			}
+		}
+		if err := q.InsertCommerceOrderLine(ctx, params); err != nil {
 			return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 		}
 	}
@@ -998,3 +1067,27 @@ var (
 	_ orders.OrderReader = Devices{}
 	_ orders.OrderStore  = Devices{}
 )
+
+// optionalString converts an empty identity to nil (NULL persistence).
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+// textFromPtr renders an optional snapshot label for persistence.
+func textFromPtr(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *value, Valid: true}
+}
+
+// int8FromPtr renders an optional snapshot minor-unit value.
+func int8FromPtr(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
+}

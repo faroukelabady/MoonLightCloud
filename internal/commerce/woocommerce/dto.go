@@ -57,20 +57,60 @@ type wooDimensions struct {
 // Unmanaged fields (categories, tags, images, tax/shipping classes,
 // featured, reviews, plugin metadata) are always omitted so Woo PUT
 // merges without clearing manually managed state.
+// wooProductAttribute is a variable-product attribute (Phase 15 §84):
+// customer-facing labels; identity is never derived from them.
+type wooProductAttribute struct {
+	Name      string   `json:"name"`
+	Position  int      `json:"position"`
+	Visible   bool     `json:"visible"`
+	Variation bool     `json:"variation"`
+	Options   []string `json:"options"`
+}
+
+// wooVariationPayload converges one variation. Phase 15 §85: variation
+// stock is NEVER managed — all variations pull from the parent-level
+// shared stock (one physical papyrus pool). A disabled configuration is
+// hidden by withholding its price (WooCommerce: variations without
+// prices don't show in the store) while ownership metadata is retained.
+type wooVariationPayload struct {
+	Attributes   []wooVariationAttribute `json:"attributes"`
+	RegularPrice string                  `json:"regular_price"`
+	ManageStock  bool                    `json:"manage_stock"`
+	Status       string                  `json:"status,omitempty"`
+	MetaData     []wooMetaDatum          `json:"meta_data,omitempty"`
+}
+
+type wooVariationAttribute struct {
+	Name   string `json:"name"`
+	Option string `json:"option"`
+}
+
+// wooVariation is the read shape used for ownership-based reconciliation.
+type wooVariation struct {
+	ID         int64 `json:"id"`
+	Attributes []struct {
+		Name   string `json:"name"`
+		Option string `json:"option"`
+	} `json:"attributes"`
+	RegularPrice string         `json:"regular_price"`
+	MetaData     []wooMetaDatum `json:"meta_data,omitempty"`
+}
+
 type wooProductPayload struct {
-	Name              string         `json:"name"`
-	Type              string         `json:"type"`
-	Status            string         `json:"status"`
-	CatalogVisibility string         `json:"catalog_visibility"`
-	Description       string         `json:"description"`
-	SKU               string         `json:"sku"`
-	RegularPrice      string         `json:"regular_price"`
-	ManageStock       bool           `json:"manage_stock"`
-	StockQuantity     int64          `json:"stock_quantity"`
-	StockStatus       string         `json:"stock_status"`
-	Backorders        string         `json:"backorders"`
-	Dimensions        *wooDimensions `json:"dimensions,omitempty"`
-	MetaData          []wooMetaDatum `json:"meta_data,omitempty"`
+	Name              string                `json:"name"`
+	Type              string                `json:"type"`
+	Status            string                `json:"status"`
+	CatalogVisibility string                `json:"catalog_visibility"`
+	Description       string                `json:"description"`
+	SKU               string                `json:"sku"`
+	RegularPrice      string                `json:"regular_price"`
+	ManageStock       bool                  `json:"manage_stock"`
+	StockQuantity     int64                 `json:"stock_quantity"`
+	StockStatus       string                `json:"stock_status"`
+	Backorders        string                `json:"backorders"`
+	Dimensions        *wooDimensions        `json:"dimensions,omitempty"`
+	Attributes        []wooProductAttribute `json:"attributes,omitempty"`
+	MetaData          []wooMetaDatum        `json:"meta_data,omitempty"`
 }
 
 // wooInventoryPayload is the narrow inventory-only update: no product
@@ -180,6 +220,11 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 	if strings.TrimSpace(product.SKU) == "" {
 		return wooProductPayload{}, commerce.ValidationError("product SKU must not be empty")
 	}
+	// Phase 15 §84/§113: a Product WITH frame configurations becomes one
+	// variable product (parent-level shared stock); the canonical remote
+	// product identity is retained across the simple->framed transition
+	// (§116). Prices live on variations (§87); the parent keeps none.
+	configured := len(product.Configurations) > 0
 	name, err := selectName(product)
 	if err != nil {
 		return wooProductPayload{}, err
@@ -192,9 +237,18 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 	if req.Published {
 		status, visibility = wooStatusPublish, wooVisibilityVisible
 	}
+	payloadType := wooTypeSimple
+	parentPrice := price
+	var attributes []wooProductAttribute
+	if configured {
+		payloadType = wooTypeVariable
+		parentPrice = "" // prices live on variations (§87)
+		attributes = frameAttributes(product)
+	}
 	payload := wooProductPayload{
-		Name: name, Type: wooTypeSimple, Status: status, CatalogVisibility: visibility,
-		Description: selectDescription(product), SKU: product.SKU, RegularPrice: price,
+		Name: name, Type: payloadType, Status: status, CatalogVisibility: visibility,
+		Description: selectDescription(product), SKU: product.SKU, RegularPrice: parentPrice,
+		Attributes:  attributes,
 		ManageStock: true, StockQuantity: 0, StockStatus: wooStockOutOfStock, Backorders: wooBackordersNo,
 		MetaData: []wooMetaDatum{
 			{Key: metaProductID, Value: req.ProductID},
@@ -259,4 +313,31 @@ func parseWooID(raw string) (int64, error) {
 // canonicalExternalID formats a Woo numeric ID for the generic mapping.
 func canonicalExternalID(id int64) string {
 	return strconv.FormatInt(id, 10)
+}
+
+// frameAttributes builds the two customer-facing frame axes with the
+// explicit valid-combination labels (§13: never a Cartesian product) and
+// the NO-FRAME choice (§86). Labels are display only — identity lives in
+// the variation ownership metadata.
+func frameAttributes(product commerce.CommerceProduct) []wooProductAttribute {
+	styles := []string{noFrameOption}
+	colors := []string{noFrameOption}
+	seenStyles := map[string]bool{noFrameOption: true}
+	seenColors := map[string]bool{noFrameOption: true}
+	for _, configuration := range product.Configurations {
+		style := displayLabel(configuration.StyleNameEN, configuration.StyleNameAR)
+		color := displayLabel(configuration.ColorNameEN, configuration.ColorNameAR)
+		if !seenStyles[style] {
+			seenStyles[style] = true
+			styles = append(styles, style)
+		}
+		if !seenColors[color] {
+			seenColors[color] = true
+			colors = append(colors, color)
+		}
+	}
+	return []wooProductAttribute{
+		{Name: frameStyleAttribute, Position: 0, Visible: true, Variation: true, Options: styles},
+		{Name: frameColorAttribute, Position: 1, Visible: true, Variation: true, Options: colors},
+	}
 }

@@ -236,6 +236,13 @@ func normalizeLine(line gqlLineItem, currency string) (orders.OrderLine, error) 
 		return orders.OrderLine{}, &orders.BlockedError{
 			Code: orders.CodeOrderInvalid, Message: "invalid line money"}
 	}
+	// Phase 15 §119: the provider selection identity (bundle variant GID)
+	// is carried raw; resolution goes through the durable configuration
+	// mapping — never label matching.
+	providerConfigurationID := ""
+	if line.Variant != nil {
+		providerConfigurationID = line.Variant.ID
+	}
 	var lineTax int64
 	for _, taxLine := range line.TaxLines {
 		amount, err := parseShopMoney(taxLine.PriceSet, currency)
@@ -254,12 +261,12 @@ func normalizeLine(line gqlLineItem, currency string) (orders.OrderLine, error) 
 		// closed as unresolved (never mapped to the wrong resource).
 	}
 	return orders.OrderLine{
-		ExternalLineID:    parsedID,
-		ExternalProductID: externalProductID,
-		// VariationID stays 0: the frozen generic resolver refuses
-		// variation lines, and Shopify order lines are keyed to the
-		// parent Product identity (the MoonLight-managed variant is a
-		// provider-internal detail of a one-variant product).
+		ExternalLineID:          parsedID,
+		ExternalProductID:       externalProductID,
+		ProviderConfigurationID: providerConfigurationID,
+		// Phase 15 §119: Shopify selections ride the variant identity
+		// (bundle variant GID for framed choices) and resolve through
+		// the durable configuration mapping — never by labels.
 		SKU:           bounded(line.SKU, 100),
 		Name:          bounded(line.Title, 200),
 		Quantity:      line.Quantity,

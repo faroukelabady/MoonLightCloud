@@ -41,6 +41,16 @@ func (s *cliStubMappings) GetProductMapping(_ context.Context, key commerce.Prov
 	return mapping, nil
 }
 
+func (s *cliStubMappings) GetProductConfigurationMapping(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *cliStubMappings) FindConfigurationByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *cliStubMappings) UpsertProductConfigurationMapping(_ context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{ProviderKey: providerKey, ProductID: productID, ConfigurationID: configurationID, ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID}, nil
+}
+
 func (s *cliStubMappings) FindByExternalProductID(_ context.Context, _ commerce.ProviderKey, _ string) (commerce.ProductMapping, error) {
 	return commerce.ProductMapping{}, errCLINoMapping
 }
@@ -423,4 +433,8 @@ func TestRunCommerceSyncOrderConflict(t *testing.T) {
 			t.Fatalf("output must not contain %q: %q", forbidden, output)
 		}
 	}
+}
+
+func errMappingNotFoundStub() error {
+	return apperr.New(apperr.NotFound, "no mapping stub")
 }

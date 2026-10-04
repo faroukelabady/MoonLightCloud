@@ -107,6 +107,7 @@ type Repository interface {
 	CatalogProductInventory(ctx context.Context, id string) (ProductInventory, error)
 	CatalogProductAvailability(ctx context.Context, id string) (ProductAvailability, error)
 	CatalogProductOnlinePolicy(ctx context.Context, id string) (ProductOnlinePolicy, error)
+	CatalogProductConfigurations(ctx context.Context, id string) ([]ProductConfiguration, error)
 }
 
 // Service fronts catalog reads for future phases.
@@ -171,4 +172,10 @@ func (s Service) GetTag(ctx context.Context, id string) (Tag, error) {
 // configuration for one product.
 func (s Service) GetProductSalesPolicy(ctx context.Context, id string) (ProductSalesPolicy, error) {
 	return s.repo.CatalogProductSalesPolicy(ctx, id)
+}
+
+// GetProductConfigurations returns one Product's projected ONLINE
+// configurations (Phase 15).
+func (s Service) GetProductConfigurations(ctx context.Context, id string) ([]ProductConfiguration, error) {
+	return s.repo.CatalogProductConfigurations(ctx, id)
 }

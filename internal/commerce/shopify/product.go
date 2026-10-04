@@ -62,10 +62,33 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 		return commerce.ProductUpsertResult{}, err
 	}
 	desired := desiredContent{title: title, description: description, price: price, sku: req.Product.SKU}
+	var result commerce.ProductUpsertResult
+	var upsertErr error
 	if req.ExistingExternal != nil {
-		return p.updateMapped(ctx, req, desired)
+		result, upsertErr = p.updateMapped(ctx, req, desired)
+	} else {
+		result, upsertErr = p.createWithRecovery(ctx, req, desired)
 	}
-	return p.createWithRecovery(ctx, req, desired)
+	if upsertErr != nil {
+		return commerce.ProductUpsertResult{}, upsertErr
+	}
+	// Phase 15 §93-§98: framed Products converge as a bundle whose
+	// inventory derives from the tracked base component — one shared
+	// papyrus pool across every customer choice. The mapped sellable
+	// identity transitions to the bundle parent (documented §116
+	// migration); the base component keeps its remote identity and its
+	// inventory item untouched.
+	if len(req.Product.Configurations) > 0 {
+		identities, err := p.syncShopifyConfigurations(ctx, req, result.ExternalProductID)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		if err := p.setBundleVariantPrices(ctx, req, result.ExternalProductID, identities); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		result.Configurations = identities
+	}
+	return result, nil
 }
 
 // desiredContent is the provider-owned content set: title, description,

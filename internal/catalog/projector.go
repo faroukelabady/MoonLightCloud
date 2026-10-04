@@ -29,6 +29,9 @@ const (
 	ProcessorProductSalesPolicyProjectionV1 = "catalog_product_sales_policy_projection.v1"
 	// Phase 5C: independent inventory stream with its own processing identity.
 	ProcessorProductInventoryProjectionV1 = "inventory_product_projection.v1"
+	// Phase 15: independent ONLINE product-option (frame configuration)
+	// stream with its own processing identity.
+	ProcessorProductConfigurationProjectionV1 = "catalog_product_configuration_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -80,6 +83,7 @@ type Store interface {
 	ProjectProduct(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductSalesPolicy(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductConfigurations(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -146,6 +150,12 @@ func NewProductSalesPolicyProjector(s Store, c clock.Clock, log *slog.Logger) *P
 // only wait); no re-arm hook.
 func NewProductInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductInventoryProjectionV1, EventInventoryProductSnapshotV1, s.ProjectProductInventory, c, log)
+}
+
+// NewProductConfigurationsProjector projects the Phase 15 ONLINE
+// product-option stream (Retail-authoritative frame configurations).
+func NewProductConfigurationsProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductConfigurationProjectionV1, EventProductConfigurationSnapshotV1, s.ProjectProductConfigurations, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

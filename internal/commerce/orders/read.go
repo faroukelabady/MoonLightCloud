@@ -35,6 +35,18 @@ type OrderLineView struct {
 	TotalMinor        string  `json:"total_minor"`
 	MoonlightProduct  *string `json:"moonlight_product_id"`
 	Mapped            bool    `json:"mapped"`
+	// Phase 15 §127/§130: optional configuration selection snapshot —
+	// null/absent for no-frame and legacy orders (backward compatible).
+	ConfigurationID              *string `json:"configuration_id,omitempty"`
+	FrameStyleCode               *string `json:"frame_style_code,omitempty"`
+	FrameStyleNameAR             *string `json:"frame_style_name_ar,omitempty"`
+	FrameStyleNameEN             *string `json:"frame_style_name_en,omitempty"`
+	FrameColorCode               *string `json:"frame_color_code,omitempty"`
+	FrameColorNameAR             *string `json:"frame_color_name_ar,omitempty"`
+	FrameColorNameEN             *string `json:"frame_color_name_en,omitempty"`
+	ConfigurationPriceDeltaMinor *string `json:"configuration_price_delta_minor,omitempty"`
+	ProviderConfigurationID      string  `json:"provider_configuration_id,omitempty"`
+	ConfigurationUnresolved      bool    `json:"configuration_unresolved,omitempty"`
 }
 
 // OrderAddressView is one dashboard address row.

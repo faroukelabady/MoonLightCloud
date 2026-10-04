@@ -32,6 +32,7 @@ sql:
       - "db/migrations/00027_commerce_mutation_barriers.sql"
       - "db/migrations/00028_category_online_policy.sql"
       - "db/migrations/00029_commerce_reevaluation_fencing.sql"
+      - "db/migrations/00030_product_configurations.sql"
     gen:
       go:
         package: "sqlcgen"

@@ -48,6 +48,9 @@ func (s stubReader) GetProductSalesPolicy(context.Context, string) (catalog.Prod
 func (s stubReader) GetProductAvailability(context.Context, string) (catalog.ProductAvailability, error) {
 	return s.availability, nil
 }
+func (s stubReader) GetProductConfigurations(context.Context, string) ([]catalog.ProductConfiguration, error) {
+	return nil, nil
+}
 
 // §135: the publication matrix through the ONE canonical formula.
 // Published = is_active AND sell_online AND category hierarchy allows.
@@ -152,7 +155,7 @@ func TestMissingPolicyCannotPublish(t *testing.T) {
 // §146: Category-policy operation identity matrix.
 func TestOperationKeyCategoryPolicyIdentity(t *testing.T) {
 	key := func(fp, ver string) string {
-		return ProductOperationKey("prov", "prod-1", 7, 3, true, fp, ver)
+		return ProductOperationKey("prov", "prod-1", 7, 3, true, fp, ver, "cf", "cv")
 	}
 	// Same category policy -> same key.
 	if key("fpA:0:1", "v1") != key("fpA:0:1", "v1") {
@@ -177,15 +180,15 @@ func TestOperationKeyCategoryPolicyIdentity(t *testing.T) {
 		t.Fatal("hierarchy change must change the key")
 	}
 	// Provider and product identity still separate keys.
-	if ProductOperationKey("p1", "prod-1", 7, 3, true, "fp", "v") == ProductOperationKey("p2", "prod-1", 7, 3, true, "fp", "v") {
+	if ProductOperationKey("p1", "prod-1", 7, 3, true, "fp", "v", "cf", "cv") == ProductOperationKey("p2", "prod-1", 7, 3, true, "fp", "v", "cf", "cv") {
 		t.Fatal("provider must separate keys")
 	}
-	if ProductOperationKey("p1", "prod-1", 7, 3, true, "fp", "v") == ProductOperationKey("p1", "prod-2", 7, 3, true, "fp", "v") {
+	if ProductOperationKey("p1", "prod-1", 7, 3, true, "fp", "v", "cf", "cv") == ProductOperationKey("p1", "prod-2", 7, 3, true, "fp", "v", "cf", "cv") {
 		t.Fatal("product must separate keys")
 	}
 	// Inventory identity carries the same policy inputs.
-	ik1 := InventoryOperationKey("p1", "prod-1", 7, 3, 5, 10, true, "fpA:0:1", "v1")
-	ik2 := InventoryOperationKey("p1", "prod-1", 7, 3, 5, 10, true, "fpA:0:0", "v1")
+	ik1 := InventoryOperationKey("p1", "prod-1", 7, 3, 5, 10, true, "fpA:0:1", "v1", "cf", "cv")
+	ik2 := InventoryOperationKey("p1", "prod-1", 7, 3, 5, 10, true, "fpA:0:0", "v1", "cf", "cv")
 	if ik1 == ik2 {
 		t.Fatal("inventory identity must be policy-aware")
 	}
@@ -222,6 +225,15 @@ type p13Mappings struct{}
 
 func (p13Mappings) GetProductMapping(context.Context, ProviderKey, string) (ProductMapping, error) {
 	return ProductMapping{}, apperr.New(apperr.NotFound, "no mapping")
+}
+func (p13Mappings) GetProductConfigurationMapping(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (p13Mappings) FindConfigurationByExternal(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (p13Mappings) UpsertProductConfigurationMapping(_ context.Context, providerKey ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (ProductConfigurationMapping, error) {
+	return ProductConfigurationMapping{ProviderKey: providerKey, ProductID: productID, ConfigurationID: configurationID, ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID}, nil
 }
 func (p13Mappings) FindByExternalProductID(context.Context, ProviderKey, string) (ProductMapping, error) {
 	return ProductMapping{}, apperr.New(apperr.NotFound, "no mapping")

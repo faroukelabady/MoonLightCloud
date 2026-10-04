@@ -475,6 +475,14 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 		if after && name == "commerce_product_reevaluations" {
 			expr += "-'requested_generation'-'claimed_generation'-'lease_generation'-'lease_token'-'lease_until'"
 		}
+		// Phase 15 00030 adds documented defaulted columns; business
+		// values stay byte-identical across the upgrade cycle.
+		if after && name == "catalog_products" {
+			expr += "-'configuration_revision'"
+		}
+		if after && name == "commerce_online_order_lines" {
+			expr += "-'configuration_id'-'frame_style_code'-'frame_style_name_ar'-'frame_style_name_en'-'frame_color_code'-'frame_color_name_ar'-'frame_color_name_en'-'configuration_price_delta_minor'-'provider_configuration_id'-'configuration_unresolved'"
+		}
 		var data string
 		if err := pf.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(jsonb_agg(%s ORDER BY (%s)::text),'[]'::jsonb)::text FROM %s t`, expr, expr, `"`+strings.ReplaceAll(name, `"`, `""`)+`"`)).Scan(&data); err != nil {
 			t.Fatal(err)
@@ -489,7 +497,7 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	version, err := migrate.Current(ctx, conn)
-	if err != nil || version != 29 {
+	if err != nil || version != migrate.TargetVersion {
 		t.Fatalf("schema %d %v", version, err)
 	}
 	for _, name := range names {

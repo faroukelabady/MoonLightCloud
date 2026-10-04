@@ -189,3 +189,79 @@ func (d Devices) ListProductMappingsForStore(ctx context.Context, providerKey co
 	}
 	return out, nil
 }
+
+// Phase 15 configuration identity (§61/§62): durable, Store-scoped,
+// ownership-keyed by (provider, product, configuration). Never matched
+// by labels or SKU. Rows survive disable/re-enable (§63).
+
+func (d Devices) GetProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID string) (commerce.ProductConfigurationMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, err
+	}
+	cuid, err := parseUUID(configurationID)
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, err
+	}
+	row, err := sqlcgen.New(d.pool).GetCommerceProductConfigurationMapping(ctx, sqlcgen.GetCommerceProductConfigurationMappingParams{
+		ProviderKey: string(providerKey), ProductID: puid, ConfigurationID: cuid,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return commerce.ProductConfigurationMapping{}, apperr.New(apperr.NotFound, "no commerce configuration mapping")
+		}
+		return commerce.ProductConfigurationMapping{}, apperr.Wrap(apperr.Internal, "commerce configuration mapping", redact(err))
+	}
+	return configurationMappingFromRow(row), nil
+}
+
+func (d Devices) FindConfigurationByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	row, err := sqlcgen.New(d.pool).FindCommerceProductConfigurationMappingByExternal(ctx, sqlcgen.FindCommerceProductConfigurationMappingByExternalParams{
+		ProviderKey: string(providerKey), ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return commerce.ProductConfigurationMapping{}, apperr.New(apperr.NotFound, "no commerce configuration mapping")
+		}
+		return commerce.ProductConfigurationMapping{}, apperr.Wrap(apperr.Internal, "commerce configuration mapping", redact(err))
+	}
+	return configurationMappingFromRow(row), nil
+}
+
+func (d Devices) UpsertProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, err
+	}
+	cuid, err := parseUUID(configurationID)
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, err
+	}
+	row, err := sqlcgen.New(d.pool).UpsertCommerceProductConfigurationMapping(ctx, sqlcgen.UpsertCommerceProductConfigurationMappingParams{
+		ProviderKey: string(providerKey), ProductID: puid, ConfigurationID: cuid,
+		ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID,
+	})
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, redact(err)
+	}
+	return configurationMappingFromRow(row), nil
+}
+
+func configurationMappingFromRow(row sqlcgen.CommerceProductConfigurationMapping) commerce.ProductConfigurationMapping {
+	mapping := commerce.ProductConfigurationMapping{
+		ProviderKey: commerce.ProviderKey(row.ProviderKey),
+		ProductID:   uuidString(row.ProductID), ConfigurationID: uuidString(row.ConfigurationID),
+		ExternalProductID: row.ExternalProductID, ExternalConfigurationID: row.ExternalConfigurationID,
+	}
+	if row.StoreID.Valid {
+		value := uuidString(row.StoreID)
+		mapping.StoreID = &value
+	}
+	return mapping
+}

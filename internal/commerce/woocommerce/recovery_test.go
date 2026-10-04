@@ -31,6 +31,16 @@ func (s *stubMappingRepo) GetProductMapping(_ context.Context, key commerce.Prov
 	return mapping, nil
 }
 
+func (s *stubMappingRepo) GetProductConfigurationMapping(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappingRepo) FindConfigurationByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
+}
+func (s *stubMappingRepo) UpsertProductConfigurationMapping(_ context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+	return commerce.ProductConfigurationMapping{ProviderKey: providerKey, ProductID: productID, ConfigurationID: configurationID, ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID}, nil
+}
+
 func (s *stubMappingRepo) FindByExternalProductID(_ context.Context, key commerce.ProviderKey, externalID string) (commerce.ProductMapping, error) {
 	for _, mapping := range s.rows {
 		if mapping.ProviderKey == key && mapping.ExternalProductID == externalID {
@@ -414,4 +424,8 @@ func TestWooInventoryFailureSafety(t *testing.T) {
 	if stored["stock_quantity"] != float64(0) || stored["stock_status"] != "outofstock" {
 		t.Fatalf("safe-zero remote, not stale 10: %v", stored)
 	}
+}
+
+func errMappingNotFoundStub() error {
+	return apperr.New(apperr.NotFound, "no mapping stub")
 }

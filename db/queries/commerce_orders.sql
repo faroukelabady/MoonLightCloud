@@ -108,9 +108,13 @@ INSERT INTO commerce_online_order_lines (
     provider_key, external_order_id, external_line_id,
     external_product_id, variation_id, sku, name, quantity,
     subtotal_minor, subtotal_tax_minor, total_minor, total_tax_minor,
-    moonlight_product_id, mapped, unsupported_reason
+    moonlight_product_id, mapped, unsupported_reason,
+    configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
+    frame_color_code, frame_color_name_ar, frame_color_name_en,
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 );
 
 -- name: InsertCommerceOrderAddress :exec

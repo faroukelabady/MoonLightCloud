@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,21 +30,23 @@ type wooRecordedRequest struct {
 // every call, keeps product state with Woo-style merge semantics, and
 // supports injected errors. It is not WordPress.
 type wooHarness struct {
-	t            *testing.T
-	server       *httptest.Server
-	expectedKey  string
-	expectedPass string
-	mu           sync.Mutex
-	requests     []wooRecordedRequest
-	products     map[int64]map[string]any
-	nextID       int64
-	wooOrders    map[int64]map[string]any
-	nextOrderID  int64
-	failWith     map[string]harnessFailure
-	intercept    func(wooRecordedRequest) (status int, body any, handled bool)
-	dropCreate   bool
-	redirectTo   string
-	redirectHits int
+	t               *testing.T
+	server          *httptest.Server
+	expectedKey     string
+	expectedPass    string
+	mu              sync.Mutex
+	requests        []wooRecordedRequest
+	products        map[int64]map[string]any
+	nextID          int64
+	wooOrders       map[int64]map[string]any
+	nextOrderID     int64
+	failWith        map[string]harnessFailure
+	intercept       func(wooRecordedRequest) (status int, body any, handled bool)
+	dropCreate      bool
+	variations      map[int64]map[int64]map[string]any
+	nextVariationID int64
+	redirectTo      string
+	redirectHits    int
 }
 
 type harnessFailure struct {
@@ -227,6 +230,13 @@ func (h *wooHarness) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rest := strings.TrimPrefix(r.URL.Path, "/wp-json/wc/v3/products")
+	// Phase 15: variable-product variations (product-level attributes;
+	// per-variation stock is intentionally NOT modeled — real Woo pulls
+	// variation stock from the parent when manage_stock is false).
+	if match := variationRoute.FindStringSubmatch(rest); match != nil {
+		h.serveVariations(w, r, parsed, match[1], match[2])
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet && (rest == "" || rest == "/"):
 		h.serveList(w, r)
@@ -379,4 +389,66 @@ func (h *wooHarness) serveUpdate(w http.ResponseWriter, id int64, parsed map[str
 		stored[key] = value
 	}
 	h.writeJSON(w, http.StatusOK, stored)
+}
+
+// variationRoute matches /{productID}/variations[/{variationID}].
+var variationRoute = regexp.MustCompile(`^/(\d+)/variations(?:/(\d+))?$`)
+
+// serveVariations is the Phase 15 fake for Woo variation CRUD. Product-
+// level custom attributes are accepted as declared (matching real
+// variable-product semantics); created variations inherit parent stock
+// behavior by carrying no quantity.
+func (h *wooHarness) serveVariations(w http.ResponseWriter, r *http.Request, parsed map[string]any, productID, variationID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	pid, _ := strconv.ParseInt(productID, 10, 64)
+	if h.variations == nil {
+		h.variations = map[int64]map[int64]map[string]any{}
+	}
+	if h.variations[pid] == nil {
+		h.variations[pid] = map[int64]map[string]any{}
+	}
+	switch {
+	case r.Method == http.MethodGet && variationID == "":
+		list := []map[string]any{}
+		for _, variation := range h.variations[pid] {
+			list = append(list, variation)
+		}
+		h.writeJSON(w, http.StatusOK, list)
+	case r.Method == http.MethodPost && variationID == "":
+		if h.dropCreate {
+			h.mu.Unlock()
+			h.server.CloseClientConnections()
+			h.mu.Lock()
+			return
+		}
+		h.nextVariationID++
+		id := h.nextVariationID
+		body := map[string]any{"id": id}
+		for key, value := range parsed {
+			body[key] = value
+		}
+		h.variations[pid][id] = body
+		h.writeJSON(w, http.StatusCreated, body)
+	case r.Method == http.MethodGet && variationID != "":
+		vid, _ := strconv.ParseInt(variationID, 10, 64)
+		if variation, ok := h.variations[pid][vid]; ok {
+			h.writeJSON(w, http.StatusOK, variation)
+			return
+		}
+		h.writeWooError(w, http.StatusNotFound, "woocommerce_rest_variation_invalid", "Resource doesn't exist.")
+	case r.Method == http.MethodPut && variationID != "":
+		vid, _ := strconv.ParseInt(variationID, 10, 64)
+		variation, ok := h.variations[pid][vid]
+		if !ok {
+			h.writeWooError(w, http.StatusNotFound, "woocommerce_rest_variation_invalid", "Resource doesn't exist.")
+			return
+		}
+		for key, value := range parsed {
+			variation[key] = value
+		}
+		h.writeJSON(w, http.StatusOK, variation)
+	default:
+		h.writeWooError(w, http.StatusMethodNotAllowed, "woocommerce_rest_invalid_method", "Method not allowed.")
+	}
 }
