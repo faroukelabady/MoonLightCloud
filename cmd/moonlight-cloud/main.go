@@ -159,6 +159,9 @@ func serve(args []string) error {
 	if a.OrderProcessor != nil {
 		go a.OrderProcessor.Run(projCtx)
 	}
+	if a.ReevaluationWorker != nil {
+		go a.ReevaluationWorker.Run(projCtx)
+	}
 	if a.NotificationDispatcher != nil {
 		go a.NotificationDispatcher.Run(projCtx)
 	}

@@ -82,7 +82,7 @@ func (q *Queries) CatalogActiveProducts(ctx context.Context, limit int32) ([]Cat
 }
 
 const catalogCategoryByID = `-- name: CatalogCategoryByID :one
-SELECT category_id, status, name_ar, name_en, source_revision,
+SELECT category_id, status, name_ar, name_en, online_enabled, source_revision,
     source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_categories WHERE category_id = $1
 `
@@ -92,6 +92,7 @@ type CatalogCategoryByIDRow struct {
 	Status            string      `json:"status"`
 	NameAr            string      `json:"name_ar"`
 	NameEn            pgtype.Text `json:"name_en"`
+	OnlineEnabled     bool        `json:"online_enabled"`
 	SourceRevision    int64       `json:"source_revision"`
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
@@ -107,6 +108,7 @@ func (q *Queries) CatalogCategoryByID(ctx context.Context, categoryID pgtype.UUI
 		&i.Status,
 		&i.NameAr,
 		&i.NameEn,
+		&i.OnlineEnabled,
 		&i.SourceRevision,
 		&i.SourceEventID,
 		&i.SourceDeviceID,
@@ -1160,8 +1162,9 @@ const upsertCatalogCategory = `-- name: UpsertCatalogCategory :exec
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id, default_algorithm
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    source_payload_hash, source_received_at, store_id, default_algorithm,
+    online_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
@@ -1169,6 +1172,7 @@ ON CONFLICT (category_id) DO UPDATE SET
     source_received_at = excluded.source_received_at,
     store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
     default_algorithm = excluded.default_algorithm,
+    online_enabled = excluded.online_enabled,
     projected_at = now()
 `
 
@@ -1184,6 +1188,7 @@ type UpsertCatalogCategoryParams struct {
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
 	DefaultAlgorithm  int16              `json:"default_algorithm"`
+	OnlineEnabled     bool               `json:"online_enabled"`
 }
 
 // Phase 9B: store_id carries the event's own ingress Store context
@@ -1207,6 +1212,7 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 		arg.SourceReceivedAt,
 		arg.StoreID,
 		arg.DefaultAlgorithm,
+		arg.OnlineEnabled,
 	)
 	return err
 }

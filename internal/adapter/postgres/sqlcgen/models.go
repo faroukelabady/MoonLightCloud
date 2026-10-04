@@ -92,6 +92,7 @@ type CatalogCategory struct {
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
 	DefaultAlgorithm  int16              `json:"default_algorithm"`
+	OnlineEnabled     bool               `json:"online_enabled"`
 }
 
 type CatalogCategoryEdge struct {
@@ -128,6 +129,16 @@ type CatalogProductInventory struct {
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
+}
+
+type CatalogProductOnlineState struct {
+	ProductID            pgtype.UUID `json:"product_id"`
+	StoreID              pgtype.UUID `json:"store_id"`
+	CategoryAllowsOnline pgtype.Bool `json:"category_allows_online"`
+	BlockReason          string      `json:"block_reason"`
+	BlockingCategoryID   pgtype.UUID `json:"blocking_category_id"`
+	PolicyFingerprint    []byte      `json:"policy_fingerprint"`
+	PolicyVersion        []byte      `json:"policy_version"`
 }
 
 type CatalogProductPrice struct {
@@ -307,6 +318,16 @@ type CommerceProductMutationBarrier struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	ResolvedAt         pgtype.Timestamptz `json:"resolved_at"`
 	Resolution         pgtype.Text        `json:"resolution"`
+}
+
+type CommerceProductReevaluation struct {
+	ProductID     pgtype.UUID        `json:"product_id"`
+	StoreID       pgtype.UUID        `json:"store_id"`
+	Reason        string             `json:"reason"`
+	RequestedAt   pgtype.Timestamptz `json:"requested_at"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorCode pgtype.Text        `json:"last_error_code"`
 }
 
 type Device struct {

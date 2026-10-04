@@ -32,7 +32,7 @@ func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
 	}
 	var res catalog.ProjectResult
 	switch rec.EventType {
-	case catalog.EventCategorySnapshotV1:
+	case catalog.EventCategorySnapshotV1, catalog.EventCategorySnapshotV2:
 		res, err = d.ProjectCategory(ctx, rec, time.Now())
 	case catalog.EventTagSnapshotV1:
 		res, err = d.ProjectTag(ctx, rec, time.Now())

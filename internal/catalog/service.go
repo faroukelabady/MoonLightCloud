@@ -106,6 +106,7 @@ type Repository interface {
 	CatalogProductSalesPolicy(ctx context.Context, id string) (ProductSalesPolicy, error)
 	CatalogProductInventory(ctx context.Context, id string) (ProductInventory, error)
 	CatalogProductAvailability(ctx context.Context, id string) (ProductAvailability, error)
+	CatalogProductOnlinePolicy(ctx context.Context, id string) (ProductOnlinePolicy, error)
 }
 
 // Service fronts catalog reads for future phases.

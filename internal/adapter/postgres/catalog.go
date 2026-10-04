@@ -219,7 +219,8 @@ func currentCategorySnapshot(ctx context.Context, q *sqlcgen.Queries, cuid pgtyp
 	}
 	return catalog.NormalizeCategorySnapshot(catalog.CategorySnapshot{
 		CategoryID: uuidString(row.CategoryID), Status: row.Status,
-		Names: names, ParentIDs: parentIDs, CatalogRevision: row.SourceRevision,
+		OnlineEnabled: row.OnlineEnabled,
+		Names:         names, ParentIDs: parentIDs, CatalogRevision: row.SourceRevision,
 	}), true, nil
 }
 
@@ -763,6 +764,9 @@ func (d Devices) markCatalogBlocked(ctx context.Context, processor string, euid 
 // after the projection transaction rolled back, mirroring the sale/return
 // discipline: the schedule commits even though the projection did not.
 func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (catalog.ProjectResult, error) {
+	// The returned error keeps its frozen exact shape (the F12 retry
+	// classifier contracts on it); the branch detail is persisted in
+	// sync_event_processing.last_error_message for diagnostics.
 	fail := func() (catalog.ProjectResult, error) {
 		return catalog.ProjectResult{Outcome: catalog.OutcomeRetryable, ErrorCode: code},
 			transient(errors.New("catalog projection transient failure"))
@@ -1007,7 +1011,16 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		euid, _ := parseUUID(event.EventID)
 		return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
 	}
-	raw, derr := catalog.DecodeCategorySnapshot(attempt.payload)
+	// Phase 13 §28: dual-version support. v1 is immutable history and
+	// normalizes to online_enabled = true (exact pre-Phase13 semantics);
+	// v2 carries the ONLINE channel policy as required semantic state.
+	var raw catalog.CategorySnapshot
+	var derr error
+	if event.EventType == catalog.EventCategorySnapshotV2 {
+		raw, derr = catalog.DecodeCategorySnapshotV2(attempt.payload)
+	} else {
+		raw, derr = catalog.DecodeCategorySnapshot(attempt.payload)
+	}
 	if derr != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
 	}
@@ -1339,8 +1352,18 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	if sharedNode {
 		defaultAlgorithm = 1
 	}
+	// Phase 13 §82: capture the pre-write policy/hierarchy state so the
+	// durable commerce re-evaluation fan-out (below, same transaction)
+	// fires only on a real eligibility-context change — pure renames and
+	// replayed duplicates never trigger provider work.
+	previous, prevFound, prevErr := currentCategorySnapshot(ctx, q, cuid)
+	if prevErr != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category state read failed")
+	}
 	if err := q.UpsertCatalogCategory(ctx, sqlcgen.UpsertCatalogCategoryParams{
 		CategoryID: cuid, Status: valid.Status, NameAr: nameAR, NameEn: nameEN,
+		OnlineEnabled:  valid.OnlineEnabled,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
 		StoreID: writeStore, DefaultAlgorithm: defaultAlgorithm,
@@ -1362,6 +1385,28 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge insert failed")
+		}
+	}
+	// Phase 13 §79/§82: durable commerce re-evaluation fan-out,
+	// committed in the SAME transaction as the category projection.
+	// Trigger only on a real eligibility-context change: online policy
+	// change or parent-set change (renames and equal replays never fan
+	// out). Affected Products = every Product classified at this node or
+	// any DAG descendant (§85), deduplicated by the queue's Product
+	// primary key (§86), Store-proven only (§107). Pure SQL inside the
+	// projection transaction: no provider I/O while locks are held (§81).
+	projectedParents := make([]string, 0, len(resolvedParents))
+	for _, parent := range resolvedParents {
+		projectedParents = append(projectedParents, parent.projected)
+	}
+	if categoryPolicyChanged(previous, prevFound, valid, projectedParents) {
+		if _, err := q.EnqueueCategoryAffectedReevaluations(ctx, sqlcgen.EnqueueCategoryAffectedReevaluationsParams{
+			Column1: cuid,
+			Column2: "category_policy",
+			Column3: writeStore,
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error())
 		}
 	}
 	// Re-evaluation trigger (R03 §39): waiting or graph-blocked product
@@ -1974,6 +2019,17 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		height = pgtype.Int4{Int32: int32(*valid.HeightCM), Valid: true}
 	}
 	fingerprint := catalog.FingerprintProduct(valid)
+	// Phase 13 §42/§84: classification changes (top category or
+	// subcategory assignments) move the Product's effective ONLINE
+	// eligibility, so they durably schedule the same generic commerce
+	// re-evaluation as Category policy changes. Metadata-only product
+	// edits (names, prices, tags, stock) do not: publication keeps its
+	// frozen manual cadence for those.
+	preClassification, preFound, preErr := currentProductSnapshot(ctx, q, puid)
+	if preErr != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product state read failed")
+	}
 	if err := q.UpsertCatalogProduct(ctx, sqlcgen.UpsertCatalogProductParams{
 		ProductID: puid, Sku: valid.SKU, Name: valid.Name, Description: description,
 		TopCategoryID: topUID, WidthCm: width, HeightCm: height, IsActive: valid.IsActive,
@@ -2044,6 +2100,16 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		}); err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag insert failed")
+		}
+	}
+	// Phase 13 §79: durable re-evaluation signal, atomic with the product
+	// projection commit (same transaction — crash-safe, restart-safe).
+	if productClassificationChanged(preClassification, preFound, uuidString(topUID), resolvedSubs) {
+		if err := q.EnqueueProductReevaluation(ctx, sqlcgen.EnqueueProductReevaluationParams{
+			ProductID: puid, StoreID: writeStore, Reason: "product_classification",
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed")
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2740,4 +2806,86 @@ func defaultReferenceRepairPending(ctx context.Context, q *sqlcgen.Queries, row 
 		}
 	}
 	return false, nil
+}
+
+// categoryPolicyChanged reports whether the projected category state
+// changed the ONLINE eligibility context of any Product (Phase 13 §42):
+// the node's online policy or its parent set. Names/labels, status and
+// parent order are deliberately excluded — a rename must never
+// republish/suppress Products, and pure reordering is not a policy
+// change (set semantics). An inserted node always counts as a change.
+func categoryPolicyChanged(previous catalog.NormalizedCategory, prevFound bool, next catalog.CategorySnapshot, resolvedParents []string) bool {
+	if !prevFound {
+		return true
+	}
+	if previous.OnlineEnabled != next.OnlineEnabled {
+		return true
+	}
+	return !sameParentSet(previous.ParentIDs, resolvedParents)
+}
+
+// sameParentSet compares parent sets independent of order.
+func sameParentSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]int, len(a))
+	for _, id := range a {
+		set[id]++
+	}
+	for _, id := range b {
+		set[id]--
+		if set[id] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// productClassificationChanged reports whether the projected product
+// changed its classification (top category or subcategory set) — the
+// only Product-side trigger for effective-online re-evaluation (Phase 13
+// §42). Comparison uses resolved (canonical) identities, and subcategory
+// order is not semantic (set equality). Metadata-only edits never fan
+// out: publication keeps its frozen manual cadence for those.
+func productClassificationChanged(previous catalog.NormalizedProduct, prevFound bool, topCategoryID string, subcategoryIDs []string) bool {
+	if !prevFound {
+		return true
+	}
+	if previous.TopCategoryID != topCategoryID {
+		return true
+	}
+	return !sameParentSet(previous.SubcategoryIDs, subcategoryIDs)
+}
+
+// CatalogProductOnlinePolicy reads the canonical effective-online policy
+// for one Product (Phase 13). Read-only: no provider calls, no writes,
+// no barrier interaction — durable Cloud state only.
+func (d Devices) CatalogProductOnlinePolicy(ctx context.Context, id string) (catalog.ProductOnlinePolicy, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(id)
+	if err != nil {
+		return catalog.ProductOnlinePolicy{}, err
+	}
+	row, err := sqlcgen.New(d.pool).CatalogProductOnlineState(ctx, uid)
+	if err != nil {
+		return catalog.ProductOnlinePolicy{}, reportErr("catalog product online policy", err)
+	}
+	policy := catalog.ProductOnlinePolicy{
+		ProductID:          uuidString(row.ProductID),
+		StoreID:            uuidPtr(row.StoreID),
+		Allowed:            row.CategoryAllowsOnline.Bool,
+		Reason:             catalog.OnlineAllowed,
+		BlockingCategoryID: uuidPtr(row.BlockingCategoryID),
+		PolicyFingerprint:  string(row.PolicyFingerprint),
+		PolicyVersion:      string(row.PolicyVersion),
+	}
+	if !row.CategoryAllowsOnline.Bool {
+		policy.Reason = row.BlockReason
+		if policy.Reason == "" {
+			policy.Reason = catalog.OnlineBlockedCategory
+		}
+	}
+	return policy, nil
 }

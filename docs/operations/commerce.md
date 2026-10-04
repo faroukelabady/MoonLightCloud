@@ -55,5 +55,10 @@ A concrete adapter implements `commerce.CommerceProvider`
 it is handed, keeps credentials in adapter configuration (never in the
 database, events, Retail, or dashboard), classifies failures with
 `commerce.ProviderError`, and is registered under one `ProviderKey`.
-Callers use `CommerceService.SyncProduct`; no scheduler or webhook
-route exists yet.
+Callers use `CommerceService.SyncProduct`. Since Phase 13, a durable
+commerce re-evaluation worker also drives it: catalog/product projection
+commits enqueue affected Products into `commerce_product_reevaluations`
+(atomic with the projection, coalesced per Product), and the worker
+converges each Product against every registered provider with bounded
+retries (including after unresolved mutation barriers). There is still
+no webhook route and no product-level scheduler beyond this queue.

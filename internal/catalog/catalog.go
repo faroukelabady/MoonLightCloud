@@ -21,6 +21,10 @@ import (
 // Registered event types (wired in internal/app).
 const (
 	EventCategorySnapshotV1 = "catalog.category.snapshot.v1"
+	// EventCategorySnapshotV2 (Phase 13) carries the provider-neutral
+	// ONLINE channel policy (online_enabled). v1 stays semantically
+	// immutable and is normalized as online_enabled = true.
+	EventCategorySnapshotV2 = "catalog.category.snapshot.v2"
 	EventTagSnapshotV1      = "catalog.tag.snapshot.v1"
 	EventProductSnapshotV1  = "catalog.product.snapshot.v1"
 	// Phase 5B: per-product channel/allocation policy at an independent
@@ -68,11 +72,29 @@ type CatalogPrice struct {
 }
 
 // CategorySnapshot is the authoritative category state at a revision.
+// OnlineEnabled is the normalized ONLINE channel policy: v1 payloads are
+// immutable history and normalize to true (pre-Phase13 semantics); v2
+// payloads carry the value explicitly. It participates in semantic
+// identity (fingerprint/equal-revision comparison): two states differing
+// only in online_enabled are NOT the same snapshot.
 type CategorySnapshot struct {
 	CategoryID      string        `json:"category_id"`
 	Status          string        `json:"status"`
 	Names           []CatalogName `json:"names"`
 	ParentIDs       []string      `json:"parent_ids"`
+	CatalogRevision int64         `json:"catalog_revision"`
+	OnlineEnabled   bool          `json:"-"`
+}
+
+// CategorySnapshotV2 is the Phase 13 wire shape. online_enabled is
+// REQUIRED (presence-checked: a missing field is a validation failure,
+// never a silent default).
+type CategorySnapshotV2 struct {
+	CategoryID      string        `json:"category_id"`
+	Status          string        `json:"status"`
+	Names           []CatalogName `json:"names"`
+	ParentIDs       []string      `json:"parent_ids"`
+	OnlineEnabled   *bool         `json:"online_enabled"`
 	CatalogRevision int64         `json:"catalog_revision"`
 }
 
@@ -148,13 +170,37 @@ func decodePayload(eventType string, raw json.RawMessage, out any) error {
 	return nil
 }
 
-// DecodeCategorySnapshot parses the canonical payload bytes.
+// DecodeCategorySnapshot parses canonical v1 payload bytes. v1 carries
+// no online policy: it normalizes to online_enabled = true (the exact
+// pre-Phase13 behavior, §28).
 func DecodeCategorySnapshot(raw json.RawMessage) (CategorySnapshot, error) {
 	var p CategorySnapshot
 	if err := decodePayload(EventCategorySnapshotV1, raw, &p); err != nil {
 		return CategorySnapshot{}, err
 	}
+	p.OnlineEnabled = true
 	return p, nil
+}
+
+// DecodeCategorySnapshotV2 parses canonical v2 payload bytes and
+// normalizes to the shared CategorySnapshot shape. online_enabled must
+// be present and boolean: missing or malformed policy fails closed.
+func DecodeCategorySnapshotV2(raw json.RawMessage) (CategorySnapshot, error) {
+	var wire CategorySnapshotV2
+	if err := decodePayload(EventCategorySnapshotV2, raw, &wire); err != nil {
+		return CategorySnapshot{}, err
+	}
+	if wire.OnlineEnabled == nil {
+		return CategorySnapshot{}, apperr.New(apperr.Unprocessable,
+			"invalid "+EventCategorySnapshotV2+": online_enabled is required")
+	}
+	normalized := CategorySnapshot{
+		CategoryID: wire.CategoryID, Status: wire.Status,
+		Names: wire.Names, ParentIDs: wire.ParentIDs,
+		CatalogRevision: wire.CatalogRevision,
+		OnlineEnabled:   *wire.OnlineEnabled,
+	}
+	return normalized, nil
 }
 
 // ValidateCategorySnapshot enforces every invariant the desktop category

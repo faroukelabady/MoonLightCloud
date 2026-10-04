@@ -30,6 +30,7 @@ sql:
       - "db/migrations/00025_store_scoped_default_catalog.sql"
       - "db/migrations/00026_notification_recipient_username_bound.sql"
       - "db/migrations/00027_commerce_mutation_barriers.sql"
+      - "db/migrations/00028_category_online_policy.sql"
     gen:
       go:
         package: "sqlcgen"

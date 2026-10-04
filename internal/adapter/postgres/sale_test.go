@@ -52,6 +52,14 @@ func TestMain(m *testing.M) {
 		_, err = catalog.ValidateCategorySnapshot(p)
 		return err
 	})
+	isync.RegisterEventType(catalog.EventCategorySnapshotV2, func(raw json.RawMessage) error {
+		decoded, err := catalog.DecodeCategorySnapshotV2(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateCategorySnapshot(decoded)
+		return err
+	})
 	isync.RegisterEventType(catalog.EventTagSnapshotV1, func(raw json.RawMessage) error {
 		p, err := catalog.DecodeTagSnapshot(raw)
 		if err != nil {

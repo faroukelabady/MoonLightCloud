@@ -38,11 +38,25 @@ GROUP BY provider_key, canonical_status, currency;
 --   AVAILABILITY_NOT_READY    — online-eligible product (active +
 --                               sell_online) with no projected inventory
 --                               row (frozen readiness: product + policy
---                               + inventory).
---   COMMERCE_MAPPING_MISSING  — online-eligible product with no mapping
---                               for a known provider (intentionally
---                               offline/inactive products are never
---                               flagged).
+--                               + inventory), excluding products
+--                               INTENTIONALLY Category-suppressed
+--                               (Phase 13 §169: deliberate suppression is
+--                               never fabricated as not-ready; missing
+--                               hierarchy state still reports not-ready
+--                               alongside CATALOG_MISSING_CATEGORY).
+--   COMMERCE_MAPPING_MISSING  — EFFECTIVELY online-eligible product with
+--                               no mapping for a known provider. Uses
+--                               the same canonical eligibility rule as
+--                               commerce publication (the
+--                               catalog_product_online_state view):
+--                               intentionally offline/inactive AND
+--                               Category-suppressed products are never
+--                               flagged (Phase 13 §113/§114).
+--   CATEGORY_ONLINE_DISABLED  — INFORMATIONAL (Phase 13 §116): active +
+--                               sell_online Product intentionally
+--                               suppressed by Category policy. Not a
+--                               catalog-health failure — it is deliberate
+--                               configuration.
 --   COMMERCE_SYNC_AMBIGUOUS   — an unresolved mutation barrier exists for
 --                               the product (needs operator settlement;
 --                               read-only, never settled here).
@@ -66,7 +80,9 @@ FROM (
     SELECT 'AVAILABILITY_NOT_READY'
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
     WHERE p.is_active AND pol.sell_online
+      AND s.block_reason <> 'CATEGORY_ONLINE_DISABLED'
       AND NOT EXISTS (SELECT 1 FROM catalog_product_inventory i WHERE i.product_id = p.product_id)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
@@ -122,7 +138,9 @@ FROM (
            p.product_id, p.sku, p.name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
     WHERE p.is_active AND pol.sell_online
+      AND s.block_reason <> 'CATEGORY_ONLINE_DISABLED'
       AND NOT EXISTS (SELECT 1 FROM catalog_product_inventory i WHERE i.product_id = p.product_id)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
@@ -135,10 +153,20 @@ FROM (
         UNION
         SELECT DISTINCT provider_key FROM commerce_product_mutation_barriers
     ) u ON (@provider_key::text = '' OR u.provider_key = @provider_key::text)
-    WHERE p.is_active AND pol.sell_online
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
+    WHERE p.is_active AND pol.sell_online AND s.category_allows_online
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
       AND NOT EXISTS (SELECT 1 FROM commerce_product_mappings m
                       WHERE m.provider_key = u.provider_key AND m.product_id = p.product_id)
+    UNION ALL
+    SELECT 'CATEGORY_ONLINE_DISABLED', ''::text,
+           p.product_id, p.sku, p.name, p.store_id
+    FROM catalog_products p
+    JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
+    WHERE p.is_active AND pol.sell_online
+      AND NOT s.category_allows_online AND s.block_reason = 'CATEGORY_ONLINE_DISABLED'
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_SYNC_AMBIGUOUS', b.provider_key,
            p.product_id, p.sku, p.name, p.store_id

@@ -10,14 +10,18 @@ import (
 
 // ProductOperationKey derives the deterministic retry identity for one
 // desired product state: provider key, product ID, catalog revision,
-// policy revision, and publication state. Same desired state retried
-// after a temporary failure yields the same key; any state change yields
-// a new key. No timestamps, random IDs, or attempt counters.
-func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool) string {
+// policy revision, publication state, and the Category ONLINE policy
+// identity (Phase 13 §96: eligibility fingerprint + policy version).
+// Same desired state retried after a temporary failure yields the same
+// key; any state change yields a new key. The policy VERSION advances
+// across an enabled->disabled->enabled cycle, so that cycle can never
+// reuse the original generation's provider idempotency key. No
+// timestamps, random IDs, or attempt counters.
+func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion string) string {
 	return operationKey("product",
 		string(providerKey), productID,
 		revisionBytes(catalogRevision), revisionBytes(policyRevision),
-		boolBytes(published),
+		boolBytes(published), categoryPolicyFingerprint, categoryPolicyVersion,
 	)
 }
 
@@ -25,11 +29,11 @@ func ProductOperationKey(providerKey ProviderKey, productID string, catalogRevis
 // desired inventory state: product ID, the revisions behind the computed
 // availability (catalog lifecycle, sales policy, inventory), the derived
 // quantity, and publication state.
-func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, published bool) string {
+func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, published bool, categoryPolicyFingerprint, categoryPolicyVersion string) string {
 	return operationKey("inventory",
 		string(providerKey), productID,
 		revisionBytes(catalogRevision), revisionBytes(policyRevision), revisionBytes(inventoryRevision),
-		revisionBytes(quantity), boolBytes(published),
+		revisionBytes(quantity), boolBytes(published), categoryPolicyFingerprint, categoryPolicyVersion,
 	)
 }
 

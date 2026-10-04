@@ -63,7 +63,7 @@ func TestV26To27MutationBarrierPreservation(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if got := version(t, conn, ctx); got != 27 {
+	if got := version(t, conn, ctx); got != migrate.TargetVersion {
 		t.Fatal("schema", got)
 	}
 	for _, table := range tables {
@@ -105,7 +105,7 @@ func TestFreshTo27MutationBarrierConstraintsAndRollback(t *testing.T) {
 	if err := migrate.DownTo(ctx, conn, 26); err == nil {
 		t.Fatal("rollback erased active uncertainty")
 	}
-	if got := version(t, conn, ctx); got != 27 {
+	if got := version(t, conn, ctx); got != migrate.TargetVersion {
 		t.Fatal("failed rollback changed schema", got)
 	}
 	tag, err := conn.ExecContext(ctx, `UPDATE commerce_product_mutation_barriers SET state='resolved',resolved_at=now(),resolution='remote_completed' WHERE operation_id=$1`, first)

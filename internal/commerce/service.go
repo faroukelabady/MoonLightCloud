@@ -119,7 +119,7 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	if mapped {
 		existing = &ProviderProductRef{ExternalProductID: mapping.ExternalProductID}
 	}
-	productKey := ProductOperationKey(key, productID, desired.CatalogRevision, desired.PolicyRevision, desired.Published)
+	productKey := ProductOperationKey(key, productID, desired.CatalogRevision, desired.PolicyRevision, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion)
 	upserted, err := provider.UpsertProduct(ctx, ProductUpsertRequest{
 		ProviderKey: key, ProductID: productID, ExistingExternal: existing,
 		Product: desired.Product, Published: desired.Published,
@@ -162,7 +162,7 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	quantity := int64(desired.Availability.OnlineAvailable)
 	inventoryKey := InventoryOperationKey(key, productID,
 		desired.CatalogRevision, desired.PolicyRevision, desired.InventoryRevision,
-		quantity, desired.Published)
+		quantity, desired.Published, desired.CategoryPolicyFingerprint, desired.CategoryPolicyVersion)
 	if err := provider.SetInventory(ctx, InventoryUpdateRequest{
 		ProviderKey: key, ProductID: productID, ExternalProductID: upserted.ExternalProductID,
 		AvailableQuantity: quantity,

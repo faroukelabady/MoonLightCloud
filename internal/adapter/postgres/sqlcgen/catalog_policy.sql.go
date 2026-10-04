@@ -109,6 +109,32 @@ func (q *Queries) CatalogOnlineConfiguredProductsForStore(ctx context.Context, a
 	return items, nil
 }
 
+const catalogProductOnlineState = `-- name: CatalogProductOnlineState :one
+
+SELECT product_id, store_id, category_allows_online, block_reason, blocking_category_id, policy_fingerprint, policy_version
+FROM catalog_product_online_state
+WHERE product_id = $1
+`
+
+// Phase 13 §62: canonical effective-online policy reads. The eligibility
+// rule lives in ONE place — the catalog_product_online_state view
+// (migration 00028) — and is consumed by commerce publication and
+// Catalog Health alike; no provider adapter ever traverses the DAG.
+func (q *Queries) CatalogProductOnlineState(ctx context.Context, productID pgtype.UUID) (CatalogProductOnlineState, error) {
+	row := q.db.QueryRow(ctx, catalogProductOnlineState, productID)
+	var i CatalogProductOnlineState
+	err := row.Scan(
+		&i.ProductID,
+		&i.StoreID,
+		&i.CategoryAllowsOnline,
+		&i.BlockReason,
+		&i.BlockingCategoryID,
+		&i.PolicyFingerprint,
+		&i.PolicyVersion,
+	)
+	return i, err
+}
+
 const catalogProductSalesPolicyByID = `-- name: CatalogProductSalesPolicyByID :one
 SELECT product_id, sell_offline, sell_online, online_allocation_limit,
     source_revision, source_event_id, source_device_id, source_payload_hash, store_id
@@ -142,6 +168,40 @@ func (q *Queries) CatalogProductSalesPolicyByID(ctx context.Context, productID p
 		&i.StoreID,
 	)
 	return i, err
+}
+
+const catalogProductsOnlineState = `-- name: CatalogProductsOnlineState :many
+SELECT product_id, store_id, category_allows_online, block_reason, blocking_category_id, policy_fingerprint, policy_version
+FROM catalog_product_online_state
+WHERE product_id = ANY($1::uuid[])
+`
+
+func (q *Queries) CatalogProductsOnlineState(ctx context.Context, dollar_1 []pgtype.UUID) ([]CatalogProductOnlineState, error) {
+	rows, err := q.db.Query(ctx, catalogProductsOnlineState, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogProductOnlineState{}
+	for rows.Next() {
+		var i CatalogProductOnlineState
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.StoreID,
+			&i.CategoryAllowsOnline,
+			&i.BlockReason,
+			&i.BlockingCategoryID,
+			&i.PolicyFingerprint,
+			&i.PolicyVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertCatalogProductSalesPolicy = `-- name: UpsertCatalogProductSalesPolicy :exec

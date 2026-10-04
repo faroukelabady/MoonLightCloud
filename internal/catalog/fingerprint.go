@@ -33,6 +33,9 @@ type NormalizedCategory struct {
 	Names      []CatalogName `json:"names"`
 	ParentIDs  []string      `json:"parent_ids"`
 	Revision   int64         `json:"catalog_revision"`
+	// OnlineEnabled is semantic state: different policy must never be
+	// fingerprint-equivalent (Phase 13 §34).
+	OnlineEnabled bool `json:"online_enabled"`
 }
 
 // NormalizedTag is the comparison form of a tag snapshot.
@@ -87,6 +90,7 @@ func NormalizeCategorySnapshot(v CategorySnapshot) NormalizedCategory {
 	return NormalizedCategory{
 		CategoryID: v.CategoryID, Status: v.Status,
 		Names: nonNilNames(v.Names), ParentIDs: parents, Revision: v.CatalogRevision,
+		OnlineEnabled: v.OnlineEnabled,
 	}
 }
 

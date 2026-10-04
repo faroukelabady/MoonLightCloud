@@ -13,6 +13,7 @@ import (
 // projection tables directly; catalog.Service satisfies this interface.
 type CatalogReader interface {
 	GetProduct(ctx context.Context, id string) (catalog.Product, error)
+	GetProductOnlinePolicy(ctx context.Context, id string) (catalog.ProductOnlinePolicy, error)
 	GetCategory(ctx context.Context, id string) (catalog.Category, error)
 	GetTag(ctx context.Context, id string) (catalog.Tag, error)
 	GetProductSalesPolicy(ctx context.Context, id string) (catalog.ProductSalesPolicy, error)
@@ -34,6 +35,13 @@ type DesiredProduct struct {
 	CatalogRevision   int64
 	PolicyRevision    int64
 	InventoryRevision int64
+	// CategoryPolicyFingerprint is the deterministic ELIGIBILITY identity
+	// of the Product's relevant Category ONLINE policy context (Phase 13),
+	// and CategoryPolicyVersion its revision-digest generation marker.
+	// Both participate in provider operation identity so category
+	// disable→enable transitions can never reuse a stale idempotency key.
+	CategoryPolicyFingerprint string
+	CategoryPolicyVersion     string
 }
 
 // CommerceProductSource assembles desired provider-neutral state from
@@ -142,9 +150,25 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		desired.PolicyRevision = policy.Revision
 		desired.Product = assembled
 	}
-	// Publication requires both lifecycle and policy consent. A missing
-	// policy can never publish: unknown online state defaults to disabled.
-	desired.Published = product.IsActive && policyFound && policy.SellOnline
+	// Phase 13 §65: publication requires lifecycle consent, Product
+	// policy consent, AND the Category hierarchy to allow ONLINE. A
+	// missing Product policy or missing/incomplete Category policy state
+	// can never publish: unknown online state defaults to disabled
+	// (§66/§67 fail-safe).
+	onlinePolicy, err := s.reader.GetProductOnlinePolicy(ctx, productID)
+	if err != nil {
+		return DesiredProduct{}, err
+	}
+	desired.Published = product.IsActive && policyFound && policy.SellOnline && onlinePolicy.Allowed
+	desired.CategoryPolicyFingerprint = onlinePolicy.PolicyFingerprint
+	desired.CategoryPolicyVersion = onlinePolicy.PolicyVersion
+	if !desired.Published {
+		// Provider-facing quantity follows existing disabled-product
+		// semantics: not published means zero availability toward the
+		// provider, never positive stock on an unpublished product
+		// (§68). Retail stock authority is untouched.
+		desired.Availability.OnlineAvailable = 0
+	}
 	return desired, nil
 }
 

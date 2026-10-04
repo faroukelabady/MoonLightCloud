@@ -72,6 +72,8 @@ type App struct {
 	InventoryProjector     *catalog.Projector
 	Catalog                catalog.Service
 	CommerceRegistry       *commerce.Registry
+	CommerceService        *commerce.CommerceService
+	ReevaluationWorker     *commerce.ReevaluationWorker
 	OrderService           *orders.OrderService
 	OrderProcessor         *orders.Processor
 	NotificationRegistry   *notifications.Registry
@@ -130,6 +132,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(sale.EventSaleFinalizedV2, ValidateSaleV2Payload)
 	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
 	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
+	sync.RegisterEventType(catalog.EventCategorySnapshotV2, ValidateCatalogCategoryV2Payload)
 	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
 	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
 	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
@@ -218,6 +221,18 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 					return adapterhttp.ShopifyWebhookConfig{}, false
 				}, a.OrderProcessor.Notify, log)
 		}
+	}
+	if a.CommerceRegistry.Count() > 0 {
+		// Phase 13 §83: generic commerce orchestration + the durable
+		// re-evaluation worker. Interval scan only (no in-process
+		// queues): enqueue happens atomically inside catalog/product
+		// projections and the worker converges affected Products through
+		// the exact same CommerceService the manual CLI uses. The store
+		// doubles as the durable queue; no provider I/O runs in any
+		// projection transaction.
+		a.CommerceService = commerce.NewCommerceService(a.CommerceRegistry, store,
+			commerce.NewCatalogCommerceSource(catalog.NewService(store)), log)
+		a.ReevaluationWorker = commerce.NewReevaluationWorker(store, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
 		"orders", ordersEnabled)
@@ -399,6 +414,18 @@ func ValidateCatalogCategoryPayload(raw json.RawMessage) error {
 		return err
 	}
 	_, err = catalog.ValidateCategorySnapshot(p)
+	return err
+}
+
+// ValidateCatalogCategoryV2Payload is the ingestion-time validator for
+// catalog.category.snapshot.v2 (Phase 13): the v1 invariants plus the
+// required ONLINE channel policy field.
+func ValidateCatalogCategoryV2Payload(raw json.RawMessage) error {
+	decoded, err := catalog.DecodeCategorySnapshotV2(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateCategorySnapshot(decoded)
 	return err
 }
 

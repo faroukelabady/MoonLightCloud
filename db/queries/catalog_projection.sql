@@ -29,8 +29,9 @@ LIMIT $3;
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id, default_algorithm
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    source_payload_hash, source_received_at, store_id, default_algorithm,
+    online_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
@@ -38,10 +39,11 @@ ON CONFLICT (category_id) DO UPDATE SET
     source_received_at = excluded.source_received_at,
     store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
     default_algorithm = excluded.default_algorithm,
+    online_enabled = excluded.online_enabled,
     projected_at = now();
 
 -- name: CatalogCategoryByID :one
-SELECT category_id, status, name_ar, name_en, source_revision,
+SELECT category_id, status, name_ar, name_en, online_enabled, source_revision,
     source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_categories WHERE category_id = $1;
 

@@ -907,6 +907,7 @@ paths:
               - COMMERCE_MAPPING_MISSING
               - COMMERCE_SYNC_AMBIGUOUS
               - COMMERCE_STORE_CONFLICT
+              - CATEGORY_ONLINE_DISABLED
           description: Narrow detail rows to one stable health reason code (empty = all).
         - name: limit
           in: query

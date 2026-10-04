@@ -1282,6 +1282,9 @@ var CatalogHealthReasonCodes = []string{
 	"COMMERCE_MAPPING_MISSING",
 	"COMMERCE_SYNC_AMBIGUOUS",
 	"COMMERCE_STORE_CONFLICT",
+	// Informational (Phase 13 §116): intentional Category suppression —
+	// never a catalog-health failure.
+	"CATEGORY_ONLINE_DISABLED",
 }
 
 // CatalogHealth is the diagnostic catalog/integration surface. It reports

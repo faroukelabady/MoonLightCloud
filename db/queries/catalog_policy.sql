@@ -46,3 +46,18 @@ WHERE pol.sell_online AND pol.store_id = $1
   AND p.store_id = pol.store_id
 ORDER BY pol.product_id
 LIMIT $2;
+
+-- Phase 13 §62: canonical effective-online policy reads. The eligibility
+-- rule lives in ONE place — the catalog_product_online_state view
+-- (migration 00028) — and is consumed by commerce publication and
+-- Catalog Health alike; no provider adapter ever traverses the DAG.
+
+-- name: CatalogProductOnlineState :one
+SELECT product_id, store_id, category_allows_online, block_reason, blocking_category_id, policy_fingerprint, policy_version
+FROM catalog_product_online_state
+WHERE product_id = $1;
+
+-- name: CatalogProductsOnlineState :many
+SELECT product_id, store_id, category_allows_online, block_reason, blocking_category_id, policy_fingerprint, policy_version
+FROM catalog_product_online_state
+WHERE product_id = ANY($1::uuid[]);

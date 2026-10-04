@@ -29,7 +29,8 @@
 		AVAILABILITY_NOT_READY: { ar: 'التوافر غير جاهز', en: 'Availability not ready' },
 		COMMERCE_MAPPING_MISSING: { ar: 'غير مربوط', en: 'Unmapped' },
 		COMMERCE_SYNC_AMBIGUOUS: { ar: 'يلحق الانتباه للمزامنة', en: 'Synchronization attention' },
-		COMMERCE_STORE_CONFLICT: { ar: 'تعارض ملكية المتجر', en: 'Store ownership conflict' }
+		COMMERCE_STORE_CONFLICT: { ar: 'تعارض ملكية المتجر', en: 'Store ownership conflict' },
+		CATEGORY_ONLINE_DISABLED: { ar: 'مغلق عبر الإنترنت بسياسة الفئة', en: 'Disabled online by Category' }
 	};
 	function label(code: string): string {
 		const l = labels[code];
@@ -52,8 +53,6 @@
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
-	{:else if status === 'empty'}
-		<EmptyState ar="لا توجد مشاكل في الكتالوج" en="No catalog issues found" />
 	{:else if data}
 		<div class="filters" role="group" aria-label="Provider filter / فلتر المزود">
 			<label for="health-provider">المزود / <span class="th-en">Provider</span></label>
@@ -69,6 +68,9 @@
 				{/each}
 			</select>
 		</div>
+		{#if status === 'empty'}
+			<EmptyState ar="لا توجد مشاكل في الكتالوج ضمن هذا النطاق" en="No catalog issues found in this scope" />
+		{/if}
 		<ul class="counts">
 			{#each data.counts as c (c.reason_code)}
 				<li>
@@ -78,9 +80,7 @@
 				</li>
 			{/each}
 		</ul>
-		{#if data.detail.length === 0}
-			<EmptyState ar="لا توجد مشاكل في الكتالوج ضمن هذا النطاق" en="No catalog issues found in this scope" />
-		{:else}
+		{#if data.detail.length > 0}
 			<div class="table-wrap">
 				<table>
 					<thead>

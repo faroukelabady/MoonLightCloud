@@ -117,37 +117,37 @@ func TestRegistryConcurrent(t *testing.T) {
 }
 
 func TestOperationKeys(t *testing.T) {
-	published := ProductOperationKey("primary", "product-1", 12, 4, true)
-	again := ProductOperationKey("primary", "product-1", 12, 4, true)
+	published := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v")
+	again := ProductOperationKey("primary", "product-1", 12, 4, true, "f", "v")
 	if published == "" || published != again {
 		t.Fatal("same state must yield a stable non-empty key")
 	}
 	changes := map[string]string{
-		"catalog revision": ProductOperationKey("primary", "product-1", 13, 4, true),
-		"policy revision":  ProductOperationKey("primary", "product-1", 12, 5, true),
-		"publication":      ProductOperationKey("primary", "product-1", 12, 4, false),
-		"provider key":     ProductOperationKey("website", "product-1", 12, 4, true),
-		"product id":       ProductOperationKey("primary", "product-2", 12, 4, true),
+		"catalog revision": ProductOperationKey("primary", "product-1", 13, 4, true, "f", "v"),
+		"policy revision":  ProductOperationKey("primary", "product-1", 12, 5, true, "f", "v"),
+		"publication":      ProductOperationKey("primary", "product-1", 12, 4, false, "f", "v"),
+		"provider key":     ProductOperationKey("website", "product-1", 12, 4, true, "f", "v"),
+		"product id":       ProductOperationKey("primary", "product-2", 12, 4, true, "f", "v"),
 	}
 	for what, key := range changes {
 		if key == published {
 			t.Fatalf("%s must change the product key", what)
 		}
 	}
-	inventory := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true)
+	inventory := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v")
 	if inventory == "" || inventory == published {
 		t.Fatal("inventory key must be distinct and non-empty")
 	}
-	if again := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true); again != inventory {
+	if again := InventoryOperationKey("primary", "product-1", 12, 4, 27, 10, true, "f", "v"); again != inventory {
 		t.Fatal("same inventory state must be stable")
 	}
 	invChanges := map[string]string{
-		"catalog revision":   InventoryOperationKey("primary", "product-1", 13, 4, 27, 10, true),
-		"policy revision":    InventoryOperationKey("primary", "product-1", 12, 5, 27, 10, true),
-		"inventory revision": InventoryOperationKey("primary", "product-1", 12, 4, 28, 10, true),
-		"quantity":           InventoryOperationKey("primary", "product-1", 12, 4, 27, 9, true),
-		"provider key":       InventoryOperationKey("website", "product-1", 12, 4, 27, 10, true),
-		"product id":         InventoryOperationKey("primary", "product-2", 12, 4, 27, 10, true),
+		"catalog revision":   InventoryOperationKey("primary", "product-1", 13, 4, 27, 10, true, "f", "v"),
+		"policy revision":    InventoryOperationKey("primary", "product-1", 12, 5, 27, 10, true, "f", "v"),
+		"inventory revision": InventoryOperationKey("primary", "product-1", 12, 4, 28, 10, true, "f", "v"),
+		"quantity":           InventoryOperationKey("primary", "product-1", 12, 4, 27, 9, true, "f", "v"),
+		"provider key":       InventoryOperationKey("website", "product-1", 12, 4, 27, 10, true, "f", "v"),
+		"product id":         InventoryOperationKey("primary", "product-2", 12, 4, 27, 10, true, "f", "v"),
 	}
 	for what, key := range invChanges {
 		if key == inventory {
