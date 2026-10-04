@@ -14,6 +14,7 @@ INSERT INTO commerce_product_reevaluations (product_id, store_id, reason, reques
 VALUES ($1, $2, $3, now(), now())
 ON CONFLICT (product_id) DO UPDATE SET
     requested_at = now(),
+    requested_generation = commerce_product_reevaluations.requested_generation + 1,
     reason = EXCLUDED.reason,
     next_attempt_at = now(),
     attempts = 0,
@@ -46,36 +47,56 @@ WHERE p.store_id IS NOT DISTINCT FROM $3::uuid
   )
 ON CONFLICT (product_id) DO UPDATE SET
     requested_at = now(),
+    requested_generation = commerce_product_reevaluations.requested_generation + 1,
     reason = EXCLUDED.reason,
     next_attempt_at = now(),
     attempts = 0,
     last_error_code = NULL;
 
 -- name: ClaimProductReevaluations :many
--- Multi-instance safe atomic claim-with-lease: SKIP LOCKED hands each
--- worker its own batch and the lease keeps a crashed worker's rows
--- recoverable; the per-product commerce coordination lock serializes
--- remote writes underneath.
-UPDATE commerce_product_reevaluations
-SET next_attempt_at = $2
-WHERE product_id IN (
-    SELECT product_id FROM commerce_product_reevaluations
-    WHERE next_attempt_at <= now()
-    ORDER BY next_attempt_at, product_id
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
+-- Scheduling never changes an active lease. A fresh opaque token also fences
+-- deletion/reinsertion (generation counters alone could suffer an ABA race).
+WITH due AS (
+ SELECT product_id FROM commerce_product_reevaluations
+ WHERE next_attempt_at <= now() AND (lease_until IS NULL OR lease_until <= now())
+ ORDER BY next_attempt_at, product_id
+ LIMIT @batch_size::int FOR UPDATE SKIP LOCKED
 )
-RETURNING product_id, store_id, reason, attempts;
+UPDATE commerce_product_reevaluations q
+SET lease_until = @lease_until::timestamptz, lease_token = @lease_token::uuid,
+    lease_generation = lease_generation + 1, claimed_generation = requested_generation
+FROM due WHERE q.product_id = due.product_id
+RETURNING q.product_id, q.store_id, q.reason, q.attempts,
+ q.claimed_generation, q.lease_generation, q.lease_token, q.lease_until;
 
--- name: CompleteProductReevaluation :execrows
-DELETE FROM commerce_product_reevaluations WHERE product_id = $1;
+-- name: CompleteProductReevaluation :one
+-- Only this live claim can acknowledge its captured intent. Newer intent is
+-- released for another pass, rather than being deleted by an older send.
+WITH finished AS (
+ DELETE FROM commerce_product_reevaluations
+ WHERE product_id = @product_id::uuid AND lease_token = @lease_token::uuid
+ AND lease_generation = @lease_generation::bigint AND claimed_generation = @claimed_generation::bigint
+ AND lease_until > now() AND requested_generation = claimed_generation
+ RETURNING product_id
+), newer AS (
+ UPDATE commerce_product_reevaluations SET lease_token=NULL, lease_until=NULL,
+ claimed_generation=NULL, next_attempt_at=now()
+ WHERE product_id = @product_id::uuid AND lease_token = @lease_token::uuid
+ AND lease_generation = @lease_generation::bigint AND claimed_generation = @claimed_generation::bigint
+ AND lease_until > now() AND requested_generation > claimed_generation
+ RETURNING product_id
+)
+SELECT EXISTS(SELECT 1 FROM finished) OR EXISTS(SELECT 1 FROM newer) AS acknowledged;
 
 -- name: RetryProductReevaluation :execrows
 UPDATE commerce_product_reevaluations
-SET attempts = attempts + 1,
-    next_attempt_at = $2,
-    last_error_code = $3
-WHERE product_id = $1;
+SET attempts = CASE WHEN requested_generation > claimed_generation THEN attempts ELSE attempts+1 END,
+ next_attempt_at = CASE WHEN requested_generation > claimed_generation THEN next_attempt_at ELSE @next_attempt_at::timestamptz END,
+ last_error_code = CASE WHEN requested_generation > claimed_generation THEN last_error_code ELSE @last_error_code::text END,
+ lease_token=NULL, lease_until=NULL, claimed_generation=NULL
+WHERE product_id = @product_id::uuid AND lease_token = @lease_token::uuid
+ AND lease_generation = @lease_generation::bigint AND claimed_generation = @claimed_generation::bigint
+ AND lease_until > now();
 
 -- name: CountProductReevaluations :one
 SELECT count(*) FROM commerce_product_reevaluations;

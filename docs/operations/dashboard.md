@@ -229,3 +229,26 @@ current representative fixture assessment is recorded in the remediation report;
 this remains a nonblocking scaling observation, not a claim that aggregation is
 bounded by the response limit. No cache, background aggregation or new financial
 SQL was added.
+
+
+## Phase 13 — Effective eligibility & Category suppression
+
+Catalog Health eligibility (`COMMERCE_MAPPING_MISSING`, and the readiness
+exclusion for `AVAILABILITY_NOT_READY`) now uses **effective** online
+eligibility from the canonical `catalog_product_online_state` view:
+`active + sell_online + Category hierarchy allows ONLINE`. A Product
+intentionally suppressed by Category policy is never reported as
+online-eligible-unmapped. Two additions:
+
+- `CATEGORY_ONLINE_DISABLED` — **informational**: an active, sell_online
+  Product deliberately suppressed by Category/Subcategory policy (a
+  disabled node or ancestor). It is intentional configuration, never a
+  catalog-health failure.
+- Missing Category hierarchy state keeps reporting through
+  `CATALOG_MISSING_CATEGORY` and readiness as before (fail-safe, never
+  publishes).
+
+The provider selector and scope context stay visible when the result set
+is empty (Phase 12 review item R1-L03, fixed while touching the widget).
+Health keeps its frozen invariants: zero provider calls, zero writes,
+durable Cloud state only.

@@ -12,36 +12,41 @@ import (
 )
 
 const claimProductReevaluations = `-- name: ClaimProductReevaluations :many
-UPDATE commerce_product_reevaluations
-SET next_attempt_at = $2
-WHERE product_id IN (
-    SELECT product_id FROM commerce_product_reevaluations
-    WHERE next_attempt_at <= now()
-    ORDER BY next_attempt_at, product_id
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
+WITH due AS (
+ SELECT product_id FROM commerce_product_reevaluations
+ WHERE next_attempt_at <= now() AND (lease_until IS NULL OR lease_until <= now())
+ ORDER BY next_attempt_at, product_id
+ LIMIT $3::int FOR UPDATE SKIP LOCKED
 )
-RETURNING product_id, store_id, reason, attempts
+UPDATE commerce_product_reevaluations q
+SET lease_until = $1::timestamptz, lease_token = $2::uuid,
+    lease_generation = lease_generation + 1, claimed_generation = requested_generation
+FROM due WHERE q.product_id = due.product_id
+RETURNING q.product_id, q.store_id, q.reason, q.attempts,
+ q.claimed_generation, q.lease_generation, q.lease_token, q.lease_until
 `
 
 type ClaimProductReevaluationsParams struct {
-	Limit         int32              `json:"limit"`
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	LeaseToken pgtype.UUID        `json:"lease_token"`
+	BatchSize  int32              `json:"batch_size"`
 }
 
 type ClaimProductReevaluationsRow struct {
-	ProductID pgtype.UUID `json:"product_id"`
-	StoreID   pgtype.UUID `json:"store_id"`
-	Reason    string      `json:"reason"`
-	Attempts  int32       `json:"attempts"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	Reason            string             `json:"reason"`
+	Attempts          int32              `json:"attempts"`
+	ClaimedGeneration pgtype.Int8        `json:"claimed_generation"`
+	LeaseGeneration   int64              `json:"lease_generation"`
+	LeaseToken        pgtype.UUID        `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
 }
 
-// Multi-instance safe atomic claim-with-lease: SKIP LOCKED hands each
-// worker its own batch and the lease keeps a crashed worker's rows
-// recoverable; the per-product commerce coordination lock serializes
-// remote writes underneath.
+// Scheduling never changes an active lease. A fresh opaque token also fences
+// deletion/reinsertion (generation counters alone could suffer an ABA race).
 func (q *Queries) ClaimProductReevaluations(ctx context.Context, arg ClaimProductReevaluationsParams) ([]ClaimProductReevaluationsRow, error) {
-	rows, err := q.db.Query(ctx, claimProductReevaluations, arg.Limit, arg.NextAttemptAt)
+	rows, err := q.db.Query(ctx, claimProductReevaluations, arg.LeaseUntil, arg.LeaseToken, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +59,10 @@ func (q *Queries) ClaimProductReevaluations(ctx context.Context, arg ClaimProduc
 			&i.StoreID,
 			&i.Reason,
 			&i.Attempts,
+			&i.ClaimedGeneration,
+			&i.LeaseGeneration,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -65,16 +74,43 @@ func (q *Queries) ClaimProductReevaluations(ctx context.Context, arg ClaimProduc
 	return items, nil
 }
 
-const completeProductReevaluation = `-- name: CompleteProductReevaluation :execrows
-DELETE FROM commerce_product_reevaluations WHERE product_id = $1
+const completeProductReevaluation = `-- name: CompleteProductReevaluation :one
+WITH finished AS (
+ DELETE FROM commerce_product_reevaluations
+ WHERE product_id = $1::uuid AND lease_token = $2::uuid
+ AND lease_generation = $3::bigint AND claimed_generation = $4::bigint
+ AND lease_until > now() AND requested_generation = claimed_generation
+ RETURNING product_id
+), newer AS (
+ UPDATE commerce_product_reevaluations SET lease_token=NULL, lease_until=NULL,
+ claimed_generation=NULL, next_attempt_at=now()
+ WHERE product_id = $1::uuid AND lease_token = $2::uuid
+ AND lease_generation = $3::bigint AND claimed_generation = $4::bigint
+ AND lease_until > now() AND requested_generation > claimed_generation
+ RETURNING product_id
+)
+SELECT EXISTS(SELECT 1 FROM finished) OR EXISTS(SELECT 1 FROM newer) AS acknowledged
 `
 
-func (q *Queries) CompleteProductReevaluation(ctx context.Context, productID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, completeProductReevaluation, productID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+type CompleteProductReevaluationParams struct {
+	ProductID         pgtype.UUID `json:"product_id"`
+	LeaseToken        pgtype.UUID `json:"lease_token"`
+	LeaseGeneration   int64       `json:"lease_generation"`
+	ClaimedGeneration int64       `json:"claimed_generation"`
+}
+
+// Only this live claim can acknowledge its captured intent. Newer intent is
+// released for another pass, rather than being deleted by an older send.
+func (q *Queries) CompleteProductReevaluation(ctx context.Context, arg CompleteProductReevaluationParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, completeProductReevaluation,
+		arg.ProductID,
+		arg.LeaseToken,
+		arg.LeaseGeneration,
+		arg.ClaimedGeneration,
+	)
+	var acknowledged pgtype.Bool
+	err := row.Scan(&acknowledged)
+	return acknowledged, err
 }
 
 const countProductReevaluations = `-- name: CountProductReevaluations :one
@@ -111,6 +147,7 @@ WHERE p.store_id IS NOT DISTINCT FROM $3::uuid
   )
 ON CONFLICT (product_id) DO UPDATE SET
     requested_at = now(),
+    requested_generation = commerce_product_reevaluations.requested_generation + 1,
     reason = EXCLUDED.reason,
     next_attempt_at = now(),
     attempts = 0,
@@ -141,6 +178,7 @@ INSERT INTO commerce_product_reevaluations (product_id, store_id, reason, reques
 VALUES ($1, $2, $3, now(), now())
 ON CONFLICT (product_id) DO UPDATE SET
     requested_at = now(),
+    requested_generation = commerce_product_reevaluations.requested_generation + 1,
     reason = EXCLUDED.reason,
     next_attempt_at = now(),
     attempts = 0,
@@ -170,20 +208,33 @@ func (q *Queries) EnqueueProductReevaluation(ctx context.Context, arg EnqueuePro
 
 const retryProductReevaluation = `-- name: RetryProductReevaluation :execrows
 UPDATE commerce_product_reevaluations
-SET attempts = attempts + 1,
-    next_attempt_at = $2,
-    last_error_code = $3
-WHERE product_id = $1
+SET attempts = CASE WHEN requested_generation > claimed_generation THEN attempts ELSE attempts+1 END,
+ next_attempt_at = CASE WHEN requested_generation > claimed_generation THEN next_attempt_at ELSE $1::timestamptz END,
+ last_error_code = CASE WHEN requested_generation > claimed_generation THEN last_error_code ELSE $2::text END,
+ lease_token=NULL, lease_until=NULL, claimed_generation=NULL
+WHERE product_id = $3::uuid AND lease_token = $4::uuid
+ AND lease_generation = $5::bigint AND claimed_generation = $6::bigint
+ AND lease_until > now()
 `
 
 type RetryProductReevaluationParams struct {
-	ProductID     pgtype.UUID        `json:"product_id"`
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	LastErrorCode pgtype.Text        `json:"last_error_code"`
+	NextAttemptAt     pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorCode     string             `json:"last_error_code"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	LeaseToken        pgtype.UUID        `json:"lease_token"`
+	LeaseGeneration   int64              `json:"lease_generation"`
+	ClaimedGeneration int64              `json:"claimed_generation"`
 }
 
 func (q *Queries) RetryProductReevaluation(ctx context.Context, arg RetryProductReevaluationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, retryProductReevaluation, arg.ProductID, arg.NextAttemptAt, arg.LastErrorCode)
+	result, err := q.db.Exec(ctx, retryProductReevaluation,
+		arg.NextAttemptAt,
+		arg.LastErrorCode,
+		arg.ProductID,
+		arg.LeaseToken,
+		arg.LeaseGeneration,
+		arg.ClaimedGeneration,
+	)
 	if err != nil {
 		return 0, err
 	}

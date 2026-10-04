@@ -626,7 +626,7 @@ func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey,
 // or blocked on a transient graph wait can still advance the entity.
 func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, scope pgtype.UUID) (bool, error) {
 	projectedID := entityID
-	if eventType == catalog.EventCategorySnapshotV1 {
+	if eventType == catalog.EventCategorySnapshotV1 || eventType == catalog.EventCategorySnapshotV2 {
 		projectedID = canonicalDefaultCategoryID(entityID, scope)
 	}
 	if eventType == catalog.EventTagSnapshotV1 {
@@ -644,7 +644,7 @@ func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, even
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return false, err
 		}
-	case catalog.EventCategorySnapshotV1:
+	case catalog.EventCategorySnapshotV1, catalog.EventCategorySnapshotV2:
 		if row, err := q.CatalogCategoryByID(ctx, uid); err == nil {
 			projected = row.SourceRevision
 		} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -2753,7 +2753,7 @@ func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (cat
 }
 
 func defaultCatalogEntity(eventType, id string) bool {
-	return eventType == catalog.EventCategorySnapshotV1 && isSharedCategoryID(id) || eventType == catalog.EventTagSnapshotV1 && isSharedTagID(id)
+	return (eventType == catalog.EventCategorySnapshotV1 || eventType == catalog.EventCategorySnapshotV2) && isSharedCategoryID(id) || eventType == catalog.EventTagSnapshotV1 && isSharedTagID(id)
 }
 func rawDefaultCategoryID(id string, scope pgtype.UUID) string {
 	for raw := range sharedCategoryIDs {

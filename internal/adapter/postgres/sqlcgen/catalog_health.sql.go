@@ -199,10 +199,19 @@ FROM (
         UNION
         SELECT DISTINCT provider_key FROM commerce_product_mutation_barriers
     ) u ON ($2::text = '' OR u.provider_key = $2::text)
-    WHERE p.is_active AND pol.sell_online
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
+    WHERE p.is_active AND pol.sell_online AND s.category_allows_online
       AND ($1::text = '' OR p.store_id = $1::uuid)
       AND NOT EXISTS (SELECT 1 FROM commerce_product_mappings m
                       WHERE m.provider_key = u.provider_key AND m.product_id = p.product_id)
+    UNION ALL
+    SELECT 'CATEGORY_ONLINE_DISABLED'
+    FROM catalog_products p
+    JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
+    JOIN catalog_product_online_state s ON s.product_id = p.product_id
+    WHERE p.is_active AND pol.sell_online
+      AND NOT s.category_allows_online AND s.block_reason = 'CATEGORY_ONLINE_DISABLED'
+      AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'COMMERCE_SYNC_AMBIGUOUS'
     FROM commerce_product_mutation_barriers b

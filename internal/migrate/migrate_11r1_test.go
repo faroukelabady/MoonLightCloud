@@ -90,7 +90,7 @@ func TestV26To27MutationBarrierPreservation(t *testing.T) {
 
 func TestFreshTo27MutationBarrierConstraintsAndRollback(t *testing.T) {
 	conn, ctx := openRaw(t)
-	if err := migrate.Up(ctx, conn); err != nil {
+	if err := migrate.UpTo(ctx, conn, 27); err != nil {
 		t.Fatal(err)
 	}
 	insert := `INSERT INTO commerce_product_mutation_barriers(operation_id,provider_key,product_id,request_fingerprint,state) VALUES ($1,'shopify-main','aaaaaaaa-0000-4000-8000-000000000001',$2,'in_flight')`
@@ -105,7 +105,7 @@ func TestFreshTo27MutationBarrierConstraintsAndRollback(t *testing.T) {
 	if err := migrate.DownTo(ctx, conn, 26); err == nil {
 		t.Fatal("rollback erased active uncertainty")
 	}
-	if got := version(t, conn, ctx); got != migrate.TargetVersion {
+	if got := version(t, conn, ctx); got != 27 {
 		t.Fatal("failed rollback changed schema", got)
 	}
 	tag, err := conn.ExecContext(ctx, `UPDATE commerce_product_mutation_barriers SET state='resolved',resolved_at=now(),resolution='remote_completed' WHERE operation_id=$1`, first)

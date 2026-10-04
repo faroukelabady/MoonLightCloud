@@ -113,7 +113,8 @@ type Projector struct {
 // DefaultScanInterval is the durable safety-net period.
 const DefaultScanInterval = 30 * time.Second
 
-// NewCategoryProjector wires the category worker.
+// NewCategoryProjector wires one canonical Category stream. Pending discovery
+// includes the explicitly supported v1/v2 versions under the same processor.
 func NewCategoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorCategoryProjectionV1, EventCategorySnapshotV1, s.ProjectCategory, c, log)
 }

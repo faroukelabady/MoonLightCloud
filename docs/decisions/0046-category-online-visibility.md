@@ -85,3 +85,65 @@ provider mappings.
   Phase 13 Cloud.
 - Inventory authority, Sales/Returns, orders, Store ownership and the
   provider adapters are untouched; suppression is publication-only.
+
+## As-built contracts
+
+### `catalog.category.snapshot.v2`
+
+```json
+{
+  "category_id": "uuid",
+  "status": "active|hidden|archived",
+  "names": [{ "locale": "ar|en", "name": "..." }],
+  "parent_ids": ["... complete ordered set ..."],
+  "online_enabled": true,
+  "catalog_revision": 7
+}
+```
+
+`online_enabled` is required (presence + boolean type checked; missing or
+malformed fails closed). v1 decodes to `online_enabled = true`. Retail
+emits v2 for every post-migration Category mutation and from bootstrap;
+the v1 builder remains only as frozen history tooling.
+
+### Fan-out triggers
+
+| commit | triggers re-evaluation when |
+|---|---|
+| Category projection | `online_enabled` changed, or parent **set** changed, or the row is new (rename/status/parent-order never fan out) |
+| Product projection | classification changed (top category or subcategory set), including first projection |
+| Product policy/inventory/metadata | never (publication keeps its frozen manual cadence for those) |
+
+Affected set = Products classified at the node or any DAG descendant
+(recursive closure, UNION-deduped, Store-proven rows only), written into
+`commerce_product_reevaluations` in the same transaction.
+
+### Operation identity inputs
+
+```text
+policy_fingerprint = ordered (category_id, depth, online_enabled) per relevant node
+policy_version     = ordered (category_id, catalog_revision) per relevant node
+ProductOperationKey / InventoryOperationKey consume both
+```
+
+## Verification (implementation round)
+
+- Retail: full `go test ./...` + `-race` + build + vet + gofmt green;
+  migration preservation, flag lifecycle, outbox rollback, v2 payload,
+  bootstrap mixed-state/idempotence, UI matrix incl. Arabic rendering.
+- Cloud: full `./scripts/test.sh` (DB-enabled race) green; DAG eligibility
+  matrix, fan-out exactness/dedupe, parent-edge re-evaluation, version
+  semantics (v1 default / stale v1 / equal-revision conflict), queue
+  crash-recovery, worker provider-independence, operation-key matrix;
+  stress `-count=20` on critical convergence tests; OpenAPI + generation
+  gates green; OCI candidate verified (schema 28, zero startup provider
+  calls); cross-repository e2e 12/12.
+- Defects found and fixed during implementation (recorded so reviewers
+  re-check them): (1) worker originally stopped at the first failing
+  provider, violating §78 — now attempts every provider per pass;
+  (2) Category creation emitted the in-memory zero value for
+  `online_enabled` while the DB default is true (default inversion) —
+  create paths now emit post-write durable state; (3) the
+  `AVAILABILITY_NOT_READY` predicate initially over-excluded
+  incomplete-hierarchy Products, regressing Phase 12 — corrected to
+  exclude only intentional Category suppression.

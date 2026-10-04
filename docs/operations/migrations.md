@@ -42,3 +42,38 @@ any affected value exceeds 32 characters. A refusal leaves schema version
 26 and all data intact. There is no truncation. Rollback requires a compatible
 backup/application pair or explicit operator handling of the longer durable
 values; do not silently change queued destinations or historical snapshots.
+
+
+## Phase 13 — schema 28 (`00028_category_online_policy`)
+
+Append-only. Adds three objects in one migration:
+
+- `catalog_categories.online_enabled BOOLEAN NOT NULL DEFAULT TRUE` —
+  the Retail-authored, provider-neutral ONLINE channel policy (existing
+  rows default to enabled: deployment never suppresses the catalog).
+- `catalog_product_online_state` — the ONE canonical effective-online
+  eligibility view (shared by commerce publication and Catalog Health;
+  providers never traverse the DAG).
+- `commerce_product_reevaluations` — the durable, Product-keyed commerce
+  re-evaluation queue (see `docs/operations/commerce.md`).
+
+The Down migration is policy-guarded like `00006`/`00027`: it refuses
+while any `commerce_product_mutation_barriers` or
+`commerce_product_reevaluations` rows or disabled category policies
+exist, so a refused rollback leaves the schema untouched (the Phase 11-13
+commerce durability stack unwinds as one unit). `TargetVersion` is 28;
+startup refuses to boot on mismatch.
+
+## Phase 13-R1 — schema 29 (`00029_commerce_reevaluation_fencing`)
+
+Apply migration 29 explicitly before starting the remediated Cloud. Shipped
+migrations 1–28 are unchanged. Migration 29 retains every queued Product,
+retry count, diagnostic code and due timestamp, and initializes its requested
+generation to 1. Previous due-time leases/backoff become claimable at their
+existing horizon. New claims use a separate expiry, opaque UUIDv7 token and
+monotonic lease generation; enqueue never clears a live lease.
+
+Rollback to 28 refuses while any reevaluation work exists. Stop workers and
+allow durable work to converge before rollback; do not delete pending work to
+force a downgrade. An empty queue can be downgraded without truncating or
+rewriting any business state.

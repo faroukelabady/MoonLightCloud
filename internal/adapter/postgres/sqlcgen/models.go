@@ -321,13 +321,18 @@ type CommerceProductMutationBarrier struct {
 }
 
 type CommerceProductReevaluation struct {
-	ProductID     pgtype.UUID        `json:"product_id"`
-	StoreID       pgtype.UUID        `json:"store_id"`
-	Reason        string             `json:"reason"`
-	RequestedAt   pgtype.Timestamptz `json:"requested_at"`
-	Attempts      int32              `json:"attempts"`
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	LastErrorCode pgtype.Text        `json:"last_error_code"`
+	ProductID           pgtype.UUID        `json:"product_id"`
+	StoreID             pgtype.UUID        `json:"store_id"`
+	Reason              string             `json:"reason"`
+	RequestedAt         pgtype.Timestamptz `json:"requested_at"`
+	Attempts            int32              `json:"attempts"`
+	NextAttemptAt       pgtype.Timestamptz `json:"next_attempt_at"`
+	LastErrorCode       pgtype.Text        `json:"last_error_code"`
+	RequestedGeneration int64              `json:"requested_generation"`
+	ClaimedGeneration   pgtype.Int8        `json:"claimed_generation"`
+	LeaseGeneration     int64              `json:"lease_generation"`
+	LeaseToken          pgtype.UUID        `json:"lease_token"`
+	LeaseUntil          pgtype.Timestamptz `json:"lease_until"`
 }
 
 type Device struct {

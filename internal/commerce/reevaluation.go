@@ -27,7 +27,7 @@ import (
 //     the existing per-product commerce coordination lock underneath;
 //   - always re-reads CURRENT desired state at execution time, so rapid
 //     policy toggles converge to the latest committed state and a stale
-//     operation can never win last;
+//     operation cannot erase newer durable intent;
 //   - bounded: fixed batch size, sequential per-Product processing.
 //
 // Respected frozen semantics: unresolved commerce mutation barriers
@@ -37,17 +37,21 @@ import (
 
 // ProductReevaluation is one durable Product re-evaluation request.
 type ProductReevaluation struct {
-	ProductID string
-	StoreID   *string
-	Reason    string
-	Attempts  int32
+	ProductID         string
+	StoreID           *string
+	Reason            string
+	Attempts          int32
+	ClaimedGeneration int64
+	LeaseGeneration   int64
+	LeaseToken        string
+	LeaseUntil        time.Time
 }
 
 // ProductReevaluationStore is the durable queue boundary.
 type ProductReevaluationStore interface {
 	ClaimProductReevaluations(ctx context.Context, limit int, leaseUntil time.Time) ([]ProductReevaluation, error)
-	CompleteProductReevaluation(ctx context.Context, productID string) error
-	RetryProductReevaluation(ctx context.Context, productID string, next time.Time, code string) error
+	CompleteProductReevaluation(ctx context.Context, claim ProductReevaluation) (bool, error)
+	RetryProductReevaluation(ctx context.Context, claim ProductReevaluation, next time.Time, code string) (bool, error)
 }
 
 // ReevaluationWorker tunables (same shape as the projection/order
@@ -127,6 +131,11 @@ func (w *ReevaluationWorker) processOne(ctx context.Context, request ProductReev
 	keys := w.registry.List()
 	failed := ""
 	for _, key := range keys {
+		// A batch member may wait behind slow provider work. It must be
+		// reclaimed rather than starting another operation after expiry.
+		if ctx.Err() != nil || !w.now().Before(request.LeaseUntil) {
+			return
+		}
 		if _, err := w.service.SyncProduct(ctx, string(key), request.ProductID); err != nil {
 			if failed == "" {
 				failed = errorCode(err)
@@ -137,13 +146,13 @@ func (w *ReevaluationWorker) processOne(ctx context.Context, request ProductReev
 		}
 	}
 	if failed == "" {
-		if err := w.store.CompleteProductReevaluation(ctx, request.ProductID); err != nil {
+		if _, err := w.store.CompleteProductReevaluation(ctx, request); err != nil {
 			w.log.Error("commerce reevaluation complete failed", "product", request.ProductID, "err", err.Error())
 		}
 		return
 	}
 	next := w.now().Add(reevaluationBackoff(int(request.Attempts)))
-	if err := w.store.RetryProductReevaluation(ctx, request.ProductID, next, failed); err != nil {
+	if _, err := w.store.RetryProductReevaluation(ctx, request, next, failed); err != nil {
 		w.log.Error("commerce reevaluation retry failed", "product", request.ProductID, "err", err.Error())
 	}
 }

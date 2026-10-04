@@ -352,13 +352,21 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 // reevaluationRows lists pending Product re-evaluation requests.
 func reevaluationRows(t *testing.T, d Devices) []string {
 	t.Helper()
-	rows, err := d.ClaimProductReevaluations(context.Background(), 100, time.Now().Add(time.Hour))
+	rows, err := d.pool.Query(context.Background(), "SELECT product_id::text FROM commerce_product_reevaluations ORDER BY product_id")
 	if err != nil {
-		t.Fatalf("claim reevaluations: %v", err)
+		t.Fatal(err)
 	}
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, row.ProductID)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
@@ -367,9 +375,13 @@ func reevaluationRows(t *testing.T, d Devices) []string {
 func drainReevaluations(t *testing.T, d Devices) {
 	t.Helper()
 	ctx := context.Background()
-	for _, row := range reevaluationRows(t, d) {
-		if err := d.CompleteProductReevaluation(ctx, row); err != nil {
-			t.Fatalf("complete reevaluation %s: %v", row, err)
+	rows, err := d.ClaimProductReevaluations(ctx, 100, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if ok, err := d.CompleteProductReevaluation(ctx, row); err != nil || !ok {
+			t.Fatalf("complete reevaluation %s: %v", row.ProductID, err)
 		}
 	}
 }
@@ -483,7 +495,7 @@ func TestReevaluationQueueRecoversAbandonedWork(t *testing.T) {
 	}
 	// Recovery completes cleanly: nothing stranded afterwards.
 	for _, row := range recovered {
-		if err := devices.CompleteProductReevaluation(context.Background(), row.ProductID); err != nil {
+		if ok, err := devices.CompleteProductReevaluation(context.Background(), row); err != nil || !ok {
 			t.Fatal(err)
 		}
 	}

@@ -31,6 +31,7 @@ sql:
       - "db/migrations/00026_notification_recipient_username_bound.sql"
       - "db/migrations/00027_commerce_mutation_barriers.sql"
       - "db/migrations/00028_category_online_policy.sql"
+      - "db/migrations/00029_commerce_reevaluation_fencing.sql"
     gen:
       go:
         package: "sqlcgen"

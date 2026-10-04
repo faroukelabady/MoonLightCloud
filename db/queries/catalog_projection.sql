@@ -10,7 +10,7 @@ SELECT e.event_id
 FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $1
-WHERE e.event_type = $2
+WHERE (e.event_type = $2 OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
   AND (p.event_id IS NULL
        OR p.status = 'pending'
        OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
@@ -197,7 +197,7 @@ SELECT e.event_id,
 FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $4
-WHERE e.event_type = $1
+WHERE (e.event_type = $1 OR ($1 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
   AND e.payload->>($2::text) = ($3::text)
   AND (CASE WHEN sqlc.arg(store_scoped_default)::boolean
        THEN e.store_id IS NOT DISTINCT FROM sqlc.narg(store_id)::uuid
@@ -330,7 +330,7 @@ UPDATE catalog_categories c SET store_id = NULL, default_algorithm = 2
 WHERE c.category_id = $1 AND c.default_algorithm = 0
   AND (c.store_id = $2 OR c.store_id IS NULL)
   AND EXISTS (SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id
-    AND e.store_id=$2 AND e.event_type='catalog.category.snapshot.v1'
+    AND e.store_id=$2 AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
     AND e.payload->>'category_id'=c.category_id::text);
 
 -- name: RetireRawDefaultTag :execrows
@@ -360,11 +360,11 @@ SELECT EXISTS (
 -- Only authoritative scoped events are replayed. Never reset genuine
 -- equal-revision/ownership conflicts, or unbound historical processing.
 WITH defaults AS (
- SELECT DISTINCT ON (e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'))
+ SELECT DISTINCT ON (e.store_id,CASE WHEN e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') THEN 'catalog.category.snapshot' ELSE e.event_type END,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'))
         e.event_id,e.event_type,e.store_id,e.payload,p.processor,e.received_at
  FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
  WHERE e.store_id IS NOT NULL AND (
-  (e.event_type='catalog.category.snapshot.v1' AND p.processor='catalog_category_projection.v1'
+  (e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND p.processor='catalog_category_projection.v1'
    AND e.payload->>'category_id'=ANY(sqlc.arg(category_ids)::text[])) OR
   (e.event_type='catalog.tag.snapshot.v1' AND p.processor='catalog_tag_projection.v1'
    AND e.payload->>'tag_id'=ANY(sqlc.arg(tag_ids)::text[])))
@@ -373,7 +373,7 @@ WITH defaults AS (
   AND p.last_error_message IN ('category owned by another store','tag owned by another store','equal revision with conflicting state')
   AND NOT EXISTS (SELECT 1 FROM sync_events own JOIN sync_event_processing settled
        ON settled.event_id=own.event_id AND settled.processor=p.processor AND settled.status='processed'
-       WHERE own.store_id=e.store_id AND own.event_type=e.event_type
+       WHERE own.store_id=e.store_id AND (own.event_type=e.event_type OR (e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND own.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
          AND COALESCE(own.payload->>'category_id',own.payload->>'tag_id')=COALESCE(e.payload->>'category_id',e.payload->>'tag_id')
          AND (own.payload->>'catalog_revision')::bigint >= (e.payload->>'catalog_revision')::bigint)
   AND (EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
@@ -384,11 +384,11 @@ WITH defaults AS (
         WHERE c.default_algorithm=1 AND c.store_id=e.store_id AND s.payload->>'category_id'=e.payload->>'category_id')
   AND NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
         WHERE t.default_algorithm=1 AND t.store_id=e.store_id AND s.payload->>'tag_id'=e.payload->>'tag_id')))
- ORDER BY e.store_id,e.event_type,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'),
+ ORDER BY e.store_id,CASE WHEN e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') THEN 'catalog.category.snapshot' ELSE e.event_type END,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'),
           (e.payload->>'catalog_revision')::bigint DESC,e.received_at DESC,e.event_id DESC
 ), candidates AS (
  SELECT d.event_id,d.processor,d.received_at FROM defaults d WHERE
-  (d.event_type='catalog.category.snapshot.v1' AND (
+  (d.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND (
    NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
      WHERE c.default_algorithm=1 AND c.store_id=d.store_id AND s.payload->>'category_id'=d.payload->>'category_id'
        AND c.source_revision >= (d.payload->>'catalog_revision')::bigint)
@@ -430,7 +430,7 @@ WITH defaults AS (
  AND NOT EXISTS (
   SELECT 1 FROM sync_events own JOIN sync_event_processing terminal ON terminal.event_id=own.event_id
   AND terminal.processor=p.processor AND terminal.status='processed'
-  WHERE own.store_id=e.store_id AND own.event_type=e.event_type
+  WHERE own.store_id=e.store_id AND (own.event_type=e.event_type OR (e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND own.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
   AND own.payload->>'tag_id'=e.payload->>'tag_id'
   AND own.payload->>'catalog_revision'=e.payload->>'catalog_revision'
   AND own.payload<>e.payload)

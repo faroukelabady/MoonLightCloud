@@ -201,16 +201,21 @@ type stubReevaluationStore struct {
 }
 
 func (s *stubReevaluationStore) ClaimProductReevaluations(context.Context, int, time.Time) ([]ProductReevaluation, error) {
+	for i := range s.claimed {
+		if s.claimed[i].LeaseUntil.IsZero() {
+			s.claimed[i].LeaseUntil = time.Now().Add(time.Hour)
+		}
+	}
 	return s.claimed, nil
 }
-func (s *stubReevaluationStore) CompleteProductReevaluation(_ context.Context, productID string) error {
-	s.completed = append(s.completed, productID)
-	return nil
+func (s *stubReevaluationStore) CompleteProductReevaluation(_ context.Context, claim ProductReevaluation) (bool, error) {
+	s.completed = append(s.completed, claim.ProductID)
+	return true, nil
 }
-func (s *stubReevaluationStore) RetryProductReevaluation(_ context.Context, productID string, _ time.Time, code string) error {
-	s.retried = append(s.retried, productID)
+func (s *stubReevaluationStore) RetryProductReevaluation(_ context.Context, claim ProductReevaluation, _ time.Time, code string) (bool, error) {
+	s.retried = append(s.retried, claim.ProductID)
 	s.lastCode = code
-	return nil
+	return true, nil
 }
 
 type p13Mappings struct{}
@@ -347,5 +352,16 @@ func TestReevaluationBackoffBounded(t *testing.T) {
 	}
 	if reevaluationBackoff(0) != 5*time.Second {
 		t.Fatalf("first retry must be 5s, got %s", reevaluationBackoff(0))
+	}
+}
+
+// Slow earlier batch members cannot authorize provider work or acknowledgments
+// for a later member after its claim has expired.
+func TestReevaluationWorkerSkipsExpiredBatchMember(t *testing.T) {
+	worker, store, first, second := reevaluationFixture(t, "")
+	store.claimed[0].LeaseUntil = worker.now().Add(-time.Second)
+	worker.drain(context.Background())
+	if first.upserts != 0 || second.upserts != 0 || len(store.completed) != 0 || len(store.retried) != 0 {
+		t.Fatal("expired batch member performed work or acknowledged its claim")
 	}
 }

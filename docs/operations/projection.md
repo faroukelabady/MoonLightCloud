@@ -255,6 +255,13 @@ catalog_product_sales_policy_projection.v1
 inventory_product_projection.v1
 ```
 
+Phase 13 adds no processor: category policy/hierarchy and product
+classification commits enqueue durable rows in
+`commerce_product_reevaluations` inside the projection transaction, and
+the commerce re-evaluation worker (see `docs/operations/commerce.md`)
+converges providers afterwards. Projection itself never contacts a
+provider.
+
 `projection status` lists all seven processors; `projection retry <id>
 [<processor>]` resets one event for any registered processor (both
 commands validate against one canonical registry, so they can never
@@ -301,13 +308,19 @@ WHERE EXISTS (SELECT 1 FROM catalog_category_edges e WHERE e.child_id = p.top_ca
 
 ## Catalog rebuild
 
-Catalog projections rebuild from accepted `catalog.*.snapshot.v1` inbox
-events with one difference from sale/return rebuilds: revisions supersede,
-so the replay must deterministically converge on the highest valid
-revision per entity regardless of processing order (stale revisions no-op,
-equal-revision conflicts stay blocked, dependency waits resolve). There is
-no catalog ownership table to retain — revision metadata in the projection
-rows is the arbitration. Procedure:
+Catalog projections rebuild from accepted `catalog.*.snapshot.*` inbox
+events (`catalog.category.snapshot.v1` and `.v2` for categories since
+Phase 13) with one difference from sale/return rebuilds: revisions
+supersede, so the replay must deterministically converge on the highest
+valid revision per entity regardless of processing order (stale revisions
+no-op, equal-revision conflicts stay blocked, dependency waits resolve).
+There is no catalog ownership table to retain — revision metadata in the
+projection rows is the arbitration. Phase 13: `online_enabled` is
+reproduced exactly by the same revision rules (v1 history normalises to
+enabled); commerce mappings survive untouched; the re-evaluation queue
+converges each affected Product toward providers exactly once per rebuild
+(coalesced per Product — expect bounded sync work afterwards, never a
+per-event storm). Procedure:
 
 ```sql
 DELETE FROM catalog_product_inventory;
@@ -383,3 +396,13 @@ SELECT product_id FROM catalog_product_inventory WHERE stock_quantity < 0;
 Inventory rebuild clears only the inventory table plus the inventory
 processor rows (see Catalog rebuild), preserving `sync_events`; replay
 converges on the highest valid revision regardless of order.
+
+### Phase 13-R1 Category discovery
+
+The production Category worker discovers both `catalog.category.snapshot.v1`
+and `.v2` in one bounded, ordered stream under the existing
+`catalog_category_projection.v1` processor. Startup and periodic scans also
+find already accepted v2 events with no processing row. Revision arbitration,
+default-identity provenance and recovery compare both versions together; v1
+is still interpreted as enabled and cannot overwrite a newer v2 revision.
+Unsupported future versions are not part of this discovery stream.
