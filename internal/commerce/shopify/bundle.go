@@ -224,7 +224,42 @@ func (p *ShopifyProvider) syncShopifyConfigurations(ctx context.Context, req com
 	if err := p.setBundleVariantPrices(ctx, state.bundleProductID, req.Product, identities, choices); err != nil {
 		return "", nil, err
 	}
+	// F20: the sellable bundle parent is the customer-facing Product —
+	// its canonical content and required activation converge on every
+	// pass, not only at creation.
+	if err := p.convergeBundleParent(ctx, req, state.bundleProductID); err != nil {
+		return "", nil, err
+	}
 	return state.bundleProductID, identities, nil
+}
+
+// convergeBundleParent converges the CANONICAL owned sellable content of
+// the bundle parent (F20): the same provider content set the hidden base
+// receives — title and description — through targeted writes only, so
+// unrelated merchant fields (tags, collections, media, SEO, vendor,
+// product type) survive. Required activation is written only when
+// publication is requested and the parent is not ACTIVE: publishing an
+// explicitly DRAFT parent must converge its status for channel
+// visibility. Unpublication never drafts the parent.
+func (p *ShopifyProvider) convergeBundleParent(ctx context.Context, req commerce.ProductUpsertRequest, bundleGID string) error {
+	state, err := p.loadProduct(ctx, bundleGID)
+	if err != nil {
+		return err
+	}
+	if state == nil {
+		return p.capabilityError("bundle parent missing")
+	}
+	input := map[string]any{
+		"id":              bundleGID,
+		"title":           bundleTitle(req.Product),
+		"descriptionHtml": localizedDescription(req.Product.Descriptions),
+	}
+	if req.Published && !strings.EqualFold(state.Status, "ACTIVE") {
+		// Shopify requires ACTIVE Product status for channel visibility;
+		// publication membership alone is not enough.
+		input["status"] = "ACTIVE"
+	}
+	return p.productUpdate(ctx, input)
 }
 
 // discoverBundle finds the existing bundle parent through ownership
@@ -438,18 +473,50 @@ func (p *ShopifyProvider) createBundle(ctx context.Context, req commerce.Product
 	if err != nil {
 		return "", err
 	}
-	if hasReceipt {
-		if receipt.State == "failed" {
-			return "", p.capabilityError("bundle operation failed")
+	// buildCreate renders the exact physical create request; its digest
+	// is the durable semantic intent recorded on the receipt at
+	// acknowledgement (identical bytes hash identically).
+	buildCreate := func() (map[string]any, string, error) {
+		baseOptions, err := p.baseComponentOptions(ctx, baseProductID, req.Product.SKU)
+		if err != nil {
+			return nil, "", err
 		}
-		productID := receipt.ProductID
-		if receipt.State == "pending" {
-			productID, err = p.awaitBundleOperation(ctx, receipt.OperationID)
+		input := map[string]any{
+			"title": bundleTitle(req.Product),
+			"components": []map[string]any{
+				{"quantity": 1, "productId": baseProductID, "optionSelections": baseOptions},
+				{"quantity": 1, "productId": frameComponentID, "optionSelections": options},
+			},
+		}
+		payload, _ := json.Marshal(gqlRequest{Query: docBundleCreate, Variables: map[string]any{"input": input}})
+		return input, fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+	}
+	if hasReceipt {
+		switch receipt.State {
+		case "failed":
+			// F07: a failed create receipt is written ONLY for a
+			// definitive terminal operation failure with no remote
+			// Product. The identical intent is never blindly replayed —
+			// its recorded outcome stands. A DISTINCT corrected intent is
+			// authorized fresh work below; history is retained and the
+			// new attempt keeps its own receipt. Unknown side effects
+			// (pending/lost receipts) keep their fences untouched.
+			_, intent, err := buildCreate()
 			if err != nil {
 				return "", err
 			}
+			if receipt.Intent == intent {
+				return "", p.capabilityError("bundle operation failed")
+			}
+		case "pending":
+			productID, err := p.awaitBundleOperation(ctx, receipt.OperationID)
+			if err != nil {
+				return "", err
+			}
+			return p.adoptCompletedBundle(ctx, req, productID, baseProductID, frameComponentID)
+		default:
+			return p.adoptCompletedBundle(ctx, req, receipt.ProductID, baseProductID, frameComponentID)
 		}
-		return p.adoptCompletedBundle(ctx, req, productID, baseProductID, frameComponentID)
 	}
 	bundleID, err := p.discoverByRole(ctx, roleBundleParent, req.ProductID)
 	if err != nil {
@@ -458,16 +525,9 @@ func (p *ShopifyProvider) createBundle(ctx context.Context, req commerce.Product
 	if bundleID != "" {
 		return bundleID, nil
 	}
-	baseOptions, err := p.baseComponentOptions(ctx, baseProductID, req.Product.SKU)
+	input, _, err := buildCreate()
 	if err != nil {
 		return "", err
-	}
-	input := map[string]any{
-		"title": bundleTitle(req.Product),
-		"components": []map[string]any{
-			{"quantity": 1, "productId": baseProductID, "optionSelections": baseOptions},
-			{"quantity": 1, "productId": frameComponentID, "optionSelections": options},
-		},
 	}
 	var out struct {
 		ProductBundleCreate struct {

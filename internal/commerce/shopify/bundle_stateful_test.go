@@ -42,6 +42,7 @@ type bundleFixture struct {
 	next                                                        int
 	dropCreate, failPublication, truncateVariants, repeatCursor bool
 	injectOperation, injectMessage                              string
+	productUpdates                                              []map[string]any
 }
 
 func newBundleFixture(t *testing.T) *bundleFixture {
@@ -286,7 +287,19 @@ func (f *bundleFixture) serve(w http.ResponseWriter, r *http.Request) {
 			components := []any{map[string]any{"quantity": 1, "productVariant": map[string]any{"id": f.h.products[bID].variants[0].gid, "product": map[string]any{"id": baseID}}}, map[string]any{"quantity": 1, "productVariant": map[string]any{"id": choice["id"], "product": map[string]any{"id": frameID}}}}
 			variants = append(variants, map[string]any{"id": variantID, "metafields": map[string]any{"nodes": metadata}, "productVariantComponents": map[string]any{"nodes": components, "pageInfo": map[string]any{"hasNextPage": false}}})
 		}
-		resource := map[string]any{"id": id, "metafields": map[string]any{"nodes": fields}, "variants": map[string]any{"nodes": variants}}
+		// Metadata-state oracle semantics: create takes the submitted
+		// title (default ACTIVE, empty description); an update with an
+		// omitted title/description/status retains the prior value
+		// rather than inventing an implicit rename.
+		title, description, status := str(input["title"]), "", "ACTIVE"
+		if prior := f.resources[id]; prior != nil {
+			if input["title"] == nil {
+				title = str(prior["title"])
+			}
+			description = str(prior["descriptionHtml"])
+			status = str(prior["status"])
+		}
+		resource := map[string]any{"id": id, "title": title, "descriptionHtml": description, "status": status, "metafields": map[string]any{"nodes": fields}, "variants": map[string]any{"nodes": variants}}
 		op := fmt.Sprintf("gid://shopify/ProductBundleOperation/%d", len(f.operations)+1)
 		f.operations[op] = map[string]any{"id": op, "status": "ACTIVE", "product": map[string]any{"id": id}, "userErrors": []any{}, "resource": resource}
 		if root == "productBundleCreate" && f.dropCreate {
@@ -392,6 +405,16 @@ func (f *bundleFixture) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		f.reply(w, map[string]any{"productVariantsBulkUpdate": map[string]any{"productVariants": []any{}, "userErrors": []any{}}})
+	case strings.Contains(request.Query, "MoonlightProductUpdate") && f.resources[str(request.Variables["input"].(map[string]any)["id"])] != nil:
+		input := request.Variables["input"].(map[string]any)
+		f.productUpdates = append(f.productUpdates, input)
+		resource := f.resources[str(input["id"])]
+		for _, key := range []string{"title", "descriptionHtml", "status"} {
+			if v, ok := input[key]; ok {
+				resource[key] = v
+			}
+		}
+		f.reply(w, map[string]any{"productUpdate": map[string]any{"product": map[string]any{"id": input["id"]}, "userErrors": []any{}}})
 	case (strings.Contains(request.Query, "MoonlightPublish") || strings.Contains(request.Query, "MoonlightUnpublish")) && f.resources[str(request.Variables["id"])] != nil:
 		id := str(request.Variables["id"])
 		external, _ := ParseGID(id, ResourceProduct)
