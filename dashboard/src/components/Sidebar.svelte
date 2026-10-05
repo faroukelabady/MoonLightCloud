@@ -9,6 +9,7 @@
 		{ r: 'categories', ar: 'الفئات', en: 'Categories', ready: true, icon: 'layers' },
 		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', ready: true, icon: 'clip' },
 		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', ready: true, icon: 'cloud' },
+		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', ready: true, icon: 'gear' },
 		{ r: 'operations', ar: 'العمليات', en: 'Operations', ready: true, icon: 'clip' },
 		{ r: 'reports', ar: 'التقارير', en: 'Reports', ready: false, note: 'قريبًا', icon: 'report' },
 		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', ready: true, icon: 'cloud' },

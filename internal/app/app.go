@@ -20,6 +20,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	shopifyadapter "github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
@@ -333,6 +334,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
 		Svc: a.DeviceControl, Auth: a.Devices, Stores: store, OnlineWindow: cfg.DeviceControl.OnlineWindow,
 	}
+	// Phase 16 catalog admin: durable operator intent + Retail pull.
+	// Always wired (routes registered unconditionally): authorization
+	// is per-request via dashboard session / device credential, and
+	// commands only flow to capable bound devices.
+	catalogAdminSvc := catalogadmin.NewService(store, catalogAdminDevices{stores: store, auth: a.Devices})
+	catalogAdminHandlers := &adapterhttp.CatalogAdminHandlers{Svc: catalogAdminSvc, Log: log}
 	opsNotify := notifications.NewService(opsStore, opsStore, log)
 	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
 	opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
@@ -354,7 +361,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

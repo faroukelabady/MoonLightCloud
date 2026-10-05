@@ -34,6 +34,7 @@ sql:
       - "db/migrations/00029_commerce_reevaluation_fencing.sql"
       - "db/migrations/00030_product_configurations.sql"
       - "db/migrations/00031_commerce_async_receipts.sql"
+      - "db/migrations/00032_catalog_admin_commands.sql"
     gen:
       go:
         package: "sqlcgen"

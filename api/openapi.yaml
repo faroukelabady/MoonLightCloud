@@ -364,6 +364,385 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/commands:
+    get:
+      summary: Store-scoped catalog command history (newest first)
+      operationId: catalogAdminListCommands
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Optional versioned command type filter.
+        - name: entity_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional entity filter.
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, CANCELLED]
+          description: Optional command status filter.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Paginated command history with per-device targets and aggregate state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminCommandList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      summary: Create a typed Store-scoped catalog command (durable intent only)
+      operationId: catalogAdminCreateCommand
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogAdminCreateRequest'
+      responses:
+        '200':
+          description: "Command persisted with per-device targets snapshotted. Creation is not success: Retail must still apply it."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminCommand'
+        '400':
+          description: Unknown type, cross-Store entity, unknown entity, or invalid payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/commands/{id}:
+    get:
+      summary: One catalog command with targets and aggregate state
+      operationId: catalogAdminGetCommand
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Command detail. Append ?payload=1 to include the immutable payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminCommand'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown command or wrong Store scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/commands/{id}/cancel:
+    post:
+      summary: Cancel a pending catalog command (never rolls back applied work)
+      operationId: catalogAdminCancelCommand
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Command with updated state. Applied commands cannot be cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminCommand'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/products:
+    get:
+      summary: Store-scoped admin Product list with pending flags
+      operationId: catalogAdminProducts
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+        - name: search
+          in: query
+          schema:
+            type: string
+            maxLength: 64
+          description: Bounded SKU/name substring. Empty lists newest.
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Keyset cursor (product_id). Empty starts newest.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Products with SKU, revisions, online state, read-only stock and pending flags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminProductList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/products/{id}:
+    get:
+      summary: Store-scoped admin Product detail snapshot
+      operationId: catalogAdminProduct
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Current projection values plus all revision streams. Money stays exact minor-unit strings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminProductDetail'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown Product or wrong Store scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/products/{id}/configurations:
+    get:
+      summary: Current frame options for the editor
+      operationId: catalogAdminConfigurations
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Current frame options with IDs so edits update rows instead of duplicating them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminConfigurationList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown Product or wrong Store scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/categories:
+    get:
+      summary: Store-scoped Category tree rows
+      operationId: catalogAdminCategories
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Categories with parents, status, online policy, revisions and pending flags.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminCategoryList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/tags:
+    get:
+      summary: Store-scoped Tag rows
+      operationId: catalogAdminTags
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Tags with revisions and pending flags. Historical Sale tags are untouched snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminTagList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/device-control/catalog-commands:
+    get:
+      summary: Retail pulls due catalog command targets (outbound only)
+      operationId: deviceCatalogCommands
+      security:
+        - deviceAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Bounded due targets for the calling device only.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCatalogCommandList'
+        '401':
+          description: Missing or invalid device credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/device-control/catalog-commands/{target_id}/result:
+    post:
+      summary: Retail reports one command target outcome
+      operationId: deviceCatalogCommandResult
+      security:
+        - deviceAuth: []
+      parameters:
+        - name: target_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCatalogCommandResult'
+      responses:
+        '200':
+          description: Outcome recorded. Wrong-device reports are rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCatalogCommandAck'
+        '401':
+          description: Missing or invalid device credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown target or wrong device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/device-control/capabilities:
+    post:
+      summary: Retail announces command capabilities
+      operationId: deviceCapabilities
+      security:
+        - deviceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCapabilities'
+      responses:
+        '200':
+          description: Capability recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCapabilityResult'
+        '401':
+          description: Missing or invalid device credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/stores:
     get:
       summary: Registered Stores with bound device counts (read-only)
@@ -2297,6 +2676,290 @@ components:
           type: string
           description: Required for completed/failed; must match the status.
           enum: [SYNC_COMPLETED, SYNC_FAILED_NETWORK, SYNC_FAILED_AUTH, SYNC_FAILED_CONFLICT, SYNC_FAILED_INTERNAL]
+    CatalogAdminCommandList:
+      type: object
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogAdminCommand'
+    CatalogAdminCreateRequest:
+      type: object
+      required: [store_id, type, entity_id, expected_revision, payload]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+          description: Authoritative Store scope. Never global.
+        type:
+          type: string
+          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1]
+          description: Immutable versioned command type. No generic patch exists.
+        entity_id:
+          type: string
+          format: uuid
+          description: Target Product, Category or Tag UUID. Immutable, never edited by the command.
+        expected_revision:
+          type: integer
+          minimum: 0
+          description: Expected authoritative Retail revision. Stale values conflict with zero writes.
+        payload:
+          type: object
+          description: Typed command fields. SKU, stock, Sales and Returns are never writable here.
+    CatalogAdminCommand:
+      type: object
+      required: [id, store_id, type, version, entity_id, payload_hash, expected_revision, actor, status, aggregate, converged, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        store_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        version:
+          type: integer
+        entity_id:
+          type: string
+          format: uuid
+        payload:
+          type: object
+          description: Immutable command payload. Included only on detail requests with ?payload=1.
+        payload_hash:
+          type: string
+          description: Deterministic SHA-256 over canonical JSON. Same ID plus different payload is rejected.
+        expected_revision:
+          type: integer
+        actor:
+          type: string
+          description: Authenticated operator identity, derived server-side. Never client-supplied.
+        status:
+          type: string
+          enum: [PENDING, CANCELLED]
+        aggregate:
+          type: string
+          enum: [PENDING, DELIVERED, APPLIED, CONVERGED, PARTIAL, CONFLICT, BLOCKED_CAPABILITY, CANCELLED]
+          description: Store-level state across targets. Creation is never reported as success; CONVERGED requires the projection to reach the resulting revision.
+        converged:
+          type: boolean
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogAdminTarget'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CatalogAdminTarget:
+      type: object
+      required: [id, command_id, device_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        command_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        device_name:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, DELIVERED, APPLIED, CONFLICT, REJECTED, BLOCKED_CAPABILITY, SKIPPED_REVOKED, CANCELLED]
+        result_code:
+          type: string
+          description: Bounded machine code (APPLIED, REVISION_CONFLICT, VALIDATION_FAILED, ENTITY_NOT_FOUND, STORE_SCOPE_CONFLICT, UNSUPPORTED_COMMAND, COMMAND_ID_PAYLOAD_MISMATCH, DEPENDENCY_MISSING, RETRYABLE_FAILURE).
+        entity_id:
+          type: string
+        pre_revision:
+          type: integer
+        post_revision:
+          type: integer
+        capable:
+          type: boolean
+          nullable: true
+          description: False when the device never announced catalog_admin_commands_v1 (Retail update required).
+    DeviceCatalogCommandList:
+      type: object
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          items:
+            type: object
+            required: [target_id, command_id, command_type, version, store_id, payload, payload_hash]
+            properties:
+              target_id:
+                type: string
+                format: uuid
+              command_id:
+                type: string
+                format: uuid
+              command_type:
+                type: string
+              version:
+                type: integer
+              store_id:
+                type: string
+                format: uuid
+              payload:
+                type: object
+              payload_hash:
+                type: string
+    DeviceCatalogCommandResult:
+      type: object
+      required: [status, result_code]
+      properties:
+        status:
+          type: string
+          enum: [APPLIED, CONFLICT, REJECTED]
+        result_code:
+          type: string
+        entity_id:
+          type: string
+        pre_revision:
+          type: integer
+        post_revision:
+          type: integer
+    DeviceCatalogCommandAck:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+    DeviceCapabilities:
+      type: object
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+          description: Versioned capability strings, e.g. catalog_admin_commands_v1.
+    DeviceCapabilityResult:
+      type: object
+      required: [catalog_admin_commands_v1]
+      properties:
+        catalog_admin_commands_v1:
+          type: boolean
+    CatalogAdminProductList:
+      type: object
+      required: [products, next_cursor]
+      properties:
+        products:
+          type: array
+          items:
+            type: object
+            required: [product_id, sku, name_ar, is_active, catalog_revision, sell_online, stock_quantity, configuration_revision, has_pending]
+            properties:
+              product_id: {type: string, format: uuid}
+              sku: {type: string, description: Read-only. Never edited by admin commands.}
+              name_ar: {type: string}
+              name_en: {type: string}
+              is_active: {type: boolean}
+              catalog_revision: {type: integer}
+              sell_online: {type: boolean}
+              stock_quantity: {type: integer, description: Read-only display. Phase16 cannot edit stock.}
+              configuration_revision: {type: integer}
+              has_pending: {type: boolean}
+        next_cursor:
+          type: string
+          description: Keyset cursor for the next page. Empty on the final page.
+    CatalogAdminProductDetail:
+      type: object
+      required: [product_id, sku, catalog_revision, sales_policy_revision, configuration_revision]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string, description: Immutable barcode identity. Display only.}
+        name_ar: {type: string}
+        name_en: {type: string}
+        description_ar: {type: string}
+        description_en: {type: string}
+        width_cm: {type: integer, nullable: true}
+        height_cm: {type: integer, nullable: true}
+        top_category_id: {type: string, format: uuid}
+        subcategory_ids:
+          type: array
+          items: {type: string, format: uuid}
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+        egp_price_minor: {type: string, description: Exact minor units. Never a JSON number.}
+        usd_price_minor: {type: string, nullable: true}
+        cost_minor: {type: string}
+        is_active: {type: boolean}
+        sell_online: {type: boolean}
+        sell_offline: {type: boolean, description: Display only. Phase16 never changes sell_offline.}
+        stock_quantity: {type: integer, description: Read-only.}
+        catalog_revision: {type: integer}
+        sales_policy_revision: {type: integer}
+        configuration_revision: {type: integer}
+        has_pending: {type: boolean}
+    CatalogAdminConfigurationList:
+      type: object
+      required: [configurations]
+      properties:
+        configurations:
+          type: array
+          items:
+            type: object
+            required: [id, style_code, style_name_ar, color_code, color_name_ar, egp_delta_minor, enabled, position]
+            properties:
+              id: {type: string, format: uuid, description: Stable row identity. Edits reuse IDs; new rows omit them.}
+              style_code: {type: string}
+              style_name_ar: {type: string}
+              style_name_en: {type: string, nullable: true}
+              color_code: {type: string}
+              color_name_ar: {type: string}
+              color_name_en: {type: string, nullable: true}
+              egp_delta_minor: {type: string, description: "Exact minor units, never negative."}
+              usd_delta_minor: {type: string, nullable: true, description: Null means unavailable in USD; zero is an explicit zero delta.}
+              enabled: {type: boolean}
+              position: {type: integer}
+    CatalogAdminCategoryList:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category_id, name_ar, status, online_enabled, parent_ids, catalog_revision, has_pending]
+            properties:
+              category_id: {type: string, format: uuid}
+              name_ar: {type: string}
+              name_en: {type: string}
+              status: {type: string, enum: [active, hidden, archived]}
+              online_enabled: {type: boolean}
+              parent_ids:
+                type: array
+                items: {type: string, format: uuid}
+              catalog_revision: {type: integer}
+              has_pending: {type: boolean}
+    CatalogAdminTagList:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            type: object
+            required: [tag_id, slug, is_active, catalog_revision, has_pending]
+            properties:
+              tag_id: {type: string, format: uuid}
+              slug: {type: string, description: Immutable. Display only.}
+              name_ar: {type: string}
+              name_en: {type: string}
+              is_active: {type: boolean}
+              catalog_revision: {type: integer}
+              has_pending: {type: boolean}
     DashboardDeviceList:
       type: object
       required: [devices]

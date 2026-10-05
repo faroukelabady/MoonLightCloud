@@ -49,3 +49,4 @@ Concise, irreversible-or-important choices only.
 - [0045](0045-analytics-catalog-health.md) — analytics, catalog health & reporting closure (12)
 - [0046](0046-category-online-visibility.md) — hierarchical online catalog visibility (13)
 - [0047](0047-product-options-frame-configurations.md) — product options (frame configurations) projection & publication (15)
+- [0048](0048-cloud-admin-catalog-control.md) — Cloud admin catalog control plane (16)

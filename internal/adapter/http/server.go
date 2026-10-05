@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -98,6 +98,35 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		}
 		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.CreateSyncRequest)))
+	}
+	// Phase 16 catalog admin: Retail pulls targets over its outbound
+	// device channel; operator creates over the dashboard session.
+	// Registered only when the admin service is wired; otherwise 404.
+	if catalogAdmin != nil {
+		mux.Handle("GET /api/v1/device-control/catalog-commands",
+			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.PollCatalogCommands)))
+		mux.Handle("POST /api/v1/device-control/catalog-commands/{target_id}/result",
+			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.ReportCatalogResult)))
+		mux.Handle("POST /api/v1/device-control/capabilities",
+			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.ReportCapabilities)))
+		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.CreateCommand)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.ListCommands)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands/{id}",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.GetCommand)))
+		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands/{id}/cancel",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.CancelCommand)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProducts)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductDetail)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/configurations",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminConfigurations)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/categories",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminCategories)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminTags)))
 	}
 	// Phase 7D operations incidents (dashboard session only; device
 	// credentials never valid here).

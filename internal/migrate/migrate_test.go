@@ -700,3 +700,28 @@ func TestV21To22PreservesEverything(t *testing.T) {
 		t.Fatalf("sale preserved: %d (%v)", total, err)
 	}
 }
+
+// TestV31ToLatest proves the Phase 16 upgrade: 00032 adds only the
+// catalog-admin command/target/capability tables. No projection,
+// commerce, order, notification, device or Store state is touched.
+func TestV31ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 31); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 31 {
+		t.Fatalf("want 31, got %d", v)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	for _, table := range []string{"catalog_admin_commands", "catalog_admin_command_targets", "catalog_admin_device_capabilities"} {
+		var exists bool
+		if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)`, table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("table %s missing (%v)", table, err)
+		}
+	}
+}

@@ -199,3 +199,19 @@ func (d Devices) StoreSummaries(ctx context.Context) ([]store.Summary, error) {
 	}
 	return out, nil
 }
+
+// CatalogAdminBindingStore resolves the current Store binding for one
+// device, or "" when unbound. Read-only; bindings are immutable.
+func (d Devices) CatalogAdminBindingStore(ctx context.Context, deviceID string) (string, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	duid, err := parseUUID(deviceID)
+	if err != nil {
+		return "", err
+	}
+	binding, err := sqlcgen.New(d.pool).BindingByDevice(ctx, duid)
+	if err != nil {
+		return "", nil
+	}
+	return uuidString(binding.StoreID), nil
+}

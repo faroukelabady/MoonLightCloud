@@ -79,6 +79,42 @@ type BusinessReportScheduleRecipient struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CatalogAdminCommand struct {
+	ID               pgtype.UUID        `json:"id"`
+	StoreID          pgtype.UUID        `json:"store_id"`
+	CommandType      string             `json:"command_type"`
+	CommandVersion   int32              `json:"command_version"`
+	EntityID         string             `json:"entity_id"`
+	Payload          []byte             `json:"payload"`
+	PayloadHash      string             `json:"payload_hash"`
+	ExpectedRevision int64              `json:"expected_revision"`
+	Actor            string             `json:"actor"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CatalogAdminCommandTarget struct {
+	ID           pgtype.UUID        `json:"id"`
+	CommandID    pgtype.UUID        `json:"command_id"`
+	DeviceID     pgtype.UUID        `json:"device_id"`
+	Status       string             `json:"status"`
+	ResultCode   pgtype.Text        `json:"result_code"`
+	EntityID     string             `json:"entity_id"`
+	PreRevision  int64              `json:"pre_revision"`
+	PostRevision int64              `json:"post_revision"`
+	DeliveredAt  pgtype.Timestamptz `json:"delivered_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CatalogAdminDeviceCapability struct {
+	DeviceID               pgtype.UUID        `json:"device_id"`
+	CatalogAdminCommandsV1 bool               `json:"catalog_admin_commands_v1"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CatalogCategory struct {
 	CategoryID        pgtype.UUID        `json:"category_id"`
 	Status            string             `json:"status"`

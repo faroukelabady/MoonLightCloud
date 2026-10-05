@@ -20,6 +20,7 @@
 	import OrdersPage from './components/OrdersPage.svelte';
 	import DevicesPage from './components/DevicesPage.svelte';
 	import OperationsPage from './components/OperationsPage.svelte';
+	import CatalogAdminPage from './components/CatalogAdminPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError, isStoreID } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow } from './lib/api.js';
@@ -693,6 +694,11 @@
 				{#if route === 'operations'}
 					<div class="cell a-orders">
 						<OperationsPage />
+					</div>
+				{/if}
+				{#if route === 'admin'}
+					<div class="cell a-orders">
+						<CatalogAdminPage {store} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

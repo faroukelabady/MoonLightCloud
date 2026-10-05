@@ -486,6 +486,122 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 	return (await res.json()) as T;
 }
 
+export interface AdminProductRow {
+	product_id: string;
+	sku: string;
+	name_ar: string;
+	name_en: string;
+	is_active: boolean;
+	catalog_revision: number;
+	sell_online: boolean;
+	stock_quantity: number;
+	configuration_revision: number;
+	has_pending: boolean;
+}
+
+export interface AdminProductDetail extends AdminProductRow {
+	description_ar: string;
+	description_en: string;
+	width_cm: number | null;
+	height_cm: number | null;
+	top_category_id: string;
+	subcategory_ids: string[];
+	tag_ids: string[];
+	egp_price_minor: string;
+	usd_price_minor: string | null;
+	cost_minor: string;
+	sell_offline: boolean;
+	sales_policy_revision: number;
+}
+
+export interface AdminCategoryRow {
+	category_id: string;
+	name_ar: string;
+	name_en: string;
+	status: string;
+	online_enabled: boolean;
+	parent_ids: string[];
+	catalog_revision: number;
+	has_pending: boolean;
+}
+
+export interface AdminTagRow {
+	tag_id: string;
+	slug: string;
+	name_ar: string;
+	name_en: string;
+	is_active: boolean;
+	catalog_revision: number;
+	has_pending: boolean;
+}
+
+export interface AdminConfiguration {
+	id: string;
+	style_code: string;
+	style_name_ar: string;
+	style_name_en: string | null;
+	color_code: string;
+	color_name_ar: string;
+	color_name_en: string | null;
+	egp_delta_minor: string;
+	usd_delta_minor: string | null;
+	enabled: boolean;
+	position: number;
+}
+
+export interface AdminCommandTarget {
+	id: string;
+	command_id: string;
+	device_id: string;
+	device_name?: string;
+	status: string;
+	result_code?: string;
+	entity_id?: string;
+	pre_revision: number;
+	post_revision: number;
+	capable?: boolean | null;
+}
+
+export interface AdminCommand {
+	id: string;
+	store_id: string;
+	type: string;
+	version: number;
+	entity_id: string;
+	payload?: Record<string, unknown>;
+	payload_hash: string;
+	expected_revision: number;
+	actor: string;
+	status: string;
+	aggregate: string;
+	converged: boolean;
+	targets?: AdminCommandTarget[];
+	created_at: string;
+	updated_at: string;
+}
+
+async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+	const res = await fetch(path, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		credentials: 'same-origin',
+		body: JSON.stringify(body),
+		signal
+	});
+	if (res.status === 401) throw new ApiError(401, 'UNAUTHORIZED', 'session required');
+	if (!res.ok) {
+		let code = 'INTERNAL';
+		try {
+			const parsed = (await res.json()) as { error?: { code?: string } };
+			if (parsed.error?.code) code = parsed.error.code;
+		} catch {
+			/* keep generic */
+		}
+		throw new ApiError(res.status, code, `request failed (${res.status})`);
+	}
+	return (await res.json()) as T;
+}
+
 export const dashboardApi = {
 	me: (s?: AbortSignal) => get<{ authenticated: boolean; username: string }>('/api/v1/dashboard/auth/me', s),
 	login: async (username: string, password: string): Promise<void> => {
@@ -527,6 +643,35 @@ export const dashboardApi = {
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s),
 	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
 	stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
+	adminProducts: (store: string, search: string, cursor: string | null, s?: AbortSignal) =>
+		get<{ products: AdminProductRow[]; next_cursor: string }>(
+			`/api/v1/dashboard/catalog-admin/products?store_id=${encodeURIComponent(store)}&search=${encodeURIComponent(search)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}&limit=20`,
+			s
+		),
+	adminProduct: (store: string, id: string, s?: AbortSignal) =>
+		get<AdminProductDetail>(`/api/v1/dashboard/catalog-admin/products/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}`, s),
+	adminConfigurations: (store: string, id: string, s?: AbortSignal) =>
+		get<{ configurations: AdminConfiguration[] }>(
+			`/api/v1/dashboard/catalog-admin/products/${encodeURIComponent(id)}/configurations?store_id=${encodeURIComponent(store)}`,
+			s
+		),
+	adminCategories: (store: string, s?: AbortSignal) =>
+		get<{ categories: AdminCategoryRow[] }>(`/api/v1/dashboard/catalog-admin/categories?store_id=${encodeURIComponent(store)}`, s),
+	adminTags: (store: string, s?: AbortSignal) =>
+		get<{ tags: AdminTagRow[] }>(`/api/v1/dashboard/catalog-admin/tags?store_id=${encodeURIComponent(store)}`, s),
+	adminCommands: (store: string, filters: { type?: string; entity_id?: string; status?: string }, s?: AbortSignal) => {
+		const q = new URLSearchParams({ store_id: store, limit: '20' });
+		if (filters.type) q.set('type', filters.type);
+		if (filters.entity_id) q.set('entity_id', filters.entity_id);
+		if (filters.status) q.set('status', filters.status);
+		return get<{ commands: AdminCommand[] }>(`/api/v1/dashboard/catalog-admin/commands?${q.toString()}`, s);
+	},
+	adminCommand: (store: string, id: string, s?: AbortSignal) =>
+		get<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}&payload=1`, s),
+	adminCreateCommand: (req: { store_id: string; type: string; entity_id: string; expected_revision: number; payload: Record<string, unknown> }, s?: AbortSignal) =>
+		postJson<AdminCommand>('/api/v1/dashboard/catalog-admin/commands', req, s),
+	adminCancelCommand: (store: string, id: string, s?: AbortSignal) =>
+		postJson<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}/cancel?store_id=${encodeURIComponent(store)}`, {}, s),
 	incidents: (params: { state?: string; severity?: string; rule?: string; limit?: number; cursor?: string | null }, s?: AbortSignal) => {
 		const q = new URLSearchParams();
 		if (params.state) q.set('state', params.state);
