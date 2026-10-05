@@ -93,6 +93,10 @@ type shopifyHarness struct {
 }
 
 func newHarness(t *testing.T) *shopifyHarness {
+	return newHarnessWithHandler(t, nil)
+}
+
+func newHarnessWithHandler(t *testing.T, build func(*shopifyHarness) http.Handler) *shopifyHarness {
 	t.Helper()
 	h := &shopifyHarness{
 		token:              "test-access-token-0123456789abcdef",
@@ -111,7 +115,11 @@ func newHarness(t *testing.T) *shopifyHarness {
 		failBody:           map[string]string{},
 		dropAfter:          map[string]bool{},
 	}
-	h.server = httptest.NewTLSServer(http.HandlerFunc(h.serve))
+	var handler http.Handler = http.HandlerFunc(h.serve)
+	if build != nil {
+		handler = build(h)
+	}
+	h.server = httptest.NewTLSServer(handler)
 	t.Cleanup(h.server.Close)
 	return h
 }
@@ -341,6 +349,9 @@ func operationName(query string) string {
 		}
 	}
 	// Phase 15 bundle surface.
+	if strings.Contains(query, "MoonlightBundleCreate") {
+		return "bundle_create"
+	}
 	if strings.Contains(query, "MoonlightVariantPrices") {
 		return "MoonlightVariantPrices"
 	}
@@ -639,11 +650,13 @@ func (h *shopifyHarness) opVariantsBySKU(vars map[string]any) map[string]any {
 			// returned too, so exact equality filtering is mandatory.
 			if strings.HasPrefix(variant.sku, wanted) || strings.HasPrefix(wanted, variant.sku) {
 				nodes = append(nodes, map[string]any{
-					"id":  variant.gid,
-					"sku": variant.sku,
+					"id":              variant.gid,
+					"sku":             variant.sku,
+					"selectedOptions": []any{map[string]any{"name": "Title", "value": "Default Title"}},
 					"product": map[string]any{
 						"id":         product.gid,
 						"status":     product.status,
+						"options":    []any{map[string]any{"id": "gid://shopify/ProductOption/" + strings.TrimPrefix(product.gid, "gid://shopify/Product/"), "name": "Title"}},
 						"metafields": map[string]any{"nodes": metafieldNodes(product.metafields)},
 					},
 				})
@@ -676,8 +689,9 @@ func (h *shopifyHarness) opProductQuery(vars map[string]any) map[string]any {
 			})
 		}
 		variants = append(variants, map[string]any{
-			"id":  variant.gid,
-			"sku": variant.sku,
+			"id":              variant.gid,
+			"sku":             variant.sku,
+			"selectedOptions": []any{map[string]any{"name": "Title", "value": "Default Title"}},
 			"inventoryItem": map[string]any{
 				"id":              variant.itemGID,
 				"tracked":         variant.tracked,
@@ -688,6 +702,7 @@ func (h *shopifyHarness) opProductQuery(vars map[string]any) map[string]any {
 	return map[string]any{"data": map[string]any{"product": map[string]any{
 		"id":         product.gid,
 		"status":     product.status,
+		"options":    []any{map[string]any{"id": "gid://shopify/ProductOption/" + strings.TrimPrefix(product.gid, "gid://shopify/Product/"), "name": "Title"}},
 		"metafields": map[string]any{"nodes": metafieldNodes(product.metafields)},
 		"variants":   map[string]any{"nodes": variants},
 	}}}

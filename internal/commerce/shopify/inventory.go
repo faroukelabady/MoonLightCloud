@@ -305,11 +305,11 @@ func (p *ShopifyProvider) setAvailable(ctx context.Context, itemID string, quant
 			// Compare-and-set detected a concurrent quantity change:
 			// retryable, because the caller's retry recomputes fresh
 			// desired state before writing again.
-			return commerce.TemporaryError(fmt.Sprintf(
-				"shopify inventory compare mismatch %s: %s", code, message))
+			return commerce.TemporaryError(p.client.safeMessage(fmt.Sprintf(
+				"shopify inventory compare mismatch %s: %s", code, message)))
 		}
-		return commerce.ValidationError(fmt.Sprintf(
-			"shopify inventorySetQuantities user error %s: %s", code, message))
+		return commerce.ValidationError(p.client.safeMessage(fmt.Sprintf(
+			"shopify inventorySetQuantities user error %s: %s", code, message)))
 	}
 	if payload.InventoryAdjustmentGroup == nil {
 		return commerce.TemporaryError("shopify inventory response missing adjustment group")

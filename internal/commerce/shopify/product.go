@@ -61,13 +61,20 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 	if err := p.ensureShopCurrency(ctx); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
+	if err := p.resumePendingBundleWork(ctx); err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	desired := desiredContent{title: title, description: description, price: price, sku: req.Product.SKU}
 	var result commerce.ProductUpsertResult
 	var upsertErr error
+	baseReq := req
+	if len(req.Product.Configurations) > 0 {
+		baseReq.Published = false
+	}
 	if req.ExistingExternal != nil {
-		result, upsertErr = p.updateMapped(ctx, req, desired)
+		result, upsertErr = p.updateMapped(ctx, baseReq, desired)
 	} else {
-		result, upsertErr = p.createWithRecovery(ctx, req, desired)
+		result, upsertErr = p.createWithRecovery(ctx, baseReq, desired)
 	}
 	if upsertErr != nil {
 		return commerce.ProductUpsertResult{}, upsertErr
@@ -97,7 +104,20 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 			result.ExternalProductID = canonicalFromGID(bundleID)
 			result.SellableTransition = true
 		}
+		if err := p.setPublication(ctx, bundleID, req.Published); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
 		result.Configurations = identities
+	}
+	if len(req.Product.Configurations) == 0 && req.ExistingExternal != nil && req.ExistingExternal.ExternalProductID != result.ExternalProductID {
+		oldID, err := productGID(req.ExistingExternal.ExternalProductID)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		if err := p.setPublication(ctx, oldID, false); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		result.SellableTransition = true
 	}
 	return result, nil
 }
@@ -129,6 +149,29 @@ func (p *ShopifyProvider) updateMapped(ctx context.Context, req commerce.Product
 		// Mapped product missing: never create a replacement, never
 		// rewrite the mapping. Operator action is required.
 		return commerce.ProductUpsertResult{}, commerce.ConflictError("mapped shopify product no longer exists")
+	}
+	if metafieldValue(product.Metafields.Nodes, keyRole) == roleBundleParent {
+		if !ownershipMatches(ownership(product.Metafields.Nodes), req.ProductID, req.ProviderKey) {
+			return commerce.ProductUpsertResult{}, commerce.ConflictError("bundle ownership mismatch")
+		}
+		if err := validateStampedVariants(product); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		baseID := metafieldValue(product.Metafields.Nodes, keyBaseComponentID)
+		if baseID == "" {
+			return commerce.ProductUpsertResult{}, commerce.ConflictError("bundle base identity missing")
+		}
+		product, err = p.loadProduct(ctx, baseID)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		if product == nil {
+			return commerce.ProductUpsertResult{}, commerce.ConflictError("bundle base missing")
+		}
+		externalID, err = CanonicalExternalID(product.ID, ResourceProduct)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
 	}
 	return p.convergeExisting(ctx, req, desired, product, externalID, true)
 }
@@ -411,6 +454,30 @@ func (p *ShopifyProvider) loadProduct(ctx context.Context, productGID string) (*
 		if _, err := CanonicalExternalID(out.Product.ID, ResourceProduct); err != nil {
 			return nil, commerce.ConflictError("shopify product identity malformed")
 		}
+	}
+	seen := map[string]bool{}
+	for page := 1; out.Product.Variants.PageInfo.HasNextPage; page++ {
+		cursor := out.Product.Variants.PageInfo.EndCursor
+		if page >= 20 || cursor == "" || seen[cursor] {
+			return nil, commerce.ConflictError("shopify variant pagination incomplete")
+		}
+		seen[cursor] = true
+		var next productQueryResponse
+		if err := p.client.do(ctx, docProductQuery, map[string]any{"id": productGID, "after": cursor}, &next); err != nil {
+			return nil, err
+		}
+		if next.Product == nil || next.Product.ID != out.Product.ID {
+			return nil, commerce.ConflictError("shopify variant pagination inconsistent")
+		}
+		out.Product.Variants.Nodes = append(out.Product.Variants.Nodes, next.Product.Variants.Nodes...)
+		out.Product.Variants.PageInfo = next.Product.Variants.PageInfo
+	}
+	seenIDs := map[string]bool{}
+	for _, variant := range out.Product.Variants.Nodes {
+		if variant.ID == "" || seenIDs[variant.ID] {
+			return nil, commerce.ConflictError("shopify variant identity ambiguous")
+		}
+		seenIDs[variant.ID] = true
 	}
 	return out.Product, nil
 }

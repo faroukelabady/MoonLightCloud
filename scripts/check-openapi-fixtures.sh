@@ -341,5 +341,10 @@ bad_envelope["payload"] = dict(config_snapshot, configurations=[dict(config_entr
 check("sync_event_union_configuration_rejects_bad_leaf", "SyncEvent", bad_envelope, expect_valid=False)
 batch = {"events": [config_envelope]}
 check("sync_batch_configuration", "SyncBatch", batch)
+category_v2 = dict(load_fixture("internal/catalog/testdata/category_valid.json"), online_enabled=True)
+check("category_v2", "CatalogCategorySnapshotV2", category_v2)
+category_envelope = dict(config_envelope, event_type="catalog.category.snapshot.v2", payload=category_v2)
+check("category_v2_event", "SyncEvent", category_envelope)
+check("category_v2_missing_policy", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_valid.json"), expect_valid=False)
 print("openapi fixture parity: PASS")
 PYEOF

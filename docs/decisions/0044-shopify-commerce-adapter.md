@@ -263,3 +263,39 @@ their existing shapes. Do not fabricate uncertainty clearance from a timeout.
 - Uncertain Shopify writes deliberately block that provider/Product until
   verified operator resolution. No automatic repair or retry through an active
   barrier is promised. Exact request settlement is an operational prerequisite.
+
+## Phase 15-R3: acknowledged bundle operations
+
+Schema 31 retains bundle receipts on the original mutation-evidence row.
+Acknowledgement atomically resolves physical-request uncertainty and records
+role, exact request fingerprint and provider operation ID. It does not claim
+that the asynchronous operation completed. The same product advisory lock
+serializes receipt adoption, polling and subsequent desired-state mutations.
+Pending work is polled before any new Product mutation, including a changed
+intent. Six reads bound one attempt; durable retries resume the same receipt.
+`CREATED` and `ACTIVE` remain pending. `COMPLETE` is inspected for operation
+errors and a returned Product; there is no invented `FAILED` provider status.
+A lost response retains the original uncertainty barrier. Receipt persistence
+failure cannot authorize resend. A completed create receipt remains adoption
+provenance after metadata/mapping/publication failures.
+
+Base, frame component and bundle are separate roles. A mapped bundle resolves
+its positively owned base before content or inventory convergence. Only the
+base tracks physical inventory; frame variants remain untracked. The configured
+publication exposes the bundle for framed Products and the base for simple
+Products. Historical configuration identities survive label edits. Bundle
+variant adoption requires quantity-one relationships to the managed base and
+an owned, configuration-stamped frame variant; titles never establish identity.
+Complete product variant reads use bounded pagination (at most 20 pages of
+100); incomplete cursors and duplicated variant IDs fail closed.
+
+Rollback to schema 30 is permitted only before any receipt exists. Once a
+receipt exists, including completed provenance, downgrade refuses to discard
+it. Preserve/backup the mutation evidence with other durable integration state;
+projection rebuilds do not delete it. No shipped migration is changed.
+
+Contract references (2026-10):
+https://shopify.dev/docs/api/admin-graphql/latest/input-objects/ProductBundleComponentInput
+https://shopify.dev/docs/api/admin-graphql/latest/input-objects/ProductBundleComponentOptionSelectionInput
+https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductBundleOperation
+https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariantComponent

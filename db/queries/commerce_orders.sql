@@ -283,3 +283,23 @@ WHERE provider_key = $1 AND external_order_id = $2 AND store_id = $3;
 DELETE FROM commerce_online_order_lines
 WHERE provider_key = $1 AND external_order_id = $2
   AND NOT (external_line_id = ANY($3::bigint[]));
+
+-- name: RefreshCommerceOrderMappingCompleteness :exec
+-- Snapshot-preserving line upserts, not today's selection lookup, are authoritative.
+-- A pre-configuration-migration variation has no raw captured selection;
+-- it is not equivalent to an explicitly captured No Frame mapping.
+UPDATE commerce_online_orders AS orders
+SET mapping_complete = NOT EXISTS (
+        SELECT 1 FROM commerce_online_order_lines AS line
+        WHERE line.provider_key = orders.provider_key
+          AND line.external_order_id = orders.external_order_id
+          AND (NOT line.mapped OR line.configuration_unresolved
+               OR (line.variation_id <> 0 AND line.provider_configuration_id IS NULL))
+    ),
+    unmapped_lines = (
+        SELECT count(*) FROM commerce_online_order_lines AS line
+        WHERE line.provider_key = orders.provider_key
+          AND line.external_order_id = orders.external_order_id
+          AND NOT line.mapped
+    )
+WHERE orders.provider_key = $1 AND orders.external_order_id = $2;

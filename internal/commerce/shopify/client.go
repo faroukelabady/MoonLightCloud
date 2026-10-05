@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 )
@@ -237,6 +238,35 @@ func (c *Client) do(ctx context.Context, document string, variables map[string]a
 		if !mutationOutcomeComplete(document, envelope.Data) {
 			return commerce.TemporaryError("shopify incomplete mutation outcome")
 		}
+		if document == docBundleCreate || document == docBundleUpdate {
+			root, role := "productBundleCreate", "bundle_create"
+			if document == docBundleUpdate {
+				root, role = "productBundleUpdate", "bundle_update"
+			}
+			var data map[string]struct {
+				Operation *struct {
+					ID string `json:"id"`
+				} `json:"productBundleOperation"`
+				UserErrors []json.RawMessage `json:"userErrors"`
+			}
+			if err := json.Unmarshal(envelope.Data, &data); err != nil {
+				return commerce.TemporaryError("shopify incomplete operation receipt")
+			}
+			result := data[root]
+			if len(result.UserErrors) == 0 && result.Operation != nil {
+				if _, err := ParseGID(result.Operation.ID, "ProductBundleOperation"); err != nil {
+					return commerce.TemporaryError("shopify operation receipt identity invalid")
+				}
+				store, err := commerce.ProductAsyncReceipts(ctx)
+				if err != nil {
+					return err
+				}
+				digest := sha256.Sum256(payload)
+				return store.AcknowledgeAsync(ctx, token, commerce.AsyncProductReceipt{
+					Role: role, Intent: fmt.Sprintf("%x", digest), OperationID: result.Operation.ID,
+				})
+			}
+		}
 		if err := complete(); err != nil {
 			return err
 		}
@@ -353,7 +383,14 @@ func (c *Client) safeMessage(message string) string {
 	if cleaned == "" {
 		return "shopify request failed"
 	}
-	return "shopify error: " + cleaned
+	message = "shopify error: " + cleaned
+	if len(message) > messageLimit {
+		message = message[:messageLimit]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
+	}
+	return message
 }
 
 // classifyStatus maps non-2xx HTTP status to the frozen taxonomy.

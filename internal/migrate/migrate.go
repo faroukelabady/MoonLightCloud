@@ -18,7 +18,7 @@ import (
 
 // TargetVersion is the required schema version: startup refuses to
 // boot on mismatch.
-const TargetVersion int64 = 30
+const TargetVersion int64 = 31
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())

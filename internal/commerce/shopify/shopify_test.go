@@ -232,3 +232,11 @@ func (fixtureMutationBarrier) Begin(context.Context, string) (string, error) {
 	return "fixture-token", nil
 }
 func (fixtureMutationBarrier) Complete(context.Context, string) error { return nil }
+
+func (fixtureMutationBarrier) AcknowledgeAsync(context.Context, string, commerce.AsyncProductReceipt) error {
+	return nil
+}
+func (fixtureMutationBarrier) LoadAsync(context.Context, string) (commerce.AsyncProductReceipt, bool, error) {
+	return commerce.AsyncProductReceipt{}, false, nil
+}
+func (fixtureMutationBarrier) FinishAsync(context.Context, string, string, string) error { return nil }

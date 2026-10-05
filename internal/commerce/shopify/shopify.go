@@ -308,7 +308,7 @@ func (p *ShopifyProvider) failUserErrors(operation string, errs []userError) err
 	if code == "" && message == "" {
 		message = "user error"
 	}
-	return commerce.ValidationError(fmt.Sprintf("shopify %s user error %s: %s", operation, code, message))
+	return commerce.ValidationError(p.client.safeMessage(fmt.Sprintf("shopify %s user error %s: %s", operation, code, message)))
 }
 
 // idempotencyKey derives the deterministic Shopify idempotency key for

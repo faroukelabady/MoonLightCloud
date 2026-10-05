@@ -355,14 +355,19 @@ type CommerceProductMapping struct {
 }
 
 type CommerceProductMutationBarrier struct {
-	OperationID        pgtype.UUID        `json:"operation_id"`
-	ProviderKey        string             `json:"provider_key"`
-	ProductID          pgtype.UUID        `json:"product_id"`
-	RequestFingerprint string             `json:"request_fingerprint"`
-	State              string             `json:"state"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	ResolvedAt         pgtype.Timestamptz `json:"resolved_at"`
-	Resolution         pgtype.Text        `json:"resolution"`
+	OperationID         pgtype.UUID        `json:"operation_id"`
+	ProviderKey         string             `json:"provider_key"`
+	ProductID           pgtype.UUID        `json:"product_id"`
+	RequestFingerprint  string             `json:"request_fingerprint"`
+	State               string             `json:"state"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	ResolvedAt          pgtype.Timestamptz `json:"resolved_at"`
+	Resolution          pgtype.Text        `json:"resolution"`
+	AsyncRole           pgtype.Text        `json:"async_role"`
+	AsyncIntent         pgtype.Text        `json:"async_intent"`
+	ProviderOperationID pgtype.Text        `json:"provider_operation_id"`
+	AsyncState          pgtype.Text        `json:"async_state"`
+	AsyncProductID      pgtype.Text        `json:"async_product_id"`
 }
 
 type CommerceProductReevaluation struct {

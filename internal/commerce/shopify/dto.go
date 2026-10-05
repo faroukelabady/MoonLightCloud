@@ -11,17 +11,23 @@ const (
   shop { currencyCode }
 }`
 
-	docProductQuery = `query MoonlightProduct($id: ID!) {
+	docProductQuery = `query MoonlightProduct($id: ID!, $after: String) {
   product(id: $id) {
     id
     status
     metafields(first: 20, namespace: "moonlight") { nodes { namespace key value } }
     options { id name }
-    variants(first: 100) {
+    variants(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         id
         sku
         title
+        selectedOptions { name value }
+        productVariantComponents(first: 3) {
+          pageInfo { hasNextPage }
+          nodes { quantity productVariant { id product { id } metafields(first: 10, namespace: "moonlight") { nodes { namespace key value } } } }
+        }
         metafields(first: 10, namespace: "moonlight") { nodes { namespace key value } }
         inventoryItem {
           id
@@ -188,9 +194,30 @@ type gqlInventoryItem struct {
 }
 
 type gqlVariant struct {
-	ID            string            `json:"id"`
-	SKU           string            `json:"sku"`
-	Title         string            `json:"title"`
+	ID              string `json:"id"`
+	SKU             string `json:"sku"`
+	Title           string `json:"title"`
+	SelectedOptions []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"selectedOptions"`
+	Components struct {
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
+		Nodes []struct {
+			Quantity int `json:"quantity"`
+			Variant  struct {
+				ID      string `json:"id"`
+				Product struct {
+					ID string `json:"id"`
+				} `json:"product"`
+				Metafields struct {
+					Nodes []gqlMetafield `json:"nodes"`
+				} `json:"metafields"`
+			} `json:"productVariant"`
+		} `json:"nodes"`
+	} `json:"productVariantComponents"`
 	InventoryItem *gqlInventoryItem `json:"inventoryItem"`
 	Metafields    struct {
 		Nodes []gqlMetafield `json:"nodes"`
@@ -208,7 +235,11 @@ type gqlProduct struct {
 		Nodes []gqlMetafield `json:"nodes"`
 	} `json:"metafields"`
 	Variants struct {
-		Nodes []gqlVariant `json:"nodes"`
+		Nodes    []gqlVariant `json:"nodes"`
+		PageInfo struct {
+			HasNextPage bool   `json:"hasNextPage"`
+			EndCursor   string `json:"endCursor"`
+		} `json:"pageInfo"`
 	} `json:"variants"`
 }
 

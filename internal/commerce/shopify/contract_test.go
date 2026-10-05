@@ -12,12 +12,12 @@ func validateWireContract(document string, vars map[string]any) error {
 	compact := strings.Join(strings.Fields(document), " ")
 	fail := func() error { return fmt.Errorf("invalid Shopify 2026-10 contract") }
 	switch operationName(document) {
-	case "MoonlightFrameComponentSet":
+	case "frame_component_set":
 		if !strings.Contains(compact, "$input: ProductSetInput!") || !strings.Contains(compact, "productSet(synchronous: true, input: $input)") {
 			return fail()
 		}
 		input, ok := vars["input"].(map[string]any)
-		if !ok || input["title"] == nil || input["variants"] == nil {
+		if !ok || (input["title"] == nil && input["id"] == nil) || input["variants"] == nil {
 			return fail()
 		}
 		values, ok := input["variants"].([]any)
@@ -30,12 +30,16 @@ func validateWireContract(document string, vars map[string]any) error {
 				return fail()
 			}
 		}
-	case "MoonlightBundleUpdate":
-		if !strings.Contains(compact, "$input: ProductBundleUpdateInput!") || !strings.Contains(compact, "productBundleUpdate(input: $input)") {
+	case "bundle_create", "bundle_update":
+		kind := "Create"
+		if operationName(document) == "bundle_update" {
+			kind = "Update"
+		}
+		if !strings.Contains(compact, "$input: ProductBundle"+kind+"Input!") || !strings.Contains(compact, "productBundle"+kind+"(input: $input)") || !strings.Contains(compact, "productBundleOperation") {
 			return fail()
 		}
 		input, ok := vars["input"].(map[string]any)
-		if !ok || input["productId"] == nil || input["components"] == nil {
+		if !ok || input["components"] == nil || (kind == "Update" && input["productId"] == nil) {
 			return fail()
 		}
 		values, ok := input["components"].([]any)
@@ -44,8 +48,27 @@ func validateWireContract(document string, vars map[string]any) error {
 		}
 		for _, raw := range values {
 			entry, ok := raw.(map[string]any)
-			if !ok || entry["productId"] == nil {
+			if !ok || entry["productId"] == nil || entry["quantity"] != float64(1) {
 				return fail()
+			}
+			opts, ok := entry["optionSelections"].([]any)
+			if !ok || len(opts) == 0 {
+				return fail()
+			}
+			for _, raw := range opts {
+				o, ok := raw.(map[string]any)
+				if !ok || str(o["componentOptionId"]) == "" || str(o["name"]) == "" {
+					return fail()
+				}
+				values, ok := o["values"].([]any)
+				if !ok || len(values) == 0 {
+					return fail()
+				}
+				for _, v := range values {
+					if str(v) == "" {
+						return fail()
+					}
+				}
 			}
 		}
 	case "MoonlightVariantPrices":
@@ -58,7 +81,7 @@ func validateWireContract(document string, vars map[string]any) error {
 		}
 		for _, raw := range values {
 			entry, ok := raw.(map[string]any)
-			if !ok || entry["id"] == nil || entry["price"] == nil {
+			if !ok || entry["id"] == nil || (entry["price"] == nil && entry["metafields"] == nil) {
 				return fail()
 			}
 			// Price-only updates never touch inventory identity (the

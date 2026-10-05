@@ -645,6 +645,13 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 			return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 		}
 	}
+	// Re-read the durable verdict after immutable selection fields have survived
+	// the line upserts. A newly discovered mapping cannot repair history.
+	if err := q.RefreshCommerceOrderMappingCompleteness(ctx, sqlcgen.RefreshCommerceOrderMappingCompletenessParams{
+		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
+	}); err != nil {
+		return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	}
 	for _, address := range []orders.Address{snapshot.Billing, snapshot.Shipping} {
 		// Provider orders may omit billing/shipping addresses; empty
 		// kinds are never rows (the kind CHECK is authoritative).

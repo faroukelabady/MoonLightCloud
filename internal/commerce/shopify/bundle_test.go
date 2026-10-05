@@ -195,3 +195,41 @@ func TestEqualLabelsStayDistinct(t *testing.T) {
 		t.Fatalf("combinations must be explicit rows, got %d", len(variants))
 	}
 }
+
+func TestBundleUpdateConfiguredSecretsAreScrubbed(t *testing.T) {
+	for _, placement := range []string{"beginning", "middle", "end"} {
+		for _, filler := range []int{8, 2000} {
+			t.Run(placement+strconv.Itoa(filler), func(t *testing.T) {
+				h := newHarness(t)
+				p := newTestProvider(t, h)
+				base, createErr := p.UpsertProduct(context.Background(), upsertRequest("privacy-base", "PRIVACY-BASE", false))
+				if createErr != nil {
+					t.Fatal(createErr)
+				}
+
+				secrets := h.token + " " + h.secret
+				padding := strings.Repeat("界", filler)
+				message := secrets + padding
+				if placement == "middle" {
+					message = padding + secrets + padding
+				}
+				if placement == "end" {
+					message = padding + secrets
+				}
+				message = "privacy-oracle: " + message
+				h.failStatus["bundle_update"] = 200
+				h.failBody["bundle_update"] = `{"data":{"productBundleUpdate":{"productBundleOperation":null,"userErrors":[{"message":` + strconv.Quote(message) + `}]}}}`
+				err := p.bundleUpdate(commerce.WithProductMutationBarrier(context.Background(), fixtureMutationBarrier{}), "gid://shopify/Product/3", FormatGID(ResourceProduct, base.ExternalProductID), "gid://shopify/Product/2", []map[string]any{{"componentOptionId": "gid://shopify/ProductOption/21", "name": "Frame", "values": []string{"Classic"}}})
+				if err == nil || !strings.Contains(err.Error(), "privacy-oracle") {
+					t.Fatal("nested provider error path was not exercised")
+				}
+				if strings.Contains(err.Error(), h.token) || strings.Contains(err.Error(), h.secret) {
+					t.Fatal("configured credential survived public error boundary")
+				}
+				if len(err.Error()) > 512 {
+					t.Fatalf("final error exceeds byte bound: %d", len(err.Error()))
+				}
+			})
+		}
+	}
+}

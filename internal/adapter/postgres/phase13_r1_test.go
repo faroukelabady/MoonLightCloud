@@ -483,6 +483,11 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 		if after && name == "commerce_online_order_lines" {
 			expr += "-'configuration_id'-'frame_style_code'-'frame_style_name_ar'-'frame_style_name_en'-'frame_color_code'-'frame_color_name_ar'-'frame_color_name_en'-'configuration_price_delta_minor'-'provider_configuration_id'-'configuration_unresolved'"
 		}
+		// Append-only 00031 adds nullable receipt fields; compare every
+		// pre-existing column exactly, as with the additions above.
+		if after && name == "commerce_product_mutation_barriers" {
+			expr += "-'async_role'-'async_intent'-'provider_operation_id'-'async_state'-'async_product_id'"
+		}
 		var data string
 		if err := pf.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(jsonb_agg(%s ORDER BY (%s)::text),'[]'::jsonb)::text FROM %s t`, expr, expr, `"`+strings.ReplaceAll(name, `"`, `""`)+`"`)).Scan(&data); err != nil {
 			t.Fatal(err)
