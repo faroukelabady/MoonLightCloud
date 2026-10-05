@@ -14,4 +14,10 @@ ORDER BY created_at DESC, operation_id DESC LIMIT 1;
 UPDATE commerce_product_mutation_barriers
 SET async_state = $4, async_product_id = $5
 WHERE provider_key = $1 AND product_id = $2 AND provider_operation_id = $3
-    AND async_state = 'pending';
+    AND (
+        async_state = 'pending'
+        -- Enrich a legacy failed receipt once; never erase known evidence
+        -- or change its terminal outcome.
+        OR (async_state = 'failed' AND coalesce(async_product_id, '') = ''
+            AND $4 = 'failed' AND $5 <> '')
+    );

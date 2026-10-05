@@ -279,6 +279,18 @@ A lost response retains the original uncertainty barrier. Receipt persistence
 failure cannot authorize resend. A completed create receipt remains adoption
 provenance after metadata/mapping/publication failures.
 
+Operation errors do not prove that no Product was created. A returned Product
+ID is retained even on failure and fences every fresh create until explicit
+reconciliation; ordinary retries never erase that evidence or substitute a new
+Product. An identical failed create intent is not replayed. A distinct corrected
+intent may create only after re-reading the original operation and verifying
+`COMPLETE`, operation errors and an explicit null Product. This also covers older
+failed receipts which discarded the Product ID: a discovered ID enriches that
+failed receipt once without changing its outcome. Missing, malformed, pending
+or unavailable operation evidence cannot authorize replacement creation. No
+automatic reconciliation or cleanup of already-created remote duplicates is
+introduced by this safety fix.
+
 Base, frame component and bundle are separate roles. A mapped bundle resolves
 its positively owned base before content or inventory convergence. Only the
 base tracks physical inventory; frame variants remain untracked. The configured

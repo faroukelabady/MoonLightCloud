@@ -494,19 +494,23 @@ func (p *ShopifyProvider) createBundle(ctx context.Context, req commerce.Product
 	if hasReceipt {
 		switch receipt.State {
 		case "failed":
-			// F07: a failed create receipt is written ONLY for a
-			// definitive terminal operation failure with no remote
-			// Product. The identical intent is never blindly replayed —
-			// its recorded outcome stands. A DISTINCT corrected intent is
-			// authorized fresh work below; history is retained and the
-			// new attempt keeps its own receipt. Unknown side effects
-			// (pending/lost receipts) keep their fences untouched.
+			// Errors do not prove absence of a Product. Known execution
+			// evidence fences every fresh create, regardless of intent.
+			if receipt.ProductID != "" {
+				return "", p.capabilityError("bundle operation failed with product; reconciliation required")
+			}
 			_, intent, err := buildCreate()
 			if err != nil {
 				return "", err
 			}
 			if receipt.Intent == intent {
 				return "", p.capabilityError("bundle operation failed")
+			}
+			// Older failed receipts discarded Product IDs. Re-read the
+			// original operation before authorizing distinct corrected
+			// work, and enrich that receipt if it returned a Product.
+			if err := p.verifyFailedBundleCreate(ctx, receipt); err != nil {
+				return "", err
 			}
 		case "pending":
 			productID, err := p.awaitBundleOperation(ctx, receipt.OperationID)
@@ -588,46 +592,104 @@ func (p *ShopifyProvider) adoptCompletedBundle(ctx context.Context, req commerce
 	return productID, nil
 }
 
-// awaitBundleOperation adopts the asynchronous operation's returned
-// Product identity (F06/F07): never discarded, never re-created.
-func (p *ShopifyProvider) awaitBundleOperation(ctx context.Context, operationID string) (string, error) {
-	var out struct {
-		ProductOperation struct {
-			Status  string `json:"status"`
-			Product *struct {
-				ID string `json:"id"`
-			} `json:"product"`
-			UserErrors []struct {
-				Message string `json:"message"`
-			} `json:"userErrors"`
-		} `json:"productOperation"`
+type bundleOperationState struct {
+	Status     string          `json:"status"`
+	Product    json.RawMessage `json:"product"`
+	UserErrors []struct {
+		Message string `json:"message"`
+	} `json:"userErrors"`
+}
+
+// An explicit null is no-Product evidence. An absent field or malformed
+// identity is not; neither may authorize replacement creation.
+func (state bundleOperationState) productID() (string, error) {
+	if len(state.Product) == 0 {
+		return "", commerce.TemporaryError("bundle operation product evidence missing")
 	}
-	for attempt := 0; attempt < 6; attempt++ {
-		if err := p.client.do(ctx, docBundleOperation, map[string]any{"id": operationID}, &out); err != nil {
-			return "", p.classifyBundleFailure(err)
+	if strings.TrimSpace(string(state.Product)) == "null" {
+		return "", nil
+	}
+	var product struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(state.Product, &product); err != nil {
+		return "", commerce.TemporaryError("bundle operation product invalid")
+	}
+	if _, err := ParseGID(product.ID, ResourceProduct); err != nil {
+		return "", commerce.TemporaryError("bundle operation product invalid")
+	}
+	return product.ID, nil
+}
+
+func (p *ShopifyProvider) readBundleOperation(ctx context.Context, operationID string) (bundleOperationState, error) {
+	var out struct {
+		ProductOperation bundleOperationState `json:"productOperation"`
+	}
+	if err := p.client.do(ctx, docBundleOperation, map[string]any{"id": operationID}, &out); err != nil {
+		return bundleOperationState{}, p.classifyBundleFailure(err)
+	}
+	return out.ProductOperation, nil
+}
+
+func (p *ShopifyProvider) verifyFailedBundleCreate(ctx context.Context, receipt commerce.AsyncProductReceipt) error {
+	state, err := p.readBundleOperation(ctx, receipt.OperationID)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(state.Status, "COMPLETE") {
+		return commerce.TemporaryError("bundle failure evidence incomplete")
+	}
+	productID, err := state.productID()
+	if err != nil {
+		return err
+	}
+	if productID != "" {
+		store, err := commerce.ProductAsyncReceipts(ctx)
+		if err != nil {
+			return err
 		}
-		switch strings.ToUpper(out.ProductOperation.Status) {
+		if err := store.FinishAsync(ctx, receipt.OperationID, "failed", productID); err != nil {
+			return err
+		}
+		return p.capabilityError("bundle operation failed with product; reconciliation required")
+	}
+	if len(state.UserErrors) == 0 {
+		return commerce.TemporaryError("bundle failure evidence incomplete")
+	}
+	return nil
+}
+
+// awaitBundleOperation retains the returned Product even on failure;
+// errors alone never establish that creation had no side effects.
+func (p *ShopifyProvider) awaitBundleOperation(ctx context.Context, operationID string) (string, error) {
+	for attempt := 0; attempt < 6; attempt++ {
+		state, err := p.readBundleOperation(ctx, operationID)
+		if err != nil {
+			return "", err
+		}
+		switch strings.ToUpper(state.Status) {
 		case "COMPLETE":
 			store, err := commerce.ProductAsyncReceipts(ctx)
 			if err != nil {
 				return "", err
 			}
-			if len(out.ProductOperation.UserErrors) > 0 {
-				if err := store.FinishAsync(ctx, operationID, "failed", ""); err != nil {
-					return "", err
-				}
-				return "", p.capabilityError(out.ProductOperation.UserErrors[0].Message)
-			}
-			if out.ProductOperation.Product == nil || out.ProductOperation.Product.ID == "" {
-				return "", p.capabilityError("bundle operation product missing")
-			}
-			if _, err := ParseGID(out.ProductOperation.Product.ID, ResourceProduct); err != nil {
-				return "", commerce.TemporaryError("bundle operation product invalid")
-			}
-			if err := store.FinishAsync(ctx, operationID, "completed", out.ProductOperation.Product.ID); err != nil {
+			productID, err := state.productID()
+			if err != nil {
 				return "", err
 			}
-			return out.ProductOperation.Product.ID, nil
+			if len(state.UserErrors) > 0 {
+				if err := store.FinishAsync(ctx, operationID, "failed", productID); err != nil {
+					return "", err
+				}
+				return "", p.capabilityError(state.UserErrors[0].Message)
+			}
+			if productID == "" {
+				return "", p.capabilityError("bundle operation product missing")
+			}
+			if err := store.FinishAsync(ctx, operationID, "completed", productID); err != nil {
+				return "", err
+			}
+			return productID, nil
 		case "CREATED", "ACTIVE":
 			// Bounded reads; the acknowledged receipt survives the retry.
 		default:

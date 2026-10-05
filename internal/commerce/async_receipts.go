@@ -11,6 +11,8 @@ type AsyncProductReceipt struct {
 type AsyncProductReceipts interface {
 	AcknowledgeAsync(context.Context, string, AsyncProductReceipt) error
 	LoadAsync(context.Context, string) (AsyncProductReceipt, bool, error)
+	// FinishAsync settles pending work, or fills a missing Product identity
+	// on a legacy failed receipt without changing its outcome or known ID.
 	FinishAsync(context.Context, string, string, string) error
 }
 

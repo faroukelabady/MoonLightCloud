@@ -43,6 +43,7 @@ type bundleFixture struct {
 	dropCreate, failPublication, truncateVariants, repeatCursor bool
 	injectOperation, injectMessage                              string
 	productUpdates                                              []map[string]any
+	operationErrorWithProduct                                   bool
 }
 
 func newBundleFixture(t *testing.T) *bundleFixture {
@@ -89,6 +90,7 @@ func (f *bundleFixture) serve(w http.ResponseWriter, r *http.Request) {
 			payload := map[string]any{"userErrors": []any{map[string]any{"message": f.injectMessage}}}
 			if f.injectOperation == "bundle_operation" {
 				payload["status"] = "COMPLETE"
+				payload["product"] = nil
 			}
 			f.reply(w, map[string]any{root: payload})
 		} else {
@@ -318,8 +320,12 @@ func (f *bundleFixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.pendingReads--
 		} else {
 			op["status"] = "COMPLETE"
-			resource := op["resource"].(map[string]any)
-			f.resources[str(resource["id"])] = resource
+			if resource, ok := op["resource"].(map[string]any); ok {
+				f.resources[str(resource["id"])] = resource
+			}
+			if f.operationErrorWithProduct {
+				op["userErrors"] = []any{map[string]any{"message": "processing failed after Product creation", "code": "GENERIC_ERROR"}}
+			}
 		}
 		f.reply(w, map[string]any{"productOperation": op})
 	case strings.Contains(request.Query, "MoonlightProduct($id") && f.resources[str(request.Variables["id"])] != nil:
