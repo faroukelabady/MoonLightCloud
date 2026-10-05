@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -45,7 +46,7 @@ func (s *fakeStore) GetCatalogAdminCommand(_ context.Context, id string) (Comman
 	return view, nil
 }
 
-func (s *fakeStore) ListCatalogAdminCommands(_ context.Context, storeID, _, _, _ string, _, _ int) ([]CommandView, error) {
+func (s *fakeStore) ListCatalogAdminCommands(_ context.Context, storeID, _, _, _ string, _ int, _ time.Time, _ string) ([]CommandView, error) {
 	var out []CommandView
 	for _, view := range s.commands {
 		if view.StoreID == storeID {

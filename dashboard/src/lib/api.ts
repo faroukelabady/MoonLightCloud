@@ -664,7 +664,7 @@ export const dashboardApi = {
 		if (filters.type) q.set('type', filters.type);
 		if (filters.entity_id) q.set('entity_id', filters.entity_id);
 		if (filters.status) q.set('status', filters.status);
-		return get<{ commands: AdminCommand[] }>(`/api/v1/dashboard/catalog-admin/commands?${q.toString()}`, s);
+		return get<{ commands: AdminCommand[]; next_cursor: string }>(`/api/v1/dashboard/catalog-admin/commands?${q.toString()}`, s);
 	},
 	adminCommand: (store: string, id: string, s?: AbortSignal) =>
 		get<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}&payload=1`, s),

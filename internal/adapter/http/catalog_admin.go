@@ -97,7 +97,9 @@ func (h *CatalogAdminHandlers) GetCommand(w http.ResponseWriter, r *http.Request
 }
 
 // ListCommands serves GET /api/v1/dashboard/catalog-admin/commands with
-// bounded Store-scoped filters and pagination.
+// bounded Store-scoped filters and keyset pagination. The opaque cursor
+// continues from the last returned row; concurrent inserts never shift
+// already-returned pages (no duplicates, no skips).
 func (h *CatalogAdminHandlers) ListCommands(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
@@ -105,13 +107,12 @@ func (h *CatalogAdminHandlers) ListCommands(w http.ResponseWriter, r *http.Reque
 	}
 	q := r.URL.Query()
 	limit := atoiBounded(q.Get("limit"), 20, 1, 100)
-	offset := atoiBounded(q.Get("offset"), 0, 0, 100000)
-	views, err := h.Svc.List(r.Context(), q.Get("store_id"), q.Get("type"), q.Get("entity_id"), q.Get("status"), limit, offset)
+	views, next, err := h.Svc.List(r.Context(), q.Get("store_id"), q.Get("type"), q.Get("entity_id"), q.Get("status"), limit, q.Get("cursor"))
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"commands": views})
+	writeJSON(w, http.StatusOK, map[string]any{"commands": views, "next_cursor": next})
 }
 
 // CancelCommand serves POST /api/v1/dashboard/catalog-admin/commands/{id}/cancel.
@@ -277,14 +278,10 @@ func (h *CatalogAdminHandlers) AdminProducts(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	q := r.URL.Query()
-	rows, err := h.Svc.AdminProducts(r.Context(), q.Get("store_id"), q.Get("search"), q.Get("cursor"), atoiBounded(q.Get("limit"), 20, 1, 100))
+	rows, next, err := h.Svc.AdminProducts(r.Context(), q.Get("store_id"), q.Get("search"), q.Get("cursor"), atoiBounded(q.Get("limit"), 20, 1, 100))
 	if err != nil {
 		WriteError(w, r, err)
 		return
-	}
-	next := ""
-	if len(rows) > 0 {
-		next = rows[len(rows)-1].ProductID
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"products": rows, "next_cursor": next})
 }

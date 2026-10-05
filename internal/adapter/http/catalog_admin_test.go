@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -55,7 +56,7 @@ func (s *stubCatalogStore) GetCatalogAdminCommand(_ context.Context, id string) 
 	return view, nil
 }
 
-func (s *stubCatalogStore) ListCatalogAdminCommands(_ context.Context, storeID, _, _, _ string, _, _ int) ([]catalogadmin.CommandView, error) {
+func (s *stubCatalogStore) ListCatalogAdminCommands(_ context.Context, storeID, _, _, _ string, _ int, _ time.Time, _ string) ([]catalogadmin.CommandView, error) {
 	var out []catalogadmin.CommandView
 	for _, view := range s.commands {
 		if view.StoreID == storeID {

@@ -2,6 +2,7 @@ package catalogadmin
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -162,7 +163,7 @@ type Store interface {
 	CreateCatalogAdminCommand(ctx context.Context, cmd NewCommand) (CommandView, error)
 	CreateCatalogAdminTarget(ctx context.Context, commandID, targetID, deviceID string) (TargetView, error)
 	GetCatalogAdminCommand(ctx context.Context, id string) (CommandView, error)
-	ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit, offset int) ([]CommandView, error)
+	ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit int, cursorTS time.Time, cursorID string) ([]CommandView, error)
 	ListCatalogAdminTargets(ctx context.Context, commandID string) ([]TargetView, error)
 	ListCatalogAdminTargetsBatch(ctx context.Context, commandIDs []string) (map[string][]TargetView, error)
 	DueCatalogAdminTargets(ctx context.Context, deviceID string, limit int) ([]DueTarget, error)
@@ -300,19 +301,20 @@ func (s *Service) GetWithPayload(ctx context.Context, storeID, commandID string)
 }
 
 // List pages Store-scoped command history (newest first).
-func (s *Service) List(ctx context.Context, storeID, commandType, entityID, status string, limit, offset int) ([]CommandView, error) {
+func (s *Service) List(ctx context.Context, storeID, commandType, entityID, status string, limit int, cursor string) ([]CommandView, string, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	if offset < 0 {
-		offset = 0
-	}
 	if commandType != "" && !IsKnownType(commandType) {
-		return nil, apperr.New(apperr.InvalidInput, "unknown command type")
+		return nil, "", apperr.New(apperr.InvalidInput, "unknown command type")
 	}
-	views, err := s.store.ListCatalogAdminCommands(ctx, storeID, commandType, entityID, status, limit, offset)
+	cursorTS, cursorID, err := decodeHistoryCursor(cursor)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	views, err := s.store.ListCatalogAdminCommands(ctx, storeID, commandType, entityID, status, limit, cursorTS, cursorID)
+	if err != nil {
+		return nil, "", err
 	}
 	ids := make([]string, 0, len(views))
 	for _, view := range views {
@@ -320,14 +322,51 @@ func (s *Service) List(ctx context.Context, storeID, commandType, entityID, stat
 	}
 	batched, err := s.store.ListCatalogAdminTargetsBatch(ctx, ids)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for i := range views {
 		targets := batched[views[i].ID]
 		views[i].Targets = targets
 		views[i].Aggregate, views[i].Converged = s.aggregate(ctx, views[i], targets)
 	}
-	return views, nil
+	var next string
+	if len(views) == limit {
+		next = encodeHistoryCursor(views[len(views)-1].CreatedAt, views[len(views)-1].ID)
+	}
+	return views, next, nil
+}
+
+// historyCursorSeparator splits the opaque history cursor payload. The
+// cursor is opaque to callers: timestamp (RFC3339Nano UTC) of the last
+// returned row plus its command ID, base64url-encoded.
+func encodeHistoryCursor(ts time.Time, id string) string {
+	raw := ts.UTC().Format(time.RFC3339Nano) + "|" + id
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeHistoryCursor parses an opaque history cursor. Empty means start
+// from the newest row. Malformed cursors fail closed with InvalidInput:
+// they never widen scope or skip ordering.
+func decodeHistoryCursor(cursor string) (time.Time, string, error) {
+	if strings.TrimSpace(cursor) == "" {
+		return time.Time{}, "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return time.Time{}, "", apperr.New(apperr.InvalidInput, "invalid history cursor")
+	}
+	ts, id, ok := strings.Cut(string(raw), "|")
+	if !ok {
+		return time.Time{}, "", apperr.New(apperr.InvalidInput, "invalid history cursor")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil || parsed.IsZero() {
+		return time.Time{}, "", apperr.New(apperr.InvalidInput, "invalid history cursor")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return time.Time{}, "", apperr.New(apperr.InvalidInput, "invalid history cursor")
+	}
+	return parsed, id, nil
 }
 
 // Cancel marks a PENDING command CANCELLED. Commands with any APPLIED
@@ -519,17 +558,77 @@ var _ = fmt.Sprintf
 // AdminProducts lists Store-scoped Products for the operator UI.
 // Malformed Store IDs fail; unknown Stores yield empty results
 // (never a global fallback).
-func (s *Service) AdminProducts(ctx context.Context, storeID, search, cursor string, limit int) ([]AdminProductRow, error) {
+func (s *Service) AdminProducts(ctx context.Context, storeID, search, cursor string, limit int) ([]AdminProductRow, string, error) {
 	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
-		return nil, apperr.New(apperr.InvalidInput, "invalid store_id")
+		return nil, "", apperr.New(apperr.InvalidInput, "invalid store_id")
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
 	if len(search) > 64 {
-		return nil, apperr.New(apperr.InvalidInput, "search too long")
+		return nil, "", apperr.New(apperr.InvalidInput, "search too long")
 	}
-	return s.store.AdminProductList(ctx, strings.TrimSpace(storeID), strings.TrimSpace(search), strings.TrimSpace(cursor), limit)
+	productID, err := decodeProductCursor(cursor, strings.TrimSpace(storeID), strings.TrimSpace(search))
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.store.AdminProductList(ctx, strings.TrimSpace(storeID), strings.TrimSpace(search), productID, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	var next string
+	if len(rows) == limit {
+		next = encodeProductCursor(strings.TrimSpace(storeID), strings.TrimSpace(search), rows[len(rows)-1].ProductID)
+	}
+	return rows, next, nil
+}
+
+// productCursorSeparator splits the opaque scope-bound Product cursor.
+// The cursor binds the Store ID and search string that produced the
+// page to the last returned Product ID (base64url-encoded). Reusing a
+// cursor under a different Store or search fails closed with
+// InvalidInput instead of silently continuing another scope's list
+// from an unrelated position.
+func encodeProductCursor(storeID, search, productID string) string {
+	raw := storeID + "\n" + search + "\n" + productID
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeProductCursor resolves an opaque Product cursor to the bare
+// Product ID after verifying it was issued for this exact Store+search
+// scope. Empty means start from the newest row.
+func decodeProductCursor(cursor, storeID, search string) (string, error) {
+	if strings.TrimSpace(cursor) == "" {
+		return "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return "", apperr.New(apperr.InvalidInput, "invalid Product cursor")
+	}
+	scopeStore, scopeSearch, productID, ok := stringsCut2(string(raw))
+	if !ok {
+		return "", apperr.New(apperr.InvalidInput, "invalid Product cursor")
+	}
+	if scopeStore != storeID || scopeSearch != search {
+		return "", apperr.New(apperr.InvalidInput, "Product cursor does not match request scope")
+	}
+	if _, err := uuid.Parse(productID); err != nil {
+		return "", apperr.New(apperr.InvalidInput, "invalid Product cursor")
+	}
+	return productID, nil
+}
+
+// stringsCut2 splits s on the first two newlines.
+func stringsCut2(s string) (string, string, string, bool) {
+	first, rest, ok := strings.Cut(s, "\n")
+	if !ok {
+		return "", "", "", false
+	}
+	second, third, ok := strings.Cut(rest, "\n")
+	if !ok {
+		return "", "", "", false
+	}
+	return first, second, third, true
 }
 
 // AdminProduct returns one Store-scoped Product detail snapshot.

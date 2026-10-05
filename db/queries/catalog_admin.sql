@@ -39,8 +39,10 @@ WHERE store_id = @store_id::uuid
   AND (@command_type::text = '' OR command_type = @command_type::text)
   AND (@entity_id::text = '' OR entity_id = @entity_id::text)
   AND (@status::text = '' OR status = @status::text)
+  AND (@cursor_ts::timestamptz IS NULL
+    OR (created_at, id) < (@cursor_ts, @cursor_id::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT @limit_n::int OFFSET @offset_n::int;
+LIMIT @limit_n::int;
 
 -- name: ListCatalogAdminTargets :many
 SELECT id, command_id, device_id, status, result_code, entity_id, pre_revision, post_revision,

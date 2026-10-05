@@ -802,17 +802,20 @@ WHERE store_id = $1::uuid
   AND ($2::text = '' OR command_type = $2::text)
   AND ($3::text = '' OR entity_id = $3::text)
   AND ($4::text = '' OR status = $4::text)
+  AND ($5::timestamptz IS NULL
+    OR (created_at, id) < ($5, $6::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $6::int OFFSET $5::int
+LIMIT $7::int
 `
 
 type ListCatalogAdminCommandsParams struct {
-	StoreID     pgtype.UUID `json:"store_id"`
-	CommandType string      `json:"command_type"`
-	EntityID    string      `json:"entity_id"`
-	Status      string      `json:"status"`
-	OffsetN     int32       `json:"offset_n"`
-	LimitN      int32       `json:"limit_n"`
+	StoreID     pgtype.UUID        `json:"store_id"`
+	CommandType string             `json:"command_type"`
+	EntityID    string             `json:"entity_id"`
+	Status      string             `json:"status"`
+	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID    pgtype.UUID        `json:"cursor_id"`
+	LimitN      int32              `json:"limit_n"`
 }
 
 type ListCatalogAdminCommandsRow struct {
@@ -835,7 +838,8 @@ func (q *Queries) ListCatalogAdminCommands(ctx context.Context, arg ListCatalogA
 		arg.CommandType,
 		arg.EntityID,
 		arg.Status,
-		arg.OffsetN,
+		arg.CursorTs,
+		arg.CursorID,
 		arg.LimitN,
 	)
 	if err != nil {

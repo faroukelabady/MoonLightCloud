@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -101,17 +102,31 @@ func (d Devices) GetCatalogAdminCommand(ctx context.Context, id string) (catalog
 	}, nil
 }
 
-// ListCatalogAdminCommands pages Store-scoped history (newest first).
-func (d Devices) ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit, offset int) ([]catalogadmin.CommandView, error) {
+// ListCatalogAdminCommands pages Store-scoped history newest-first with a
+// keyset cursor: rows strictly older than (cursorTS, cursorID). A zero
+// cursorTS starts from the newest row. Keyset pagination is stable under
+// concurrent inserts: new commands never shift already-returned pages,
+// so readers observe neither duplicates nor skips.
+func (d Devices) ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit int, cursorTS time.Time, cursorID string) ([]catalogadmin.CommandView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
 	if err != nil {
 		return nil, err
 	}
+	var ts pgtype.Timestamptz
+	var cid pgtype.UUID
+	if !cursorTS.IsZero() {
+		ts = pgtype.Timestamptz{Time: cursorTS.UTC(), Valid: true}
+		parsed, err := parseUUID(cursorID)
+		if err != nil {
+			return nil, err
+		}
+		cid = parsed
+	}
 	rows, err := sqlcgen.New(d.pool).ListCatalogAdminCommands(ctx, sqlcgen.ListCatalogAdminCommandsParams{
 		StoreID: suid, CommandType: commandType, EntityID: entityID, Status: status,
-		LimitN: int32(limit), OffsetN: int32(offset),
+		LimitN: int32(limit), CursorTs: ts, CursorID: cid,
 	})
 	if err != nil {
 		return nil, catalogAdminErr(err)

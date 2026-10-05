@@ -396,12 +396,15 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
-        - name: offset
+        - name: cursor
           in: query
           schema:
-            type: integer
-            minimum: 0
-            default: 0
+            type: string
+          description: >-
+            Opaque keyset cursor from a previous response's next_cursor.
+            Empty starts newest. Cursors are bound to the exact
+            Store+filter scope; concurrent inserts never shift
+            already-returned pages (no duplicates, no skips).
       responses:
         '200':
           description: Paginated command history with per-device targets and aggregate state.
@@ -505,6 +508,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown command or cross-Store access (returned as not found).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Command already has applied effects and cannot be cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/products:
     get:
       summary: Store-scoped admin Product list with pending flags
@@ -523,8 +538,12 @@ paths:
           in: query
           schema:
             type: string
-            format: uuid
-          description: Keyset cursor (product_id). Empty starts newest.
+          description: >-
+            Opaque scope-bound keyset cursor from a previous response's
+            next_cursor. Empty starts newest. The cursor is bound to the
+            exact Store+search scope that produced it; reuse under a
+            different Store or search is rejected (400) rather than
+            silently continuing another scope's list.
         - name: limit
           in: query
           schema:
@@ -2684,6 +2703,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogAdminCommand'
+        next_cursor:
+          type: string
+          description: Opaque keyset cursor for the next page. Empty means end of history.
     CatalogAdminCreateRequest:
       type: object
       required: [store_id, type, entity_id, expected_revision, payload]

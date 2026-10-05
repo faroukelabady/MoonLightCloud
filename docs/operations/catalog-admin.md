@@ -67,6 +67,13 @@ CANCELLED          Cancelled (only while nothing applied)
 Creation shows **Change queued**, never Saved. APPLIED shows
 **Applied on Retail — waiting for synchronization**, never converged.
 
+History pages use opaque keyset cursors (`next_cursor`): concurrent
+inserts never shift already-returned pages, so readers observe
+neither duplicates nor skips. Product list cursors are additionally
+bound to the exact Store+search scope that produced them — reuse
+under a different Store or search is rejected instead of silently
+continuing another scope's list.
+
 ## Offline Retail
 
 Commands stay durable PENDING while Retail is offline; the panel
