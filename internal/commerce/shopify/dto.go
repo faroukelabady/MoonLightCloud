@@ -16,10 +16,13 @@ const (
     id
     status
     metafields(first: 20, namespace: "moonlight") { nodes { namespace key value } }
-    variants(first: 50) {
+    options { id name }
+    variants(first: 100) {
       nodes {
         id
         sku
+        title
+        metafields(first: 10, namespace: "moonlight") { nodes { namespace key value } }
         inventoryItem {
           id
           tracked
@@ -195,8 +198,12 @@ type gqlVariant struct {
 }
 
 type gqlProduct struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Options []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"options"`
 	Metafields struct {
 		Nodes []gqlMetafield `json:"nodes"`
 	} `json:"metafields"`

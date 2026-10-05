@@ -361,6 +361,11 @@ func (d Devices) LoadProjectedOrder(ctx context.Context, providerKey, externalOr
 // from the same mapping rows in the same pass (no extra queries).
 func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.OrderSnapshot) (orders.OrderSnapshot, map[string]*string, error) {
 	unmapped := 0
+	// Phase 15-R2 F13: an order whose provider selection is unresolved
+	// is NEVER "fully mapped". Base-Product mapping completeness keeps
+	// its frozen meaning (unmapped_lines); the aggregate
+	// mapping_complete claim additionally requires resolved selections.
+	unresolvedSelections := 0
 	lineStores := map[string]*string{}
 	for i := range snapshot.Lines {
 		line := &snapshot.Lines[i]
@@ -425,8 +430,13 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 		line.Mapped = true
 		lineStores[productID] = storeString(mapping.StoreID)
 	}
+	for _, line := range snapshot.Lines {
+		if line.ConfigurationUnresolved {
+			unresolvedSelections++
+		}
+	}
 	snapshot.UnmappedLines = unmapped
-	snapshot.MappingComplete = unmapped == 0
+	snapshot.MappingComplete = unmapped == 0 && unresolvedSelections == 0
 	return snapshot, lineStores, nil
 }
 
@@ -568,10 +578,29 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
 	}
-	if err := q.DeleteCommerceOrderLines(ctx, sqlcgen.DeleteCommerceOrderLinesParams{
-		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
-	}); err != nil {
-		return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	// Phase 15-R2 F11: never delete-then-reinsert — that bypassed the
+	// snapshot-preserving ON CONFLICT entirely. Lines synchronize by
+	// stable provider line identity: surviving lines keep their first
+	// captured selection (labels, codes, delta, currency); only lines the
+	// provider no longer sends are removed. Same transaction as the
+	// header/line writes.
+	lineIDs := make([]int64, 0, len(snapshot.Lines))
+	for _, line := range snapshot.Lines {
+		lineIDs = append(lineIDs, line.ExternalLineID)
+	}
+	if len(lineIDs) > 0 {
+		if err := q.DeleteCommerceOrderLinesNotIn(ctx, sqlcgen.DeleteCommerceOrderLinesNotInParams{
+			ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
+			Column3: lineIDs,
+		}); err != nil {
+			return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		}
+	} else {
+		if err := q.DeleteCommerceOrderLines(ctx, sqlcgen.DeleteCommerceOrderLinesParams{
+			ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
+		}); err != nil {
+			return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+		}
 	}
 	if err := q.DeleteCommerceOrderAddresses(ctx, sqlcgen.DeleteCommerceOrderAddressesParams{
 		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
@@ -617,6 +646,11 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 		}
 	}
 	for _, address := range []orders.Address{snapshot.Billing, snapshot.Shipping} {
+		// Provider orders may omit billing/shipping addresses; empty
+		// kinds are never rows (the kind CHECK is authoritative).
+		if address.Kind == "" {
+			continue
+		}
 		if err := q.InsertCommerceOrderAddress(ctx, sqlcgen.InsertCommerceOrderAddressParams{
 			ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
 			Kind:      address.Kind,

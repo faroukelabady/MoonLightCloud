@@ -273,3 +273,13 @@ SELECT provider_key, external_order_id, order_number,
     store_id, projected_at, updated_at
 FROM commerce_online_orders
 WHERE provider_key = $1 AND external_order_id = $2 AND store_id = $3;
+
+-- name: DeleteCommerceOrderLinesNotIn :exec
+-- Phase 15-R2 F11: line synchronization by STABLE provider line identity.
+-- Lines the provider no longer sends are removed; every surviving line
+-- keeps its first captured selection snapshot (the INSERT's ON CONFLICT
+-- clause freezes those columns). No delete-then-reinsert: that bypassed
+-- snapshot preservation entirely.
+DELETE FROM commerce_online_order_lines
+WHERE provider_key = $1 AND external_order_id = $2
+  AND NOT (external_line_id = ANY($3::bigint[]));

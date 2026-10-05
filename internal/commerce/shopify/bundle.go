@@ -52,6 +52,29 @@ const (
 	noFrameVariantName     = "No Frame"
 )
 
+// productGID converts a persisted decimal external identity to the
+// GraphQL GID form used at the transport boundary (F07); GIDs pass
+// through unchanged. Persisted identity format is never rewritten.
+func productGID(externalOrGID string) (string, error) {
+	if strings.HasPrefix(externalOrGID, "gid://") {
+		return externalOrGID, nil
+	}
+	externalID, err := CanonicalDecimalID(externalOrGID)
+	if err != nil {
+		return "", commerce.ValidationError("shopify product identity is malformed")
+	}
+	return FormatGID(ResourceProduct, externalID), nil
+}
+
+// canonicalFromGID reduces a product GID to the persisted decimal form.
+func canonicalFromGID(gid string) string {
+	externalID, err := ParseGID(gid, ResourceProduct)
+	if err != nil {
+		return gid
+	}
+	return externalID
+}
+
 // metafieldValue reads one owned metafield value from a remote product.
 func metafieldValue(nodes []gqlMetafield, key string) string {
 	for _, field := range nodes {
@@ -68,13 +91,13 @@ const (
 	docBundleCreate = `mutation MoonlightBundleCreate($input: ProductBundleCreateInput!) {
   productBundleCreate(input: $input) {
     productBundleOperation { id status }
-    userErrors { message field code }
+    userErrors { message field }
   }
 }`
 	docBundleUpdate = `mutation MoonlightBundleUpdate($input: ProductBundleUpdateInput!) {
   productBundleUpdate(input: $input) {
     productBundleOperation { id status }
-    userErrors { message field code }
+    userErrors { message field }
   }
 }`
 	docBundleOperation = `query MoonlightBundleOperation($id: ID!) {
@@ -118,8 +141,10 @@ const (
 )
 
 // capabilityError is the stable permanent provider error for shops that
-// cannot represent frame options safely (§96/§216): bounded, no retry
-// storm, no unsafe fallback.
+// cannot represent frame options safely (§96/§216). Detail passes the
+// FROZEN Shopify scrub/bound contract (F19): remote text is scrubbed of
+// credentials and bounded exactly like every other provider error —
+// never concatenated raw into caller-visible messages.
 func capabilityError(detail string) error {
 	return commerce.ValidationError(CapabilityCode + ": " + detail)
 }
@@ -129,13 +154,13 @@ func capabilityError(detail string) error {
 // stable capability code. Network, throttle and unknown-side-effect
 // failures keep the frozen retry/F2 classification untouched (F06:
 // never classify every GraphQL error identically).
-func classifyBundleFailure(err error) error {
+func (p *ShopifyProvider) classifyBundleFailure(err error) error {
 	if err == nil {
 		return nil
 	}
 	var providerErr *commerce.ProviderError
 	if errors.As(err, &providerErr) && providerErr.Kind == commerce.ErrorValidation {
-		return capabilityError(providerErr.Message)
+		return capabilityError(p.client.safeMessage(providerErr.Message))
 	}
 	return err
 }
@@ -152,30 +177,36 @@ type bundleState struct {
 // returns the sellable identity (bundle parent) plus configuration
 // identities (configuration GID map, including the NO-FRAME sentinel).
 func (p *ShopifyProvider) syncShopifyConfigurations(ctx context.Context, req commerce.ProductUpsertRequest, baseProductID string) (string, map[string]string, error) {
-	// Currency-coherent choices only (F09): a configuration without a
-	// delta for the adapter currency is NOT a customer choice.
 	choices := chooseConfigurations(req.Product, p.currency)
 	state, err := p.discoverBundle(ctx, req, baseProductID)
 	if err != nil {
 		return "", nil, err
 	}
-	if state == nil {
-		frameComponentID, frameOptions, err := p.ensureFrameComponent(ctx, req, baseProductID, choices)
-		if err != nil {
-			return "", nil, err
-		}
-		bundleID, err := p.createBundle(ctx, req, baseProductID, frameComponentID, frameOptions, choices)
-		if err != nil {
-			return "", nil, err
-		}
-		state = &bundleState{bundleProductID: bundleID, baseComponentID: baseProductID, frameComponentID: frameComponentID}
-	}
-	// Converge component selection + prices on the discovered/created
-	// bundle; identities come from variant configuration metadata (F08).
-	if err := p.convergeBundleComponents(ctx, state, req, choices); err != nil {
+	// F09: the frame component's explicit combination set converges on
+	// EVERY pass (create or existing) BEFORE bundle convergence is
+	// claimed — disabled/missing-currency choices stop being represented.
+	frameID, optionIDs, err := p.ensureFrameComponent(ctx, req, baseProductID, choices)
+	if err != nil {
 		return "", nil, err
 	}
-	identities, err := p.bundleVariantIdentities(ctx, state.bundleProductID, req.Product)
+	if state == nil {
+		bundleID, err := p.createBundle(ctx, req, baseProductID, frameID, frameComponentOptions(optionIDs, choices), choices)
+		if err != nil {
+			return "", nil, err
+		}
+		state = &bundleState{bundleProductID: bundleID, baseComponentID: baseProductID, frameComponentID: frameID}
+	} else {
+		state.frameComponentID = frameID
+		if err := p.bundleUpdate(ctx, state.bundleProductID, state.baseComponentID, frameID, frameComponentOptions(optionIDs, choices)); err != nil {
+			return "", nil, err
+		}
+	}
+	// F08: establish/confirm ownership-proven configuration identity on
+	// the sellable bundle variants (metadata-stamped; establishment tuples
+	// are collision-disambiguated so they can never merge identities),
+	// then apply exact prices. An empty/partial map with intended choices
+	// is a bounded failure — never synchronized success.
+	identities, err := p.establishBundleVariantIdentity(ctx, state.bundleProductID, req, choices)
 	if err != nil {
 		return "", nil, err
 	}
@@ -189,6 +220,11 @@ func (p *ShopifyProvider) syncShopifyConfigurations(ctx context.Context, req com
 // metadata on the base component (F07): recovery after lost responses
 // re-adopts the SAME resources; nothing is ever created blindly.
 func (p *ShopifyProvider) discoverBundle(ctx context.Context, req commerce.ProductUpsertRequest, baseProductID string) (*bundleState, error) {
+	baseGID, err := productGID(baseProductID)
+	if err != nil {
+		return nil, err
+	}
+	baseProductID = baseGID
 	base, err := p.loadProduct(ctx, baseProductID)
 	if err != nil {
 		return nil, err
@@ -254,30 +290,63 @@ const keyBundleParentID = "bundle_parent_id"
 // ensureFrameComponent creates OR adopts the untracked frame component
 // (F07 recovery). Ownership metadata proves the tuple; a lost create
 // response re-adopts the same component.
-func (p *ShopifyProvider) ensureFrameComponent(ctx context.Context, req commerce.ProductUpsertRequest, baseProductID string, choices []commerce.CommerceConfiguration) (string, []map[string]any, error) {
-	if existing, err := p.discoverByRole(ctx, roleFrameComponent, req.ProductID); err != nil {
+func (p *ShopifyProvider) ensureFrameComponent(ctx context.Context, req commerce.ProductUpsertRequest, baseProductID string, choices []commerce.CommerceConfiguration) (string, map[string]string, error) {
+	styleValues := frameStyleValues(choices)
+	colorValues := frameColorValues(choices)
+	variantInputs := frameComponentVariants(choices)
+	optionsInput := []map[string]any{
+		{"name": "Frame Style", "values": optionValueList(styleValues)},
+		{"name": "Frame Color", "values": optionValueList(colorValues)},
+	}
+	// Ownership-first discovery (F07 recovery): a lost create response
+	// re-adopts the same component; nothing is created blindly.
+	existing, err := p.discoverByRole(ctx, roleFrameComponent, req.ProductID)
+	if err != nil {
 		return "", nil, err
-	} else if existing != "" {
+	}
+	if existing != "" {
 		state, err := p.loadProduct(ctx, existing)
 		if err != nil {
 			return "", nil, err
 		}
-		if metafieldValue(state.Metafields.Nodes, metafieldProductID) != req.ProductID || metafieldValue(state.Metafields.Nodes, metafieldProviderKey) != string(p.key) {
-			return "", nil, capabilityError("frame component ownership mismatch")
+		if metafieldValue(state.Metafields.Nodes, metafieldProductID) != req.ProductID ||
+			metafieldValue(state.Metafields.Nodes, metafieldProviderKey) != string(p.key) {
+			return "", nil, capabilityError(p.client.safeMessage("frame component ownership mismatch"))
 		}
-		return existing, frameComponentOptions(choices), nil
+		// F09: converge the EXISTING component's explicit combination set.
+		input := map[string]any{
+			"id":             existing,
+			"productOptions": optionsInput,
+			"variants":       variantInputs,
+		}
+		var out struct {
+			ProductSet struct {
+				Product struct {
+					Options []struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					} `json:"options"`
+				} `json:"product"`
+				UserErrors []struct {
+					Message string `json:"message"`
+				} `json:"userErrors"`
+			} `json:"productSet"`
+		}
+		if err := p.classifyBundleFailure(p.client.do(ctx, docFrameComponentSet, map[string]any{"input": input}, &out)); err != nil {
+			return "", nil, err
+		}
+		if len(out.ProductSet.UserErrors) > 0 {
+			return "", nil, capabilityError(p.client.safeMessage(out.ProductSet.UserErrors[0].Message))
+		}
+		return existing, optionIDsFrom(out.ProductSet.Product.Options), nil
 	}
-	options := frameComponentOptions(choices)
 	input := map[string]any{
-		"title":       frameComponentTitle(req.Product),
-		"productType": "MoonLight Frame",
-		"status":      "DRAFT",
-		"metafields":  componentMetafields(req, roleFrameComponent),
-		"productOptions": []map[string]any{
-			{"name": "Frame Style", "values": frameStyleValues(choices)},
-			{"name": "Frame Color", "values": frameColorValues(choices)},
-		},
-		"variants": frameComponentVariants(choices),
+		"title":          frameComponentTitle(req.Product),
+		"productType":    "MoonLight Frame",
+		"status":         "DRAFT",
+		"metafields":     componentMetafields(req, roleFrameComponent),
+		"productOptions": optionsInput,
+		"variants":       variantInputs,
 	}
 	var out struct {
 		ProductSet struct {
@@ -293,34 +362,41 @@ func (p *ShopifyProvider) ensureFrameComponent(ctx context.Context, req commerce
 			} `json:"userErrors"`
 		} `json:"productSet"`
 	}
-	if err := p.client.do(ctx, docFrameComponentSet, map[string]any{"input": input}, &out); err != nil {
-		return "", nil, classifyBundleFailure(err)
+	if err := p.classifyBundleFailure(p.client.do(ctx, docFrameComponentSet, map[string]any{"input": input}, &out)); err != nil {
+		return "", nil, err
 	}
 	if len(out.ProductSet.UserErrors) > 0 {
-		return "", nil, capabilityError(out.ProductSet.UserErrors[0].Message)
+		return "", nil, capabilityError(p.client.safeMessage(out.ProductSet.UserErrors[0].Message))
 	}
 	if out.ProductSet.Product.ID == "" {
-		// Ambiguous create (response unusable): recover by ownership
-		// discovery instead of issuing another blind create (F07).
 		found, err := p.discoverByRole(ctx, roleFrameComponent, req.ProductID)
 		if err != nil {
 			return "", nil, err
 		}
 		if found == "" {
-			return "", nil, capabilityError("frame component identity missing")
+			return "", nil, capabilityError(p.client.safeMessage("frame component identity missing"))
 		}
 		out.ProductSet.Product.ID = found
 	}
-	// Record role ownership on the BASE component for restart-safe
-	// recovery (with ownerId — standalone metafieldsSet requires it, F06).
 	if err := p.setOwnership(ctx, baseProductID, []map[string]any{
 		{"ownerId": baseProductID, "namespace": metafieldNamespace, "key": keyFrameComponentID, "type": "single_line_text_field", "value": out.ProductSet.Product.ID},
 	}); err != nil {
 		return "", nil, err
 	}
-	options = frameComponentOptions(choices)
-	_ = out.ProductSet.Product.Options
-	return out.ProductSet.Product.ID, options, nil
+	return out.ProductSet.Product.ID, optionIDsFrom(out.ProductSet.Product.Options), nil
+}
+
+// optionIDsFrom maps option names to their provider option identifiers
+// (F06: optionSelections require componentOptionId).
+func optionIDsFrom(options []struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}) map[string]string {
+	ids := make(map[string]string, len(options))
+	for _, option := range options {
+		ids[option.Name] = option.ID
+	}
+	return ids
 }
 
 // createBundle creates the distinct sellable bundle parent through the
@@ -342,15 +418,16 @@ func (p *ShopifyProvider) createBundle(ctx context.Context, req commerce.Product
 		},
 	}
 	var out struct {
-		ProductBundleOperation struct {
-			OperationID string `json:"id"`
-		} `json:"productBundleOperation"`
-		UserErrors []struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"userErrors"`
+		ProductBundleCreate struct {
+			ProductBundleOperation struct {
+				OperationID string `json:"id"`
+			} `json:"productBundleOperation"`
+			UserErrors []struct {
+				Message string `json:"message"`
+			} `json:"userErrors"`
+		} `json:"productBundleCreate"`
 	}
-	err = classifyBundleFailure(p.client.do(ctx, docBundleCreate, map[string]any{"input": input}, &out))
+	err = p.classifyBundleFailure(p.client.do(ctx, docBundleCreate, map[string]any{"input": input}, &out))
 	if err != nil {
 		// Ambiguous create: the bundle may already exist (response lost).
 		if found, findErr := p.discoverByRole(ctx, roleBundleParent, req.ProductID); findErr == nil && found != "" {
@@ -358,10 +435,10 @@ func (p *ShopifyProvider) createBundle(ctx context.Context, req commerce.Product
 		}
 		return "", err
 	}
-	if len(out.UserErrors) > 0 {
-		return "", capabilityError(out.UserErrors[0].Message)
+	if len(out.ProductBundleCreate.UserErrors) > 0 {
+		return "", capabilityError(p.client.safeMessage(out.ProductBundleCreate.UserErrors[0].Message))
 	}
-	operationID := out.ProductBundleOperation.OperationID
+	operationID := out.ProductBundleCreate.ProductBundleOperation.OperationID
 	if operationID == "" {
 		return "", capabilityError("bundle operation missing")
 	}
@@ -410,7 +487,7 @@ func (p *ShopifyProvider) awaitBundleOperation(ctx context.Context, operationID 
 	}
 	for attempt := 0; attempt < 6; attempt++ {
 		if err := p.client.do(ctx, docBundleOperation, map[string]any{"id": operationID}, &out); err != nil {
-			return "", classifyBundleFailure(err)
+			return "", p.classifyBundleFailure(err)
 		}
 		switch strings.ToUpper(out.ProductOperation.Status) {
 		case "COMPLETE":
@@ -420,26 +497,12 @@ func (p *ShopifyProvider) awaitBundleOperation(ctx context.Context, operationID 
 			return out.ProductOperation.Product.ID, nil
 		case "FAILED":
 			if len(out.ProductOperation.UserErrors) > 0 {
-				return "", capabilityError(out.ProductOperation.UserErrors[0].Message)
+				return "", capabilityError(p.client.safeMessage(out.ProductOperation.UserErrors[0].Message))
 			}
 			return "", capabilityError("bundle operation failed")
 		}
 	}
 	return "", commerce.TemporaryError("bundle operation pending")
-}
-
-// convergeBundleComponents attaches base + frame components to the
-// sellable bundle with the enabled, currency-coherent choices only (F09).
-func (p *ShopifyProvider) convergeBundleComponents(ctx context.Context, state *bundleState, req commerce.ProductUpsertRequest, choices []commerce.CommerceConfiguration) error {
-	if state.frameComponentID == "" {
-		frameID, options, err := p.ensureFrameComponent(ctx, req, state.baseComponentID, choices)
-		if err != nil {
-			return err
-		}
-		state.frameComponentID = frameID
-		return p.bundleUpdate(ctx, state.bundleProductID, state.baseComponentID, frameID, options)
-	}
-	return p.bundleUpdate(ctx, state.bundleProductID, state.baseComponentID, state.frameComponentID, frameComponentOptions(choices))
 }
 
 func (p *ShopifyProvider) bundleUpdate(ctx context.Context, bundleID, baseComponentID, frameComponentID string, options []map[string]any) error {
@@ -461,7 +524,7 @@ func (p *ShopifyProvider) bundleUpdate(ctx context.Context, bundleID, baseCompon
 		} `json:"productBundleUpdate"`
 	}
 	if err := p.client.do(ctx, docBundleUpdate, map[string]any{"input": input}, &out); err != nil {
-		return classifyBundleFailure(err)
+		return p.classifyBundleFailure(err)
 	}
 	if len(out.ProductBundleUpdate.UserErrors) > 0 {
 		return capabilityError(out.ProductBundleUpdate.UserErrors[0].Message)
@@ -509,6 +572,88 @@ func chooseConfigurations(product commerce.CommerceProduct, currency string) []c
 
 // bundleVariantIdentities loads the bundle variants and maps identity
 // from stable metadata (F08).
+// establishBundleVariantIdentity establishes and CONFIRMS the
+// ownership-proven configuration identity of every sellable bundle
+// variant (F08). Establishment matches the collision-disambiguated
+// explicit combination tuple exactly once — never labels alone, never
+// array position, never arbitrary first-match — and stamps the
+// configuration_id metadata (including the NO-FRAME sentinel). All later
+// reads use that metadata, so renames/reorders never change identity.
+// An empty or partial map with intended choices is a bounded failure.
+func (p *ShopifyProvider) establishBundleVariantIdentity(ctx context.Context, bundleProductID string, req commerce.ProductUpsertRequest, choices []commerce.CommerceConfiguration) (map[string]string, error) {
+	state, err := p.loadProduct(ctx, bundleProductID)
+	if err != nil {
+		return nil, err
+	}
+	styleValues := frameStyleValues(choices)
+	colorValues := frameColorValues(choices)
+	type tuple struct{ style, color, configurationID string }
+	tuples := []tuple{{styleValues[0], colorValues[0], commerce.NoFrameConfigurationID}}
+	for index, configuration := range choices {
+		tuples = append(tuples, tuple{styleValues[index+1], colorValues[index+1], configuration.ConfigurationID})
+	}
+	identities := map[string]string{}
+	var stamps []map[string]any
+	seen := map[string]string{}
+	for _, variant := range state.Variants.Nodes {
+		if stamped := metafieldValue(variant.Metafields.Nodes, keyConfigurationIDMeta); stamped != "" {
+			identities[stamped] = variant.ID
+			seen[stamped] = variant.ID
+			continue
+		}
+		for _, entry := range tuples {
+			want := entry.style + " / " + entry.color
+			if entry.style == noFrameVariantName && entry.color == noFrameVariantName {
+				want = noFrameVariantName
+			}
+			if variant.Title != want {
+				continue
+			}
+			if _, taken := seen[entry.configurationID]; taken {
+				return nil, capabilityError(p.client.safeMessage("ambiguous bundle variant identity"))
+			}
+			seen[entry.configurationID] = variant.ID
+			identities[entry.configurationID] = variant.ID
+			stamps = append(stamps, map[string]any{
+				"id": variant.ID,
+				"metafields": []map[string]any{{
+					"namespace": metafieldNamespace, "key": keyConfigurationIDMeta,
+					"value": entry.configurationID, "type": "single_line_text_field",
+				}},
+			})
+			break
+		}
+	}
+	if len(stamps) > 0 {
+		var out struct {
+			ProductVariantsBulkUpdate struct {
+				UserErrors []struct {
+					Message string `json:"message"`
+				} `json:"userErrors"`
+			} `json:"productVariantsBulkUpdate"`
+		}
+		if err := p.client.do(ctx, docVariantPrices, map[string]any{
+			"productId": bundleProductID, "variants": stamps,
+		}, &out); err != nil {
+			return nil, err
+		}
+		if len(out.ProductVariantsBulkUpdate.UserErrors) > 0 {
+			return nil, commerce.ValidationError(p.client.safeMessage(out.ProductVariantsBulkUpdate.UserErrors[0].Message))
+		}
+	}
+	// Complete-map guard (F08): every intended choice plus NO-FRAME must
+	// map exactly once — empty/partial maps are never synchronized success.
+	for _, entry := range tuples {
+		if _, ok := identities[entry.configurationID]; !ok {
+			return nil, capabilityError(p.client.safeMessage("bundle variant identity incomplete"))
+		}
+	}
+	if len(identities) == 0 {
+		return nil, capabilityError(p.client.safeMessage("bundle variant identity missing"))
+	}
+	return identities, nil
+}
+
 func (p *ShopifyProvider) bundleVariantIdentities(ctx context.Context, bundleProductID string, product commerce.CommerceProduct) (map[string]string, error) {
 	state, err := p.loadProduct(ctx, bundleProductID)
 	if err != nil {
@@ -574,19 +719,30 @@ func (p *ShopifyProvider) setBundleVariantPrices(ctx context.Context, bundleProd
 	}
 	// F10: nested mutation userErrors must surface as bounded failures.
 	if len(out.ProductVariantsBulkUpdate.UserErrors) > 0 {
-		return commerce.ValidationError("bundle price refusal: " + out.ProductVariantsBulkUpdate.UserErrors[0].Message)
+		return commerce.ValidationError(p.client.safeMessage("bundle price refusal: " + out.ProductVariantsBulkUpdate.UserErrors[0].Message))
 	}
 	return nil
 }
 
-// frameComponentOptions are the option selections advertised to the
-// bundle for the enabled, currency-coherent choices (explicit valid
-// combinations only — never a Cartesian product).
-func frameComponentOptions(choices []commerce.CommerceConfiguration) []map[string]any {
+// frameComponentOptions builds bundle optionSelections carrying the
+// component option IDENTIFIERS (F06): OptionSetInput values are
+// option-value objects and ProductBundleComponentOptionSelectionInput
+// requires componentOptionId — never bare strings, never labels as
+// identity (F08).
+func frameComponentOptions(optionIDs map[string]string, choices []commerce.CommerceConfiguration) []map[string]any {
 	return []map[string]any{
-		{"name": "Frame Style", "values": frameStyleValues(choices)},
-		{"name": "Frame Color", "values": frameColorValues(choices)},
+		{"componentOptionId": optionIDs["Frame Style"], "name": "Frame Style", "values": frameStyleValues(choices)},
+		{"componentOptionId": optionIDs["Frame Color"], "name": "Frame Color", "values": frameColorValues(choices)},
 	}
+}
+
+// optionValueList renders OptionSetInput values (objects, F06).
+func optionValueList(values []string) []map[string]any {
+	out := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		out = append(out, map[string]any{"name": value})
+	}
+	return out
 }
 
 // frameComponentVariants lists EXPLICIT valid combinations (§13) as
@@ -654,28 +810,35 @@ func bundleTitle(product commerce.CommerceProduct) string {
 	return product.SKU
 }
 
+// frameStyleValues builds the DISTINCT customer-facing option values.
+// Equal display labels never collapse distinct identities (F08): a
+// colliding label is deterministically disambiguated with its stable
+// machine code (identity-backed text, never an arbitrary guess).
 func frameStyleValues(choices []commerce.CommerceConfiguration) []string {
 	values := []string{noFrameVariantName}
 	seen := map[string]bool{noFrameVariantName: true}
 	for _, configuration := range choices {
-		value := displayLabel(configuration.StyleNameEN, configuration.StyleNameAR)
-		if !seen[value] {
-			seen[value] = true
-			values = append(values, value)
-		}
+		value := disambiguatedLabel(displayLabel(configuration.StyleNameEN, configuration.StyleNameAR), configuration.StyleCode, seen)
+		values = append(values, value)
 	}
 	return values
+}
+
+func disambiguatedLabel(label, code string, seen map[string]bool) string {
+	value := label
+	if seen[value] {
+		value = label + " (" + code + ")"
+	}
+	seen[value] = true
+	return value
 }
 
 func frameColorValues(choices []commerce.CommerceConfiguration) []string {
 	values := []string{noFrameVariantName}
 	seen := map[string]bool{noFrameVariantName: true}
 	for _, configuration := range choices {
-		value := displayLabel(configuration.ColorNameEN, configuration.ColorNameAR)
-		if !seen[value] {
-			seen[value] = true
-			values = append(values, value)
-		}
+		value := disambiguatedLabel(displayLabel(configuration.ColorNameEN, configuration.ColorNameAR), configuration.ColorCode, seen)
+		values = append(values, value)
 	}
 	return values
 }

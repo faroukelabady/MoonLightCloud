@@ -136,10 +136,11 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	if len(upserted.ExternalProductID) > 200 {
 		return SyncResult{}, apperr.New(apperr.Internal, "provider returned overlong external product id")
 	}
-	if mapped && mapping.ExternalProductID != upserted.ExternalProductID {
-		// The adapter claims a different remote identity than the
-		// durable mapping: never silently remap. Inventory is not
-		// addressed while identity is disputed.
+	if mapped && mapping.ExternalProductID != upserted.ExternalProductID && !upserted.SellableTransition {
+		// The adapter claims a different remote identity WITHOUT the
+		// authorized-transition marker: never silently remap (generic
+		// protection, F07). Inventory is not addressed while identity is
+		// disputed.
 		return SyncResult{}, apperr.New(apperr.Conflict, fmt.Sprintf(
 			"provider mapping conflict for %s/%s: mapped %q, adapter returned %q",
 			key, productID, mapping.ExternalProductID, upserted.ExternalProductID))

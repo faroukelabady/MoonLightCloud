@@ -31,6 +31,10 @@ func mutationOutcomeComplete(document string, data json.RawMessage) bool {
 		root, primary = "productSet", "product"
 	case docBundleUpdate:
 		root, primary = "productBundleUpdate", "productBundleOperation"
+	case docBundleCreate:
+		// Phase 15-R2 F06: the bundle-create mutation settles under the
+		// same definitive-evidence standard as every other mutation.
+		root, primary = "productBundleCreate", "productBundleOperation"
 	case docVariantPrices:
 		root, primary = "productVariantsBulkUpdate", "productVariants"
 	default:

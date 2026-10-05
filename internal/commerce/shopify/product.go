@@ -83,11 +83,20 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 		// bundle parent only after the base/frame/bundle representation
 		// and its ownership records are coherent. The base product keeps
 		// its remote identity and tracked inventory item (§116).
-		bundleID, identities, err := p.syncShopifyConfigurations(ctx, req, result.ExternalProductID)
+		baseGID, err := productGID(result.ExternalProductID)
 		if err != nil {
 			return commerce.ProductUpsertResult{}, err
 		}
-		result.ExternalProductID = bundleID
+		bundleID, identities, err := p.syncShopifyConfigurations(ctx, req, baseGID)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		if bundleID != "" && bundleID != baseGID {
+			// F07: narrow authorized simple→framed sellable transition —
+			// ownership/role proven by the bundle adoption above.
+			result.ExternalProductID = canonicalFromGID(bundleID)
+			result.SellableTransition = true
+		}
 		result.Configurations = identities
 	}
 	return result, nil

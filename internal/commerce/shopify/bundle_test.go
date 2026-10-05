@@ -7,6 +7,7 @@ package shopify
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -121,15 +122,76 @@ func TestBundlePriceRefusalIsBounded(t *testing.T) {
 // capability code; unknown/temporary failures keep frozen retry
 // semantics (never a blanket reclassification).
 func TestBundleCapabilityClassification(t *testing.T) {
-	permanent := classifyBundleFailure(commerce.ValidationError("invalid schema"))
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	permanent := provider.classifyBundleFailure(commerce.ValidationError("invalid schema"))
 	if permanent == nil || !strings.Contains(permanent.Error(), CapabilityCode) {
 		t.Fatalf("deterministic refusal must map to the capability code: %v", permanent)
 	}
 	temporary := commerce.TemporaryError("connection reset")
-	if classifyBundleFailure(temporary) != temporary {
+	if provider.classifyBundleFailure(temporary) != temporary {
 		t.Fatal("temporary failures must keep frozen retry classification")
 	}
-	if classifyBundleFailure(nil) != nil {
+	if provider.classifyBundleFailure(nil) != nil {
 		t.Fatal("nil stays nil")
+	}
+}
+
+// F19: every bundle failure path routes through the frozen scrub/bound
+// contract — remote messages never carry credentials or unbounded text.
+func TestBundleErrorsAreScrubbedAndBounded(t *testing.T) {
+	h := newHarness(t)
+	provider := newTestProvider(t, h)
+	secret := "shpat_synthetic_secret_value_1234567890"
+	oversized := strings.Repeat("A", 2000) + " token=" + secret
+	h.failStatus["MoonlightVariantPrices"] = 200
+	h.failBody["MoonlightVariantPrices"] = `{"data":{"productVariantsBulkUpdate":{"productVariants":[],"userErrors":[{"field":["variants"],"message":` + strconv.Quote(oversized) + `}]}}}`
+	usd := int64(2500)
+	product := commerce.CommerceProduct{
+		ProductID: "p1", SKU: "S1",
+		Prices: []commerce.Money{{Currency: "EGP", AmountMinor: 100000}},
+		Configurations: []commerce.CommerceConfiguration{
+			frameConfig("11111111-0000-4000-8000-0000000000c1", "classic", "black", "Classic", "Black", 30000, &usd, true),
+		},
+	}
+	var err error
+	coord := fixtureCoordinator{}
+	err = coord.WithProductSync(context.Background(), provider.Key(), "p1", func(held context.Context) error {
+		return provider.setBundleVariantPrices(held, "gid://shopify/Product/7", product,
+			map[string]string{"11111111-0000-4000-8000-0000000000c1": "gid://shopify/ProductVariant/10"}, product.Configurations)
+	})
+	if err == nil {
+		t.Fatal("refusal must surface")
+	}
+	message := err.Error()
+	if strings.Contains(message, secret) {
+		t.Fatal("provider secret leaked into the error boundary")
+	}
+	if len(message) > 512 {
+		t.Fatalf("error text unbounded: %d bytes", len(message))
+	}
+	t.Logf("bounded error length=%d", len(message))
+}
+
+// F08: equal display labels never collapse identities (deterministic
+// code-suffixed option values) and never invent cross-product choices.
+func TestEqualLabelsStayDistinct(t *testing.T) {
+	usd := int64(1)
+	choices := []commerce.CommerceConfiguration{
+		frameConfig("11111111-0000-4000-8000-0000000000c1", "classic", "black", "Classic", "Black", 100, &usd, true),
+		frameConfig("11111111-0000-4000-8000-0000000000c2", "classic", "black", "Classic", "Black", 200, &usd, true),
+	}
+	styles := frameStyleValues(choices)
+	colors := frameColorValues(choices)
+	if styles[1] == styles[2] {
+		t.Fatalf("equal labels collapsed: %v", styles)
+	}
+	if colors[1] == colors[2] {
+		t.Fatalf("equal color labels collapsed: %v", colors)
+	}
+	// Explicit combinations only: two tuples, no Cartesian extras.
+	variants := frameComponentVariants(choices)
+	if len(variants) != 3 { // NO-FRAME + 2 explicit configurations
+		t.Fatalf("combinations must be explicit rows, got %d", len(variants))
 	}
 }

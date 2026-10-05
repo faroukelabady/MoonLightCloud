@@ -325,5 +325,21 @@ order_line_unresolved = {
     "configuration_unresolved": True,
 }
 check("order_line_unresolved", "DashboardOrderLine", order_line_unresolved)
+
+# Phase 15-R2 F15: the configuration event must validate through the
+# FULL published SyncEvent union (and SyncBatch), not only its leaf.
+config_envelope = {
+    "event_id": "22222222-2222-4222-8222-222222222222",
+    "device_id": "11111111-1111-4111-8111-111111111111",
+    "event_type": "catalog.product.configuration.snapshot.v1",
+    "occurred_at": "2026-10-05T00:00:00Z",
+    "payload": config_snapshot,
+}
+check("sync_event_union_configuration", "SyncEvent", config_envelope)
+bad_envelope = dict(config_envelope)
+bad_envelope["payload"] = dict(config_snapshot, configurations=[dict(config_entry, price_delta_egp_cents=-5)])
+check("sync_event_union_configuration_rejects_bad_leaf", "SyncEvent", bad_envelope, expect_valid=False)
+batch = {"events": [config_envelope]}
+check("sync_batch_configuration", "SyncBatch", batch)
 print("openapi fixture parity: PASS")
 PYEOF

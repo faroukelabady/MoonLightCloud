@@ -1904,6 +1904,7 @@ components:
         - $ref: '#/components/schemas/CatalogProductSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
         - $ref: '#/components/schemas/InventoryProductSnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogProductConfigurationsSnapshotV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type

@@ -286,6 +286,11 @@ func definitiveGraphQLRefusal(envelope gqlEnvelope) bool {
 		}
 		switch e.Extensions.Code {
 		case "THROTTLED", "ACCESS_DENIED", "UNAUTHENTICATED", "FORBIDDEN":
+		case "GRAPHQL_VALIDATION_FAILED":
+			// Phase 15-R2 F06: documented pre-execution request
+			// validation refusal — the document never ran, so there is no
+			// remote side effect to remain uncertain about. Same strict
+			// evidence standard: message + code, no data key, no paths.
 		default:
 			return false
 		}
@@ -308,6 +313,10 @@ func (c *Client) classifyGraphQLErrors(envelope gqlEnvelope) error {
 		return commerce.RateLimitedError(message, throttleHint(envelope.Extensions.Cost))
 	case "ACCESS_DENIED", "UNAUTHENTICATED", "FORBIDDEN":
 		return commerce.AuthenticationError(message)
+	case "GRAPHQL_VALIDATION_FAILED":
+		// Deterministic pre-execution schema/contract refusal: bounded
+		// permanent validation failure (F06), never a retry storm.
+		return commerce.ValidationError(message)
 	default:
 		// HTTP 200 with an error body is not a validated success; the
 		// mutation outcome is unknown and stays durably blocked.

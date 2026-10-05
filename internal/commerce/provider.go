@@ -140,6 +140,12 @@ type ProductUpsertRequest struct {
 type ProductUpsertResult struct {
 	ExternalProductID string
 	Configurations    map[string]string
+	// SellableTransition (Phase 15-R2 F07) marks a NARROW authorized
+	// simple↔framed sellable-identity transition: the adapter has proven
+	// ownership/role of the new identity before returning it. Without
+	// this marker a differing returned identity stays the frozen mapping
+	// conflict (generic protection against arbitrary remapping).
+	SellableTransition bool
 }
 
 // InventoryUpdateRequest asks the adapter to set provider-facing

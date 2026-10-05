@@ -223,6 +223,28 @@ func (q *Queries) DeleteCommerceOrderLines(ctx context.Context, arg DeleteCommer
 	return err
 }
 
+const deleteCommerceOrderLinesNotIn = `-- name: DeleteCommerceOrderLinesNotIn :exec
+DELETE FROM commerce_online_order_lines
+WHERE provider_key = $1 AND external_order_id = $2
+  AND NOT (external_line_id = ANY($3::bigint[]))
+`
+
+type DeleteCommerceOrderLinesNotInParams struct {
+	ProviderKey     string  `json:"provider_key"`
+	ExternalOrderID string  `json:"external_order_id"`
+	Column3         []int64 `json:"column_3"`
+}
+
+// Phase 15-R2 F11: line synchronization by STABLE provider line identity.
+// Lines the provider no longer sends are removed; every surviving line
+// keeps its first captured selection snapshot (the INSERT's ON CONFLICT
+// clause freezes those columns). No delete-then-reinsert: that bypassed
+// snapshot preservation entirely.
+func (q *Queries) DeleteCommerceOrderLinesNotIn(ctx context.Context, arg DeleteCommerceOrderLinesNotInParams) error {
+	_, err := q.db.Exec(ctx, deleteCommerceOrderLinesNotIn, arg.ProviderKey, arg.ExternalOrderID, arg.Column3)
+	return err
+}
+
 const finishCommerceWebhookEvent = `-- name: FinishCommerceWebhookEvent :execrows
 UPDATE commerce_online_order_webhook_events
 SET status = $5, next_attempt_at = $6, processed_at = $7,
