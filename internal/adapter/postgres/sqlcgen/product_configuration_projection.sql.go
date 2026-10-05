@@ -251,7 +251,7 @@ func (q *Queries) ListCommerceProductConfigurationMappings(ctx context.Context, 
 	return items, nil
 }
 
-const upsertCatalogProductConfiguration = `-- name: UpsertCatalogProductConfiguration :exec
+const upsertCatalogProductConfiguration = `-- name: UpsertCatalogProductConfiguration :execrows
 
 INSERT INTO catalog_product_configurations (
     configuration_id, product_id, kind,
@@ -263,7 +263,6 @@ INSERT INTO catalog_product_configurations (
     source_payload_hash, source_received_at, projected_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, now())
 ON CONFLICT (configuration_id) DO UPDATE SET
-    product_id = excluded.product_id,
     kind = excluded.kind,
     style_code = excluded.style_code,
     style_name_ar = excluded.style_name_ar,
@@ -282,6 +281,7 @@ ON CONFLICT (configuration_id) DO UPDATE SET
     source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
     projected_at = now()
+WHERE catalog_product_configurations.product_id = excluded.product_id
 `
 
 type UpsertCatalogProductConfigurationParams struct {
@@ -308,8 +308,11 @@ type UpsertCatalogProductConfigurationParams struct {
 
 // Phase 15: Product configuration projection (Retail-authoritative
 // current state) + durable provider configuration identity.
-func (q *Queries) UpsertCatalogProductConfiguration(ctx context.Context, arg UpsertCatalogProductConfigurationParams) error {
-	_, err := q.db.Exec(ctx, upsertCatalogProductConfiguration,
+// Immutable configuration→Product ownership (Phase 15-R1 F17): a
+// configuration ID belonging to another Product/Store is NEVER adopted;
+// the guarded update affects zero rows and the projector blocks.
+func (q *Queries) UpsertCatalogProductConfiguration(ctx context.Context, arg UpsertCatalogProductConfigurationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertCatalogProductConfiguration,
 		arg.ConfigurationID,
 		arg.ProductID,
 		arg.Kind,
@@ -330,7 +333,10 @@ func (q *Queries) UpsertCatalogProductConfiguration(ctx context.Context, arg Ups
 		arg.SourcePayloadHash,
 		arg.SourceReceivedAt,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertCommerceProductConfigurationMapping = `-- name: UpsertCommerceProductConfigurationMapping :one

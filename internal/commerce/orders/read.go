@@ -76,6 +76,12 @@ type OrderStatusEvent struct {
 // OrderDetail is the full operator-visible order.
 type OrderDetail struct {
 	Summary OrderSummary `json:"summary"`
+	// SelectionUnresolvedLines/SelectionComplete (Phase 15-R1 F13) are
+	// the explicit selection-truthfulness companion to the frozen base
+	// mapping_complete semantics: an unknown provider selection is never
+	// presented as fully resolved. Backward compatible additive fields.
+	SelectionUnresolvedLines int  `json:"selection_unresolved_lines"`
+	SelectionComplete        bool `json:"selection_complete"`
 	// StoreID echoes the applied ownership scope (UUID or null global).
 	StoreID            *string            `json:"store_id"`
 	DiscountMinor      string             `json:"discount_minor"`

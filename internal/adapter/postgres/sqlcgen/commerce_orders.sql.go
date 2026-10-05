@@ -571,6 +571,19 @@ INSERT INTO commerce_online_order_lines (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 )
+ON CONFLICT (provider_key, external_order_id, external_line_id) DO UPDATE SET
+    external_product_id = excluded.external_product_id,
+    variation_id = excluded.variation_id,
+    sku = excluded.sku,
+    name = excluded.name,
+    quantity = excluded.quantity,
+    subtotal_minor = excluded.subtotal_minor,
+    subtotal_tax_minor = excluded.subtotal_tax_minor,
+    total_minor = excluded.total_minor,
+    total_tax_minor = excluded.total_tax_minor,
+    moonlight_product_id = excluded.moonlight_product_id,
+    mapped = excluded.mapped,
+    unsupported_reason = excluded.unsupported_reason
 `
 
 type InsertCommerceOrderLineParams struct {
@@ -601,6 +614,11 @@ type InsertCommerceOrderLineParams struct {
 	ConfigurationUnresolved      bool        `json:"configuration_unresolved"`
 }
 
+// Phase 15-R1 F11: the captured selection snapshot is IMMUTABLE. Later
+// status refresh, retry, catalog rename/reprice/disable or mapping repair
+// may evolve provider money and base mapping state under the frozen
+// reconciliation rules, but can never substitute current configuration
+// values for the purchase-time selection.
 func (q *Queries) InsertCommerceOrderLine(ctx context.Context, arg InsertCommerceOrderLineParams) error {
 	_, err := q.db.Exec(ctx, insertCommerceOrderLine,
 		arg.ProviderKey,
@@ -772,7 +790,10 @@ const listCommerceOrderLines = `-- name: ListCommerceOrderLines :many
 SELECT provider_key, external_order_id, external_line_id,
     external_product_id, variation_id, sku, name, quantity,
     subtotal_minor, subtotal_tax_minor, total_minor, total_tax_minor,
-    moonlight_product_id, mapped, unsupported_reason
+    moonlight_product_id, mapped, unsupported_reason,
+    configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
+    frame_color_code, frame_color_name_ar, frame_color_name_en,
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
 FROM commerce_online_order_lines
 WHERE provider_key = $1 AND external_order_id = $2
 ORDER BY external_line_id
@@ -783,33 +804,15 @@ type ListCommerceOrderLinesParams struct {
 	ExternalOrderID string `json:"external_order_id"`
 }
 
-type ListCommerceOrderLinesRow struct {
-	ProviderKey        string      `json:"provider_key"`
-	ExternalOrderID    string      `json:"external_order_id"`
-	ExternalLineID     int64       `json:"external_line_id"`
-	ExternalProductID  string      `json:"external_product_id"`
-	VariationID        int64       `json:"variation_id"`
-	Sku                string      `json:"sku"`
-	Name               string      `json:"name"`
-	Quantity           int64       `json:"quantity"`
-	SubtotalMinor      int64       `json:"subtotal_minor"`
-	SubtotalTaxMinor   int64       `json:"subtotal_tax_minor"`
-	TotalMinor         int64       `json:"total_minor"`
-	TotalTaxMinor      int64       `json:"total_tax_minor"`
-	MoonlightProductID pgtype.UUID `json:"moonlight_product_id"`
-	Mapped             bool        `json:"mapped"`
-	UnsupportedReason  string      `json:"unsupported_reason"`
-}
-
-func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOrderLinesParams) ([]ListCommerceOrderLinesRow, error) {
+func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOrderLinesParams) ([]CommerceOnlineOrderLine, error) {
 	rows, err := q.db.Query(ctx, listCommerceOrderLines, arg.ProviderKey, arg.ExternalOrderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListCommerceOrderLinesRow{}
+	items := []CommerceOnlineOrderLine{}
 	for rows.Next() {
-		var i ListCommerceOrderLinesRow
+		var i CommerceOnlineOrderLine
 		if err := rows.Scan(
 			&i.ProviderKey,
 			&i.ExternalOrderID,
@@ -826,6 +829,16 @@ func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOr
 			&i.MoonlightProductID,
 			&i.Mapped,
 			&i.UnsupportedReason,
+			&i.ConfigurationID,
+			&i.FrameStyleCode,
+			&i.FrameStyleNameAr,
+			&i.FrameStyleNameEn,
+			&i.FrameColorCode,
+			&i.FrameColorNameAr,
+			&i.FrameColorNameEn,
+			&i.ConfigurationPriceDeltaMinor,
+			&i.ProviderConfigurationID,
+			&i.ConfigurationUnresolved,
 		); err != nil {
 			return nil, err
 		}

@@ -160,6 +160,17 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 		result.MappingCreated = true
 	}
 
+	// Phase 15-R1 F07/§116: the sellable remote identity may transition
+	// (simple→framed bundle parent). The transition is a compare-and-set
+	// on the existing mapping — a concurrent different identity is never
+	// clobbered and no abandoned conflicting mapping is created.
+	if mapped && upserted.ExternalProductID != "" {
+		if _, err := s.mappings.UpdateProductMappingExternal(ctx, key, productID,
+			mapping.ExternalProductID, upserted.ExternalProductID); err != nil {
+			return SyncResult{}, err
+		}
+	}
+
 	// Phase 15 §64: persist provider configuration identity durably; a
 	// failure here stops before SetInventory and a retry re-adopts the
 	// owned remote representation (never a duplicate variation).

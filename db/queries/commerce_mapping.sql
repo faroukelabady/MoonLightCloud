@@ -37,3 +37,12 @@ SELECT provider_key, product_id, external_product_id, store_id, created_at, upda
 FROM commerce_product_mappings
 WHERE provider_key = $1 AND store_id = $2
 ORDER BY product_id;
+
+-- name: UpdateCommerceProductMappingExternal :one
+-- Phase 15-R1 F07 (§116): compare-and-set sellable-identity transition.
+-- Only the currently recorded external identity may be replaced; a
+-- concurrent different mapping is never clobbered.
+UPDATE commerce_product_mappings
+SET external_product_id = $4, updated_at = now()
+WHERE provider_key = $1 AND product_id = $2 AND external_product_id = $3
+RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at;

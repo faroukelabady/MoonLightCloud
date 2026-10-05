@@ -2936,7 +2936,11 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		}
 		return done, nil
 	}
-	if err := lockCatalogEntities(ctx, q, [2]string{"product", valid.ProductID}); err != nil {
+	lockKeys := [][2]string{{"product", valid.ProductID}}
+	for _, entry := range valid.Configurations {
+		lockKeys = append(lockKeys, [2]string{"product-configuration", entry.ConfigurationID})
+	}
+	if err := lockCatalogEntities(ctx, q, lockKeys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
@@ -2952,6 +2956,36 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+	// Phase 15-R1 F17: the TRUSTED ingress Store context recorded with
+	// the accepted event must authorize mutation of this Product's
+	// configurations. The payload never supplies Store identity and the
+	// device's CURRENT binding is never re-derived here.
+	if _, scopeOK := resolveProjectionScope(productRow.StoreID, event.StoreID); !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "configuration event not authorized for product store")
+	}
+	// Phase 15-R1 F17: configuration ID → Product ownership is immutable.
+	// A supplied ID already owned by another Product/Store is rejected —
+	// an upsert may never reassign product_id.
+	for _, entry := range valid.Configurations {
+		configurationUID, err := parseUUID(entry.ConfigurationID)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrValidation, "configuration_id must be a UUID")
+		}
+		row, err := q.CatalogProductConfigurationByID(ctx, configurationUID)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				_ = tx.Rollback(ctx)
+				return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration ownership lookup failed")
+			}
+			continue
+		}
+		if uuidString(row.ProductID) != valid.ProductID {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "configuration identity owned by another product")
+		}
 	}
 	storedRows, err := q.CatalogProductConfigurationsByProduct(ctx, puid)
 	if err != nil {
@@ -3000,12 +3034,19 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		if entry.PriceDeltaUSDCents != nil {
 			params.PriceDeltaUsdMinor = pgtype.Int8{Int64: *entry.PriceDeltaUSDCents, Valid: true}
 		}
-		if err := q.UpsertCatalogProductConfiguration(ctx, params); err != nil {
+		written, err := q.UpsertCatalogProductConfiguration(ctx, params)
+		if err != nil {
 			_ = tx.Rollback(ctx)
 			if isUniqueViolation(err) {
 				return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "configuration identity collision")
 			}
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration upsert failed")
+		}
+		// The guarded ON CONFLICT clause never moves product_id (F17):
+		// zero affected rows means the ID belongs to another Product.
+		if written == 0 {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "configuration identity owned by another product")
 		}
 	}
 	if _, err := q.BumpCatalogProductConfigurationRevision(ctx, sqlcgen.BumpCatalogProductConfigurationRevisionParams{

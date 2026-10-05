@@ -273,5 +273,57 @@ check("order detail", "DashboardOrderDetail", {
 bad_order = copy.deepcopy(order_summary)
 bad_order["total_minor"] = 9007199254740993
 check("order unsafe money", "DashboardOrderSummary", bad_order, expect_valid=False)
+
+# Phase 15-R1 F15: configuration snapshot + order selection contract.
+config_entry = {
+    "configuration_id": "11111111-0000-4000-8000-0000000000c1",
+    "kind": "frame",
+    "style_code": "classic", "style_name_ar": "كلاسيكي", "style_name_en": "Classic",
+    "color_code": "black", "color_name_ar": "أسود", "color_name_en": "Black",
+    "price_delta_egp_cents": 30000, "price_delta_usd_cents": 2500,
+    "enabled": True, "position": 0, "configuration_revision": 1,
+}
+config_snapshot = {
+    "product_id": "11111111-0000-4000-8000-0000000000aa",
+    "configurations": [config_entry],
+    "configuration_revision": 3,
+}
+check("configuration_snapshot", "CatalogProductConfigurationsSnapshotV1", config_snapshot)
+bad_sentinel = dict(config_snapshot, configurations=[dict(config_entry,
+    configuration_id="00000000-0000-0000-0000-000000000000")])
+check("configuration_sentinel_identity", "CatalogProductConfigurationsSnapshotV1", bad_sentinel, expect_valid=False)
+bad_delta = dict(config_snapshot, configurations=[dict(config_entry, price_delta_egp_cents=-1)])
+check("configuration_negative_delta", "CatalogProductConfigurationsSnapshotV1", bad_delta, expect_valid=False)
+# Cross-item style/color uniqueness is NOT JSON-Schema expressible; it is
+# enforced by the authoritative configuration validator and DB constraint
+# (Go tests: duplicate style+color and duplicate canonical IDs rejected).
+bad_null_usd = dict(config_snapshot, configurations=[dict(config_entry, price_delta_usd_cents=None)])
+check("configuration_null_usd_distinct", "CatalogProductConfigurationsSnapshotV1", bad_null_usd)
+order_line_selection = {
+    "external_line_id": 1, "external_product_id": "1000", "variation_id": 2000,
+    "sku": "ML-1", "name": "Papyrus", "quantity": 1, "total_minor": "130000", "mapped": True,
+    "configuration_id": "11111111-0000-4000-8000-0000000000c1",
+    "frame_style_code": "classic", "frame_style_name_ar": "كلاسيكي", "frame_style_name_en": "Classic",
+    "frame_color_code": "black", "frame_color_name_ar": "أسود", "frame_color_name_en": "Black",
+    "configuration_price_delta_minor": "30000",
+    "provider_configuration_id": "gid://shopify/ProductVariant/1",
+    "configuration_unresolved": False,
+}
+check("order_line_selection", "DashboardOrderLine", order_line_selection)
+order_line_noframe = {
+    "external_line_id": 2, "external_product_id": "1000", "variation_id": 0,
+    "sku": "ML-1", "name": "Papyrus", "quantity": 1, "total_minor": "100000", "mapped": True,
+    "configuration_id": None,
+    "configuration_unresolved": False,
+}
+check("order_line_noframe", "DashboardOrderLine", order_line_noframe)
+order_line_unresolved = {
+    "external_line_id": 3, "external_product_id": "1000", "variation_id": 2001,
+    "sku": "ML-1", "name": "Papyrus", "quantity": 1, "total_minor": "100000", "mapped": True,
+    "configuration_id": None,
+    "provider_configuration_id": "9999",
+    "configuration_unresolved": True,
+}
+check("order_line_unresolved", "DashboardOrderLine", order_line_unresolved)
 print("openapi fixture parity: PASS")
 PYEOF

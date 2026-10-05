@@ -1864,7 +1864,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -1916,6 +1916,7 @@ components:
           catalog.product.snapshot.v1: '#/components/schemas/CatalogProductSnapshotV1Event'
           catalog.product.sales_policy.snapshot.v1: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
           inventory.product.snapshot.v1: '#/components/schemas/InventoryProductSnapshotV1Event'
+          catalog.product.configuration.snapshot.v1: '#/components/schemas/CatalogProductConfigurationsSnapshotV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -2022,6 +2023,56 @@ components:
               enum: [inventory.product.snapshot.v1]
             payload:
               $ref: '#/components/schemas/InventoryProductSnapshotV1'
+    CatalogProductConfigurationsSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.product.configuration.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogProductConfigurationsSnapshotV1'
+    CatalogProductConfigurationsSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [product_id, configurations, configuration_revision]
+      description: >
+        Complete ONLINE product-option (frame configuration) state of one
+        Product at one aggregate configuration revision (Phase 15). Valid
+        combinations are explicit rows — never a Cartesian generation.
+        A frame configuration is not a Product: no SKU, no stock. The
+        integration-only NO-FRAME sentinel is never a configuration id.
+      properties:
+        product_id: {type: string, format: uuid}
+        configuration_revision: {type: integer, minimum: 1}
+        configurations:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/CatalogProductConfigurationEntry'}
+    CatalogProductConfigurationEntry:
+      type: object
+      additionalProperties: false
+      required: [configuration_id, kind, style_code, style_name_ar, color_code, color_name_ar, price_delta_egp_cents, enabled, position, configuration_revision]
+      properties:
+        configuration_id:
+          type: string
+          format: uuid
+          not: {enum: ['00000000-0000-0000-0000-000000000000']}
+          description: 'Stable identity; the zero UUID sentinel is rejected — it is integration-only NO-FRAME state.'
+        kind: {type: string, enum: [frame]}
+        style_code: {type: string, minLength: 1, maxLength: 32}
+        style_name_ar: {type: string, minLength: 1, maxLength: 100}
+        style_name_en: {type: string, nullable: true, minLength: 1, maxLength: 100}
+        color_code: {type: string, minLength: 1, maxLength: 32}
+        color_name_ar: {type: string, minLength: 1, maxLength: 100}
+        color_name_en: {type: string, nullable: true, minLength: 1, maxLength: 100}
+        price_delta_egp_cents: {type: integer, minimum: 0, maximum: 1000000000000, description: 'Exact int64 minor units; never float; never FX.'}
+        price_delta_usd_cents: {type: integer, nullable: true, minimum: 0, maximum: 1000000000000, description: 'NULL = the choice is not offered in USD; never inferred from EGP.'}
+        enabled: {type: boolean}
+        position: {type: integer, minimum: 0}
+        configuration_revision: {type: integer, minimum: 1}
     CatalogName:
       type: object
       additionalProperties: false
@@ -3167,6 +3218,8 @@ components:
       type: object
       required: [summary, discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, prices_include_tax, payment_method, payment_method_title, customer_first_name, customer_last_name, customer_email, customer_phone, lines, addresses, status_history]
       properties:
+        selection_unresolved_lines: {type: integer, description: 'Lines whose provider selection could not be resolved (F13).'}
+        selection_complete: {type: boolean, description: 'False when any line selection is unresolved; companion to base mapping_complete.'}
         summary: {$ref: '#/components/schemas/DashboardOrderSummary'}
         store_id:
           type: string
@@ -3208,6 +3261,16 @@ components:
         total_minor: {type: string, description: Exact minor units.}
         moonlight_product_id: {type: string, format: uuid, nullable: true}
         mapped: {type: boolean}
+        configuration_id: {type: string, format: uuid, nullable: true, description: 'Purchase-time selection; NULL for NO-FRAME and legacy lines. Immutable (Phase 15-R1 F11).'}
+        frame_style_code: {type: string, nullable: true}
+        frame_style_name_ar: {type: string, nullable: true}
+        frame_style_name_en: {type: string, nullable: true}
+        frame_color_code: {type: string, nullable: true}
+        frame_color_name_ar: {type: string, nullable: true}
+        frame_color_name_en: {type: string, nullable: true}
+        configuration_price_delta_minor: {type: string, nullable: true, description: 'Exact minor units in the ORDER currency; NULL = no delta defined for that currency. Never FX, never EGP fallback.'}
+        provider_configuration_id: {type: string, nullable: true, description: 'Raw bounded provider identity for the selection.'}
+        configuration_unresolved: {type: boolean, description: 'True when the provider selection could not be resolved to a known configuration (F13 truthfulness).'}
     DashboardOrderAddress:
       type: object
       required: [kind, first_name, last_name, company, address_1, address_2, city, state, postcode, country, email, phone]

@@ -40,6 +40,8 @@ func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
 		res, err = d.ProjectProduct(ctx, rec, time.Now())
 	case catalog.EventProductSalesPolicySnapshotV1:
 		res, err = d.ProjectProductSalesPolicy(ctx, rec, time.Now())
+	case catalog.EventProductConfigurationSnapshotV1:
+		res, err = d.ProjectProductConfigurations(ctx, rec, time.Now())
 	case catalog.EventInventoryProductSnapshotV1:
 		res, err = d.ProjectProductInventory(ctx, rec, time.Now())
 	default:

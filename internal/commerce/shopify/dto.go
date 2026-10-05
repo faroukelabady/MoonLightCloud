@@ -187,7 +187,11 @@ type gqlInventoryItem struct {
 type gqlVariant struct {
 	ID            string            `json:"id"`
 	SKU           string            `json:"sku"`
+	Title         string            `json:"title"`
 	InventoryItem *gqlInventoryItem `json:"inventoryItem"`
+	Metafields    struct {
+		Nodes []gqlMetafield `json:"nodes"`
+	} `json:"metafields"`
 }
 
 type gqlProduct struct {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"strconv"
 	"strings"
 	"time"
@@ -391,11 +392,17 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 				// projected configuration is copied into the order line,
 				// never joined later.
 				resolved := uuidString(mapping.ConfigurationID)
-				line.ConfigurationID = &resolved
-				if row, err := q.CatalogProductConfigurationByID(ctx, mapping.ConfigurationID); err == nil {
-					snapshotConfiguration(line, row)
-				} else if !errors.Is(err, pgx.ErrNoRows) {
-					return orders.OrderSnapshot{}, nil, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+				// Phase 15-R1 F14: the zero sentinel is an integration
+				// mapping key only — a NO-FRAME selection normalizes to
+				// "no business configuration" while the raw provider
+				// identity is preserved above.
+				if resolved != catalog.NoFrameSentinelID {
+					line.ConfigurationID = &resolved
+					if row, err := q.CatalogProductConfigurationByID(ctx, mapping.ConfigurationID); err == nil {
+						snapshotConfiguration(line, row, snapshot.Currency)
+					} else if !errors.Is(err, pgx.ErrNoRows) {
+						return orders.OrderSnapshot{}, nil, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+					}
 				}
 			}
 		}
@@ -426,7 +433,7 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 // snapshotConfiguration copies the selection into the order line at
 // ingestion (§56/§57/§58): historical display and pricing survive later
 // rename, delta changes and disabling.
-func snapshotConfiguration(line *orders.OrderLine, row sqlcgen.CatalogProductConfigurationByIDRow) {
+func snapshotConfiguration(line *orders.OrderLine, row sqlcgen.CatalogProductConfigurationByIDRow, currency string) {
 	styleCode := row.StyleCode
 	line.FrameStyleCode = &styleCode
 	styleAR := row.StyleNameAr
@@ -443,8 +450,18 @@ func snapshotConfiguration(line *orders.OrderLine, row sqlcgen.CatalogProductCon
 		value := row.ColorNameEn.String
 		line.FrameColorNameEN = &value
 	}
-	delta := row.PriceDeltaEgpMinor
-	line.ConfigurationPriceDeltaMinor = &delta
+	// Phase 15-R1 F12: the delta is captured in the ORDER's currency.
+	// A currency without a defined delta stays NULL — never zero, never
+	// the other currency's value, never FX.
+	if strings.EqualFold(currency, "USD") {
+		if row.PriceDeltaUsdMinor.Valid {
+			delta := row.PriceDeltaUsdMinor.Int64
+			line.ConfigurationPriceDeltaMinor = &delta
+		}
+	} else {
+		delta := row.PriceDeltaEgpMinor
+		line.ConfigurationPriceDeltaMinor = &delta
+	}
 }
 
 // deriveOrderStore resolves the single proven Store for a reconciled
@@ -772,16 +789,7 @@ func (d Devices) GetOrderDetail(ctx context.Context, providerKey, externalOrderI
 		detail.CompletedAt = &completed
 	}
 	for _, line := range lines {
-		view := orders.OrderLineView{
-			ExternalLineID: line.ExternalLineID, ExternalProductID: line.ExternalProductID,
-			VariationID: line.VariationID, SKU: line.Sku, Name: line.Name,
-			Quantity: line.Quantity, TotalMinor: orders.MinorString(line.TotalMinor),
-			Mapped: line.Mapped,
-		}
-		if line.MoonlightProductID.Valid {
-			productID := uuidString(line.MoonlightProductID)
-			view.MoonlightProduct = &productID
-		}
+		view := orderLineViewFromRow(line)
 		detail.Lines = append(detail.Lines, view)
 	}
 	for _, address := range addresses {
@@ -1011,16 +1019,7 @@ func (d Devices) GetOrderDetailForStore(ctx context.Context, storeID, providerKe
 		detail.CompletedAt = &completed
 	}
 	for _, line := range lines {
-		view := orders.OrderLineView{
-			ExternalLineID: line.ExternalLineID, ExternalProductID: line.ExternalProductID,
-			VariationID: line.VariationID, SKU: line.Sku, Name: line.Name,
-			Quantity: line.Quantity, TotalMinor: orders.MinorString(line.TotalMinor),
-			Mapped: line.Mapped,
-		}
-		if line.MoonlightProductID.Valid {
-			productID := uuidString(line.MoonlightProductID)
-			view.MoonlightProduct = &productID
-		}
+		view := orderLineViewFromRow(line)
 		detail.Lines = append(detail.Lines, view)
 	}
 	for _, address := range addresses {
@@ -1090,4 +1089,46 @@ func int8FromPtr(value *int64) pgtype.Int8 {
 		return pgtype.Int8{}
 	}
 	return pgtype.Int8{Int64: *value, Valid: true}
+}
+
+// orderLineViewFromRow exposes the stored immutable selection snapshot
+// (Phase 15-R1 F13): persisted values only — no current-catalog join —
+// including the truthful unresolved flag for unknown provider
+// selections (never presented as resolved, never hidden).
+func orderLineViewFromRow(line sqlcgen.CommerceOnlineOrderLine) orders.OrderLineView {
+	view := orders.OrderLineView{
+		ExternalLineID: line.ExternalLineID, ExternalProductID: line.ExternalProductID,
+		VariationID: line.VariationID, SKU: line.Sku, Name: line.Name,
+		Quantity: line.Quantity, TotalMinor: orders.MinorString(line.TotalMinor),
+		Mapped:                  line.Mapped,
+		ProviderConfigurationID: line.ProviderConfigurationID.String,
+		ConfigurationUnresolved: line.ConfigurationUnresolved,
+	}
+	if line.MoonlightProductID.Valid {
+		productID := uuidString(line.MoonlightProductID)
+		view.MoonlightProduct = &productID
+	}
+	if line.ConfigurationID.Valid {
+		value := uuidString(line.ConfigurationID)
+		view.ConfigurationID = &value
+	}
+	view.FrameStyleCode = optionalTextPtr(line.FrameStyleCode)
+	view.FrameStyleNameAR = optionalTextPtr(line.FrameStyleNameAr)
+	view.FrameStyleNameEN = optionalTextPtr(line.FrameStyleNameEn)
+	view.FrameColorCode = optionalTextPtr(line.FrameColorCode)
+	view.FrameColorNameAR = optionalTextPtr(line.FrameColorNameAr)
+	view.FrameColorNameEN = optionalTextPtr(line.FrameColorNameEn)
+	if line.ConfigurationPriceDeltaMinor.Valid {
+		value := orders.MinorString(line.ConfigurationPriceDeltaMinor.Int64)
+		view.ConfigurationPriceDeltaMinor = &value
+	}
+	return view
+}
+
+func optionalTextPtr(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	out := value.String
+	return &out
 }

@@ -1,7 +1,7 @@
 -- Phase 15: Product configuration projection (Retail-authoritative
 -- current state) + durable provider configuration identity.
 
--- name: UpsertCatalogProductConfiguration :exec
+-- name: UpsertCatalogProductConfiguration :execrows
 INSERT INTO catalog_product_configurations (
     configuration_id, product_id, kind,
     style_code, style_name_ar, style_name_en,
@@ -12,7 +12,6 @@ INSERT INTO catalog_product_configurations (
     source_payload_hash, source_received_at, projected_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, now())
 ON CONFLICT (configuration_id) DO UPDATE SET
-    product_id = excluded.product_id,
     kind = excluded.kind,
     style_code = excluded.style_code,
     style_name_ar = excluded.style_name_ar,
@@ -30,7 +29,11 @@ ON CONFLICT (configuration_id) DO UPDATE SET
     source_device_id = excluded.source_device_id,
     source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    projected_at = now();
+    projected_at = now()
+-- Immutable configuration→Product ownership (Phase 15-R1 F17): a
+-- configuration ID belonging to another Product/Store is NEVER adopted;
+-- the guarded update affects zero rows and the projector blocks.
+WHERE catalog_product_configurations.product_id = excluded.product_id;
 
 -- name: DeleteCatalogProductConfigurations :exec
 DELETE FROM catalog_product_configurations WHERE product_id = $1;

@@ -151,3 +151,48 @@ func TestWooVariationMappingLossRecovery(t *testing.T) {
 		t.Fatalf("recovered identities missing: %v", result.Configurations)
 	}
 }
+
+// Phase 15-R1 F05: a variation carrying OUR configuration marker but a
+// FOREIGN Product/provider marker is never adopted or overwritten —
+// ownership is the full tuple, never the marker alone. Unmarked manual
+// variations are equally untouched.
+func TestWooForeignVariationNeverAdopted(t *testing.T) {
+	harness := newWooHarness(t, testConsumerKey, testConsumerSec)
+	provider := testProvider(t, harness)
+	product := framedProduct("11111111-0000-4000-8000-0000000000cc")
+
+	// Foreign variation: our configuration id, foreign Product/provider.
+	harness.preloadVariation(1000, 9001, map[string]any{
+		"id": 9001, "regular_price": "1.00",
+		"meta_data": []any{
+			map[string]any{"key": metaConfigurationID, "value": "11111111-0000-4000-8000-0000000000c1"},
+			map[string]any{"key": metaProductID, "value": "someone-elses-product"},
+			map[string]any{"key": metaProviderKey, "value": "not-" + string(provider.Key())},
+		},
+	})
+	// Manual variation: no ownership metadata at all.
+	harness.preloadVariation(1000, 9002, map[string]any{
+		"id": 9002, "regular_price": "2.00", "meta_data": []any{},
+	})
+
+	result, err := provider.UpsertProduct(context.Background(), commerce.ProductUpsertRequest{
+		ProviderKey: provider.Key(), ProductID: product.ProductID,
+		Product: product, Published: true, CatalogRevision: 1, PolicyRevision: 1,
+		OperationKey: "op-key-foreign",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range harness.recorded() {
+		if request.Method == "PUT" && strings.Contains(request.Path, "/variations/9001") {
+			t.Fatal("foreign variation was overwritten (marker-only adoption)")
+		}
+		if request.Method == "PUT" && strings.Contains(request.Path, "/variations/9002") {
+			t.Fatal("manual variation was overwritten")
+		}
+	}
+	// The configuration still converges — through OUR OWN new variation.
+	if result.Configurations["11111111-0000-4000-8000-0000000000c1"] == "9001" {
+		t.Fatal("foreign variation adopted as our configuration identity")
+	}
+}

@@ -229,6 +229,10 @@ func (p13Mappings) GetProductMapping(context.Context, ProviderKey, string) (Prod
 func (p13Mappings) GetProductConfigurationMapping(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
 	return ProductConfigurationMapping{}, errMappingNotFoundStub()
 }
+
+func (p13Mappings) UpdateProductMappingExternal(_ context.Context, providerKey ProviderKey, productID, expectedExternalID, newExternalID string) (ProductMapping, error) {
+	return ProductMapping{ProviderKey: providerKey, ProductID: productID, ExternalProductID: newExternalID}, nil
+}
 func (p13Mappings) FindConfigurationByExternal(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
 	return ProductConfigurationMapping{}, errMappingNotFoundStub()
 }

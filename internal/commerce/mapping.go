@@ -39,6 +39,11 @@ type ProductMappingRepository interface {
 	// the same external ID for a different product, is a mapping
 	// conflict. PostgreSQL uniqueness constraints are the backstop.
 	CreateProductMapping(ctx context.Context, providerKey ProviderKey, productID, externalID string) (ProductMapping, error)
+	// UpdateProductMappingExternal performs the documented Phase 15
+	// simple→framed sellable-identity transition (§116): a
+	// compare-and-set replace of the external identity that never
+	// clobbers a concurrent different mapping.
+	UpdateProductMappingExternal(ctx context.Context, providerKey ProviderKey, productID, expectedExternalID, newExternalID string) (ProductMapping, error)
 }
 
 // ProductConfigurationMapping is durable provider identity for one

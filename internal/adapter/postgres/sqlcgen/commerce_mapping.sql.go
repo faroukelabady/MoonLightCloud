@@ -216,3 +216,48 @@ func (q *Queries) ListCommerceProductMappingsForStore(ctx context.Context, arg L
 	}
 	return items, nil
 }
+
+const updateCommerceProductMappingExternal = `-- name: UpdateCommerceProductMappingExternal :one
+UPDATE commerce_product_mappings
+SET external_product_id = $4, updated_at = now()
+WHERE provider_key = $1 AND product_id = $2 AND external_product_id = $3
+RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at
+`
+
+type UpdateCommerceProductMappingExternalParams struct {
+	ProviderKey         string      `json:"provider_key"`
+	ProductID           pgtype.UUID `json:"product_id"`
+	ExternalProductID   string      `json:"external_product_id"`
+	ExternalProductID_2 string      `json:"external_product_id_2"`
+}
+
+type UpdateCommerceProductMappingExternalRow struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Phase 15-R1 F07 (§116): compare-and-set sellable-identity transition.
+// Only the currently recorded external identity may be replaced; a
+// concurrent different mapping is never clobbered.
+func (q *Queries) UpdateCommerceProductMappingExternal(ctx context.Context, arg UpdateCommerceProductMappingExternalParams) (UpdateCommerceProductMappingExternalRow, error) {
+	row := q.db.QueryRow(ctx, updateCommerceProductMappingExternal,
+		arg.ProviderKey,
+		arg.ProductID,
+		arg.ExternalProductID,
+		arg.ExternalProductID_2,
+	)
+	var i UpdateCommerceProductMappingExternalRow
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.ExternalProductID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

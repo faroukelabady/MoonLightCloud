@@ -79,13 +79,15 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 	// migration); the base component keeps its remote identity and its
 	// inventory item untouched.
 	if len(req.Product.Configurations) > 0 {
-		identities, err := p.syncShopifyConfigurations(ctx, req, result.ExternalProductID)
+		// Phase 15-R1 F07: the sellable identity becomes the DISTINCT
+		// bundle parent only after the base/frame/bundle representation
+		// and its ownership records are coherent. The base product keeps
+		// its remote identity and tracked inventory item (§116).
+		bundleID, identities, err := p.syncShopifyConfigurations(ctx, req, result.ExternalProductID)
 		if err != nil {
 			return commerce.ProductUpsertResult{}, err
 		}
-		if err := p.setBundleVariantPrices(ctx, req, result.ExternalProductID, identities); err != nil {
-			return commerce.ProductUpsertResult{}, err
-		}
+		result.ExternalProductID = bundleID
 		result.Configurations = identities
 	}
 	return result, nil

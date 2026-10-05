@@ -138,6 +138,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
 	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
 	sync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, ValidateCatalogProductInventoryPayload)
+	sync.RegisterEventType(catalog.EventProductConfigurationSnapshotV1, ValidateCatalogProductConfigurationsPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store

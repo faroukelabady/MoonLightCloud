@@ -265,3 +265,29 @@ func configurationMappingFromRow(row sqlcgen.CommerceProductConfigurationMapping
 	}
 	return mapping
 }
+
+// UpdateProductMappingExternal is the Phase 15-R1 F07 (§116) documented
+// simple→framed sellable-identity transition: compare-and-set, never a
+// blind overwrite.
+func (d Devices) UpdateProductMappingExternal(ctx context.Context, providerKey commerce.ProviderKey, productID, expectedExternalID, newExternalID string) (commerce.ProductMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if expectedExternalID == newExternalID {
+		return d.GetProductMapping(ctx, providerKey, productID)
+	}
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return commerce.ProductMapping{}, apperr.New(apperr.InvalidInput, "product_id must be a UUID")
+	}
+	row, err := sqlcgen.New(d.pool).UpdateCommerceProductMappingExternal(ctx, sqlcgen.UpdateCommerceProductMappingExternalParams{
+		ProviderKey: string(providerKey), ProductID: puid,
+		ExternalProductID: expectedExternalID, ExternalProductID_2: newExternalID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return commerce.ProductMapping{}, apperr.New(apperr.Conflict, "commerce mapping changed concurrently")
+		}
+		return commerce.ProductMapping{}, apperr.Wrap(apperr.Internal, "commerce mapping transition", redact(err))
+	}
+	return commerceMappingFromRow(row.ProviderKey, row.ProductID, row.ExternalProductID, row.StoreID, row.CreatedAt, row.UpdatedAt), nil
+}

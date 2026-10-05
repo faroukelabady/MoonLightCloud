@@ -452,3 +452,20 @@ func (h *wooHarness) serveVariations(w http.ResponseWriter, r *http.Request, par
 		h.writeWooError(w, http.StatusMethodNotAllowed, "woocommerce_rest_invalid_method", "Method not allowed.")
 	}
 }
+
+// preloadVariation seeds one variation for ownership/recovery tests.
+func (h *wooHarness) preloadVariation(productID, variationID int64, body map[string]any) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.variations == nil {
+		h.variations = map[int64]map[int64]map[string]any{}
+	}
+	if h.variations[productID] == nil {
+		h.variations[productID] = map[int64]map[string]any{}
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["id"] = variationID
+	h.variations[productID][variationID] = body
+}

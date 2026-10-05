@@ -38,7 +38,7 @@ const (
 // the desired configuration state. Returns the owned variation identity
 // per configuration ("" for the implicit NO-FRAME choice).
 func (p *WooCommerceProvider) syncWooVariations(ctx context.Context, externalProductID string, product commerce.CommerceProduct) (map[string]string, error) {
-	existing, err := p.listOwnedVariations(ctx, externalProductID)
+	existing, err := p.listOwnedVariations(ctx, externalProductID, product.ProductID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (p *WooCommerceProvider) createVariation(ctx context.Context, externalProdu
 	if err != nil {
 		// Lost-response recovery: the remote may already own the
 		// variation. Search by ownership before reporting failure.
-		if owned, findErr := p.listOwnedVariations(ctx, externalProductID); findErr == nil {
+		if owned, findErr := p.listOwnedVariations(ctx, externalProductID, metaValue(payload.MetaData, metaProductID)); findErr == nil {
 			for _, variation := range owned {
 				if variationConfigurationID(variation) == metaValue(payload.MetaData, metaConfigurationID) {
 					return variation.ID, nil
@@ -136,9 +136,14 @@ func (p *WooCommerceProvider) createVariation(ctx context.Context, externalProdu
 	return result.ID, nil
 }
 
-// listOwnedVariations returns MoonLight-owned variations indexed by
-// configuration identity. Foreign/manual variations are ignored (§89).
-func (p *WooCommerceProvider) listOwnedVariations(ctx context.Context, externalProductID string) (map[string]wooVariation, error) {
+// listOwnedVariations returns variations proven to belong to THIS
+// provider + Product + configuration tuple (Phase 15-R1 F05): a
+// configuration marker alone is never sufficient — foreign or
+// contradictory Product/provider markers are ignored (never adopted,
+// never overwritten). Discovery is also complete-or-fail: an exhausted
+// bounded scan is a safe error, never proof of absence that could cause
+// a duplicate create.
+func (p *WooCommerceProvider) listOwnedVariations(ctx context.Context, externalProductID, productID string) (map[string]wooVariation, error) {
 	owned := make(map[string]wooVariation)
 	for page := 1; page <= 4; page++ {
 		var batch []wooVariation
@@ -147,15 +152,22 @@ func (p *WooCommerceProvider) listOwnedVariations(ctx context.Context, externalP
 			return nil, err
 		}
 		for _, variation := range batch {
-			if configurationID := variationConfigurationID(variation); configurationID != "" {
-				owned[configurationID] = variation
+			configurationID := variationConfigurationID(variation)
+			if configurationID == "" {
+				continue
 			}
+			// Full ownership tuple: configuration + Product + provider.
+			if metaValue(variation.MetaData, metaProductID) != productID ||
+				metaValue(variation.MetaData, metaProviderKey) != string(p.key) {
+				continue
+			}
+			owned[configurationID] = variation
 		}
 		if len(batch) < 100 {
-			break
+			return owned, nil
 		}
 	}
-	return owned, nil
+	return nil, fmt.Errorf("woo variation discovery: bounded scan exhausted; ownership not established")
 }
 
 func variationConfigurationID(variation wooVariation) string {

@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/google/uuid"
 )
 
 // EventProductConfigurationSnapshotV1 is the complete ONLINE product
@@ -70,10 +72,15 @@ func ValidateProductConfigurationsSnapshot(snapshot ProductConfigurationsSnapsho
 		return snapshot, fmt.Errorf("invalid %s: too many configurations", EventProductConfigurationSnapshotV1)
 	}
 	seen := make(map[string]bool, len(snapshot.Configurations))
+	idSeen := make(map[string]bool, len(snapshot.Configurations))
+	normalized := make([]ProductConfigurationEntry, 0, len(snapshot.Configurations))
 	for _, entry := range snapshot.Configurations {
-		if !isUUID(entry.ConfigurationID) {
-			return snapshot, fmt.Errorf("invalid %s: configuration_id must be a UUID", EventProductConfigurationSnapshotV1)
+		canonical, err := canonicalConfigurationID(entry.ConfigurationID)
+		if err != nil {
+			return snapshot, err
 		}
+		entry.ConfigurationID = canonical
+		normalized = append(normalized, entry)
 		if entry.Kind != ConfigurationKindFrame {
 			return snapshot, fmt.Errorf("invalid %s: unsupported configuration kind", EventProductConfigurationSnapshotV1)
 		}
@@ -103,8 +110,32 @@ func ValidateProductConfigurationsSnapshot(snapshot ProductConfigurationsSnapsho
 			return snapshot, fmt.Errorf("invalid %s: duplicate style/color combination", EventProductConfigurationSnapshotV1)
 		}
 		seen[key] = true
+		if idSeen[entry.ConfigurationID] {
+			return snapshot, fmt.Errorf("invalid %s: duplicate configuration id", EventProductConfigurationSnapshotV1)
+		}
+		idSeen[entry.ConfigurationID] = true
 	}
+	snapshot.Configurations = normalized
 	return snapshot, nil
+}
+
+// NoFrameSentinelID is the integration-only mapping key for the implicit
+// NO-FRAME choice. It is never a business configuration identity (F14).
+const NoFrameSentinelID = "00000000-0000-0000-0000-000000000000"
+
+// canonicalConfigurationID normalizes UUID spelling/case so duplicate
+// spellings of one identity are detected (F17), and rejects the
+// integration sentinel as a business configuration identity (F14).
+func canonicalConfigurationID(raw string) (string, error) {
+	parsed, err := uuid.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: configuration_id must be a UUID", EventProductConfigurationSnapshotV1)
+	}
+	canonical := parsed.String()
+	if canonical == NoFrameSentinelID {
+		return "", fmt.Errorf("invalid %s: reserved sentinel is not a configuration identity", EventProductConfigurationSnapshotV1)
+	}
+	return canonical, nil
 }
 
 func validateConfigurationLabel(value string) error {

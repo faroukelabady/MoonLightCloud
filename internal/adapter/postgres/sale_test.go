@@ -84,6 +84,14 @@ func TestMain(m *testing.M) {
 		_, err = catalog.ValidateProductSalesPolicySnapshot(p)
 		return err
 	})
+	isync.RegisterEventType(catalog.EventProductConfigurationSnapshotV1, func(raw json.RawMessage) error {
+		decoded, err := catalog.DecodeProductConfigurationsSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductConfigurationsSnapshot(decoded)
+		return err
+	})
 	isync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, func(raw json.RawMessage) error {
 		p, err := catalog.DecodeProductInventorySnapshot(raw)
 		if err != nil {

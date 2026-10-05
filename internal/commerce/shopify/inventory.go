@@ -64,6 +64,23 @@ func (p *ShopifyProvider) SetInventory(ctx context.Context, req commerce.Invento
 	if product == nil {
 		return commerce.ConflictError("mapped shopify product no longer exists")
 	}
+	// Phase 15-R1 F07: the mapped sellable may be the bundle parent.
+	// Availability always targets the TRACKED BASE component's managed
+	// variant — bundle inventory derives from component inventory, so
+	// every customer choice consumes one base pool.
+	if metafieldValue(product.Metafields.Nodes, keyRole) == roleBundleParent {
+		baseGID := metafieldValue(product.Metafields.Nodes, keyBaseComponentID)
+		if baseGID == "" {
+			return commerce.ConflictError("bundle base component identity missing")
+		}
+		product, err = p.loadProduct(ctx, baseGID)
+		if err != nil {
+			return err
+		}
+		if product == nil {
+			return commerce.ConflictError("bundle base component no longer exists")
+		}
+	}
 	values := ownership(product.Metafields.Nodes)
 	if !ownershipMatches(values, req.ProductID, req.ProviderKey) {
 		return commerce.ConflictError("shopify product owned by another product or provider")

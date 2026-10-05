@@ -220,6 +220,10 @@ func (s *stubMappings) GetProductMapping(_ context.Context, key ProviderKey, pro
 func (s *stubMappings) GetProductConfigurationMapping(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
 	return ProductConfigurationMapping{}, errMappingNotFoundStub()
 }
+
+func (s *stubMappings) UpdateProductMappingExternal(_ context.Context, providerKey ProviderKey, productID, expectedExternalID, newExternalID string) (ProductMapping, error) {
+	return ProductMapping{ProviderKey: providerKey, ProductID: productID, ExternalProductID: newExternalID}, nil
+}
 func (s *stubMappings) FindConfigurationByExternal(context.Context, ProviderKey, string, string) (ProductConfigurationMapping, error) {
 	return ProductConfigurationMapping{}, errMappingNotFoundStub()
 }

@@ -41,6 +41,10 @@ func (s *stubMappings) GetProductMapping(_ context.Context, key commerce.Provide
 func (s *stubMappings) GetProductConfigurationMapping(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
 	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
 }
+
+func (s *stubMappings) UpdateProductMappingExternal(_ context.Context, providerKey commerce.ProviderKey, productID, expectedExternalID, newExternalID string) (commerce.ProductMapping, error) {
+	return commerce.ProductMapping{ProviderKey: providerKey, ProductID: productID, ExternalProductID: newExternalID}, nil
+}
 func (s *stubMappings) FindConfigurationByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductConfigurationMapping, error) {
 	return commerce.ProductConfigurationMapping{}, errMappingNotFoundStub()
 }
