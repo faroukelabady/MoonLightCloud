@@ -115,3 +115,17 @@ state. It cannot erase the corrective request: a later pass re-reads canonical
 current state through the existing CommerceService. This is eventual
 convergence, not remote transactional fencing. Mappings, remote identity,
 mutation barriers and provider-specific ambiguity rules remain authoritative.
+
+## Product options (Phase 15)
+
+Retail-authored frame configurations publish as ONLINE product options
+without creating a second stock authority (ADR-0047). The canonical Product
+keeps its SKU and inventory; each valid style/colour combination is a
+separate option with a per-currency price delta, and the implicit No Frame
+choice uses the reserved mapping-key sentinel. Configurations project through
+`catalog_product_configuration_projection.v1`, enqueue the same coalesced
+commerce re-evaluation, and publish through `CommerceService.SyncProduct` --
+there is no separate CLI. Provider representation (Woo variable product with
+one physical pool; Shopify asynchronous bundle) and the
+`SHOPIFY_FRAME_OPTIONS_CAPABILITY_UNAVAILABLE` gate are documented in
+`docs/operations/product-options.md`.

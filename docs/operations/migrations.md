@@ -77,3 +77,36 @@ Rollback to 28 refuses while any reevaluation work exists. Stop workers and
 allow durable work to converge before rollback; do not delete pending work to
 force a downgrade. An empty queue can be downgraded without truncating or
 rewriting any business state.
+
+## Phase 15 — schema 30 (`00030_product_configurations`)
+
+Apply migration 30 explicitly before starting the Phase 15 Cloud. Shipped
+migrations 1–29 are unchanged. It adds:
+
+- `catalog_products.configuration_revision` and
+  `catalog_product_configurations` — the projected ONLINE product options
+  (frame configurations). They carry no SKU and no inventory: the canonical
+  Product remains the only stock and identity authority.
+- `commerce_product_configuration_mappings` — durable, Store-scoped,
+  ownership-keyed provider configuration identity (never label-matched).
+- Immutable selection-snapshot columns on `commerce_online_order_lines`
+  (`configuration_id`, frame style/colour labels, delta, provider
+  configuration id, `configuration_unresolved`).
+
+Existing rows and historical sales/returns are untouched. The Down migration
+drops the additive columns/tables; because order-line selections are
+immutable history, a downgrade after selections exist is lossy for that
+history — take a backup first.
+
+## Phase 15-R3 — schema 31 (`00031_commerce_async_receipts`)
+
+Apply migration 31 explicitly before starting the remediated Phase 15 Cloud.
+Shipped migrations 1–30 are unchanged. It extends
+`commerce_product_mutation_barriers` with asynchronous receipt columns
+(role, request fingerprint, provider operation id, state, product id) plus a
+completeness CHECK and indexes for pending/history lookup, so acknowledged
+Shopify bundle operations are tracked until they settle.
+
+Down refuses while any receipt exists (including completed adoption
+provenance); preserve the mutation-evidence table with the rest of the
+durable commerce state and restore a matching backup before downgrading.

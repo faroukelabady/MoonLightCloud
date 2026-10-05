@@ -296,6 +296,7 @@ func allProjectionProcessors() []string {
 		catalog.ProcessorProductProjectionV1,
 		catalog.ProcessorProductSalesPolicyProjectionV1,
 		catalog.ProcessorProductInventoryProjectionV1,
+		catalog.ProcessorProductConfigurationProjectionV1,
 	}
 }
 

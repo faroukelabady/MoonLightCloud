@@ -253,6 +253,7 @@ catalog_tag_projection.v1
 catalog_product_projection.v1
 catalog_product_sales_policy_projection.v1
 inventory_product_projection.v1
+catalog_product_configuration_projection.v1
 ```
 
 Phase 13 adds no processor: category policy/hierarchy and product
@@ -262,7 +263,13 @@ the commerce re-evaluation worker (see `docs/operations/commerce.md`)
 converges providers afterwards. Projection itself never contacts a
 provider.
 
-`projection status` lists all seven processors; `projection retry <id>
+Phase 15 adds the configuration processor: frame options project as
+current-state option rows (no SKU, no inventory) and each accepted revision
+enqueues the same durable commerce re-evaluation. Its dependency wait means
+the core product has not projected yet. See
+`docs/operations/product-options.md`.
+
+`projection status` lists every registered processor; `projection retry <id>
 [<processor>]` resets one event for any registered processor (both
 commands validate against one canonical registry, so they can never
 diverge again). Catalog-specific
@@ -325,6 +332,7 @@ per-event storm). Procedure:
 ```sql
 DELETE FROM catalog_product_inventory;
 DELETE FROM catalog_product_sales_policies;
+DELETE FROM catalog_product_configurations;
 DELETE FROM catalog_product_tags;
 DELETE FROM catalog_product_subcategories;
 DELETE FROM catalog_product_translations;
@@ -335,7 +343,7 @@ DELETE FROM catalog_tags;
 DELETE FROM catalog_categories;
 UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
   attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1', 'inventory_product_projection.v1');
+  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1', 'inventory_product_projection.v1', 'catalog_product_configuration_projection.v1');
 ```
 
 Then reprocess categories, tags, products, and policies (any order

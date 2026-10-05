@@ -131,7 +131,15 @@ the same inventory update is idempotent; no rollback is attempted.
 
 Deliberate v1 boundaries, not omissions: Woo category/tag
 materialization (MoonLight's multi-parent DAG must not be flattened
-lossily), product images/media uploads, multilingual plugins, variable
-products, sale pricing, and automatic background synchronization.
+lossily), product images/media uploads, multilingual plugins,
+sale pricing, and automatic background synchronization.
 Manually managed Woo taxonomy and images are preserved because update
 payloads omit those fields entirely (never empty arrays).
+
+## Product options (variables)
+
+Since Phase 15 a Product with frame configurations is represented as one
+**variable** Product: variations never carry quantities, so every choice
+shares the single physical parent stock pool. Owned variations are matched
+by `_moonlight_configuration_id` metadata (never labels); manually created
+variations are preserved. See `docs/operations/product-options.md`.

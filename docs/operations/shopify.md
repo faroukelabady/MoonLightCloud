@@ -381,6 +381,13 @@ Notable past changes: idempotency keys became required on
 | webhook 409 | same `X-Shopify-Webhook-Id` with a different payload hash — inspect the delivery source |
 | order blocked `COMMERCE_STORE_SCOPE_CONFLICT` | order spans product mappings from two Stores; resolve the catalog ownership |
 
+## Product options (bundles)
+
+Since Phase 15 a Product with frame configurations is published as a
+**bundle** (tracked base component + untracked frame component), so every
+choice consumes one base inventory pool. Bundle mutations are asynchronous
+and recorded as durable receipts. See `docs/operations/product-options.md`.
+
 ## Backup significance
 
 - `commerce_product_mappings`, `commerce_online_orders` and the webhook
