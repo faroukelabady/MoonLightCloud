@@ -73,8 +73,8 @@ func TestRunServerCleanShutdown(t *testing.T) {
 // never recur for policy, inventory, configuration, or future processors.
 func TestProjectionProcessorRegistry(t *testing.T) {
 	processors := allProjectionProcessors()
-	if len(processors) != 8 {
-		t.Fatalf("want 8 processors, got %d: %v", len(processors), processors)
+	if len(processors) != 10 {
+		t.Fatalf("want 10 processors, got %d: %v", len(processors), processors)
 	}
 	seen := map[string]bool{}
 	for _, processor := range processors {
@@ -90,6 +90,8 @@ func TestProjectionProcessorRegistry(t *testing.T) {
 		"catalog_product_sales_policy_projection.v1",
 		"inventory_product_projection.v1",
 		"catalog_product_configuration_projection.v1",
+		"catalog_product_variant_projection.v1",
+		"inventory_product_variant_projection.v1",
 	} {
 		if !seen[want] {
 			t.Fatalf("registry missing %q", want)
