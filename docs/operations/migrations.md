@@ -110,3 +110,36 @@ Shopify bundle operations are tracked until they settle.
 Down refuses while any receipt exists (including completed adoption
 provenance); preserve the mutation-evidence table with the rest of the
 durable commerce state and restore a matching backup before downgrading.
+
+## Phase 17 — schemas 33 and 34 (`00033_product_variants`, `00034_commerce_order_variant_snap`)
+
+Apply both migrations explicitly before starting the Phase 17 Cloud. Shipped
+migrations 1–32 are unchanged. Migration 33 moves SKU/inventory ownership
+from the Product to the ProductVariant projection:
+
+- `catalog_product_variants` — variant identity, SKU, `is_active`,
+  tombstone `deleted`, per-currency price overrides, `combination_key`,
+  variant/catalog revisions, Store-scoped uniqueness (legacy `store_id NULL`
+  never collides, per `00023`). Deliberately **no FK** to `catalog_products`
+  (rebuildable projection root, `00012` style); the projector enforces the
+  product dependency as a retryable wait.
+- `catalog_product_variant_attribute_values` and
+  `catalog_product_variant_inventory` — child rows FK-owned by the variant
+  root, bilingual labels and per-variant stock with its own
+  `inventory_revision` gate.
+- `commerce_product_variant_mappings` — durable provider identity
+  (provider + Store + product + variant + external ids), no FK to
+  rebuildable projections.
+
+Variants are tombstoned, never hard-deleted. Migration 34 adds immutable
+order-line variant snapshots (`variant_id`, `variant_sku`,
+`variant_attribute_snapshot` JSONB) captured at ingestion; they carry no FK
+so they survive catalog rebuilds and tombstones. Existing rows and
+historical sales/returns are untouched.
+
+`catalog_products.sku` becomes the deprecated display mirror; uniqueness and
+authority live in `catalog_product_variants`. `TargetVersion` is 34;
+startup refuses to boot on mismatch. The Down migrations drop the additive
+tables/columns; because order-line variant snapshots and tombstones are
+immutable history, a downgrade after variant data exists is lossy for that
+history — take a backup first.

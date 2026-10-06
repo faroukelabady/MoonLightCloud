@@ -198,7 +198,11 @@ Retail inventory remains authoritative; provider stock is downstream
 published state. Stable reason codes (CATALOG_MISSING_SKU,
 CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY,
 COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS,
-COMMERCE_STORE_CONFLICT) are the API contract; bilingual labels may
+COMMERCE_STORE_CONFLICT, and since Phase 17 the variant codes
+PRODUCT_NO_ACTIVE_VARIANTS, PRODUCT_NO_SELLABLE_VARIANT,
+VARIANT_DUPLICATE_COMBINATION, VARIANT_MISSING_SKU,
+VARIANT_MAPPING_MISSING, with VARIANT_INTENTIONALLY_OFFLINE as
+informational only) are the API contract; bilingual labels may
 evolve. Detail rows are bounded and carry IDs + stable codes only — no
 credentials, PII, raw provider errors or SQL.
 

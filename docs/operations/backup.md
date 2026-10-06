@@ -24,7 +24,10 @@ restore verification must cover this table explicitly. Phase 6C adds
 the same durability class: `commerce_online_orders*` tables, the
 webhook inbox, and the reconciliation fence table are provider-derived
 or operational integration state, never cleared by projection
-rebuilds, and covered by normal database backup.
+rebuilds, and covered by normal database backup. Phase 15/17 add
+`commerce_product_configuration_mappings` and
+`commerce_product_variant_mappings` to the same class (durable provider
+identity for options and physical variants).
 
 ## Local development
 

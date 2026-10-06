@@ -59,7 +59,18 @@ Field rules:
   tags idempotently under a separate processor with shared sale-id
   arbitration),
   `sale.return_refund.finalized.v1` (one immutable event per finalized
-  Retail return/refund transaction; see `docs/sync/returns.md`).
+  Retail return/refund transaction; see `docs/sync/returns.md`),
+  `catalog.category.snapshot.v1`/`v2` and `catalog.tag.snapshot.v1`
+  (current Catalog state; v2 adds `online_enabled`),
+  `catalog.product.snapshot.v1`/`v2` (v2 removes the product `sku` and
+  carries a deprecated `primary_variant_sku` mirror; SKU authority moves to
+  the variant),
+  `catalog.product.sales_policy.snapshot.v1`, 
+  `inventory.product.snapshot.v1`, 
+  `catalog.product.configuration.snapshot.v1` (Phase 15 frame options),
+  `catalog.product_variant.snapshot.v1` and
+  `inventory.product_variant.snapshot.v1` (Phase 17 physical variants:
+  SKU/stock/attributes; see `docs/operations/product-variants.md`).
 - `occurred_at`: RFC3339 business timestamp. Recorded, never authority for
   auth/dedup/ordering. Bounds: not before 2020-01-01, not more than 24h in
   the future, else `422`. Desktop clocks are untrusted.

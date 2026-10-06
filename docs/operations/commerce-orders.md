@@ -98,6 +98,11 @@ Woo products or variations). The order is valid and visible; map the
 product in Woo-managed flow and re-run `sync-order` to resolve it.
 Nothing is auto-created.
 
+Since Phase 17 a line also carries its immutable variant snapshot
+(`variant_id`, `variant_sku`, `variant_attribute_snapshot`) captured at
+ingestion; an order with an unresolved provider selection is never
+reported fully mapped. See `docs/operations/product-variants.md`.
+
 ## PII handling
 
 Webhook bodies are never persisted — only delivery metadata and the

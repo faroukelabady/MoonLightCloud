@@ -143,3 +143,8 @@ Since Phase 15 a Product with frame configurations is represented as one
 shares the single physical parent stock pool. Owned variations are matched
 by `_moonlight_configuration_id` metadata (never labels); manually created
 variations are preserved. See `docs/operations/product-options.md`.
+
+Since Phase 17 a ProductVariant maps to a Woo variation with its own SKU
+and stock (migration 33), so per-variant quantities are authoritative for
+the sellable unit. Frame configurations layer on the selected variant and
+never multiply variant stock. See `docs/operations/product-variants.md`.

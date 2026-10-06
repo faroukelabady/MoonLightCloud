@@ -2307,7 +2307,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -2346,9 +2346,12 @@ components:
         - $ref: '#/components/schemas/CatalogCategorySnapshotV2Event'
         - $ref: '#/components/schemas/CatalogTagSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductSnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogProductSnapshotV2Event'
         - $ref: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
         - $ref: '#/components/schemas/InventoryProductSnapshotV1Event'
         - $ref: '#/components/schemas/CatalogProductConfigurationsSnapshotV1Event'
+        - $ref: '#/components/schemas/CatalogProductVariantSnapshotV1Event'
+        - $ref: '#/components/schemas/InventoryProductVariantSnapshotV1Event'
         - $ref: '#/components/schemas/SystemTestV1Event'
       discriminator:
         propertyName: event_type
@@ -2360,9 +2363,12 @@ components:
           catalog.category.snapshot.v2: '#/components/schemas/CatalogCategorySnapshotV2Event'
           catalog.tag.snapshot.v1: '#/components/schemas/CatalogTagSnapshotV1Event'
           catalog.product.snapshot.v1: '#/components/schemas/CatalogProductSnapshotV1Event'
+          catalog.product.snapshot.v2: '#/components/schemas/CatalogProductSnapshotV2Event'
           catalog.product.sales_policy.snapshot.v1: '#/components/schemas/CatalogProductSalesPolicySnapshotV1Event'
           inventory.product.snapshot.v1: '#/components/schemas/InventoryProductSnapshotV1Event'
           catalog.product.configuration.snapshot.v1: '#/components/schemas/CatalogProductConfigurationsSnapshotV1Event'
+          catalog.product_variant.snapshot.v1: '#/components/schemas/CatalogProductVariantSnapshotV1Event'
+          inventory.product_variant.snapshot.v1: '#/components/schemas/InventoryProductVariantSnapshotV1Event'
           system.test.v1: '#/components/schemas/SystemTestV1Event'
     SyncEventEnvelope:
       type: object
@@ -2458,6 +2464,39 @@ components:
               enum: [catalog.product.snapshot.v1]
             payload:
               $ref: '#/components/schemas/CatalogProductSnapshotV1'
+    CatalogProductSnapshotV2Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.product.snapshot.v2]
+            payload:
+              $ref: '#/components/schemas/CatalogProductSnapshotV2'
+    CatalogProductVariantSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [catalog.product_variant.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/CatalogProductVariantSnapshotV1'
+    InventoryProductVariantSnapshotV1Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [inventory.product_variant.snapshot.v1]
+            payload:
+              $ref: '#/components/schemas/InventoryProductVariantSnapshotV1'
     CatalogProductSalesPolicySnapshotV1Event:
       allOf:
         - $ref: '#/components/schemas/SyncEventEnvelope'
@@ -2632,6 +2671,96 @@ components:
         is_active: {type: boolean}
         catalog_revision: {type: integer, minimum: 1}
       description: Authoritative product state at a monotonic revision. No stock, no provider identity, no images.
+    CatalogProductSnapshotV2:
+      type: object
+      additionalProperties: false
+      required: [product_id, primary_variant_sku, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
+      description: >
+        Product aggregate at catalog_revision (Phase 17). `sku` is removed:
+        SKU authority lives on the ProductVariant. `primary_variant_sku` is a
+        deprecated display mirror of the primary variant's SKU. v1 stays
+        semantically immutable; both versions share one catalog_revision.
+      properties:
+        product_id: {type: string, format: uuid}
+        primary_variant_sku: {type: string, maxLength: 64, pattern: '^[^\r\n\t]{0,64}$', description: Deprecated display mirror; never identity.}
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, nullable: true}
+        translations:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogProductTranslation'}
+        prices:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogPrice'}
+        top_category_id: {type: string, format: uuid}
+        subcategory_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: Complete ordered set; Cloud replaces transactionally.
+        tag_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: Complete ordered set; Cloud replaces transactionally.
+        width_cm: {type: integer, minimum: 1, nullable: true}
+        height_cm: {type: integer, minimum: 1, nullable: true}
+        is_active: {type: boolean}
+        catalog_revision: {type: integer, minimum: 1}
+    CatalogProductVariantSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [variant_id, product_id, sku, is_active, variant_revision, catalog_revision]
+      description: >
+        Authoritative ProductVariant state at variant_revision (Phase 17):
+        the physical sellable unit (SKU + stock + attribute combination).
+        Money is int64 minor units. Variants are tombstoned (`deleted`),
+        never hard-deleted. `stock_quantity`/`inventory_revision` are
+        non-semantic mirrors of the inventory stream (shape-checked only).
+      properties:
+        variant_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        sku: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
+        is_active: {type: boolean}
+        deleted: {type: boolean, default: false, description: Tombstone marker; the row is never deleted.}
+        price_egp_cents: {type: integer, minimum: 0, nullable: true}
+        price_usd_cents: {type: integer, minimum: 0, nullable: true}
+        stock_quantity: {type: integer, minimum: 0, maximum: 2147483647}
+        inventory_revision: {type: integer, minimum: 1}
+        variant_revision: {type: integer, minimum: 1}
+        position: {type: integer, minimum: 0}
+        combination_key: {type: string, maxLength: 512, pattern: '^[^\r\n\t]{0,512}$'}
+        attributes:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/CatalogProductVariantAttribute'}
+        catalog_revision: {type: integer, minimum: 1}
+    CatalogProductVariantAttribute:
+      type: object
+      additionalProperties: false
+      required: [definition_code, value_code, name_ar, definition_name_ar, position]
+      description: One physical option of a variant. Identity is (definition_code, value_code); labels are projection-only.
+      properties:
+        definition_code: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
+        value_code: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
+        name_ar: {type: string, minLength: 1, maxLength: 200}
+        name_en: {type: string, maxLength: 200, nullable: true}
+        definition_name_ar: {type: string, minLength: 1, maxLength: 200}
+        definition_name_en: {type: string, maxLength: 200, nullable: true}
+        position: {type: integer, minimum: 0}
+    InventoryProductVariantSnapshotV1:
+      type: object
+      additionalProperties: false
+      required: [variant_id, product_id, inventory_revision, stock_quantity]
+      description: Authoritative per-variant stock at an independent monotonic inventory revision (Phase 17). Current state, never a delta.
+      properties:
+        variant_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        sku: {type: string, maxLength: 64, description: Shape-validated mirror; not semantic on this stream.}
+        stock_quantity: {type: integer, minimum: 0, maximum: 2147483647}
+        inventory_revision: {type: integer, minimum: 1}
+        ready: {type: boolean}
+        sell_online: {type: boolean}
+        online_allocation_limit: {type: integer, minimum: 0, maximum: 2147483647, nullable: true}
+        policy_revision: {type: integer, minimum: 0}
+        catalog_revision: {type: integer, minimum: 0}
     CatalogProductSalesPolicySnapshotV1:
       type: object
       additionalProperties: false

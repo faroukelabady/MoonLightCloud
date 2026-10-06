@@ -254,6 +254,8 @@ catalog_product_projection.v1
 catalog_product_sales_policy_projection.v1
 inventory_product_projection.v1
 catalog_product_configuration_projection.v1
+catalog_product_variant_projection.v1
+inventory_product_variant_projection.v1
 ```
 
 Phase 13 adds no processor: category policy/hierarchy and product
@@ -268,6 +270,14 @@ current-state option rows (no SKU, no inventory) and each accepted revision
 enqueues the same durable commerce re-evaluation. Its dependency wait means
 the core product has not projected yet. See
 `docs/operations/product-options.md`.
+
+Phase 17 adds two variant processors (migration 33): `catalog_product_
+variant_projection.v1` projects ProductVariant identity/SKU/attributes and
+`inventory_product_variant_projection.v1` projects per-variant stock under
+its own inventory revision. Both reuse the same dependency-wait and
+revision-arbitration rules; `catalog.product.snapshot.v2` (no `sku`)
+projects through the product processor. See
+`docs/operations/product-variants.md`.
 
 `projection status` lists every registered processor; `projection retry <id>
 [<processor>]` resets one event for any registered processor (both
@@ -330,6 +340,9 @@ converges each affected Product toward providers exactly once per rebuild
 per-event storm). Procedure:
 
 ```sql
+DELETE FROM catalog_product_variant_inventory;
+DELETE FROM catalog_product_variant_attribute_values;
+DELETE FROM catalog_product_variants;
 DELETE FROM catalog_product_inventory;
 DELETE FROM catalog_product_sales_policies;
 DELETE FROM catalog_product_configurations;
@@ -343,7 +356,7 @@ DELETE FROM catalog_tags;
 DELETE FROM catalog_categories;
 UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
   attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1', 'inventory_product_projection.v1', 'catalog_product_configuration_projection.v1');
+  WHERE processor IN ('catalog_category_projection.v1', 'catalog_tag_projection.v1', 'catalog_product_projection.v1', 'catalog_product_sales_policy_projection.v1', 'inventory_product_projection.v1', 'catalog_product_configuration_projection.v1', 'catalog_product_variant_projection.v1', 'inventory_product_variant_projection.v1');
 ```
 
 Then reprocess categories, tags, products, and policies (any order

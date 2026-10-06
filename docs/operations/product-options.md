@@ -9,8 +9,10 @@ rationale and contracts.
 A configuration is a valid frame choice for one canonical MoonLight
 Product: a style/colour combination with a per-currency price delta and an
 `enabled` flag. It is **not** a Product — it carries no SKU and no
-inventory. The single physical papyrus stock stays on the canonical
-Product.
+inventory. Since Phase 17 the physical sellable unit is the
+**ProductVariant** (SKU + stock); a configuration layers on the selected
+variant as a non-stocked customization and must never multiply variant
+stock (see `docs/operations/product-variants.md`).
 
 The implicit **No Frame** choice is not a MoonLight row; it is represented
 on the provider side under the reserved mapping key

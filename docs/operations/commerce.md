@@ -129,3 +129,15 @@ there is no separate CLI. Provider representation (Woo variable product with
 one physical pool; Shopify asynchronous bundle) and the
 `SHOPIFY_FRAME_OPTIONS_CAPABILITY_UNAVAILABLE` gate are documented in
 `docs/operations/product-options.md`.
+
+## Physical variants (Phase 17)
+
+Since Phase 17 the physical sellable unit is the **ProductVariant**
+(SKU + stock + attribute combination); the Product is the customer-facing
+aggregate (ADR-0049). Cloud projects variant identity and per-variant stock
+through dedicated processors, computes availability from the variant's own
+stock (`ComputeVariantAvailability`, never a product aggregate copied per
+variant), and maps Product -> provider product with ProductVariant ->
+provider variation/variant. Durable identity lives in
+`commerce_product_variant_mappings`. See
+`docs/operations/product-variants.md`.

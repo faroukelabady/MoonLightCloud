@@ -29,6 +29,9 @@ catalog.category.parents.update.v1       complete parent set (Retail validates D
 catalog.category.online-policy.update.v1 online_enabled
 catalog.tag.details.update.v1            names, active
 catalog.product.configurations.update.v1 full frame-option set (Phase 15 semantics)
+catalog.product.variants.update.v1        full ProductVariant set (Phase 17 semantics)
+catalog.product.variant.update.v1         one ProductVariant (SKU, active, prices, attributes)
+catalog.variant.attributes.update.v1      variant attribute definitions/labels
 ```
 
 No remote Product creation, no hard delete, no stock edits, no Sales

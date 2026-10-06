@@ -388,6 +388,12 @@ Since Phase 15 a Product with frame configurations is published as a
 choice consumes one base inventory pool. Bundle mutations are asynchronous
 and recorded as durable receipts. See `docs/operations/product-options.md`.
 
+Since Phase 17 a ProductVariant maps to a Shopify variant with its own SKU
+and stock, and durable identity is recorded in
+`commerce_product_variant_mappings`. A provider combination the shop cannot
+represent fails safely with a capability conflict. See
+`docs/operations/product-variants.md`.
+
 ## Backup significance
 
 - `commerce_product_mappings`, `commerce_online_orders` and the webhook

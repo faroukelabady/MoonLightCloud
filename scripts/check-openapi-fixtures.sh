@@ -346,5 +346,66 @@ check("category_v2", "CatalogCategorySnapshotV2", category_v2)
 category_envelope = dict(config_envelope, event_type="catalog.category.snapshot.v2", payload=category_v2)
 check("category_v2_event", "SyncEvent", category_envelope)
 check("category_v2_missing_policy", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_valid.json"), expect_valid=False)
+
+# Phase 17: product v2 (SKU authority moved to the variant) and physical
+# variants must validate through the published union, and reject bad leaf
+# shapes.
+product_v2 = load_fixture("internal/catalog/testdata/product_valid.json")
+product_v2.pop("sku")
+product_v2["primary_variant_sku"] = "PAP-001"
+check("product_v2", "CatalogProductSnapshotV2", product_v2)
+product_v2_bad = dict(product_v2, sku="PAP-001")
+check("product_v2_rejects_sku", "CatalogProductSnapshotV2", product_v2_bad, expect_valid=False)
+product_v2_envelope = dict(config_envelope, event_type="catalog.product.snapshot.v2", payload=product_v2)
+check("sync_event_union_product_v2", "SyncEvent", product_v2_envelope)
+
+variant_snapshot = {
+    "variant_id": "11111111-0000-4000-8000-0000000000b1",
+    "product_id": "11111111-0000-4000-8000-0000000000aa",
+    "sku": "PAP-001-BLK",
+    "is_active": True,
+    "deleted": False,
+    "price_egp_cents": 70000,
+    "price_usd_cents": None,
+    "stock_quantity": 4,
+    "inventory_revision": 2,
+    "variant_revision": 5,
+    "position": 0,
+    "combination_key": "colour\u001fblack\u001fsize\u001fa5",
+    "attributes": [{
+        "definition_code": "colour", "value_code": "black",
+        "name_ar": "أسود", "name_en": "Black",
+        "definition_name_ar": "اللون", "definition_name_en": "Colour",
+        "position": 0,
+    }],
+    "catalog_revision": 3,
+}
+check("product_variant_snapshot", "CatalogProductVariantSnapshotV1", variant_snapshot)
+check("product_variant_missing_sku", "CatalogProductVariantSnapshotV1",
+      {k: v for k, v in variant_snapshot.items() if k != "sku"}, expect_valid=False)
+check("product_variant_negative_sku_whitespace", "CatalogProductVariantSnapshotV1",
+      dict(variant_snapshot, sku="PAP\n001"), expect_valid=False)
+variant_envelope = dict(config_envelope, event_type="catalog.product_variant.snapshot.v1", payload=variant_snapshot)
+check("sync_event_union_product_variant", "SyncEvent", variant_envelope)
+check("sync_batch_product_variant", "SyncBatch", {"events": [variant_envelope]})
+
+inventory_variant = {
+    "variant_id": "11111111-0000-4000-8000-0000000000b1",
+    "product_id": "11111111-0000-4000-8000-0000000000aa",
+    "sku": "PAP-001-BLK",
+    "stock_quantity": 4,
+    "inventory_revision": 2,
+    "ready": True,
+    "sell_online": True,
+    "online_allocation_limit": 10,
+    "policy_revision": 1,
+    "catalog_revision": 3,
+}
+check("inventory_product_variant_snapshot", "InventoryProductVariantSnapshotV1", inventory_variant)
+check("inventory_product_variant_negative_stock", "InventoryProductVariantSnapshotV1",
+      dict(inventory_variant, stock_quantity=-1), expect_valid=False)
+inventory_variant_envelope = dict(config_envelope, event_type="inventory.product_variant.snapshot.v1", payload=inventory_variant)
+check("sync_event_union_inventory_variant", "SyncEvent", inventory_variant_envelope)
+
 print("openapi fixture parity: PASS")
 PYEOF
