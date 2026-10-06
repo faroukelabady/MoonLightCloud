@@ -3,6 +3,7 @@ package catalogadmin
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,8 @@ func (s *fakeStore) FinishCatalogAdminTarget(_ context.Context, targetID, device
 				}
 				list[i].Status = status
 				list[i].ResultCode = code
+				list[i].EntityID = entityID
+				list[i].PreRevision = pre
 				list[i].PostRevision = post
 				s.targets[cmdID] = list
 				return true, nil
@@ -205,9 +208,14 @@ func validPayload(entityID string) []byte {
 // TestServiceCreateSnapshotsTargets ensures creation snapshots the
 // current eligible device set and reports PENDING (never success).
 func TestServiceCreateSnapshotsTargets(t *testing.T) {
-	svc, _, _, storeID, entityID := testService()
+	svc, store, devices, storeID, entityID := testService()
 	ctx := context.Background()
 	devA, devB := uuid.NewString(), uuid.NewString()
+	for _, dev := range []string{devA, devB} {
+		devices.active[dev] = true
+		devices.binding[dev] = storeID
+		store.capable[dev] = true
+	}
 	svc.store.(*fakeStore).bound[storeID] = []BoundDevice{{DeviceID: devA}, {DeviceID: devB}}
 
 	view, err := svc.Create(ctx, "op", storeID, TypeProductDetailsUpdateV1, entityID, 5, validPayload(entityID))
@@ -348,4 +356,67 @@ func TestServiceConvergenceRequiresProjection(t *testing.T) {
 
 func errFakeNotFound() error {
 	return errFakeNotFoundValue()
+}
+
+func (s *fakeStore) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd NewCommand) (CommandView, error) {
+	v, err := s.CreateCatalogAdminCommand(ctx, cmd)
+	if err != nil {
+		return v, err
+	}
+	bound, err := s.ListCatalogAdminBoundDevices(ctx, cmd.StoreID)
+	if err != nil {
+		return v, err
+	}
+	for _, dev := range bound {
+		if _, err = s.CreateCatalogAdminTarget(ctx, v.ID, uuid.NewString(), dev.DeviceID); err != nil {
+			return v, err
+		}
+	}
+	return v, nil
+}
+
+type noopConfigurationStore struct {
+	*fakeStore
+	rows []AdminConfigurationRow
+}
+
+func (s *noopConfigurationStore) AdminProductConfigurations(context.Context, string, string) ([]AdminConfigurationRow, error) {
+	return s.rows, nil
+}
+func TestNoopConfigurationsRequiresCompleteProjectedIntent(t *testing.T) {
+	_, base, devices, _, _ := testService()
+	store := &noopConfigurationStore{fakeStore: base, rows: []AdminConfigurationRow{{ID: "existing", Enabled: true}}}
+	svc := NewService(store, devices)
+	view := CommandView{Type: TypeProductConfigurationsUpdateV1, Payload: []byte(`{"configurations":[]}`)}
+	if svc.noopProjected(context.Background(), view) {
+		t.Fatal("empty desired set cannot converge while omitted configuration remains enabled")
+	}
+	store.rows[0].Enabled = false
+	if !svc.noopProjected(context.Background(), view) {
+		t.Fatal("already disabled omitted rows are a genuine no-op")
+	}
+}
+
+func TestNoopConfigurationsPreservesExactMoneyAndLabels(t *testing.T) {
+	_, base, devices, _, _ := testService()
+	id := uuid.NewString()
+	english := "English"
+	usd := "0"
+	store := &noopConfigurationStore{fakeStore: base, rows: []AdminConfigurationRow{{ID: id, StyleCode: "gold", ColorCode: "white", StyleNameAR: "ذهبي", ColorNameAR: "أبيض", StyleNameEN: &english, EGPDeltaMinor: "9007199254740993", USDDeltaMinor: &usd, Enabled: true, Position: 0}}}
+	svc := NewService(store, devices)
+	payload, _ := json.Marshal(map[string]any{"configurations": []map[string]any{{"id": strings.ToUpper(id), "style_code": " gold ", "color_code": "white", "style_name_ar": "ذهبي", "color_name_ar": "أبيض", "style_name_en": " English ", "egp_delta_cents": "09007199254740993", "usd_delta_cents": "000", "enabled": true}}})
+	view := CommandView{Type: TypeProductConfigurationsUpdateV1, Payload: payload}
+	if !svc.noopProjected(context.Background(), view) {
+		t.Fatal("canonical equivalent no-op should converge without float money")
+	}
+	wrong := "Changed"
+	store.rows[0].StyleNameEN = &wrong
+	if svc.noopProjected(context.Background(), view) {
+		t.Fatal("different English label cannot converge")
+	}
+	store.rows[0].StyleNameEN = &english
+	store.rows[0].Position = 1
+	if svc.noopProjected(context.Background(), view) {
+		t.Fatal("different position cannot converge")
+	}
 }

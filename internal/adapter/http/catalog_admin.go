@@ -149,24 +149,7 @@ func (h *CatalogAdminHandlers) PollCatalogCommands(w http.ResponseWriter, r *htt
 		WriteError(w, r, err)
 		return
 	}
-	type wire struct {
-		TargetID    string `json:"target_id"`
-		CommandID   string `json:"command_id"`
-		CommandType string `json:"command_type"`
-		Version     int    `json:"version"`
-		StoreID     string `json:"store_id"`
-		Payload     []byte `json:"payload"`
-		PayloadHash string `json:"payload_hash"`
-	}
-	out := make([]wire, 0, len(due))
-	for _, t := range due {
-		out = append(out, wire{
-			TargetID: t.TargetID, CommandID: t.CommandID,
-			CommandType: t.Type, Version: t.Version,
-			StoreID: t.StoreID, Payload: t.Payload, PayloadHash: t.PayloadHash,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"commands": out})
+	writeJSON(w, http.StatusOK, map[string]any{"commands": catalogadmin.PollWire(due)})
 }
 
 // ReportCatalogResult serves POST /api/v1/device-control/catalog-commands/{target_id}/result.

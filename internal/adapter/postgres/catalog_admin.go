@@ -3,13 +3,16 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // Catalog admin persistence on Devices (shared pool + timeouts).
@@ -221,8 +224,8 @@ func (d Devices) DueCatalogAdminTargets(ctx context.Context, deviceID string, li
 }
 
 // FinishCatalogAdminTarget records one device outcome. Only
-// PENDING/DELIVERED rows move; replays of terminal rows are rejected
-// by the query (no rows) so callers can treat them as idempotent.
+// PENDING/DELIVERED rows move; identical terminal replays succeed,
+// contradictory terminal outcomes conflict under the command lock.
 func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceID, status, code, entityID string, pre, post int64) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -234,14 +237,74 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 	if err != nil {
 		return false, err
 	}
-	_, err = sqlcgen.New(d.pool).FinishCatalogAdminTarget(ctx, sqlcgen.FinishCatalogAdminTargetParams{
-		ID: tid, DeviceID: duid, Status: status, ResultCode: code,
-		EntityID: entityID, PreRevision: pre, PostRevision: post,
-	})
+	tx, err := d.pool.Begin(ctx)
 	if err != nil {
+		return false, catalogAdminErr(err)
+	}
+	defer tx.Rollback(ctx)
+	// Lock command first in every ACK/cancel transaction, then device/binding/target.
+	var commandID string
+	if err = tx.QueryRow(ctx, `SELECT command_id::text FROM catalog_admin_command_targets WHERE id=$1 AND device_id=$2`, tid, duid).Scan(&commandID); err != nil {
 		if isNotFoundErr(err) {
 			return false, nil
 		}
+		return false, catalogAdminErr(err)
+	}
+	var cmd catalogadmin.CommandView
+	if err = tx.QueryRow(ctx, `SELECT id::text,store_id::text,entity_id,expected_revision,status,command_type,command_version,payload FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, commandID).Scan(&cmd.ID, &cmd.StoreID, &cmd.EntityID, &cmd.ExpectedRevision, &cmd.Status, &cmd.Type, &cmd.Version, &cmd.Payload); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	var currentStatus string
+	var currentCode, currentEntity string
+	var currentPre, currentPost int64
+	if err = tx.QueryRow(ctx, `SELECT status,COALESCE(result_code,''),entity_id,pre_revision,post_revision FROM catalog_admin_command_targets WHERE id=$1 FOR UPDATE`, tid).Scan(&currentStatus, &currentCode, &currentEntity, &currentPre, &currentPost); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	// Server-owned lifecycle reconciliation is allowed only for genuinely invalid targets.
+	if status == catalogadmin.TargetSkippedRevoked {
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices d JOIN device_store_bindings b ON b.device_id=d.id WHERE d.id=$1 AND d.status='active' AND b.store_id=$2)`, duid, cmd.StoreID).Scan(&eligible); err != nil {
+			return false, catalogAdminErr(err)
+		}
+		if eligible {
+			return false, nil
+		}
+	} else if status == catalogadmin.TargetBlockedCapability {
+		if code != catalogadmin.CodeUnsupportedCommand || (catalogadmin.IsKnownType(cmd.Type) && cmd.Version == 1) {
+			return false, apperr.New(apperr.InvalidInput, "invalid capability block")
+		}
+	} else {
+		var lifecycle, bound string
+		if err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE id=$1 FOR SHARE`, duid).Scan(&lifecycle); err != nil {
+			return false, catalogAdminErr(err)
+		}
+		if err = tx.QueryRow(ctx, `SELECT store_id::text FROM device_store_bindings WHERE device_id=$1 FOR SHARE`, duid).Scan(&bound); err != nil {
+			if isNotFoundErr(err) {
+				return false, nil
+			}
+			return false, catalogAdminErr(err)
+		}
+		if lifecycle != "active" || !strings.EqualFold(bound, cmd.StoreID) {
+			return false, apperr.New(apperr.NotFound, "unknown command target")
+		}
+		if err = catalogadmin.ValidateOutcome(cmd, status, code, entityID, pre, post); err != nil {
+			return false, apperr.New(apperr.InvalidInput, err.Error())
+		}
+	}
+	if currentStatus != catalogadmin.TargetPending && currentStatus != catalogadmin.TargetDelivered {
+		if currentStatus == status && currentCode == code && currentEntity == entityID && currentPre == pre && currentPost == post {
+			return true, tx.Commit(ctx)
+		}
+		return false, apperr.New(apperr.Conflict, "contradictory terminal outcome")
+	}
+	if cmd.Status != catalogadmin.CommandPending {
+		return false, apperr.New(apperr.Conflict, "command cancelled")
+	}
+	_, err = sqlcgen.New(tx).FinishCatalogAdminTarget(ctx, sqlcgen.FinishCatalogAdminTargetParams{ID: tid, DeviceID: duid, Status: status, ResultCode: code, EntityID: entityID, PreRevision: pre, PostRevision: post})
+	if err != nil {
+		return false, catalogAdminErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return false, catalogAdminErr(err)
 	}
 	return true, nil
@@ -259,13 +322,37 @@ func (d Devices) MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, 
 	if err != nil {
 		return err
 	}
-	_, err = sqlcgen.New(d.pool).MarkCatalogAdminTargetDelivered(ctx, sqlcgen.MarkCatalogAdminTargetDeliveredParams{
-		ID: tid, DeviceID: duid,
-	})
-	if err != nil && !isNotFoundErr(err) {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
 		return catalogAdminErr(err)
 	}
-	return nil
+	defer tx.Rollback(ctx)
+	var cid string
+	if err = tx.QueryRow(ctx, `SELECT command_id::text FROM catalog_admin_command_targets WHERE id=$1 AND device_id=$2`, tid, duid).Scan(&cid); err != nil {
+		return catalogAdminErr(err)
+	}
+	var cmdStatus, sid string
+	if err = tx.QueryRow(ctx, `SELECT status,store_id::text FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, cid).Scan(&cmdStatus, &sid); err != nil {
+		return catalogAdminErr(err)
+	}
+	var lifecycle, bound string
+	if err = tx.QueryRow(ctx, `SELECT status FROM devices WHERE id=$1 FOR SHARE`, duid).Scan(&lifecycle); err != nil {
+		return catalogAdminErr(err)
+	}
+	if err = tx.QueryRow(ctx, `SELECT store_id::text FROM device_store_bindings WHERE device_id=$1 FOR SHARE`, duid).Scan(&bound); err != nil {
+		return catalogAdminErr(err)
+	}
+	if cmdStatus != catalogadmin.CommandPending || lifecycle != "active" || bound != sid {
+		return apperr.New(apperr.Conflict, "command no longer deliverable")
+	}
+	tag, err := tx.Exec(ctx, `UPDATE catalog_admin_command_targets SET status='DELIVERED',delivered_at=COALESCE(delivered_at,now()),updated_at=now() WHERE id=$1 AND device_id=$2 AND status IN ('PENDING','DELIVERED')`, tid, duid)
+	if err != nil {
+		return catalogAdminErr(err)
+	}
+	if tag.RowsAffected() != 1 {
+		return apperr.New(apperr.Conflict, "command no longer deliverable")
+	}
+	return catalogAdminErr(tx.Commit(ctx))
 }
 
 // CancelCatalogAdminCommand marks a PENDING command CANCELLED plus its
@@ -277,14 +364,34 @@ func (d Devices) CancelCatalogAdminCommand(ctx context.Context, commandID string
 	if err != nil {
 		return false, err
 	}
-	if err := sqlcgen.New(d.pool).CancelPendingCatalogAdminTargets(ctx, cid); err != nil {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
 		return false, catalogAdminErr(err)
 	}
-	_, err = sqlcgen.New(d.pool).CancelCatalogAdminCommand(ctx, cid)
-	if err != nil {
-		if isNotFoundErr(err) {
-			return false, nil
-		}
+	defer tx.Rollback(ctx)
+	var status string
+	if err = tx.QueryRow(ctx, `SELECT status FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, cid).Scan(&status); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	if status != catalogadmin.CommandPending {
+		return false, nil
+	}
+	var unsafe bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_admin_command_targets WHERE command_id=$1 AND status IN ('APPLIED','DELIVERED'))`, cid).Scan(&unsafe); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	// A delivered command may already be executing: cancellation cannot retract it safely.
+	if unsafe {
+		return false, apperr.New(apperr.Conflict, "command delivered or applied; issue a compensating command")
+	}
+	q := sqlcgen.New(tx)
+	if err = q.CancelPendingCatalogAdminTargets(ctx, cid); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	if _, err = q.CancelCatalogAdminCommand(ctx, cid); err != nil {
+		return false, catalogAdminErr(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
 		return false, catalogAdminErr(err)
 	}
 	return true, nil
@@ -432,6 +539,9 @@ func catalogAdminErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apperr.New(apperr.NotFound, catalogadmin.CodeEntityNotFound)
+	}
 	return reportErr("catalog admin", err)
 }
 
@@ -565,9 +675,10 @@ func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID stri
 	pending, err := q.AdminProductHasPending(ctx, sqlcgen.AdminProductHasPendingParams{
 		StoreID: suid, ProductID: puid,
 	})
-	if err == nil {
-		detail.HasPending = pending
+	if err != nil {
+		return catalogadmin.AdminProductDetail{}, catalogAdminErr(err)
 	}
+	detail.HasPending = pending
 	return detail, nil
 }
 
@@ -698,4 +809,47 @@ func (d Devices) AdminProductConfigurations(ctx context.Context, storeID, produc
 		})
 	}
 	return out, nil
+}
+
+// CreateCatalogAdminCommandWithTargets atomically snapshots all currently bound
+// devices with immutable intent. Any target insertion failure rolls back all.
+func (d Devices) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	defer tx.Rollback(ctx)
+	id, err := parseUUID(cmd.ID)
+	if err != nil {
+		return catalogadmin.CommandView{}, err
+	}
+	sid, err := parseUUID(cmd.StoreID)
+	if err != nil {
+		return catalogadmin.CommandView{}, err
+	}
+	var locked string
+	if err = tx.QueryRow(ctx, `SELECT id::text FROM stores WHERE id=$1 FOR UPDATE`, sid).Scan(&locked); err != nil {
+		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	q := sqlcgen.New(tx)
+	row, err := q.CreateCatalogAdminCommand(ctx, sqlcgen.CreateCatalogAdminCommandParams{ID: id, StoreID: sid, CommandType: cmd.Type, CommandVersion: int32(cmd.Version), EntityID: cmd.EntityID, Payload: cmd.Payload, PayloadHash: cmd.PayloadHash, ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor})
+	if err != nil {
+		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	devices, err := q.ListStoreBoundDevices(ctx, sid)
+	if err != nil {
+		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	for _, dev := range devices {
+		tid, _ := parseUUID((ids.System{}).New())
+		if _, err = q.CreateCatalogAdminTarget(ctx, sqlcgen.CreateCatalogAdminTargetParams{ID: tid, CommandID: id, DeviceID: dev.DeviceID}); err != nil {
+			return catalogadmin.CommandView{}, catalogAdminErr(err)
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	return catalogAdminCommandToDomain(row), nil
 }

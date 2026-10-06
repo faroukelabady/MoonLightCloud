@@ -497,7 +497,7 @@ paths:
         - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
-          description: Command with updated state. Applied commands cannot be cancelled.
+          description: Command with updated state. Delivered or applied commands cannot be cancelled.
           content:
             application/json:
               schema:
@@ -515,7 +515,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Command already has applied effects and cannot be cancelled.
+          description: Command was delivered or applied and cannot be safely cancelled.
           content:
             application/json:
               schema:
@@ -688,7 +688,7 @@ paths:
             default: 10
       responses:
         '200':
-          description: Bounded due targets for the calling device only.
+          description: Bounded due targets for the calling device only. At most 50 commands and 128 KiB of encoded JSON; a byte-bounded prefix is delivered and the remainder stays due.
           content:
             application/json:
               schema:
@@ -732,7 +732,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
-          description: Unknown target or wrong device.
+          description: Unknown target, wrong device, inactive device or device rebound to another Store.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Contradictory terminal outcome or cancelled command.
           content:
             application/json:
               schema:

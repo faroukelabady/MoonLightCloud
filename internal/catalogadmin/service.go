@@ -3,6 +3,7 @@ package catalogadmin
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
 // NewCommand is the validated creation intent.
@@ -160,6 +162,7 @@ type AdminConfigurationRow struct {
 // Store persists commands, targets and capabilities plus projection
 // ownership/convergence reads. Implemented in adapter/postgres.
 type Store interface {
+	CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd NewCommand) (CommandView, error)
 	CreateCatalogAdminCommand(ctx context.Context, cmd NewCommand) (CommandView, error)
 	CreateCatalogAdminTarget(ctx context.Context, commandID, targetID, deviceID string) (TargetView, error)
 	GetCatalogAdminCommand(ctx context.Context, id string) (CommandView, error)
@@ -221,7 +224,13 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 	if err != nil {
 		return CommandView{}, apperr.New(apperr.InvalidInput, err.Error())
 	}
-	_ = decoded
+	payload, err = json.Marshal(decoded)
+	if err != nil || len(payload) > 64*1024 {
+		return CommandView{}, apperr.New(apperr.InvalidInput, "invalid command payload")
+	}
+	storeUUID, _ := uuid.Parse(strings.TrimSpace(storeID))
+	entityUUID, _ := uuid.Parse(strings.TrimSpace(entityID))
+	storeID, entityID = storeUUID.String(), entityUUID.String()
 	ownerStore, _, found, err := s.store.CatalogAdminOwnership(ctx, typ, entityID)
 	if err != nil {
 		return CommandView{}, err
@@ -239,23 +248,14 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 		return CommandView{}, apperr.New(apperr.InvalidInput, err.Error())
 	}
 	cmd := NewCommand{
-		ID: uuid.NewString(), StoreID: strings.TrimSpace(storeID),
+		ID: (ids.System{}).New(), StoreID: strings.TrimSpace(storeID),
 		Type: typ, Version: 1, EntityID: strings.TrimSpace(entityID),
 		Payload: payload, PayloadHash: hash,
 		ExpectedRevision: expectedRevision, Actor: actor,
 	}
-	view, err := s.store.CreateCatalogAdminCommand(ctx, cmd)
+	view, err := s.store.CreateCatalogAdminCommandWithTargets(ctx, cmd)
 	if err != nil {
 		return CommandView{}, err
-	}
-	bound, err := s.store.ListCatalogAdminBoundDevices(ctx, storeID)
-	if err != nil {
-		return CommandView{}, err
-	}
-	for _, dev := range bound {
-		if _, err := s.store.CreateCatalogAdminTarget(ctx, view.ID, uuid.NewString(), dev.DeviceID); err != nil {
-			return CommandView{}, err
-		}
 	}
 	return s.Get(ctx, storeID, view.ID)
 }
@@ -274,7 +274,9 @@ func (s *Service) Get(ctx context.Context, storeID, commandID string) (CommandVi
 	if err != nil {
 		return CommandView{}, err
 	}
-	s.annotateCapabilities(ctx, targets)
+	if err := s.annotateCapabilities(ctx, targets); err != nil {
+		return CommandView{}, err
+	}
 	view.Targets = targets
 	view.Aggregate, view.Converged = s.aggregate(ctx, view, targets)
 	view.Payload = nil // history lists never ship payloads by default
@@ -294,7 +296,9 @@ func (s *Service) GetWithPayload(ctx context.Context, storeID, commandID string)
 	if err != nil {
 		return CommandView{}, err
 	}
-	s.annotateCapabilities(ctx, targets)
+	if err := s.annotateCapabilities(ctx, targets); err != nil {
+		return CommandView{}, err
+	}
 	view.Targets = targets
 	view.Aggregate, view.Converged = s.aggregate(ctx, view, targets)
 	return view, nil
@@ -326,6 +330,9 @@ func (s *Service) List(ctx context.Context, storeID, commandType, entityID, stat
 	}
 	for i := range views {
 		targets := batched[views[i].ID]
+		if err := s.annotateCapabilities(ctx, targets); err != nil {
+			return nil, "", err
+		}
 		views[i].Targets = targets
 		views[i].Aggregate, views[i].Converged = s.aggregate(ctx, views[i], targets)
 	}
@@ -430,21 +437,31 @@ func (s *Service) Poll(ctx context.Context, deviceID string, limit int) ([]DueTa
 	}
 	out := make([]DueTarget, 0, len(due))
 	for _, t := range due {
-		if !IsKnownType(t.Type) {
+		if !IsKnownType(t.Type) || t.Version != 1 {
 			// Never deliver unknown commands to any device.
-			_, _ = s.store.FinishCatalogAdminTarget(ctx, t.TargetID, deviceID,
-				TargetBlockedCapability, CodeUnsupportedCommand, t.EntityID, 0, 0)
+			if _, err := s.store.FinishCatalogAdminTarget(ctx, t.TargetID, deviceID,
+				TargetBlockedCapability, CodeUnsupportedCommand, t.EntityID, 0, 0); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if boundStore == "" || !strings.EqualFold(boundStore, t.StoreID) {
 			// Rebound since snapshot: must not apply the old
 			// Store's command here. Leave for the bound Store's
 			// devices; mark skipped so history stays truthful.
-			_, _ = s.store.FinishCatalogAdminTarget(ctx, t.TargetID, deviceID,
-				TargetSkippedRevoked, CodeStoreScopeConflict, t.EntityID, 0, 0)
+			if _, err := s.store.FinishCatalogAdminTarget(ctx, t.TargetID, deviceID,
+				TargetSkippedRevoked, CodeStoreScopeConflict, t.EntityID, 0, 0); err != nil {
+				return nil, err
+			}
 			continue
 		}
-		_ = s.store.MarkCatalogAdminTargetDelivered(ctx, t.TargetID, deviceID)
+		candidate := append(append([]DueTarget(nil), out...), t)
+		if CatalogPollBytes(candidate) > MaxCatalogPollResponseBytes {
+			break
+		}
+		if err := s.store.MarkCatalogAdminTargetDelivered(ctx, t.TargetID, deviceID); err != nil {
+			return nil, err
+		}
 		t.Status = TargetDelivered
 		out = append(out, t)
 	}
@@ -503,9 +520,32 @@ func (s *Service) ReportCapabilities(ctx context.Context, deviceID string, capab
 
 // annotateCapabilities marks PENDING targets on incapable devices so
 // the dashboard can show update-required instead of silent waiting.
-func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView) {
+func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView) error {
 	for i := range targets {
 		if targets[i].Status != TargetPending && targets[i].Status != TargetDelivered {
+			continue
+		}
+		active, err := s.devices.DeviceActive(ctx, targets[i].DeviceID)
+		if err != nil {
+			return err
+		}
+		bound, err := s.devices.BindingStore(ctx, targets[i].DeviceID)
+		if err != nil {
+			return err
+		}
+		cmd, err := s.store.GetCatalogAdminCommand(ctx, targets[i].CommandID)
+		if err != nil {
+			return err
+		}
+		if !active || !strings.EqualFold(bound, cmd.StoreID) {
+			changed, err := s.store.FinishCatalogAdminTarget(ctx, targets[i].ID, targets[i].DeviceID, TargetSkippedRevoked, CodeStoreScopeConflict, cmd.EntityID, 0, 0)
+			if err != nil {
+				return err
+			}
+			if changed {
+				targets[i].Status = TargetSkippedRevoked
+				targets[i].ResultCode = CodeStoreScopeConflict
+			}
 			continue
 		}
 		capable, err := s.store.GetCatalogAdminCapability(ctx, targets[i].DeviceID)
@@ -521,6 +561,7 @@ func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView
 			targets[i].DeviceName = name
 		}
 	}
+	return nil
 }
 
 // aggregate derives the Store-level state plus convergence: CONVERGED
@@ -541,8 +582,8 @@ func (s *Service) aggregate(ctx context.Context, view CommandView, targets []Tar
 			converged = false
 			break
 		}
-		_, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, view.EntityID)
-		if err != nil || !found || revision < t.PostRevision {
+		owner, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, view.EntityID)
+		if err != nil || !found || !strings.EqualFold(owner, view.StoreID) || t.EntityID != view.EntityID || t.PostRevision < view.ExpectedRevision || revision < t.PostRevision || (t.PostRevision == view.ExpectedRevision && !s.noopProjected(ctx, view)) {
 			converged = false
 			break
 		}
@@ -681,4 +722,143 @@ func (s *Service) AdminConfigurations(ctx context.Context, storeID, productID st
 		return nil, apperr.New(apperr.NotFound, CodeEntityNotFound)
 	}
 	return s.store.AdminProductConfigurations(ctx, strings.TrimSpace(storeID), strings.TrimSpace(productID))
+}
+
+// Wire shape is shared by byte budgeting and the HTTP encoder.
+const MaxCatalogPollResponseBytes = 128 * 1024
+
+type CommandWire struct {
+	TargetID    string `json:"target_id"`
+	CommandID   string `json:"command_id"`
+	CommandType string `json:"command_type"`
+	Version     int    `json:"version"`
+	StoreID     string `json:"store_id"`
+	Payload     []byte `json:"payload"`
+	PayloadHash string `json:"payload_hash"`
+}
+
+func PollWire(due []DueTarget) []CommandWire {
+	out := make([]CommandWire, 0, len(due))
+	for _, t := range due {
+		out = append(out, CommandWire{t.TargetID, t.CommandID, t.Type, t.Version, t.StoreID, t.Payload, t.PayloadHash})
+	}
+	return out
+}
+func CatalogPollBytes(due []DueTarget) int {
+	b, _ := json.Marshal(map[string]any{"commands": PollWire(due)})
+	return len(b) + 1
+}
+
+// A no-op may retain its revision. Require the requested values in projection,
+// rather than treating a reported unchanged revision as proof of a change.
+func (s *Service) noopProjected(ctx context.Context, view CommandView) bool {
+	if len(view.Payload) == 0 {
+		stored, err := s.store.GetCatalogAdminCommand(ctx, view.ID)
+		if err != nil {
+			return false
+		}
+		view.Payload = stored.Payload
+	}
+	var payload map[string]any
+	if json.Unmarshal(view.Payload, &payload) != nil {
+		return false
+	}
+	switch view.Type {
+	case TypeProductOnlinePolicyUpdateV1:
+		p, err := s.store.AdminProductDetail(ctx, view.StoreID, view.EntityID)
+		wanted, ok := payload["sell_online"].(bool)
+		return err == nil && ok && p.SellOnline == wanted
+	case TypeCategoryOnlinePolicyUpdateV1:
+		rows, err := s.store.AdminCategoryList(ctx, view.StoreID)
+		if err != nil {
+			return false
+		}
+		wanted, ok := payload["online_enabled"].(bool)
+		if !ok {
+			return false
+		}
+		for _, row := range rows {
+			if row.CategoryID == view.EntityID {
+				return row.OnlineEnabled == wanted
+			}
+		}
+	case TypeProductConfigurationsUpdateV1:
+		rows, err := s.store.AdminProductConfigurations(ctx, view.StoreID, view.EntityID)
+		if err != nil {
+			return false
+		}
+		desired, ok := payload["configurations"].([]any)
+		if !ok {
+			return false
+		}
+		requestedIDs := make(map[string]bool, len(desired))
+		for position, item := range desired {
+			m, ok := item.(map[string]any)
+			if !ok {
+				return false
+			}
+			id := payloadText(m, "id")
+			if parsed, err := uuid.Parse(id); err == nil {
+				id = parsed.String()
+			}
+			requestedIDs[id] = true
+			matched := false
+			for _, row := range rows {
+				if row.ID != id {
+					continue
+				}
+				enabled, valid := m["enabled"].(bool)
+				matched = valid && row.Position == position && optionalTextEqual(row.StyleNameEN, m["style_name_en"]) && optionalTextEqual(row.ColorNameEN, m["color_name_en"]) && row.StyleCode == payloadText(m, "style_code") && row.ColorCode == payloadText(m, "color_code") && row.StyleNameAR == payloadText(m, "style_name_ar") && row.ColorNameAR == payloadText(m, "color_name_ar") && minorTextEqual(row.EGPDeltaMinor, m["egp_delta_cents"]) && row.Enabled == enabled && ((row.USDDeltaMinor == nil && m["usd_delta_cents"] == nil) || (row.USDDeltaMinor != nil && minorTextEqual(*row.USDDeltaMinor, m["usd_delta_cents"])))
+				break
+			}
+			if !matched {
+				return false
+			}
+		}
+		// Omitted options must already be disabled for a genuine no-op.
+		for _, row := range rows {
+			if row.Enabled && !requestedIDs[row.ID] {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func optionalTextEqual(stored *string, requested any) bool {
+	value, _ := requested.(string)
+	value = strings.TrimSpace(value)
+	if stored == nil {
+		return value == ""
+	}
+	return *stored == value
+}
+
+func payloadText(payload map[string]any, key string) string {
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
+}
+
+// Compare exact decimal strings after the same whitespace/leading-zero
+// normalization as Retail's integer parser; never use floating-point money.
+func minorTextEqual(stored string, requested any) bool {
+	value, ok := requested.(string)
+	if !ok {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	value = strings.TrimLeft(value, "0")
+	if value == "" {
+		value = "0"
+	}
+	return stored == value
 }

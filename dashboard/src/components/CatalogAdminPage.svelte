@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api.js';
 	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand } from '../lib/api.js';
 
@@ -13,6 +14,7 @@
 	let tab: Tab = $state('products');
 
 	let epoch = 0;
+	const requests: Record<string, number> = {};
 	let notice = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	function say(kind: 'ok' | 'err', text: string) {
 		notice = { kind, text };
@@ -49,31 +51,33 @@
 
 	async function loadProducts(reset: boolean) {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.loadProducts = (requests.loadProducts ?? 0) + 1;
 		productsState = reset ? 'loading' : 'loading-more';
 		try {
 			const v = await dashboardApi.adminProducts(store, search.trim(), reset ? null : productCursor);
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadProducts) return;
 			products = reset ? v.products : [...products, ...v.products];
 			productCursor = v.next_cursor && v.products.length > 0 ? v.next_cursor : null;
 			productsState = products.length === 0 ? 'empty' : 'loaded';
 		} catch {
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadProducts) return;
 			productsState = 'error';
 		}
 	}
 
 	async function openProduct(id: string) {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.openProduct = (requests.openProduct ?? 0) + 1;
 		productState = 'loading';
 		try {
 			const v = await dashboardApi.adminProduct(store, id);
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.openProduct) return;
 			selectedProduct = v;
 			try {
 				const cfgs = await dashboardApi.adminConfigurations(store, id);
-				if (my !== epoch) return;
+				if (my !== epoch || request !== requests.openProduct) return;
 				configKey = 0;
 				configRows = cfgs.configurations.map((c) => ({
 					key: ++configKey,
@@ -87,17 +91,17 @@
 					enabled: c.enabled
 				}));
 			} catch {
-				if (my !== epoch) return;
+				if (my !== epoch || request !== requests.openProduct) return;
 				configRows = [];
 			}
 			productState = 'loaded';
 		} catch {
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.openProduct) return;
 			productState = 'error';
 		}
 	}
 
-	function productPayloadBase(p: AdminProductDetail, extra: Record<string, unknown>, revKey: string, rev: number) {
+	function productPayloadBase(extra: Record<string, unknown>, revKey: string, rev: number) {
 		return { ...extra, [revKey]: rev };
 	}
 
@@ -113,6 +117,7 @@
 		for (const [label, v] of [['EGP', egp], ['USD', usd], ['cost', cost]] as const) {
 			if (!/^\d+$/.test(v)) return say('err', `قيمة ${label} يجب أن تكون أرقامًا صحيحة (وحدات صغرى). / ${label} must be integer minor units.`);
 		}
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -120,7 +125,7 @@
 				type: 'catalog.product.details.update.v1',
 				entity_id: p.product_id,
 				expected_revision: p.catalog_revision,
-				payload: productPayloadBase(p, {
+				payload: productPayloadBase({
 					product_id: p.product_id,
 					arabic_name: ar,
 					arabic_description: p.description_ar,
@@ -136,18 +141,21 @@
 					tag_ids: p.tag_ids
 				}, 'expected_catalog_revision', p.catalog_revision)
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
 	async function saveProductOnline(next: boolean) {
 		if (!selectedProduct || !store || saving) return;
 		const p = selectedProduct;
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -157,12 +165,14 @@
 				expected_revision: p.sales_policy_revision,
 				payload: { product_id: p.product_id, sell_online: next, expected_sales_policy_revision: p.sales_policy_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -172,6 +182,7 @@
 		const top = (document.getElementById('pc-top') as HTMLSelectElement)?.value ?? p.top_category_id;
 		const subs = Array.from(document.querySelectorAll<HTMLInputElement>('.pc-sub-check:checked')).map((el) => el.value);
 		const tagIds = Array.from(document.querySelectorAll<HTMLInputElement>('.pc-tag-check:checked')).map((el) => el.value);
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -181,12 +192,14 @@
 				expected_revision: p.catalog_revision,
 				payload: { product_id: p.product_id, top_category_id: top, subcategory_ids: subs, tag_ids: tagIds, expected_catalog_revision: p.catalog_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -240,6 +253,7 @@
 				enabled: r.enabled
 			});
 		}
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -249,12 +263,14 @@
 				expected_revision: p.configuration_revision,
 				payload: { product_id: p.product_id, configurations: entries, expected_configuration_revision: p.configuration_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -265,15 +281,16 @@
 
 	async function loadCategories() {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.loadCategories = (requests.loadCategories ?? 0) + 1;
 		categoriesState = 'loading';
 		try {
 			const v = await dashboardApi.adminCategories(store);
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadCategories) return;
 			categories = v.categories;
 			categoriesState = categories.length === 0 ? 'empty' : 'loaded';
 		} catch {
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadCategories) return;
 			categoriesState = 'error';
 		}
 	}
@@ -285,6 +302,7 @@
 			if (!ok) return;
 		}
 		const c = selectedCategory;
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -294,12 +312,14 @@
 				expected_revision: c.catalog_revision,
 				payload: { category_id: c.category_id, online_enabled: next, expected_catalog_revision: c.catalog_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -310,6 +330,7 @@
 		const en = (document.getElementById('cd-en') as HTMLInputElement)?.value.trim() ?? '';
 		const status = (document.getElementById('cd-status') as HTMLSelectElement)?.value ?? c.status;
 		if (!ar) return say('err', 'الاسم العربي مطلوب. / Arabic name required.');
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -319,12 +340,14 @@
 				expected_revision: c.catalog_revision,
 				payload: { category_id: c.category_id, name_ar: ar, name_en: en, status, expected_catalog_revision: c.catalog_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -332,6 +355,7 @@
 		if (!selectedCategory || !store || saving) return;
 		const c = selectedCategory;
 		const checked = Array.from(document.querySelectorAll<HTMLInputElement>('.cat-parent-check:checked')).map((el) => el.value);
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -341,12 +365,14 @@
 				expected_revision: c.catalog_revision,
 				payload: { category_id: c.category_id, parent_ids: checked, expected_catalog_revision: c.catalog_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — يتحقق الكاشير من عدم وجود دورات. الأمر ${cmd.id.slice(0, 8)}… / Change queued — Retail validates the graph.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -357,15 +383,16 @@
 
 	async function loadTags() {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.loadTags = (requests.loadTags ?? 0) + 1;
 		tagsState = 'loading';
 		try {
 			const v = await dashboardApi.adminTags(store);
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadTags) return;
 			tags = v.tags;
 			tagsState = tags.length === 0 ? 'empty' : 'loaded';
 		} catch {
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadTags) return;
 			tagsState = 'error';
 		}
 	}
@@ -377,6 +404,7 @@
 		const en = (document.getElementById('td-en') as HTMLInputElement)?.value.trim() ?? '';
 		const active = (document.getElementById('td-active') as HTMLInputElement)?.checked ?? t.is_active;
 		if (!ar) return say('err', 'الاسم العربي مطلوب. / Arabic name required.');
+		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand({
@@ -386,12 +414,14 @@
 				expected_revision: t.catalog_revision,
 				payload: { tag_id: t.tag_id, name_ar: ar, name_en: en, is_active: active, expected_catalog_revision: t.catalog_revision }
 			});
+			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -402,44 +432,50 @@
 
 	async function loadCommands() {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.loadCommands = (requests.loadCommands ?? 0) + 1;
 		commandsState = 'loading';
 		try {
 			const v = await dashboardApi.adminCommands(store, {});
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadCommands) return;
 			commands = v.commands;
 			commandsState = commands.length === 0 ? 'empty' : 'loaded';
 		} catch {
-			if (my !== epoch) return;
+			if (my !== epoch || request !== requests.loadCommands) return;
 			commandsState = 'error';
 		}
 	}
 
 	async function openCommand(id: string) {
 		if (!store) return;
-		const my = ++epoch;
+		const my = epoch;
+		const request = requests.openCommand = (requests.openCommand ?? 0) + 1;
 		const myStore = store;
 		try {
 			const v = await dashboardApi.adminCommand(store, id);
-			if (my !== epoch || store !== myStore) return;
+			if (my !== epoch || request !== requests.openCommand || store !== myStore) return;
 			selectedCommand = v;
 		} catch (err) {
-			if (my !== epoch || store !== myStore) return;
+			if (my !== epoch || request !== requests.openCommand || store !== myStore) return;
 			say('err', apiErrorText(err, 'فشل تحميل الأمر. / Load failed.'));
 		}
 	}
 
 	async function cancelCommand(id: string) {
 		if (!store || saving) return;
+		const actionEpoch = epoch;
 		saving = true;
 		try {
-			selectedCommand = await dashboardApi.adminCancelCommand(store, id);
+			const cancelled = await dashboardApi.adminCancelCommand(store, id);
+			if (actionEpoch !== epoch) return;
+			selectedCommand = cancelled;
 			say('ok', 'تم إلغاء الأمر المعلق. / Pending command cancelled.');
 			void loadCommands();
 		} catch (err) {
+			if (actionEpoch !== epoch) return;
 			say('err', apiErrorText(err, 'فشل الإلغاء. / Cancel failed.'));
 		} finally {
-			saving = false;
+			if (actionEpoch === epoch) saving = false;
 		}
 	}
 
@@ -452,6 +488,7 @@
 			case 'PARTIAL': return 'جزئي — راجع الأجهزة / Partial';
 			case 'CONFLICT': return 'تعارض — حدّث قبل إعادة المحاولة / Conflict';
 			case 'BLOCKED_CAPABILITY': return 'يتطلب تحديث الكاشير / Retail update required';
+			case 'SKIPPED_REVOKED': return 'تم تخطي الجهاز الملغى أو المنقول / Revoked or rebound device skipped';
 			case 'CANCELLED': return 'ملغي / Cancelled';
 			default: return a;
 		}
@@ -462,6 +499,9 @@
 		const current = store;
 		void current;
 		epoch++;
+		saving = false;
+		productState = 'idle';
+		configRows = [];
 		products = [];
 		productCursor = null;
 		selectedProduct = null;
@@ -473,10 +513,12 @@
 		selectedCommand = null;
 		notice = null;
 		if (!store) return;
-		void loadProducts(true);
-		void loadCategories();
-		void loadTags();
-		void loadCommands();
+		untrack(() => {
+			void loadProducts(true);
+			void loadCategories();
+			void loadTags();
+			void loadCommands();
+		});
 	});
 </script>
 
@@ -515,7 +557,12 @@
 				</table>
 				{#if productCursor}<button type="button" onclick={() => void loadProducts(false)}>المزيد / More</button>{/if}
 			{/if}
-			{#if selectedProduct}
+			{#if productState === 'loading'}
+			<p role="status">جارٍ تحميل المنتج… / Loading Product…</p>
+		{:else if productState === 'error'}
+			<p role="alert">تعذر تحميل المنتج. / Product could not be loaded.</p>
+		{/if}
+		{#if selectedProduct}
 				{@const p = selectedProduct}
 				<section class="detail" aria-label="Product editor">
 					<h3>{p.name_ar} <span class="muted num" dir="ltr">{p.sku}</span></h3>
@@ -688,14 +735,14 @@
 								{#each cmd.targets as tgt (tgt.id)}
 									<tr>
 										<td class="num" dir="ltr">{tgt.device_name || tgt.device_id.slice(0, 8)}</td>
-										<td>{tgt.status}{#if tgt.capable === false} — يتطلب تحديث الكاشير / Retail update required{/if}</td>
+										<td>{aggregateLabel(tgt.status)}{#if tgt.capable === false} — يتطلب تحديث الكاشير / Retail update required{/if}</td>
 										<td class="num" dir="ltr">{tgt.result_code ?? '—'}</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					{/if}
-					{#if cmd.status === 'PENDING'}
+					{#if cmd.status === 'PENDING' && !cmd.targets?.some(t => t.status === 'DELIVERED' || t.status === 'APPLIED')}
 						<button type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>إلغاء الأمر المعلق / Cancel pending command</button>
 					{/if}
 				</section>

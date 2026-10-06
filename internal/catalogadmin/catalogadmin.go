@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -176,6 +177,25 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return nil, fmt.Errorf("command payload must be a JSON object")
 	}
+	entity, ok := decoded[EntityKeyOf(typ)].(string)
+	parsed, e := uuid.Parse(strings.TrimSpace(entity))
+	outer, _ := uuid.Parse(strings.TrimSpace(entityID))
+	if !ok || e != nil || parsed != outer {
+		return nil, fmt.Errorf("command entity mismatch")
+	}
+	key := ExpectedRevisionKeyOf(typ)
+	if expectedRevision > 9007199254740991 {
+		return nil, fmt.Errorf("invalid expected revision")
+	}
+	if v, present := decoded[key]; present {
+		n, ok := v.(float64)
+		if !ok || math.Trunc(n) != n || n != float64(expectedRevision) {
+			return nil, fmt.Errorf("command revision mismatch")
+		}
+	} else {
+		decoded[key] = float64(expectedRevision)
+	}
+	decoded[EntityKeyOf(typ)] = outer.String()
 	if err := boundPayload(typ, decoded); err != nil {
 		return nil, err
 	}
@@ -308,8 +328,10 @@ func Aggregate(commandStatus string, targets []string, converged bool) string {
 			conflict++
 		case TargetRejected:
 			rejected++
-		case TargetBlockedCapability, TargetSkippedRevoked:
+		case TargetBlockedCapability:
 			blocked++
+		case TargetSkippedRevoked:
+			rejected++
 		case TargetDelivered:
 			delivered++
 		default:
@@ -335,4 +357,35 @@ func Aggregate(commandStatus string, targets []string, converged bool) string {
 	default:
 		return AggregatePending
 	}
+}
+
+// ValidateOutcome checks bounded vocabulary and immutable command semantics.
+func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int64) error {
+	id, e := uuid.Parse(entity)
+	want, _ := uuid.Parse(cmd.EntityID)
+	if e != nil || id != want || pre < 0 || post < 0 {
+		return fmt.Errorf("invalid outcome identity or revision")
+	}
+	switch status {
+	case TargetApplied:
+		if code != CodeApplied || pre != cmd.ExpectedRevision || post < pre || post-pre > 2 || ((cmd.Type != TypeCategoryDetailsUpdateV1 && cmd.Type != TypeTagDetailsUpdateV1) && post-pre > 1) || (post == pre && cmd.Type != TypeProductOnlinePolicyUpdateV1 && cmd.Type != TypeCategoryOnlinePolicyUpdateV1 && cmd.Type != TypeProductConfigurationsUpdateV1) {
+			return fmt.Errorf("invalid applied outcome")
+		}
+	case TargetConflict:
+		if code != CodeConflict || post != 0 {
+			return fmt.Errorf("invalid conflict outcome")
+		}
+	case TargetRejected:
+		if post != 0 {
+			return fmt.Errorf("invalid rejected outcome")
+		}
+		switch code {
+		case CodeValidationFailed, CodeEntityNotFound, CodeStoreScopeConflict, CodeUnsupportedCommand, CodePayloadMismatch, CodeDependencyMissing:
+		default:
+			return fmt.Errorf("invalid rejection code")
+		}
+	default:
+		return fmt.Errorf("invalid outcome status")
+	}
+	return nil
 }

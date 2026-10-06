@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
 )
 
@@ -205,12 +207,14 @@ func postCommand(t *testing.T, handlers *CatalogAdminHandlers, body string) *htt
 // cross-Store entities and unknown entities fail. The store has no
 // projection mutation surface, so creation cannot write projections.
 func TestCatalogAdminCreateValidates(t *testing.T) {
-	handlers, stub, _, storeID, entityID := catalogAdminTestSetup()
+	handlers, stub, devices, storeID, entityID := catalogAdminTestSetup()
 	otherStore := uuid.NewString()
 	crossEntity := uuid.NewString()
 	stub.owner[crossEntity] = otherStore
 	deviceID := uuid.NewString()
 	stub.bound[storeID] = []catalogadmin.BoundDevice{{DeviceID: deviceID, Name: "d1"}}
+	devices.active[deviceID] = true
+	devices.binding[deviceID] = storeID
 
 	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"}}`
 	rec := postCommand(t, handlers, valid)
@@ -237,7 +241,8 @@ func TestCatalogAdminCreateValidates(t *testing.T) {
 	if rec := postCommand(t, handlers, cross); rec.Code != http.StatusBadRequest {
 		t.Fatalf("cross-store: %d", rec.Code)
 	}
-	missing := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + uuid.NewString() + `","expected_revision":1,"payload":{"product_id":"x"}}`
+	missingID := uuid.NewString()
+	missing := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + missingID + `","expected_revision":1,"payload":{"product_id":"` + missingID + `"}}`
 	if rec := postCommand(t, handlers, missing); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown entity: %d", rec.Code)
 	}
@@ -376,6 +381,56 @@ func TestCatalogAdminMethodGating(t *testing.T) {
 	for _, tc := range cases {
 		if rec := tc.call(); rec.Code != http.StatusNotFound {
 			t.Fatalf("%s: want 404, got %d", tc.name, rec.Code)
+		}
+	}
+}
+
+func (s *stubCatalogStore) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
+	v, err := s.CreateCatalogAdminCommand(ctx, cmd)
+	if err != nil {
+		return v, err
+	}
+	bound, err := s.ListCatalogAdminBoundDevices(ctx, cmd.StoreID)
+	if err != nil {
+		return v, err
+	}
+	for _, dev := range bound {
+		if _, err = s.CreateCatalogAdminTarget(ctx, v.ID, uuid.NewString(), dev.DeviceID); err != nil {
+			return v, err
+		}
+	}
+	return v, nil
+}
+
+// TestRemediationPollWire exercises the real HTTP encoder; an optional fixture
+// path lets the Retail public client independently consume these exact bytes.
+func TestRemediationPollWire(t *testing.T) {
+	h, st, ds, sid, pid := catalogAdminTestSetup()
+	did := uuid.NewString()
+	ds.binding[did] = sid
+	ds.active[did] = true
+	st.capable[did] = true
+	payload, _ := json.Marshal(map[string]any{"product_id": pid, "arabic_name": "منتج", "english_name": "Product", "arabic_description": strings.Repeat("م", 2000), "english_description": strings.Repeat("x", 2000), "width_cm": 10, "height_cm": 10, "egp_price_cents": "10000", "usd_price_cents": "0", "cost_cents": "5000", "top_category_id": uuid.NewString(), "subcategory_ids": []any{}, "tag_ids": []any{}, "expected_catalog_revision": float64(5)})
+	hash, _ := catalogadmin.HashPayload(payload)
+	for i := 0; i < 10; i++ {
+		st.due[did] = append(st.due[did], catalogadmin.DueTarget{TargetID: uuid.NewString(), CommandID: uuid.NewString(), DeviceID: did, Type: catalogadmin.TypeProductDetailsUpdateV1, Version: 1, StoreID: sid, EntityID: pid, Payload: payload, PayloadHash: hash})
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/device-control/catalog-commands?limit=10", nil)
+	req = req.WithContext(context.WithValue(req.Context(), deviceKey, auth.Device{ID: did, Status: auth.StatusActive}))
+	rec := httptest.NewRecorder()
+	h.PollCatalogCommands(rec, req)
+	if rec.Code != 200 || rec.Body.Len() > catalogadmin.MaxCatalogPollResponseBytes || rec.Body.Len() < 64*1024 {
+		t.Fatalf("wire status=%d bytes=%d", rec.Code, rec.Body.Len())
+	}
+	var body struct {
+		Commands []catalogadmin.CommandWire `json:"commands"`
+	}
+	if e := json.Unmarshal(rec.Body.Bytes(), &body); e != nil || len(body.Commands) != 10 || body.Commands[0].Version != 1 {
+		t.Fatal(body, e)
+	}
+	if path := os.Getenv("P16_WIRE_FIXTURE_OUT"); path != "" {
+		if e := os.WriteFile(path, rec.Body.Bytes(), 0600); e != nil {
+			t.Fatal(e)
 		}
 	}
 }

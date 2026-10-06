@@ -155,7 +155,7 @@ FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
 LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.store_id = @store_id::uuid
-  AND (@search::text = '' OR p.sku ILIKE '%'||@search::text||'%' OR p.name ILIKE '%'||@search::text||'%')
+  AND (sqlc.arg(search)::text = '' OR p.sku ILIKE '%'||sqlc.arg(search)::text||'%' OR p.name ILIKE '%'||sqlc.arg(search)::text||'%')
   AND (p.product_id::text < @cursor::text OR @cursor::text = '')
 ORDER BY p.product_id DESC
 LIMIT @limit_n::int;
@@ -221,7 +221,7 @@ ORDER BY t.tag_id;
 SELECT EXISTS (
     SELECT 1 FROM catalog_admin_commands c
     JOIN catalog_admin_command_targets t ON t.command_id = c.id
-    WHERE c.store_id = @store_id::uuid AND c.entity_id = @product_id::uuid
+    WHERE c.store_id = @store_id::uuid AND c.entity_id = (@product_id::uuid)::text
       AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
 )::bool AS has_pending;
 

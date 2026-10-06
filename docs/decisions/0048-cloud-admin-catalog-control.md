@@ -28,8 +28,8 @@ Add a parallel-but-consistent command plane rather than overloading
   `catalog_admin_device_capabilities` (Retail-announced support).
 - Retail migration 000012: append-only `admin_command_receipts`
   (command_id PK, hash, status, result, pre/post revision).
-- Eight versioned types (`catalog.*.v1`); no generic patch; typed
-  server-side request models on both ends.
+- Eight versioned types (`catalog.*.v1`); no generic patch; validated
+  entity/revision-bound payloads on both ends.
 - Retail pulls bounded due targets over existing device auth in the
   existing control worker rhythm; announces
   `catalog_admin_commands_v1`; dispatches through canonical Product,
@@ -37,12 +37,12 @@ Add a parallel-but-consistent command plane rather than overloading
   fencing; persists receipts with crash recovery (RUNNING→RECEIVED
   re-examination, revision fence prevents double-apply).
 - Cloud verifies entity Store ownership against projections at
-  creation (legacy NULL never mutable); snapshots bound devices as
-  targets; gates delivery on active + bound-to-command-Store +
-  capable; binds ACKs server-side to the calling device.
+  creation (legacy NULL never mutable); atomically snapshots bound devices as
+  targets; new command and target IDs are UUIDv7; gates delivery on active + bound-to-command-Store +
+  capable; binds ACKs server-side to the active calling device and current Store.
 - Aggregate states distinguish PENDING/DELIVERED/APPLIED/CONVERGED
-  (projection reached post_revision)/PARTIAL/CONFLICT/
-  BLOCKED_CAPABILITY/CANCELLED; cancellation only pre-apply.
+  (matching projection reached validated post_revision)/PARTIAL/CONFLICT/
+  BLOCKED_CAPABILITY/CANCELLED; cancellation only before any target is delivered or applied.
 - Out of scope: remote Product creation (second SKU allocator risk),
   hard deletes, inventory/Sales/Returns mutation, media pipeline,
   self-update (Phase 17), retention policy (Phase 19).
@@ -59,3 +59,18 @@ Add a parallel-but-consistent command plane rather than overloading
   silent partial success.
 - Frame, DAG, money and history invariants reuse Phase 13/15
   validators unchanged.
+
+## R1 consistency closure
+
+- The wire uses `version`; encoded poll responses are capped at 128 KiB and
+  50 commands. Cloud budgets before marking delivery, preserving the rest.
+- Retail joins canonical repository work into a single BEGIN IMMEDIATE command
+  transaction. Receipt ownership, revision checks and final persistence share
+  that lock; a savepoint undoes all partial suboperations on rejection.
+- ACK, poll delivery and cancellation serialize on the parent command. Exact
+  terminal retries succeed; contradictions conflict. Revoked/rebound targets
+  are terminally reconciled during history reads without catalog mutation.
+- No-op convergence requires matching requested projection values; arbitrary
+  entity IDs, codes and revision jumps cannot manufacture convergence.
+- Dashboard loaders use independent request sequences within a Store lifetime,
+  preventing sibling-loader cancellation and old-Store result publication.

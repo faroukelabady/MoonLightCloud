@@ -61,7 +61,7 @@ CONVERGED          Converged (projection reached post_revision)
 PARTIAL            Partial — some devices diverged, see targets
 CONFLICT           Conflict — refresh before retrying
 BLOCKED_CAPABILITY Retail update required (old Retail, no capability)
-CANCELLED          Cancelled (only while nothing applied)
+CANCELLED          Cancelled (only before any target is delivered or applied)
 ```
 
 Creation shows **Change queued**, never Saved. APPLIED shows
@@ -88,7 +88,9 @@ targets; each eligible Retail applies independently and reports its
 own outcome. Aggregate success requires every target applied plus
 projection convergence. A conflicted device yields PARTIAL, never
 hidden success. Devices that rebind to another Store skip old
-targets (`SKIPPED_REVOKED`); revoked devices cannot fetch or ACK;
+targets (`SKIPPED_REVOKED`); revoked devices cannot fetch or ACK. Command
+history reads durably reconcile revoked/rebound pending targets to this
+terminal skip, which contributes to PARTIAL rather than false success;
 devices joining after creation are not retroactive targets. Old
 Retail without `catalog_admin_commands_v1` never receives unknown
 payloads; the panel shows **Retail update required before remote
@@ -103,7 +105,7 @@ controls; Phase 16 never force-updates.
 
 ## Cancellation
 
-Pending commands may be cancelled. Once any device applied,
+Undelivered pending commands may be cancelled. Once any target is delivered or applied,
 cancellation is refused: issue a compensating command instead.
 Cancellation never implies rollback.
 
@@ -142,3 +144,39 @@ UNSUPPORTED_COMMAND      Old Retail or unknown type; update Retail.
 COMMAND_ID_PAYLOAD_MISMATCH Same ID, changed payload; rejected, original stands.
 RETRYABLE_FAILURE        Transient (database busy); redelivery retries automatically.
 ```
+
+## Remediation transaction and wire boundaries
+
+Command creation and the complete initial target snapshot commit in one
+PostgreSQL transaction. New command/target identities use repository UUIDv7;
+historical IDs are not rewritten. The payload entity must match the outer
+entity, and any supplied stream revision must match the outer expected revision.
+If the payload omits that revision, Cloud injects the outer value before hashing
+and persisting the immutable intent.
+
+ACK, delivery and cancellation take the same parent-command lock. ACKs
+revalidate active device identity and current Store binding; terminal retries
+must match the stored outcome exactly. Result codes are closed machine values,
+and applied entity/revisions must agree with the immutable command. A genuine
+no-op can keep its revision; convergence then checks requested values against
+the projection rather than treating revision equality alone as success.
+
+Poll JSON uses `version` and a 128 KiB whole-response budget (including base64
+payload overhead), with at most 50 commands and 64 KiB per decoded payload.
+Cloud delivers a fitting prefix; remaining targets stay due. A malformed entry
+on Retail cannot discard its valid siblings. Existing Sync Now limits remain
+unchanged.
+
+Retail adopts RECEIVED durably, then holds one SQLite write transaction across
+receipt ownership, revision reads, canonical mutations and terminal persistence.
+Partial canonical suboperations roll back to a savepoint on rejection. A failed
+receipt write rolls back business changes; APPLIED is returned only after commit.
+
+## Baseline provenance correction
+
+The approved Cloud interval `a2c584b… → b94e43a…` is not documentation-only:
+it also registers `catalog.ProcessorProductConfigurationProjectionV1` in
+`allProjectionProcessors()` and adds command-package coverage. Phase 16 review
+therefore included those runtime registry changes and the expanded full race
+suite. This correction records the actual baseline; it does not rewrite history
+or imply that the registry addition changed financial semantics.

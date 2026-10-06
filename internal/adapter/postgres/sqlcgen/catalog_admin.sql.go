@@ -224,7 +224,7 @@ const adminProductHasPending = `-- name: AdminProductHasPending :one
 SELECT EXISTS (
     SELECT 1 FROM catalog_admin_commands c
     JOIN catalog_admin_command_targets t ON t.command_id = c.id
-    WHERE c.store_id = $1::uuid AND c.entity_id = $2::uuid
+    WHERE c.store_id = $1::uuid AND c.entity_id = ($2::uuid)::text
       AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
 )::bool AS has_pending
 `
@@ -260,7 +260,7 @@ FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
 LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.store_id = $1::uuid
-  AND ($2::text = '' OR p.sku ILIKE '%'||@search::text||'%' OR p.name ILIKE '%'||@search::text||'%')
+  AND ($2::text = '' OR p.sku ILIKE '%'||$2::text||'%' OR p.name ILIKE '%'||$2::text||'%')
   AND (p.product_id::text < $3::text OR $3::text = '')
 ORDER BY p.product_id DESC
 LIMIT $4::int
