@@ -220,7 +220,21 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 			t.Fatal(e)
 		}
 		for _, count := range x.Counts {
-			if provider == "unknown" && count.Products != 0 {
+			// Provider narrowing applies to provider-scoped reasons
+			// only (the codes computed against the durable provider
+			// universe). Provider-independent lifecycle reasons (the
+			// original CATALOG_MISSING_SKU/AVAILABILITY_NOT_READY family
+			// and, since Phase 17, the product/variant variant-health
+			// family) intentionally survive provider narrowing — they are
+			// not provider concepts. The Phase 12 all-zero assertion held
+			// only because this fixture produced zero for every
+			// provider-independent code; it is now scoped to the codes
+			// the narrowing contract actually covers.
+			providerScoped := count.ReasonCode == "COMMERCE_MAPPING_MISSING" ||
+				count.ReasonCode == "COMMERCE_SYNC_AMBIGUOUS" ||
+				count.ReasonCode == "COMMERCE_STORE_CONFLICT" ||
+				count.ReasonCode == "VARIANT_MAPPING_MISSING"
+			if provider == "unknown" && providerScoped && count.Products != 0 {
 				t.Fatalf("unknown provider widened: %+v", x)
 			}
 			if provider == "other" && (count.ReasonCode == "COMMERCE_SYNC_AMBIGUOUS" || count.ReasonCode == "COMMERCE_STORE_CONFLICT") && count.Products != 0 {

@@ -36,7 +36,7 @@ func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
 		res, err = d.ProjectCategory(ctx, rec, time.Now())
 	case catalog.EventTagSnapshotV1:
 		res, err = d.ProjectTag(ctx, rec, time.Now())
-	case catalog.EventProductSnapshotV1:
+	case catalog.EventProductSnapshotV1, catalog.EventProductSnapshotV2:
 		res, err = d.ProjectProduct(ctx, rec, time.Now())
 	case catalog.EventProductSalesPolicySnapshotV1:
 		res, err = d.ProjectProductSalesPolicy(ctx, rec, time.Now())
@@ -44,6 +44,10 @@ func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
 		res, err = d.ProjectProductConfigurations(ctx, rec, time.Now())
 	case catalog.EventInventoryProductSnapshotV1:
 		res, err = d.ProjectProductInventory(ctx, rec, time.Now())
+	case catalog.EventProductVariantSnapshotV1:
+		res, err = d.ProjectProductVariant(ctx, rec, time.Now())
+	case catalog.EventInventoryProductVariantSnapshotV1:
+		res, err = d.ProjectProductVariantInventory(ctx, rec, time.Now())
 	default:
 		err = fmt.Errorf("unexpected projector %s", rec.EventType)
 	}

@@ -35,6 +35,10 @@ const (
 	TypeCategoryOnlinePolicyUpdateV1  = "catalog.category.online-policy.update.v1"
 	TypeTagDetailsUpdateV1            = "catalog.tag.details.update.v1"
 	TypeProductConfigurationsUpdateV1 = "catalog.product.configurations.update.v1"
+	// Phase 17 variant commands (SKU/inventory ownership on variant).
+	TypeProductVariantsUpdateV1   = "catalog.product.variants.update.v1"
+	TypeProductVariantUpdateV1    = "catalog.product.variant.update.v1"
+	TypeVariantAttributesUpdateV1 = "catalog.variant.attributes.update.v1"
 )
 
 // KnownTypes lists every creatable command type.
@@ -48,6 +52,9 @@ func KnownTypes() []string {
 		TypeCategoryOnlinePolicyUpdateV1,
 		TypeTagDetailsUpdateV1,
 		TypeProductConfigurationsUpdateV1,
+		TypeProductVariantsUpdateV1,
+		TypeProductVariantUpdateV1,
+		TypeVariantAttributesUpdateV1,
 	}
 }
 
@@ -111,13 +118,16 @@ const (
 func EntityKeyOf(typ string) string {
 	switch typ {
 	case TypeProductDetailsUpdateV1, TypeProductOnlinePolicyUpdateV1,
-		TypeProductClassificationUpdateV1, TypeProductConfigurationsUpdateV1:
+		TypeProductClassificationUpdateV1, TypeProductConfigurationsUpdateV1,
+		TypeProductVariantsUpdateV1:
 		return "product_id"
 	case TypeCategoryDetailsUpdateV1, TypeCategoryParentsUpdateV1,
 		TypeCategoryOnlinePolicyUpdateV1:
 		return "category_id"
 	case TypeTagDetailsUpdateV1:
 		return "tag_id"
+	case TypeProductVariantUpdateV1, TypeVariantAttributesUpdateV1:
+		return "variant_id"
 	}
 	return ""
 }
@@ -129,6 +139,9 @@ func ExpectedRevisionKeyOf(typ string) string {
 		return "expected_sales_policy_revision"
 	case TypeProductConfigurationsUpdateV1:
 		return "expected_configuration_revision"
+	case TypeProductVariantUpdateV1, TypeVariantAttributesUpdateV1:
+		// Variant-scoped commands version on the variant catalog stream.
+		return "expected_variant_revision"
 	default:
 		return "expected_catalog_revision"
 	}
@@ -270,11 +283,46 @@ func boundPayload(typ string, payload map[string]any) error {
 			return fmt.Errorf("invalid configurations: at most 100")
 		}
 	}
+	// Phase 17 variant payloads: bounded SKU/combination identity, the
+	// option attribute list, and bulk replace-set bounds.
+	if typ == TypeProductVariantsUpdateV1 {
+		raw, present := payload["variants"]
+		if !present {
+			return fmt.Errorf("missing variants")
+		}
+		list, ok := raw.([]any)
+		if !ok || len(list) > 100 {
+			return fmt.Errorf("invalid variants: at most 100")
+		}
+		for _, item := range list {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return fmt.Errorf("invalid variants entry")
+			}
+			if err := boundVariantPayload(entry); err != nil {
+				return err
+			}
+		}
+	}
+	if typ == TypeProductVariantUpdateV1 {
+		if err := boundVariantPayload(payload); err != nil {
+			return err
+		}
+	}
+	if typ == TypeVariantAttributesUpdateV1 {
+		raw, present := payload["attributes"]
+		if !present {
+			return fmt.Errorf("missing attributes")
+		}
+		if err := boundVariantAttributes(raw); err != nil {
+			return err
+		}
+	}
 	// Money travels as digit strings (never JSON numbers): float64
 	// cannot represent values above 2^53, so the string-only rule is
 	// enforced at creation as well as at Retail apply time. Null is
 	// allowed only for explicitly nullable USD deltas.
-	for _, key := range []string{"egp_price_cents", "usd_price_cents", "cost_cents", "egp_delta_cents"} {
+	for _, key := range []string{"egp_price_cents", "usd_price_cents", "cost_cents", "egp_delta_cents", "price_egp_cents", "price_usd_cents"} {
 		raw, present := payload[key]
 		if !present || raw == nil {
 			continue
@@ -304,6 +352,80 @@ func checkMinorString(key string, raw any) error {
 	for i := 0; i < len(s); i++ {
 		if s[i] < '0' || s[i] > '9' {
 			return fmt.Errorf("invalid %s: want minor-unit digit string", key)
+		}
+	}
+	return nil
+}
+
+// boundVariantPayload bounds one Phase 17 variant object: SKU and
+// normalized combination identity plus the optional attribute list
+// (money bounds come from the shared minor-string rule).
+func boundVariantPayload(payload map[string]any) error {
+	if err := variantStrLen(payload, "sku", 64); err != nil {
+		return err
+	}
+	if err := variantStrLen(payload, "combination_key", 512); err != nil {
+		return err
+	}
+	if raw, present := payload["attributes"]; present && raw != nil {
+		return boundVariantAttributes(raw)
+	}
+	return nil
+}
+
+// variantStrLen bounds one optional string field of a variant object.
+func variantStrLen(payload map[string]any, key string, max int) error {
+	raw, present := payload[key]
+	if !present || raw == nil {
+		return nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("invalid %s", key)
+	}
+	if len([]rune(s)) > max {
+		return fmt.Errorf("%s exceeds %d characters", key, max)
+	}
+	return nil
+}
+
+// boundVariantAttributes bounds the Phase 17 option attribute list:
+// identity codes, bilingual display labels, and positions.
+func boundVariantAttributes(raw any) error {
+	list, ok := raw.([]any)
+	if !ok || len(list) > 32 {
+		return fmt.Errorf("invalid attributes: at most 32")
+	}
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("invalid attributes entry")
+		}
+		for _, key := range []string{"definition_code", "value_code"} {
+			s, ok := entry[key].(string)
+			if !ok || s == "" || len([]rune(s)) > 64 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		}
+		for _, key := range []string{"name_ar", "definition_name_ar"} {
+			s, ok := entry[key].(string)
+			if !ok || strings.TrimSpace(s) == "" || len([]rune(s)) > 200 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		}
+		for _, key := range []string{"name_en", "definition_name_en"} {
+			if value, present := entry[key]; present && value != nil {
+				s, ok := value.(string)
+				if !ok || len([]rune(s)) > 200 {
+					return fmt.Errorf("invalid %s", key)
+				}
+			}
+		}
+		if value, present := entry["position"]; present && value != nil {
+			n, ok := value.(float64)
+			if !ok || n < 0 || math.Trunc(n) != n {
+				return fmt.Errorf("invalid position")
+			}
 		}
 	}
 	return nil
@@ -368,7 +490,16 @@ func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int
 	}
 	switch status {
 	case TargetApplied:
-		if code != CodeApplied || pre != cmd.ExpectedRevision || post < pre || post-pre > 2 || ((cmd.Type != TypeCategoryDetailsUpdateV1 && cmd.Type != TypeTagDetailsUpdateV1) && post-pre > 1) || (post == pre && cmd.Type != TypeProductOnlinePolicyUpdateV1 && cmd.Type != TypeCategoryOnlinePolicyUpdateV1 && cmd.Type != TypeProductConfigurationsUpdateV1) {
+		// A no-op may retain its revision for no-op-capable commands
+		// (policy flips, configurations, Phase 17 variant updates):
+		// convergence re-verifies the requested values in projection.
+		noopCapable := cmd.Type == TypeProductOnlinePolicyUpdateV1 ||
+			cmd.Type == TypeCategoryOnlinePolicyUpdateV1 ||
+			cmd.Type == TypeProductConfigurationsUpdateV1 ||
+			cmd.Type == TypeProductVariantsUpdateV1 ||
+			cmd.Type == TypeProductVariantUpdateV1 ||
+			cmd.Type == TypeVariantAttributesUpdateV1
+		if code != CodeApplied || pre != cmd.ExpectedRevision || post < pre || post-pre > 2 || ((cmd.Type != TypeCategoryDetailsUpdateV1 && cmd.Type != TypeTagDetailsUpdateV1) && post-pre > 1) || (post == pre && !noopCapable) {
 			return fmt.Errorf("invalid applied outcome")
 		}
 	case TargetConflict:

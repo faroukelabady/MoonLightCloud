@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
 
 // ProviderKey is the stable logical identity of one provider instance
@@ -85,6 +87,11 @@ type CommerceProduct struct {
 	// state. Products without configurations keep the simple
 	// representation (§113).
 	Configurations []CommerceConfiguration
+	// Variants carries the complete current ProductVariant set (Phase
+	// 17): the physical sellable units owning SKU and stock. Frame
+	// configurations above are non-stocked customizations layered on the
+	// selected variant — they never create separate inventory identity.
+	Variants []CommerceVariant
 }
 
 // CommerceConfiguration is one provider-neutral ONLINE product option
@@ -113,10 +120,53 @@ type CommerceConfiguration struct {
 // configuration row and no Product identity is derived from it.
 const NoFrameConfigurationID = "00000000-0000-0000-0000-000000000000"
 
+// CommerceVariantAttribute is one physical option of a MoonLight
+// ProductVariant (Phase 17): identity is (DefinitionCode, ValueCode);
+// labels are provider display only and never prove ownership.
+type CommerceVariantAttribute struct {
+	DefinitionCode   string
+	ValueCode        string
+	NameAR           string
+	NameEN           *string
+	DefinitionNameAR string
+	DefinitionNameEN *string
+	Position         int
+}
+
+// CommerceVariant is the provider-neutral desired state of one MoonLight
+// ProductVariant: the physical sellable unit that owns SKU and stock
+// (Phase 17). AvailableQuantity is the per-variant derived availability
+// (ComputeVariantAvailability output) — NEVER a product aggregate copied
+// per variant and NEVER a sum over frame choices: physical inventory is
+// variant-specific and must never multiply across provider
+// representations.
+type CommerceVariant struct {
+	VariantID  string
+	SKU        string
+	Attributes []CommerceVariantAttribute
+	// PriceEGPMinor/PriceUSDMinor are exact int64 minor-unit overrides.
+	// A nil override inherits the Product base price for that currency;
+	// no floats, no FX.
+	PriceEGPMinor *int64
+	PriceUSDMinor *int64
+	Active        bool
+	// AvailableQuantity is the derived ONLINE quantity to publish for
+	// this variant (zero when !Ready, inactive, or unpublished).
+	AvailableQuantity int64
+	Ready             bool
+	InventoryRevision int64
+}
+
 // ProviderProductRef is the minimal external identity an adapter returns.
 // Variant/category/media/order identifiers are future phases.
 type ProviderProductRef struct {
 	ExternalProductID string
+}
+
+// ProviderVariantRef is one variant's external identity as returned by
+// the adapter and persisted in commerce_product_variant_mappings.
+type ProviderVariantRef struct {
+	ExternalVariantID string
 }
 
 // ProductUpsertRequest asks the adapter to converge one remote product to
@@ -163,6 +213,59 @@ type InventoryUpdateRequest struct {
 	OperationKey      string
 }
 
+// ProductVariantsUpsertRequest asks the adapter to converge one remote
+// product's provider variations to the desired MoonLight ProductVariant
+// set (Phase 17). Existing carries the durable per-variant remote
+// identities already recorded in commerce_product_variant_mappings
+// (variant ID → external variant ID) so an adapter updates instead of
+// creating; a variant missing from that map must be recovered by SKU +
+// ownership metadata or created — never duplicated.
+//
+// Safe-zero convention: variant metadata writes leave provider stock at
+// zero; the separate SetVariantInventory calls restore per-variant
+// availability. Frame Configurations on Product are non-stocked
+// customizations: an adapter that cannot layer them on the selected
+// variant WITHOUT multiplying stock must fail with a capability
+// (conflict) error — never invent stock-multiplying variants.
+type ProductVariantsUpsertRequest struct {
+	ProviderKey       ProviderKey
+	ProductID         string
+	ExternalProductID string
+	ExistingVariants  map[string]string
+	Product           CommerceProduct
+	Published         bool
+	CatalogRevision   int64
+	PolicyRevision    int64
+	OperationKey      string
+}
+
+// ProductVariantsUpsertResult carries the external identity of each
+// converged provider variation, keyed by MoonLight variant ID. The
+// service seam persists every entry durably before any variant
+// inventory is published.
+type ProductVariantsUpsertResult struct {
+	Variants map[string]string
+}
+
+// VariantInventoryUpdateRequest asks the adapter to set provider-facing
+// availability for ONE MoonLight variant's provider variation. The
+// quantity is that variant's own derived availability (safe-zero when
+// not ready) — never a product aggregate, never a sum over frame
+// choices.
+type VariantInventoryUpdateRequest struct {
+	ProviderKey       ProviderKey
+	ProductID         string
+	VariantID         string
+	ExternalProductID string
+	ExternalVariantID string
+	AvailableQuantity int64
+	InventoryRevision int64
+	CatalogRevision   int64
+	PolicyRevision    int64
+	Ready             bool
+	OperationKey      string
+}
+
 // CommerceProvider is the single provider-neutral adapter boundary.
 // UpsertProduct converges remote product metadata/publication state;
 // SetInventory sets remote availability. Orders, refunds, fulfillment,
@@ -172,6 +275,33 @@ type CommerceProvider interface {
 	Key() ProviderKey
 	UpsertProduct(ctx context.Context, req ProductUpsertRequest) (ProductUpsertResult, error)
 	SetInventory(ctx context.Context, req InventoryUpdateRequest) error
+}
+
+// VariantCommerceProvider is the OPTIONAL Phase 17 variant capability a
+// provider may implement alongside the frozen CommerceProvider. It maps
+// MoonLight ProductVariant → provider variation/variant with
+// variant-specific inventory. Detect via AsVariantProvider (typed
+// failure, never panic) exactly like the orders capability. A product
+// whose desired state carries variants is NEVER synced through a
+// provider lacking this capability: provider limitations fail safely
+// (capability conflict), never fall back to inventory-multiplying
+// representations.
+type VariantCommerceProvider interface {
+	UpsertProductVariants(ctx context.Context, req ProductVariantsUpsertRequest) (ProductVariantsUpsertResult, error)
+	SetVariantInventory(ctx context.Context, req VariantInventoryUpdateRequest) error
+}
+
+// AsVariantProvider resolves the variant capability from a registered
+// provider instance.
+func AsVariantProvider(provider CommerceProvider) (VariantCommerceProvider, error) {
+	if provider == nil {
+		return nil, apperr.New(apperr.InvalidInput, "nil provider has no variant capability")
+	}
+	variantProvider, ok := provider.(VariantCommerceProvider)
+	if !ok {
+		return nil, apperr.New(apperr.Unprocessable, fmt.Sprintf("provider %q does not support variant commerce", provider.Key()))
+	}
+	return variantProvider, nil
 }
 
 // ErrorKind classifies provider failures for future orchestration.

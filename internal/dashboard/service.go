@@ -1285,6 +1285,15 @@ var CatalogHealthReasonCodes = []string{
 	// Informational (Phase 13 §116): intentional Category suppression —
 	// never a catalog-health failure.
 	"CATEGORY_ONLINE_DISABLED",
+	// Phase 17 variant health (SKU/inventory ownership on ProductVariant).
+	"PRODUCT_NO_ACTIVE_VARIANTS",
+	"PRODUCT_NO_SELLABLE_VARIANT",
+	"VARIANT_DUPLICATE_COMBINATION",
+	"VARIANT_MISSING_SKU",
+	"VARIANT_MAPPING_MISSING",
+	// Informational (Phase 17): deliberate variant inactivity/tombstone
+	// on an online-eligible product — never a catalog-health failure.
+	"VARIANT_INTENTIONALLY_OFFLINE",
 }
 
 // CatalogHealth is the diagnostic catalog/integration surface. It reports

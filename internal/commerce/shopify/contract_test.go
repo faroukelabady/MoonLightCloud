@@ -146,12 +146,37 @@ func validateWireContract(document string, vars map[string]any) error {
 			return fail()
 		}
 		vs, ok := input["variants"].([]any)
-		if !ok || len(vs) != 1 {
+		if !ok || len(vs) == 0 {
 			return fail()
 		}
-		v, ok := vs[0].(map[string]any)
-		if !ok || v["sku"] == nil {
+		// Phase 17: multi-variant creates declare their option axes and
+		// carry SKU/price per variant.
+		if len(vs) > 1 && input["productOptions"] == nil {
 			return fail()
+		}
+		for _, raw := range vs {
+			v, ok := raw.(map[string]any)
+			if !ok || v["sku"] == nil {
+				return fail()
+			}
+		}
+	case "MoonlightVariantSet":
+		if !strings.Contains(compact, "$input: ProductSetInput!") || !strings.Contains(compact, "productSet(synchronous: true, input: $input)") {
+			return fail()
+		}
+		input, ok := vars["input"].(map[string]any)
+		if !ok || input["id"] == nil || input["variants"] == nil || input["productOptions"] == nil {
+			return fail()
+		}
+		values, ok := input["variants"].([]any)
+		if !ok || len(values) == 0 {
+			return fail()
+		}
+		for _, raw := range values {
+			entry, ok := raw.(map[string]any)
+			if !ok || entry["sku"] == nil || entry["inventoryItem"] == nil {
+				return fail()
+			}
 		}
 	case "MoonlightProductUpdate":
 		if !strings.Contains(compact, "$input: ProductInput!") || !strings.Contains(compact, "productUpdate(input: $input)") {

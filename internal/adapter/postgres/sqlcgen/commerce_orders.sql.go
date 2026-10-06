@@ -588,10 +588,11 @@ INSERT INTO commerce_online_order_lines (
     moonlight_product_id, mapped, unsupported_reason,
     configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
     frame_color_code, frame_color_name_ar, frame_color_name_en,
-    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved,
+    variant_id, variant_sku, variant_attribute_snapshot
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 )
 ON CONFLICT (provider_key, external_order_id, external_line_id) DO UPDATE SET
     external_product_id = excluded.external_product_id,
@@ -634,13 +635,16 @@ type InsertCommerceOrderLineParams struct {
 	ConfigurationPriceDeltaMinor pgtype.Int8 `json:"configuration_price_delta_minor"`
 	ProviderConfigurationID      pgtype.Text `json:"provider_configuration_id"`
 	ConfigurationUnresolved      bool        `json:"configuration_unresolved"`
+	VariantID                    pgtype.UUID `json:"variant_id"`
+	VariantSku                   pgtype.Text `json:"variant_sku"`
+	VariantAttributeSnapshot     []byte      `json:"variant_attribute_snapshot"`
 }
 
 // Phase 15-R1 F11: the captured selection snapshot is IMMUTABLE. Later
 // status refresh, retry, catalog rename/reprice/disable or mapping repair
 // may evolve provider money and base mapping state under the frozen
 // reconciliation rules, but can never substitute current configuration
-// values for the purchase-time selection.
+// or variant values (Phase 17) for the purchase-time selection.
 func (q *Queries) InsertCommerceOrderLine(ctx context.Context, arg InsertCommerceOrderLineParams) error {
 	_, err := q.db.Exec(ctx, insertCommerceOrderLine,
 		arg.ProviderKey,
@@ -668,6 +672,9 @@ func (q *Queries) InsertCommerceOrderLine(ctx context.Context, arg InsertCommerc
 		arg.ConfigurationPriceDeltaMinor,
 		arg.ProviderConfigurationID,
 		arg.ConfigurationUnresolved,
+		arg.VariantID,
+		arg.VariantSku,
+		arg.VariantAttributeSnapshot,
 	)
 	return err
 }
@@ -815,7 +822,8 @@ SELECT provider_key, external_order_id, external_line_id,
     moonlight_product_id, mapped, unsupported_reason,
     configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
     frame_color_code, frame_color_name_ar, frame_color_name_en,
-    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved,
+    variant_id, variant_sku, variant_attribute_snapshot
 FROM commerce_online_order_lines
 WHERE provider_key = $1 AND external_order_id = $2
 ORDER BY external_line_id
@@ -861,6 +869,9 @@ func (q *Queries) ListCommerceOrderLines(ctx context.Context, arg ListCommerceOr
 			&i.ConfigurationPriceDeltaMinor,
 			&i.ProviderConfigurationID,
 			&i.ConfigurationUnresolved,
+			&i.VariantID,
+			&i.VariantSku,
+			&i.VariantAttributeSnapshot,
 		); err != nil {
 			return nil, err
 		}

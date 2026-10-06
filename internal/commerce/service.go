@@ -29,6 +29,11 @@ type SyncResult struct {
 	InventoryUpdated      bool
 	ProductOperationKey   string
 	InventoryOperationKey string
+	// Phase 17 variant reconciliation outcome (zero without variants).
+	VariantsSynced          int
+	VariantMappingsCreated  int
+	VariantInventoryUpdated int
+	VariantOperationKey     string
 }
 
 // CommerceService is the synchronous orchestration seam Phase 6B
@@ -182,6 +187,21 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 		}
 	}
 
+	result.VariantOperationKey, err = s.syncVariants(ctx, provider, key, productID, desired, upserted.ExternalProductID, &result)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	if len(desired.Product.Variants) > 0 {
+		// Phase 17: variant-owning products publish per-variant
+		// availability ONLY. A product-level aggregate publish would
+		// misrepresent variant stock (and multiply it across frame
+		// choices), so it never runs alongside the variant path.
+		s.logInfo("commerce sync variants", "provider", string(key), "product", productID,
+			"external", upserted.ExternalProductID, "variants", result.VariantsSynced,
+			"published", desired.Published, "mapped", mapped)
+		return result, nil
+	}
+
 	quantity := int64(desired.Availability.OnlineAvailable)
 	inventoryKey := InventoryOperationKey(key, productID,
 		desired.CatalogRevision, desired.PolicyRevision, desired.InventoryRevision,
@@ -208,4 +228,105 @@ func (s *CommerceService) logInfo(msg string, args ...any) {
 	if s.log != nil {
 		s.log.Info(msg, args...)
 	}
+}
+
+// syncVariants reconciles the provider variation set to the desired
+// MoonLight ProductVariant set (Phase 17) and publishes per-variant
+// availability. Durable per-variant mappings persist BEFORE any variant
+// inventory is published; a mapping-loss retry re-adopts the owned
+// remote variation (adapters recover by SKU + ownership metadata), never
+// a duplicate. Provider limitations fail safely: a provider without the
+// variant capability, or a returned identity that disputes a durable
+// mapping, is a capability/mapping conflict — never an inventory
+// fallback that could multiply stock.
+func (s *CommerceService) syncVariants(ctx context.Context, provider CommerceProvider, key ProviderKey, productID string, desired DesiredProduct, externalProductID string, result *SyncResult) (string, error) {
+	variants := desired.Product.Variants
+	if len(variants) == 0 {
+		return "", nil
+	}
+	variantProvider, err := AsVariantProvider(provider)
+	if err != nil {
+		return "", apperr.New(apperr.Conflict,
+			"VARIANT_CAPABILITY_UNAVAILABLE: provider cannot represent product variants without multiplying stock")
+	}
+	existingRows, err := s.mappings.ListProductVariantMappings(ctx, key, productID)
+	if err != nil {
+		return "", err
+	}
+	existing := make(map[string]string, len(existingRows))
+	for _, row := range existingRows {
+		existing[row.VariantID] = row.ExternalVariantID
+	}
+	variantKey := VariantOperationKey(key, productID,
+		desired.CatalogRevision, desired.PolicyRevision, desired.Published,
+		desired.VariantsFingerprint, desired.VariantsVersion)
+	upserted, err := variantProvider.UpsertProductVariants(ctx, ProductVariantsUpsertRequest{
+		ProviderKey: key, ProductID: productID, ExternalProductID: externalProductID,
+		ExistingVariants: existing, Product: desired.Product, Published: desired.Published,
+		CatalogRevision: desired.CatalogRevision, PolicyRevision: desired.PolicyRevision,
+		OperationKey: variantKey,
+	})
+	if err != nil {
+		return "", err
+	}
+	// The complete returned set is validated BEFORE anything is
+	// persisted: partial or disputed identity never reaches durable
+	// mapping state.
+	desiredIDs := make(map[string]bool, len(variants))
+	for _, variant := range variants {
+		desiredIDs[variant.VariantID] = true
+		externalVariantID := upserted.Variants[variant.VariantID]
+		if externalVariantID == "" {
+			return "", apperr.New(apperr.Internal, "provider returned no external variant id for one variant")
+		}
+		if len(externalVariantID) > 200 {
+			return "", apperr.New(apperr.Internal, "provider returned overlong external variant id")
+		}
+		if mapped, ok := existing[variant.VariantID]; ok && mapped != externalVariantID {
+			// The adapter claims a different remote variation for an
+			// already-mapped variant: never silently remap (generic
+			// protection). Variant inventory is not addressed while
+			// identity is disputed.
+			return "", apperr.New(apperr.Conflict, fmt.Sprintf(
+				"provider variant mapping conflict for %s/%s: mapped %q, adapter returned %q",
+				key, variant.VariantID, mapped, externalVariantID))
+		}
+	}
+	for variantID := range upserted.Variants {
+		if !desiredIDs[variantID] {
+			return "", apperr.New(apperr.Internal, "provider returned external variant id for an unknown variant")
+		}
+	}
+	for _, variant := range variants {
+		if _, ok := existing[variant.VariantID]; ok {
+			continue
+		}
+		if _, err := s.mappings.CreateProductVariantMapping(ctx, key, productID, variant.VariantID,
+			externalProductID, upserted.Variants[variant.VariantID]); err != nil {
+			// Mapping persistence failed: stop before variant inventory.
+			// The stable operation key lets a retry recover without
+			// duplicating the remote variation.
+			return "", err
+		}
+		result.VariantMappingsCreated++
+	}
+	for _, variant := range variants {
+		quantity := variant.AvailableQuantity
+		inventoryKey := VariantInventoryOperationKey(key, productID, variant.VariantID,
+			desired.CatalogRevision, desired.PolicyRevision, variant.InventoryRevision,
+			quantity, variant.Ready, desired.Published,
+			desired.VariantsFingerprint, desired.VariantsVersion)
+		if err := variantProvider.SetVariantInventory(ctx, VariantInventoryUpdateRequest{
+			ProviderKey: key, ProductID: productID, VariantID: variant.VariantID,
+			ExternalProductID: externalProductID, ExternalVariantID: upserted.Variants[variant.VariantID],
+			AvailableQuantity: quantity, InventoryRevision: variant.InventoryRevision,
+			CatalogRevision: desired.CatalogRevision, PolicyRevision: desired.PolicyRevision,
+			Ready: variant.Ready, OperationKey: inventoryKey,
+		}); err != nil {
+			return "", err
+		}
+		result.VariantInventoryUpdated++
+	}
+	result.VariantsSynced = len(variants)
+	return variantKey, nil
 }

@@ -239,3 +239,53 @@ SELECT id, command_id, device_id, status, result_code, entity_id, pre_revision, 
 FROM catalog_admin_command_targets
 WHERE command_id = ANY(@command_ids::uuid[])
 ORDER BY command_id, created_at, id;
+
+-- Phase 17 variant admin reads: Store-scoped projection rows for the
+-- operator (variant identity, prices, stock, option attributes). Never
+-- query Retail directly; tombstones are shown but flagged.
+
+-- name: AdminVariantOwnership :one
+SELECT variant_id, store_id, variant_revision
+FROM catalog_product_variants
+WHERE variant_id = @variant_id::uuid;
+
+-- name: AdminProductVariants :many
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
+    EXISTS (
+        SELECT 1 FROM catalog_admin_commands c
+        JOIN catalog_admin_command_targets t ON t.command_id = c.id
+        WHERE c.store_id = @store_id::uuid
+          AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
+          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+    ) AS has_pending
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+WHERE v.product_id = @product_id::uuid AND v.store_id = @store_id::uuid
+ORDER BY v.position, v.variant_id;
+
+-- name: AdminProductVariantByVariantID :one
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
+    EXISTS (
+        SELECT 1 FROM catalog_admin_commands c
+        JOIN catalog_admin_command_targets t ON t.command_id = c.id
+        WHERE c.store_id = @store_id::uuid
+          AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
+          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+    ) AS has_pending
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+WHERE v.variant_id = @variant_id::uuid AND v.store_id = @store_id::uuid;
+
+-- name: AdminProductVariantAttributes :many
+SELECT definition_code, value_code, name_ar, name_en, definition_name_ar, definition_name_en, position
+FROM catalog_product_variant_attribute_values
+WHERE variant_id = @variant_id::uuid
+ORDER BY position, definition_code;

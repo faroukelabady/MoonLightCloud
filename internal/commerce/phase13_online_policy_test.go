@@ -245,6 +245,18 @@ func (p13Mappings) FindByExternalProductID(context.Context, ProviderKey, string)
 func (p13Mappings) CreateProductMapping(_ context.Context, key ProviderKey, productID, externalID string) (ProductMapping, error) {
 	return ProductMapping{ProviderKey: key, ProductID: productID, ExternalProductID: externalID}, nil
 }
+func (p13Mappings) GetProductVariantMapping(context.Context, ProviderKey, string) (ProductVariantMapping, error) {
+	return ProductVariantMapping{}, errMappingNotFoundStub()
+}
+func (p13Mappings) ListProductVariantMappings(context.Context, ProviderKey, string) ([]ProductVariantMapping, error) {
+	return nil, nil
+}
+func (p13Mappings) FindProductVariantMappingByExternal(context.Context, ProviderKey, string, string) (ProductVariantMapping, error) {
+	return ProductVariantMapping{}, errMappingNotFoundStub()
+}
+func (p13Mappings) CreateProductVariantMapping(_ context.Context, key ProviderKey, productID, variantID, externalProductID, externalVariantID string) (ProductVariantMapping, error) {
+	return ProductVariantMapping{ProviderKey: key, ProductID: productID, VariantID: variantID, ExternalProductID: externalProductID, ExternalVariantID: externalVariantID}, nil
+}
 
 type stubDesiredSource struct{ desired DesiredProduct }
 

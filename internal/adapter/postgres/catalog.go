@@ -1754,7 +1754,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		euid, _ := parseUUID(event.EventID)
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
 	}
-	raw, derr := catalog.DecodeProductSnapshot(attempt.payload)
+	raw, derr := decodeProductSnapshotEvent(event, attempt.payload)
 	if derr != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
 	}
@@ -3139,4 +3139,617 @@ func (d Devices) CatalogProductConfigurations(ctx context.Context, id string) ([
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// ---- Phase 17 product & physical variants ----
+//
+// SKU and inventory ownership live on ProductVariant. Two independent
+// streams project with the exact Phase 5 machinery: one claim+project
+// transaction per event, entity advisory locks, revision gates where
+// stale is a terminal no-op, equal-revision semantic comparison,
+// Store-scoped ownership (00023 conventions), and product/variant
+// dependency waits that are retryable, never terminal.
+
+// decodeProductSnapshotEvent decodes the product stream by wire version:
+// v1 carries `sku`; v2 (Phase 17) replaced it with the deprecated
+// `primary_variant_sku` display mirror. Both normalize to one shape so a
+// single projector, revision gate, and fingerprint serve the stream.
+func decodeProductSnapshotEvent(event catalog.EventRecord, payload []byte) (catalog.ProductSnapshot, error) {
+	if event.EventType == catalog.EventProductSnapshotV2 {
+		return catalog.DecodeProductSnapshotV2(payload)
+	}
+	return catalog.DecodeProductSnapshot(payload)
+}
+
+// currentProductVariantSnapshot reconstructs the normalized semantic
+// state of a projected variant (identity, prices, attributes) for
+// equal-revision comparison. Inventory mirrors never participate.
+func currentProductVariantSnapshot(ctx context.Context, q *sqlcgen.Queries, vuid pgtype.UUID) (catalog.NormalizedProductVariant, bool, error) {
+	row, err := q.CatalogProductVariantByID(ctx, vuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.NormalizedProductVariant{}, false, nil
+		}
+		return catalog.NormalizedProductVariant{}, false, err
+	}
+	attrs, err := q.CatalogProductVariantAttributes(ctx, vuid)
+	if err != nil {
+		return catalog.NormalizedProductVariant{}, false, err
+	}
+	snapshot := catalog.ProductVariantSnapshot{
+		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+		SKU: row.Sku, IsActive: row.IsActive, Deleted: row.Deleted,
+		Position: int(row.Position), CombinationKey: row.CombinationKey,
+		VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
+	}
+	if row.PriceEgpCents.Valid {
+		price := row.PriceEgpCents.Int64
+		snapshot.PriceEGPCents = &price
+	}
+	if row.PriceUsdCents.Valid {
+		price := row.PriceUsdCents.Int64
+		snapshot.PriceUSDCents = &price
+	}
+	for _, attr := range attrs {
+		entry := catalog.VariantAttribute{
+			DefinitionCode: attr.DefinitionCode, ValueCode: attr.ValueCode,
+			NameAR: attr.NameAr, DefinitionNameAR: attr.DefinitionNameAr,
+			Position: int(attr.Position),
+		}
+		if attr.NameEn.Valid {
+			name := attr.NameEn.String
+			entry.NameEN = &name
+		}
+		if attr.DefinitionNameEn.Valid {
+			name := attr.DefinitionNameEn.String
+			entry.DefinitionNameEN = &name
+		}
+		snapshot.Attributes = append(snapshot.Attributes, entry)
+	}
+	return catalog.NormalizeProductVariantSnapshot(snapshot), true, nil
+}
+
+// currentProductVariantInventorySnapshot reconstructs the normalized
+// semantic state of a projected variant inventory row.
+func currentProductVariantInventorySnapshot(ctx context.Context, q *sqlcgen.Queries, vuid pgtype.UUID) (catalog.NormalizedProductVariantInventory, bool, error) {
+	row, err := q.CatalogProductVariantInventoryByID(ctx, vuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.NormalizedProductVariantInventory{}, false, nil
+		}
+		return catalog.NormalizedProductVariantInventory{}, false, err
+	}
+	return catalog.NormalizeProductVariantInventorySnapshot(catalog.ProductVariantInventorySnapshot{
+		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+		InventoryRevision: row.SourceRevision, StockQuantity: int(row.StockQuantity),
+	}), true, nil
+}
+
+// ProjectProductVariant projects one catalog.product_variant.snapshot.v1
+// with revision ordering and a product dependency wait. Either the
+// variant row and its attribute values commit or nothing does. Tombstones
+// (`deleted: true`) are stored as rows, never deletes. Legacy (unscoped)
+// rows may carry duplicate combination keys: the Store-scoped unique
+// constraints never fire for NULL ownership (NULL is never equal to
+// NULL), so duplicate combination data is tolerated at the projection
+// layer and surfaced as VARIANT_DUPLICATE_COMBINATION health instead.
+func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductVariantSnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductVariantSnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	vuid, err := parseUUID(valid.VariantID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrValidation, "variant_id must be a UUID")
+	}
+	puid, err := parseUUID(valid.ProductID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrValidation, "product_id must be a UUID")
+	}
+
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+
+	// Entity locks (R04): own the variant plus its inventory namespace so
+	// variant adoption and concurrent variant inventory writes serialize
+	// (F02 adoption-race protection, mirroring ProjectProduct).
+	if err := lockCatalogEntities(ctx, q,
+		[2]string{"product-variant", valid.VariantID},
+		[2]string{"product-variant-inventory", valid.VariantID},
+	); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+
+	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
+	if row, err := q.CatalogProductVariantByID(ctx, vuid); err == nil {
+		storedRevision = row.VariantRevision
+		existingStore = row.StoreID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory. A scoped event for a
+	// variant owned by another Store blocks here; a scoped event adopts a
+	// NULL legacy row by aggregate-ID + revision continuity.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "variant owned by another store")
+	}
+	storeScope := storeUUID(effectiveScope(writeStore, existingStore))
+	proceed, stale := revisionGate(valid.VariantRevision, storedRevision)
+	if stale {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if !proceed {
+		supersededEqual, err := entitySuperseded(ctx, q,
+			catalog.EventProductVariantSnapshotV1, "variant_id", valid.VariantID,
+			catalog.ProcessorProductVariantProjectionV1, "variant_revision", valid.VariantRevision, storeScope)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		}
+		if supersededEqual {
+			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		}
+		currentSnapshot, exists, err := currentProductVariantSnapshot(ctx, q, vuid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+		}
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductVariantSnapshot(valid), currentSnapshot) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	superseded, err := entitySuperseded(ctx, q,
+		catalog.EventProductVariantSnapshotV1, "variant_id", valid.VariantID,
+		catalog.ProcessorProductVariantProjectionV1, "variant_revision", valid.VariantRevision, storeScope)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+	}
+	if superseded {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+
+	// Dependency resolution: the core product must exist. Absence is a
+	// retryable wait (out-of-order arrival), never terminal. A product
+	// owned by another proven Store can never back this variant.
+	productRow, err := q.CatalogProductByID(ctx, puid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
+		}
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+	}
+	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product owned by another store")
+	}
+	// Phase 9-R1 F02 mirror: adopting a variant into a Store must not
+	// leave its inventory or provider mapping owned by another proven
+	// Store (see ProjectProduct).
+	if adoptingStore(existingStore, writeStore) {
+		dependentStores, err := q.CatalogProductVariantDependentStores(ctx, vuid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant dependency scope lookup failed")
+		}
+		if !storeDependentsCompatible(writeStore, dependentStores) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "variant adoption would cross an existing dependent store")
+		}
+	}
+
+	var priceEGP, priceUSD pgtype.Int8
+	if valid.PriceEGPCents != nil {
+		priceEGP = pgtype.Int8{Int64: *valid.PriceEGPCents, Valid: true}
+	}
+	if valid.PriceUSDCents != nil {
+		priceUSD = pgtype.Int8{Int64: *valid.PriceUSDCents, Valid: true}
+	}
+	fingerprint := catalog.FingerprintProductVariant(valid)
+	if err := q.UpsertCatalogProductVariant(ctx, sqlcgen.UpsertCatalogProductVariantParams{
+		VariantID: vuid, ProductID: puid, Sku: valid.SKU,
+		IsActive: valid.IsActive, Deleted: valid.Deleted,
+		PriceEgpCents: priceEGP, PriceUsdCents: priceUSD,
+		Position: int32(valid.Position), CombinationKey: valid.CombinationKey,
+		VariantRevision: valid.VariantRevision, CatalogRevision: valid.CatalogRevision,
+		SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
+		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isUniqueViolation(err) {
+			// A proven-Store identity collision (duplicate SKU or
+			// combination) is deterministic, never a crash. Legacy NULL
+			// ownership can never collide here (NULLS DISTINCT).
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "variant identity collision")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant upsert failed")
+	}
+	if err := q.DeleteCatalogProductVariantAttributes(ctx, vuid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute replace failed")
+	}
+	for _, attr := range valid.Attributes {
+		var nameEN, defNameEN pgtype.Text
+		if attr.NameEN != nil {
+			nameEN = pgText(*attr.NameEN)
+		}
+		if attr.DefinitionNameEN != nil {
+			defNameEN = pgText(*attr.DefinitionNameEN)
+		}
+		if err := q.InsertCatalogProductVariantAttribute(ctx, sqlcgen.InsertCatalogProductVariantAttributeParams{
+			VariantID: vuid, DefinitionCode: attr.DefinitionCode, ValueCode: attr.ValueCode,
+			NameAr: attr.NameAR, NameEn: nameEN,
+			DefinitionNameAr: attr.DefinitionNameAR, DefinitionNameEn: defNameEN,
+			Position: int32(attr.Position),
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute insert failed")
+		}
+	}
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
+// ProjectProductVariantInventory projects one
+// inventory.product_variant.snapshot.v1 with revision ordering and a
+// variant dependency wait. Either the inventory row commits or nothing
+// does; failure leaves the previous revision visible. Inactive/tombstoned
+// variants and sell_online=false still project rows: lifecycle and policy
+// affect availability, never inventory truth.
+func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductVariantInventorySnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductVariantInventorySnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	vuid, err := parseUUID(valid.VariantID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrValidation, "variant_id must be a UUID")
+	}
+	puid, err := parseUUID(valid.ProductID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrValidation, "product_id must be a UUID")
+	}
+
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+
+	// Distinct lock namespace: variant inventory decisions serialize per
+	// variant without joining catalog stream lock traffic.
+	if err := lockCatalogEntities(ctx, q, [2]string{"product-variant-inventory", valid.VariantID}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
+	if row, err := q.CatalogProductVariantInventoryByID(ctx, vuid); err == nil {
+		storedRevision = row.SourceRevision
+		existingStore = row.StoreID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory lookup failed")
+	}
+	// Phase 9B ownership gate: see ProjectCategory.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "variant inventory owned by another store")
+	}
+	proceed, stale := revisionGate(valid.InventoryRevision, storedRevision)
+	if stale {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if !proceed {
+		supersededEqual, err := entitySuperseded(ctx, q,
+			catalog.EventInventoryProductVariantSnapshotV1, "variant_id", valid.VariantID,
+			catalog.ProcessorProductVariantInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		}
+		if supersededEqual {
+			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		}
+		currentSnapshot, exists, err := currentProductVariantInventorySnapshot(ctx, q, vuid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+		}
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductVariantInventorySnapshot(valid), currentSnapshot) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	superseded, err := entitySuperseded(ctx, q,
+		catalog.EventInventoryProductVariantSnapshotV1, "variant_id", valid.VariantID,
+		catalog.ProcessorProductVariantInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+	}
+	if superseded {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+
+	// Dependency resolution: the variant must exist. Absence is a
+	// retryable wait (out-of-order arrival), never terminal. A variant
+	// owned by another proven Store can never back this inventory.
+	variantRow, err := q.CatalogProductVariantByID(ctx, vuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "variant not yet projected")
+		}
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed")
+	}
+	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(variantRow.StoreID)) {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "variant owned by another store")
+	}
+
+	var allocation pgtype.Int8
+	if valid.OnlineAllocationLimit != nil {
+		allocation = pgtype.Int8{Int64: int64(*valid.OnlineAllocationLimit), Valid: true}
+	}
+	fingerprint := catalog.FingerprintProductVariantInventory(valid)
+	if err := q.UpsertCatalogProductVariantInventory(ctx, sqlcgen.UpsertCatalogProductVariantInventoryParams{
+		VariantID: vuid, ProductID: puid, Sku: valid.SKU,
+		StockQuantity: int64(valid.StockQuantity),
+		Ready:         valid.Ready, SellOnline: valid.SellOnline, OnlineAllocationLimit: allocation,
+		PolicyRevision: valid.PolicyRevision, CatalogRevision: valid.CatalogRevision,
+		SourceRevision: valid.InventoryRevision,
+		SourceEventID:  attempt.euid, SourceDeviceID: attempt.duid,
+		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory upsert failed")
+	}
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
+// CatalogProductVariants returns the projected variants of one product
+// with attributes and last-known stock. Tombstoned variants are excluded
+// (historical rows stay queryable through admin/health surfaces).
+func (d Devices) CatalogProductVariants(ctx context.Context, productID string) ([]catalog.Variant, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "product_id must be a UUID")
+	}
+	q := sqlcgen.New(d.pool)
+	rows, err := q.CatalogProductVariantsByProduct(ctx, puid)
+	if err != nil {
+		return nil, apperr.Wrap(apperr.Internal, "catalog variants", redact(err))
+	}
+	out := make([]catalog.Variant, 0, len(rows))
+	for _, row := range rows {
+		if row.Deleted {
+			continue
+		}
+		variant := catalog.Variant{
+			VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+			SKU: row.Sku, IsActive: row.IsActive,
+			Position: int(row.Position), CombinationKey: row.CombinationKey,
+			VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
+			SourceEventID: uuidString(row.SourceEventID), Attributes: []catalog.VariantAttribute{},
+		}
+		if row.PriceEgpCents.Valid {
+			price := row.PriceEgpCents.Int64
+			variant.PriceEGPCents = &price
+		}
+		if row.PriceUsdCents.Valid {
+			price := row.PriceUsdCents.Int64
+			variant.PriceUSDCents = &price
+		}
+		attrs, err := q.CatalogProductVariantAttributes(ctx, row.VariantID)
+		if err != nil {
+			return nil, apperr.Wrap(apperr.Internal, "catalog variant attributes", redact(err))
+		}
+		for _, attr := range attrs {
+			entry := catalog.VariantAttribute{
+				DefinitionCode: attr.DefinitionCode, ValueCode: attr.ValueCode,
+				NameAR: attr.NameAr, DefinitionNameAR: attr.DefinitionNameAr,
+				Position: int(attr.Position),
+			}
+			if attr.NameEn.Valid {
+				name := attr.NameEn.String
+				entry.NameEN = &name
+			}
+			if attr.DefinitionNameEn.Valid {
+				name := attr.DefinitionNameEn.String
+				entry.DefinitionNameEN = &name
+			}
+			variant.Attributes = append(variant.Attributes, entry)
+		}
+		if inv, err := q.CatalogProductVariantInventoryByID(ctx, row.VariantID); err == nil {
+			stock := int(inv.StockQuantity)
+			variant.StockQuantity = &stock
+			variant.InventoryRevision = inv.SourceRevision
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperr.Wrap(apperr.Internal, "catalog variant inventory", redact(err))
+		}
+		out = append(out, variant)
+	}
+	return out, nil
+}
+
+// CatalogProductVariantInventory returns the projected last-known
+// variant inventory with its policy/catalog mirrors.
+func (d Devices) CatalogProductVariantInventory(ctx context.Context, id string) (catalog.VariantInventory, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	vuid, err := parseUUID(id)
+	if err != nil {
+		return catalog.VariantInventory{}, catalogNotFound("variant inventory")
+	}
+	row, err := sqlcgen.New(d.pool).CatalogProductVariantInventoryByID(ctx, vuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.VariantInventory{}, catalogNotFound("variant inventory")
+		}
+		return catalog.VariantInventory{}, apperr.Wrap(apperr.Internal, "catalog variant inventory", redact(err))
+	}
+	out := catalog.VariantInventory{
+		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+		SKU: row.Sku, StockQuantity: int(row.StockQuantity), Revision: row.SourceRevision,
+		Ready: row.Ready, SellOnline: row.SellOnline,
+		PolicyRevision: row.PolicyRevision, CatalogRevision: row.CatalogRevision,
+		SourceEventID:    uuidString(row.SourceEventID),
+		SourceReceivedAt: row.SourceReceivedAt.Time, ProjectedAt: row.ProjectedAt.Time,
+	}
+	if row.OnlineAllocationLimit.Valid {
+		limit := int(row.OnlineAllocationLimit.Int64)
+		out.OnlineAllocationLimit = &limit
+	}
+	return out, nil
+}
+
+// CatalogProductVariantAvailability derives per-variant provider-neutral
+// ONLINE availability from current variant, product, policy, and variant
+// inventory rows in one read transaction (no writes). The variant-level
+// policy mirror (sell_online, online_allocation_limit) carried by the
+// inventory stream tightens the product-level policy when present.
+func (d Devices) CatalogProductVariantAvailability(ctx context.Context, id string) (catalog.VariantAvailability, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	vuid, err := parseUUID(id)
+	if err != nil {
+		return catalog.VariantAvailability{}, catalogNotFound("availability")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return catalog.VariantAvailability{}, apperr.Wrap(apperr.Internal, "catalog variant availability", redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	row, err := sqlcgen.New(tx).CatalogVariantAvailabilityByVariantID(ctx, vuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.VariantAvailability{VariantID: id, MissingVariant: true}, nil
+		}
+		return catalog.VariantAvailability{}, apperr.Wrap(apperr.Internal, "catalog variant availability", redact(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.VariantAvailability{}, apperr.Wrap(apperr.Internal, "catalog variant availability", redact(err))
+	}
+	availability := catalog.VariantAvailability{
+		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+		VariantActive:  row.VariantActive && !row.VariantDeleted,
+		MissingProduct: !row.ProductActive.Valid, MissingPolicy: !row.SellOnline.Valid,
+		MissingInventory: !row.StockQuantity.Valid,
+	}
+	productActive := row.ProductActive.Valid && row.ProductActive.Bool
+	sellOnline := row.SellOnline.Valid && row.SellOnline.Bool
+	if availability.MissingPolicy {
+		sellOnline = false
+	}
+	// Effective variant channel policy: the variant inventory mirror
+	// tightens (never widens) the product policy.
+	if row.VariantSellOnline.Valid && !row.VariantSellOnline.Bool {
+		sellOnline = false
+	}
+	availability.ProductActive = productActive
+	availability.SellOnline = sellOnline
+	limit := row.OnlineAllocationLimit
+	if row.VariantAllocationLimit.Valid {
+		limit = row.VariantAllocationLimit
+	}
+	if limit.Valid {
+		cap := int(limit.Int64)
+		availability.OnlineAllocationLimit = &cap
+	}
+	var stock int
+	inventoryFound := row.StockQuantity.Valid
+	if inventoryFound {
+		stock = int(row.StockQuantity.Int64)
+		quantity := stock
+		availability.StockQuantity = &quantity
+		availability.InventoryRevision = row.InventoryRevision.Int64
+		availability.InventoryEventID = uuidString(row.InventoryEventID)
+		if row.InventoryProjectedAt.Valid {
+			projected := row.InventoryProjectedAt.Time
+			availability.InventoryProjectedAt = &projected
+		}
+	}
+	availability.OnlineAvailable = catalog.ComputeVariantAvailability(
+		productActive && sellOnline, availability.VariantActive,
+		stock, availability.OnlineAllocationLimit,
+	)
+	availability.Ready = !availability.MissingProduct && !availability.MissingPolicy && !availability.MissingInventory
+	return availability, nil
 }

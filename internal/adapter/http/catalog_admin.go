@@ -254,6 +254,21 @@ func (h *CatalogAdminHandlers) AdminConfigurations(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"configurations": rows})
 }
 
+// AdminProductVariants serves GET /api/v1/dashboard/catalog-admin/products/{id}/variants
+// (Phase 17: projected variant rows with attributes, prices, stock).
+func (h *CatalogAdminHandlers) AdminProductVariants(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return
+	}
+	rows, err := h.Svc.AdminProductVariants(r.Context(), r.URL.Query().Get("store_id"), r.PathValue("id"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"variants": rows})
+}
+
 // AdminProducts serves GET /api/v1/dashboard/catalog-admin/products.
 func (h *CatalogAdminHandlers) AdminProducts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -47,6 +47,12 @@ type OrderLineView struct {
 	ConfigurationPriceDeltaMinor *string `json:"configuration_price_delta_minor,omitempty"`
 	ProviderConfigurationID      string  `json:"provider_configuration_id,omitempty"`
 	ConfigurationUnresolved      bool    `json:"configuration_unresolved,omitempty"`
+	// Phase 17: optional ProductVariant identity snapshot (00034) —
+	// null/absent for lines without a resolved provider variation
+	// (backward compatible).
+	VariantID         *string                     `json:"variant_id,omitempty"`
+	VariantSKU        *string                     `json:"variant_sku,omitempty"`
+	VariantAttributes []OrderLineVariantAttribute `json:"variant_attributes,omitempty"`
 }
 
 // OrderAddressView is one dashboard address row.

@@ -49,6 +49,13 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 	if req.Product.SKU == "" {
 		return commerce.ProductUpsertResult{}, commerce.ValidationError("product sku is required")
 	}
+	// Phase 17 SKU ownership: a single-variant product converges the
+	// VARIANT's SKU on its managed variant (catalog_products.sku is the
+	// deprecated display mirror); multi-variant products carry the
+	// variant SKUs on their variants and recover by the first one.
+	if len(req.Product.Variants) == 1 && req.Product.Variants[0].SKU != "" {
+		req.Product.SKU = req.Product.Variants[0].SKU
+	}
 	title := localizedPrimary(req.Product.Names)
 	if title == "" {
 		return commerce.ProductUpsertResult{}, commerce.ValidationError("product title is required in any locale")
@@ -64,7 +71,11 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 	if err := p.resumePendingBundleWork(ctx); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	desired := desiredContent{title: title, description: description, price: price, sku: req.Product.SKU}
+	recoverySKU := req.Product.SKU
+	if len(req.Product.Variants) > 1 {
+		recoverySKU = strings.TrimSpace(req.Product.Variants[0].SKU)
+	}
+	desired := desiredContent{title: title, description: description, price: price, sku: recoverySKU}
 	var result commerce.ProductUpsertResult
 	var upsertErr error
 	baseReq := req
@@ -210,13 +221,28 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) {
 		return commerce.ProductUpsertResult{}, errSuperseded()
 	}
-	variant, err := managedVariant(product, desired.sku, values[metafieldManagedVariantID])
-	if err != nil {
-		return commerce.ProductUpsertResult{}, err
-	}
-	variantID, err := parseVariantGID(variant.ID)
-	if err != nil {
-		return commerce.ProductUpsertResult{}, commerce.ConflictError("shopify managed variant identity malformed")
+	variantID := ""
+	var safeZero []gqlVariant
+	if len(req.Product.Variants) > 1 {
+		// Phase 17 multi-variant: no single managed variant exists.
+		// Every owned variant is safe-zeroed; SKU/price/identity
+		// convergence belongs to UpsertProductVariants.
+		for _, candidate := range product.Variants.Nodes {
+			if metafieldValue(candidate.Metafields.Nodes, metafieldVariantID) != "" {
+				safeZero = append(safeZero, candidate)
+			}
+		}
+	} else {
+		variant, err := managedVariant(product, desired.sku, values[metafieldManagedVariantID])
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
+		parsed, err := parseVariantGID(variant.ID)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, commerce.ConflictError("shopify managed variant identity malformed")
+		}
+		variantID = parsed
+		safeZero = []gqlVariant{variant}
 	}
 
 	// Safe-zero FIRST (CAS-guarded): metadata/publication failures below
@@ -225,8 +251,16 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if err := p.checkFence(ctx, productGID, req); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	if err := p.setManagedQuantity(ctx, variant, 0, idempotencyKey("safe-zero", req.OperationKey)); err != nil {
-		return commerce.ProductUpsertResult{}, err
+	for _, target := range safeZero {
+		step := "safe-zero"
+		if len(req.Product.Variants) > 1 {
+			// Per-variant idempotency identity: one cached response can
+			// never stand in for a different inventory item.
+			step = "safe-zero-" + target.ID
+		}
+		if err := p.setManagedQuantity(ctx, target, 0, idempotencyKey(step, req.OperationKey)); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
 	}
 
 	// Targeted content writes only: omitted fields are never sent, so
@@ -250,8 +284,12 @@ func (p *ShopifyProvider) convergeExisting(ctx context.Context, req commerce.Pro
 	if err := p.checkFence(ctx, productGID, req); err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
-	if err := p.updateManagedVariant(ctx, productGID, variant.ID, desired.sku, desired.price); err != nil {
-		return commerce.ProductUpsertResult{}, err
+	if len(req.Product.Variants) <= 1 {
+		// Multi-variant SKU/price convergence belongs to
+		// UpsertProductVariants (one provider variation per variant).
+		if err := p.updateManagedVariant(ctx, productGID, safeZero[0].ID, desired.sku, desired.price); err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
 	}
 	// Check freshness before stamping; this is not remote compare-and-set.
 	if err := p.checkFence(ctx, productGID, req); err != nil {
@@ -367,19 +405,53 @@ func (p *ShopifyProvider) createProduct(ctx context.Context, req commerce.Produc
 	if req.Published {
 		status = "ACTIVE"
 	}
+	productOptions := []map[string]any{
+		{"name": "Title", "values": []map[string]any{{"name": "Default"}}},
+	}
+	variantInputs := []map[string]any{{
+		"optionValues":  []map[string]any{{"optionName": "Title", "name": "Default"}},
+		"sku":           desired.sku,
+		"price":         desired.price,
+		"inventoryItem": map[string]any{"tracked": true},
+	}}
+	if len(req.Product.Variants) > 1 {
+		// Phase 17: one tracked Shopify variant per MoonLight variant
+		// (SKU, exact price, own inventory item) — never a multiplied
+		// aggregate. Variants are created tracked at quantity zero, so
+		// remote inventory is safe-zero before any later stage can fail.
+		axes, codes, err := variantAxes(req.Product.Variants)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, p.classifyBundleFailure(err)
+		}
+		productOptions = axes
+		variantInputs = nil
+		for _, variant := range req.Product.Variants {
+			price, err := p.variantPrice(req.Product, variant)
+			if err != nil {
+				return commerce.ProductUpsertResult{}, err
+			}
+			optionValues, err := variantOptionValues(variant, codes)
+			if err != nil {
+				return commerce.ProductUpsertResult{}, p.classifyBundleFailure(err)
+			}
+			variantInputs = append(variantInputs, map[string]any{
+				"optionValues":  optionValues,
+				"sku":           strings.TrimSpace(variant.SKU),
+				"price":         price,
+				"inventoryItem": map[string]any{"tracked": true},
+				"metafields": []map[string]any{{
+					"namespace": metafieldNamespace, "key": metafieldVariantID,
+					"value": variant.VariantID, "type": "single_line_text_field",
+				}},
+			})
+		}
+	}
 	input := map[string]any{
 		"title":           desired.title,
 		"descriptionHtml": desired.description,
 		"status":          status,
-		"productOptions": []map[string]any{
-			{"name": "Title", "values": []map[string]any{{"name": "Default"}}},
-		},
-		"variants": []map[string]any{{
-			"optionValues":  []map[string]any{{"optionName": "Title", "name": "Default"}},
-			"sku":           desired.sku,
-			"price":         desired.price,
-			"inventoryItem": map[string]any{"tracked": true},
-		}},
+		"productOptions":  productOptions,
+		"variants":        variantInputs,
 		// Ownership metadata is created atomically with the product:
 		// ambiguous-create and mapping-loss recovery can always prove
 		// MoonLight identity. The managed variant id is refreshed right
@@ -413,7 +485,10 @@ func (p *ShopifyProvider) createProduct(ctx context.Context, req commerce.Produc
 	productGID := FormatGID(ResourceProduct, externalID)
 	variantGID := ""
 	variantID := ""
-	if len(out.ProductSet.Product.Variants.Nodes) == 1 {
+	if len(req.Product.Variants) > 1 {
+		// Multi-variant products have no single managed variant: variant
+		// identity is established per variant by UpsertProductVariants.
+	} else if len(out.ProductSet.Product.Variants.Nodes) == 1 {
 		variantGID = out.ProductSet.Product.Variants.Nodes[0].ID
 		variantID, err = parseVariantGID(variantGID)
 		if err != nil {
@@ -421,7 +496,7 @@ func (p *ShopifyProvider) createProduct(ctx context.Context, req commerce.Produc
 			variantGID = ""
 		}
 	}
-	if variantGID == "" {
+	if variantGID == "" && len(req.Product.Variants) <= 1 {
 		// The remote creation occurred but the managed variant is
 		// unidentified: retryable (SKU recovery re-reads it).
 		return commerce.ProductUpsertResult{}, commerce.TemporaryError("shopify create response missing managed variant")

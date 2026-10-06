@@ -111,16 +111,17 @@ INSERT INTO commerce_online_order_lines (
     moonlight_product_id, mapped, unsupported_reason,
     configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
     frame_color_code, frame_color_name_ar, frame_color_name_en,
-    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved,
+    variant_id, variant_sku, variant_attribute_snapshot
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 )
 -- Phase 15-R1 F11: the captured selection snapshot is IMMUTABLE. Later
 -- status refresh, retry, catalog rename/reprice/disable or mapping repair
 -- may evolve provider money and base mapping state under the frozen
 -- reconciliation rules, but can never substitute current configuration
--- values for the purchase-time selection.
+-- or variant values (Phase 17) for the purchase-time selection.
 ON CONFLICT (provider_key, external_order_id, external_line_id) DO UPDATE SET
     external_product_id = excluded.external_product_id,
     variation_id = excluded.variation_id,
@@ -170,7 +171,8 @@ SELECT provider_key, external_order_id, external_line_id,
     moonlight_product_id, mapped, unsupported_reason,
     configuration_id, frame_style_code, frame_style_name_ar, frame_style_name_en,
     frame_color_code, frame_color_name_ar, frame_color_name_en,
-    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved
+    configuration_price_delta_minor, provider_configuration_id, configuration_unresolved,
+    variant_id, variant_sku, variant_attribute_snapshot
 FROM commerce_online_order_lines
 WHERE provider_key = $1 AND external_order_id = $2
 ORDER BY external_line_id;

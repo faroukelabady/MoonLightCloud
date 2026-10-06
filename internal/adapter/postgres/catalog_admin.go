@@ -461,7 +461,8 @@ func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityI
 	}
 	q := sqlcgen.New(d.pool)
 	switch commandType {
-	case catalogadmin.TypeProductDetailsUpdateV1, catalogadmin.TypeProductClassificationUpdateV1:
+	case catalogadmin.TypeProductDetailsUpdateV1, catalogadmin.TypeProductClassificationUpdateV1,
+		catalogadmin.TypeProductVariantsUpdateV1:
 		row, err := q.AdminProductOwnership(ctx, uid)
 		if err != nil {
 			if isNotFoundErr(err) {
@@ -470,6 +471,17 @@ func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityI
 			return "", 0, false, catalogAdminErr(err)
 		}
 		return storeOrEmpty(row.StoreID), row.SourceRevision, true, nil
+	case catalogadmin.TypeProductVariantUpdateV1, catalogadmin.TypeVariantAttributesUpdateV1:
+		// Variant-scoped commands converge on the variant catalog
+		// stream (variant_revision).
+		row, err := q.AdminVariantOwnership(ctx, uid)
+		if err != nil {
+			if isNotFoundErr(err) {
+				return "", 0, false, nil
+			}
+			return "", 0, false, catalogAdminErr(err)
+		}
+		return storeOrEmpty(row.StoreID), row.VariantRevision, true, nil
 	case catalogadmin.TypeProductOnlinePolicyUpdateV1:
 		prod, err := q.AdminProductOwnership(ctx, uid)
 		if err != nil {
@@ -852,4 +864,148 @@ func (d Devices) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd c
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
 	return catalogAdminCommandToDomain(row), nil
+}
+
+// ---- Phase 17 variant admin reads ----
+
+// adminVariantRow flattens the identical variant row shape both admin
+// variant queries return.
+type adminVariantRow struct {
+	VariantID         pgtype.UUID
+	ProductID         pgtype.UUID
+	Sku               string
+	IsActive          bool
+	Deleted           bool
+	PriceEgpCents     pgtype.Int8
+	PriceUsdCents     pgtype.Int8
+	Position          int32
+	CombinationKey    string
+	VariantRevision   int64
+	CatalogRevision   int64
+	StockQuantity     int64
+	InventoryRevision int64
+	HasPending        bool
+}
+
+// adminVariantToDomain renders one variant row with exact minor-unit
+// money strings (never floats).
+func adminVariantToDomain(row adminVariantRow) catalogadmin.AdminProductVariant {
+	entry := catalogadmin.AdminProductVariant{
+		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
+		SKU: row.Sku, IsActive: row.IsActive, Deleted: row.Deleted,
+		StockQuantity: row.StockQuantity, Position: int(row.Position),
+		CombinationKey: row.CombinationKey, VariantRevision: row.VariantRevision,
+		CatalogRevision: row.CatalogRevision, InventoryRevision: row.InventoryRevision,
+		HasPending: row.HasPending, Attributes: []catalogadmin.AdminProductVariantAttribute{},
+		PriceEGPMinor: "0",
+	}
+	if row.PriceEgpCents.Valid {
+		entry.PriceEGPMinor = pgIntToString(row.PriceEgpCents.Int64)
+	}
+	if row.PriceUsdCents.Valid {
+		usd := pgIntToString(row.PriceUsdCents.Int64)
+		entry.PriceUSDMinor = &usd
+	}
+	return entry
+}
+
+// adminVariantAttributes loads the option attribute rows for one
+// variant in canonical (position, definition_code) order.
+func adminVariantAttributes(ctx context.Context, q *sqlcgen.Queries, vuid pgtype.UUID) ([]catalogadmin.AdminProductVariantAttribute, error) {
+	rows, err := q.AdminProductVariantAttributes(ctx, vuid)
+	if err != nil {
+		return nil, catalogAdminErr(err)
+	}
+	out := make([]catalogadmin.AdminProductVariantAttribute, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, catalogadmin.AdminProductVariantAttribute{
+			DefinitionCode: row.DefinitionCode, ValueCode: row.ValueCode,
+			NameAR: row.NameAr, NameEN: adminTextOrEmpty(row.NameEn),
+			DefinitionNameAR: row.DefinitionNameAr,
+			DefinitionNameEN: adminTextOrEmpty(row.DefinitionNameEn),
+			Position:         int(row.Position),
+		})
+	}
+	return out, nil
+}
+
+// AdminProductVariants serves one Product's projected variant rows for
+// the operator UI (Store-scoped; tombstones are flagged, never hidden).
+func (d Devices) AdminProductVariants(ctx context.Context, storeID, productID string) ([]catalogadmin.AdminProductVariant, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return nil, err
+	}
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return nil, err
+	}
+	q := sqlcgen.New(d.pool)
+	rows, err := q.AdminProductVariants(ctx, sqlcgen.AdminProductVariantsParams{
+		StoreID: suid, ProductID: puid,
+	})
+	if err != nil {
+		return nil, catalogAdminErr(err)
+	}
+	out := make([]catalogadmin.AdminProductVariant, 0, len(rows))
+	for _, row := range rows {
+		entry := adminVariantToDomain(adminVariantRow{
+			VariantID: row.VariantID, ProductID: row.ProductID, Sku: row.Sku,
+			IsActive: row.IsActive, Deleted: row.Deleted,
+			PriceEgpCents: row.PriceEgpCents, PriceUsdCents: row.PriceUsdCents,
+			Position: row.Position, CombinationKey: row.CombinationKey,
+			VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
+			StockQuantity: row.StockQuantity, InventoryRevision: row.InventoryRevision,
+			HasPending: row.HasPending,
+		})
+		attrs, err := adminVariantAttributes(ctx, q, row.VariantID)
+		if err != nil {
+			return nil, err
+		}
+		entry.Attributes = attrs
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// AdminProductVariant serves one projected variant row by variant ID
+// (Store-scoped; unknown/foreign rows are NotFound, never a fallback).
+func (d Devices) AdminProductVariant(ctx context.Context, storeID, variantID string) (catalogadmin.AdminProductVariant, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return catalogadmin.AdminProductVariant{}, err
+	}
+	vuid, err := parseUUID(variantID)
+	if err != nil {
+		return catalogadmin.AdminProductVariant{}, err
+	}
+	q := sqlcgen.New(d.pool)
+	row, err := q.AdminProductVariantByVariantID(ctx, sqlcgen.AdminProductVariantByVariantIDParams{
+		StoreID: suid, VariantID: vuid,
+	})
+	if err != nil {
+		if isNotFoundErr(err) {
+			return catalogadmin.AdminProductVariant{}, apperr.New(apperr.NotFound, catalogadmin.CodeEntityNotFound)
+		}
+		return catalogadmin.AdminProductVariant{}, catalogAdminErr(err)
+	}
+	entry := adminVariantToDomain(adminVariantRow{
+		VariantID: row.VariantID, ProductID: row.ProductID, Sku: row.Sku,
+		IsActive: row.IsActive, Deleted: row.Deleted,
+		PriceEgpCents: row.PriceEgpCents, PriceUsdCents: row.PriceUsdCents,
+		Position: row.Position, CombinationKey: row.CombinationKey,
+		VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
+		StockQuantity: row.StockQuantity, InventoryRevision: row.InventoryRevision,
+		HasPending: row.HasPending,
+	})
+	attrs, err := adminVariantAttributes(ctx, q, vuid)
+	if err != nil {
+		return catalogadmin.AdminProductVariant{}, err
+	}
+	entry.Attributes = attrs
+	return entry, nil
 }

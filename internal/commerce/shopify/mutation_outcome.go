@@ -29,6 +29,10 @@ func mutationOutcomeComplete(document string, data json.RawMessage) bool {
 	// release evidence.
 	case docFrameComponentSet:
 		root, primary = "productSet", "product"
+	case docVariantSet:
+		// Phase 17: the variant-set productSet settles under the same
+		// definitive-evidence standard (F2).
+		root, primary = "productSet", "product"
 	case docBundleUpdate:
 		root, primary = "productBundleUpdate", "productBundleOperation"
 	case docBundleCreate:

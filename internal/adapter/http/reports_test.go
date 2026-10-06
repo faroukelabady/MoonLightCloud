@@ -33,6 +33,9 @@ func (s stubReportRepo) SalesDaily(context.Context, time.Time, time.Time, string
 func (s stubReportRepo) SalesByProduct(context.Context, time.Time, time.Time, string) ([]report.ProductRow, error) {
 	return nil, nil
 }
+func (s stubReportRepo) SalesByVariant(context.Context, time.Time, time.Time, string) ([]report.VariantRow, error) {
+	return nil, nil
+}
 func (s stubReportRepo) SalesByRootCategory(context.Context, time.Time, time.Time, string) ([]report.CategoryRow, error) {
 	return nil, nil
 }
@@ -90,6 +93,10 @@ func (s stubReportRepo) SalesDailyForStore(context.Context, string, time.Time, t
 }
 
 func (s stubReportRepo) SalesByProductForStore(context.Context, string, time.Time, time.Time, string) ([]report.ProductRow, error) {
+	return nil, nil
+}
+
+func (s stubReportRepo) SalesByVariantForStore(context.Context, string, time.Time, time.Time, string) ([]report.VariantRow, error) {
 	return nil, nil
 }
 
@@ -282,6 +289,10 @@ func (s shapeRepo) SalesByProduct(context.Context, time.Time, time.Time, string)
 	pid := "66666666-6666-6666-8666-666666666666"
 	return []report.ProductRow{{ProductID: &pid, SKU: "SKU-1", ProductName: "Alpha",
 		Units: 2, Currency: "EGP", LineSales: 200000, LineCost: 20000}}, nil
+}
+
+func (s shapeRepo) SalesByVariant(context.Context, time.Time, time.Time, string) ([]report.VariantRow, error) {
+	return []report.VariantRow{}, nil
 }
 
 func (s shapeRepo) SalesByTag(context.Context, time.Time, time.Time, string) ([]report.TagRow, error) {

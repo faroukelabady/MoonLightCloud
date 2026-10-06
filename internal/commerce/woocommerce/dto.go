@@ -18,14 +18,26 @@ import (
 
 // MoonLight ownership metadata keys. Permanent ownership is
 // ProductID + ProviderKey; the operation key is desired-state identity
-// that legitimately rotates with revisions.
+// that legitimately rotates with revisions. Phase 17 variant variations
+// additionally stamp the MoonLight VariantID: SKU alone never proves
+// ownership, and frame variations never carry it.
 const (
 	metaProductID    = "_moonlight_product_id"
 	metaProviderKey  = "_moonlight_provider_key"
 	metaOperationKey = "_moonlight_product_operation_key"
 	metaCatalogRev   = "_moonlight_catalog_revision"
 	metaPolicyRev    = "_moonlight_policy_revision"
+	metaVariantID    = "_moonlight_variant_id"
 )
+
+// WooVariantOptionsCapabilityCode is the stable blocked-state code
+// returned when the Woo representation cannot layer frame options on
+// per-variant stock without multiplying it (Phase 17 §33-§37): multiple
+// physical variants AND frame configurations on one product would need
+// a (variant × frame) Cartesian variation set whose stock cannot be
+// shared per variant. The adapter fails safely — never an
+// inventory-multiplying fallback.
+const WooVariantOptionsCapabilityCode = "WOO_VARIANT_OPTIONS_CAPABILITY_UNAVAILABLE"
 
 // Woo wire field values (verified against WooCommerce REST API v3 docs).
 const (
@@ -67,17 +79,25 @@ type wooProductAttribute struct {
 	Options   []string `json:"options"`
 }
 
-// wooVariationPayload converges one variation. Phase 15 §85: variation
-// stock is NEVER managed — all variations pull from the parent-level
-// shared stock (one physical papyrus pool). A disabled configuration is
-// hidden by withholding its price (WooCommerce: variations without
-// prices don't show in the store) while ownership metadata is retained.
+// wooVariationPayload converges one variation. Phase 15 §85: FRAME
+// variation stock is NEVER managed — all frame choices pull from the
+// parent-level shared pool (one physical inventory, never multiplied).
+// Phase 17 VARIANT variations are the opposite: manage_stock=true with
+// the exact per-variation quantity restored by SetVariantInventory
+// (metadata writes stay safe-zero). A disabled configuration or
+// inactive variant is hidden by withholding its price (WooCommerce:
+// variations without prices don't show in the store) while ownership
+// metadata is retained.
 type wooVariationPayload struct {
-	Attributes   []wooVariationAttribute `json:"attributes"`
-	RegularPrice string                  `json:"regular_price"`
-	ManageStock  bool                    `json:"manage_stock"`
-	Status       string                  `json:"status,omitempty"`
-	MetaData     []wooMetaDatum          `json:"meta_data,omitempty"`
+	Attributes    []wooVariationAttribute `json:"attributes"`
+	SKU           string                  `json:"sku,omitempty"`
+	RegularPrice  string                  `json:"regular_price"`
+	ManageStock   bool                    `json:"manage_stock"`
+	StockQuantity *int64                  `json:"stock_quantity,omitempty"`
+	StockStatus   string                  `json:"stock_status,omitempty"`
+	Backorders    string                  `json:"backorders,omitempty"`
+	Status        string                  `json:"status,omitempty"`
+	MetaData      []wooMetaDatum          `json:"meta_data,omitempty"`
 }
 
 type wooVariationAttribute struct {
@@ -92,6 +112,7 @@ type wooVariation struct {
 		Name   string `json:"name"`
 		Option string `json:"option"`
 	} `json:"attributes"`
+	SKU          string         `json:"sku"`
 	RegularPrice string         `json:"regular_price"`
 	MetaData     []wooMetaDatum `json:"meta_data,omitempty"`
 }
@@ -116,6 +137,16 @@ type wooProductPayload struct {
 // wooInventoryPayload is the narrow inventory-only update: no product
 // metadata fields, keeping the operation idempotent and minimal.
 type wooInventoryPayload struct {
+	ManageStock   bool   `json:"manage_stock"`
+	StockQuantity int64  `json:"stock_quantity"`
+	StockStatus   string `json:"stock_status"`
+	Backorders    string `json:"backorders"`
+}
+
+// wooVariationInventoryPayload is the narrow per-variation inventory
+// update (Phase 17): tracked stock fields only, never variation
+// metadata.
+type wooVariationInventoryPayload struct {
 	ManageStock   bool   `json:"manage_stock"`
 	StockQuantity int64  `json:"stock_quantity"`
 	StockStatus   string `json:"stock_status"`
@@ -224,7 +255,16 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 	// variable product (parent-level shared stock); the canonical remote
 	// product identity is retained across the simple->framed transition
 	// (§116). Prices live on variations (§87); the parent keeps none.
+	// Phase 17: a Product with SEVERAL physical variants becomes a
+	// variable product whose variation axes are the variant attributes
+	// and whose variations carry per-variant tracked stock — never the
+	// parent pool. Variant + frame options together cannot be layered
+	// without multiplying stock and fail with the stable capability code.
+	if err := variantOptionConflict(product); err != nil {
+		return wooProductPayload{}, err
+	}
 	configured := len(product.Configurations) > 0
+	varianted := len(product.Variants) > 1
 	name, err := selectName(product)
 	if err != nil {
 		return wooProductPayload{}, err
@@ -240,7 +280,16 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 	payloadType := wooTypeSimple
 	parentPrice := price
 	var attributes []wooProductAttribute
-	if configured {
+	manageStock := true
+	if varianted {
+		payloadType = wooTypeVariable
+		parentPrice = "" // prices live on variations (§87)
+		attributes = variantAttributes(product.Variants)
+		// No parent pool exists: every variant variation tracks its own
+		// exact stock. A parent pool here would be either dead weight or
+		// an accidental shared pool (stock multiplication risk).
+		manageStock = false
+	} else if configured {
 		payloadType = wooTypeVariable
 		parentPrice = "" // prices live on variations (§87)
 		attributes = frameAttributes(product)
@@ -249,7 +298,7 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 		Name: name, Type: payloadType, Status: status, CatalogVisibility: visibility,
 		Description: selectDescription(product), SKU: product.SKU, RegularPrice: parentPrice,
 		Attributes:  attributes,
-		ManageStock: true, StockQuantity: 0, StockStatus: wooStockOutOfStock, Backorders: wooBackordersNo,
+		ManageStock: manageStock, StockQuantity: 0, StockStatus: wooStockOutOfStock, Backorders: wooBackordersNo,
 		MetaData: []wooMetaDatum{
 			{Key: metaProductID, Value: req.ProductID},
 			{Key: metaProviderKey, Value: string(req.ProviderKey)},

@@ -73,6 +73,21 @@ WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
   AND (@currency::text = '' OR l.line_currency = @currency::text)
 GROUP BY l.product_id, l.sku, l.product_name, l.line_currency;
 
+-- name: ReportSalesByVariant :many
+-- Phase 17 optional variant breakdown: GROUP BY the line's frozen variant
+-- identity columns (sale_lines_projection is append-only history, never
+-- joined to the current-state variant projection). Legacy lines without a
+-- variant identity group under NULL variant_id.
+SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency;
+
 -- name: ReportSalesByCategory :many
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en, l.line_currency AS currency,
@@ -341,6 +356,18 @@ WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
   AND (@currency::text = '' OR l.line_currency = @currency::text)
   AND s.store_id = @store_id::uuid
 GROUP BY l.product_id, l.sku, l.product_name, l.line_currency;
+
+-- name: ReportSalesByVariantForStore :many
+SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+  AND (@currency::text = '' OR l.line_currency = @currency::text)
+  AND s.store_id = @store_id::uuid
+GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency;
 
 -- name: ReportSalesByCategoryForStore :many
 SELECT c.classification_kind AS kind, c.classification_id AS id,

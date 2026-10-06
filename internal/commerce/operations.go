@@ -39,6 +39,32 @@ func InventoryOperationKey(providerKey ProviderKey, productID string, catalogRev
 	)
 }
 
+// VariantOperationKey derives the deterministic retry identity for one
+// desired ProductVariant set (Phase 17): provider key, product ID, the
+// catalog/policy revisions, publication state, and the deterministic
+// variant-set identity (fingerprint + version). Same desired state
+// retried after a temporary failure yields the same key.
+func VariantOperationKey(providerKey ProviderKey, productID string, catalogRevision, policyRevision int64, published bool, variantsFingerprint, variantsVersion string) string {
+	return operationKey("product-variants",
+		string(providerKey), productID,
+		revisionBytes(catalogRevision), revisionBytes(policyRevision),
+		boolBytes(published), variantsFingerprint, variantsVersion,
+	)
+}
+
+// VariantInventoryOperationKey derives the deterministic retry identity
+// for ONE variant's desired availability: the variant's own identity and
+// inventory revision plus the derived quantity. Per-variant keys keep
+// concurrent variant publishes independent and idempotent.
+func VariantInventoryOperationKey(providerKey ProviderKey, productID, variantID string, catalogRevision, policyRevision, inventoryRevision, quantity int64, ready, published bool, variantsFingerprint, variantsVersion string) string {
+	return operationKey("variant-inventory",
+		string(providerKey), productID, variantID,
+		revisionBytes(catalogRevision), revisionBytes(policyRevision), revisionBytes(inventoryRevision),
+		revisionBytes(quantity), boolBytes(ready), boolBytes(published),
+		variantsFingerprint, variantsVersion,
+	)
+}
+
 // operationKey hashes canonical length-prefixed fields: domain separation
 // plus explicit lengths, so no concatenation ambiguity and no unordered
 // JSON anywhere near retry identity.

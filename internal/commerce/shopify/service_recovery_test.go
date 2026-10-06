@@ -77,6 +77,22 @@ func (s *stubMappings) CreateProductMapping(_ context.Context, key commerce.Prov
 	return commerce.ProductMapping{ProviderKey: key, ProductID: productID, ExternalProductID: externalID}, nil
 }
 
+func (s *stubMappings) GetProductVariantMapping(context.Context, commerce.ProviderKey, string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{}, errMappingNotFoundStub()
+}
+
+func (s *stubMappings) ListProductVariantMappings(context.Context, commerce.ProviderKey, string) ([]commerce.ProductVariantMapping, error) {
+	return nil, nil
+}
+
+func (s *stubMappings) FindProductVariantMappingByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{}, errMappingNotFoundStub()
+}
+
+func (s *stubMappings) CreateProductVariantMapping(_ context.Context, key commerce.ProviderKey, productID, variantID, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{ProviderKey: key, ProductID: productID, VariantID: variantID, ExternalProductID: externalProductID, ExternalVariantID: externalVariantID}, nil
+}
+
 // stubSource serves fixed desired states keyed by product id.
 type stubSource struct {
 	desired map[string]commerce.DesiredProduct

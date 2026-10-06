@@ -27,6 +27,11 @@ const (
 	EventCategorySnapshotV2 = "catalog.category.snapshot.v2"
 	EventTagSnapshotV1      = "catalog.tag.snapshot.v1"
 	EventProductSnapshotV1  = "catalog.product.snapshot.v1"
+	// EventProductSnapshotV2 (Phase 17) removes `sku` from the product
+	// aggregate and replaces it with `primary_variant_sku`, a deprecated
+	// display mirror of the primary variant's SKU. v1 stays semantically
+	// immutable; both versions share one catalog_revision stream.
+	EventProductSnapshotV2 = "catalog.product.snapshot.v2"
 	// Phase 5B: per-product channel/allocation policy at an independent
 	// revision (never overlapping catalog_revision).
 	EventProductSalesPolicySnapshotV1 = "catalog.product.sales_policy.snapshot.v1"
@@ -299,6 +304,55 @@ func DecodeProductSnapshot(raw json.RawMessage) (ProductSnapshot, error) {
 	return p, nil
 }
 
+// ProductSnapshotV2 is the Phase 17 wire shape: identical to v1 except
+// `sku` is REMOVED and `primary_variant_sku` mirrors the primary
+// variant's SKU for deprecated display only (SKU ownership lives on
+// ProductVariant). Decoding maps the mirror into the shared
+// ProductSnapshot shape so one projector and one semantic fingerprint
+// serve both versions.
+type ProductSnapshotV2 struct {
+	ProductID         string                      `json:"product_id"`
+	PrimaryVariantSKU string                      `json:"primary_variant_sku"`
+	Name              string                      `json:"name"`
+	Description       *string                     `json:"description,omitempty"`
+	Translations      []CatalogProductTranslation `json:"translations"`
+	Prices            []CatalogPrice              `json:"prices"`
+	TopCategoryID     string                      `json:"top_category_id"`
+	SubcategoryIDs    []string                    `json:"subcategory_ids"`
+	TagIDs            []string                    `json:"tag_ids"`
+	WidthCM           *int                        `json:"width_cm,omitempty"`
+	HeightCM          *int                        `json:"height_cm,omitempty"`
+	IsActive          bool                        `json:"is_active"`
+	CatalogRevision   int64                       `json:"catalog_revision"`
+}
+
+// DecodeProductSnapshotV2 parses canonical v2 payload bytes and
+// normalizes to the shared ProductSnapshot shape (SKU = the deprecated
+// primary_variant_sku display mirror).
+func DecodeProductSnapshotV2(raw json.RawMessage) (ProductSnapshot, error) {
+	var wire ProductSnapshotV2
+	if err := decodePayload(EventProductSnapshotV2, raw, &wire); err != nil {
+		return ProductSnapshot{}, err
+	}
+	return ProductSnapshot{
+		ProductID: wire.ProductID, SKU: wire.PrimaryVariantSKU,
+		Name: wire.Name, Description: wire.Description,
+		Translations: wire.Translations, Prices: wire.Prices,
+		TopCategoryID: wire.TopCategoryID, SubcategoryIDs: wire.SubcategoryIDs,
+		TagIDs: wire.TagIDs, WidthCM: wire.WidthCM, HeightCM: wire.HeightCM,
+		IsActive: wire.IsActive, CatalogRevision: wire.CatalogRevision,
+	}, nil
+}
+
+// ValidateProductSnapshotV2 enforces the v2 product contract: every v1
+// invariant unchanged, except the SKU field is a deprecated display
+// mirror and may be blank (a product whose variants carry the SKUs has
+// no primary mirror yet; blank mirrors surface as CATALOG_MISSING_SKU
+// health, never as ingestion rejection).
+func ValidateProductSnapshotV2(p ProductSnapshot) (ProductSnapshot, error) {
+	return validateProductSnapshot(p, EventProductSnapshotV2, false)
+}
+
 // ValidateProductSnapshot enforces every invariant the desktop product path
 // guarantees: UUID identity, SKU bounds, bilingual-capable names, nonneg
 // integer money per EGP|USD row, positive whole-centimeter dimensions when
@@ -307,14 +361,24 @@ func DecodeProductSnapshot(raw json.RawMessage) (ProductSnapshot, error) {
 // than failing: storage permits them, so ingestion must too. Reachability
 // and root rules are projection-time checks, never ingestion blocks.
 func ValidateProductSnapshot(p ProductSnapshot) (ProductSnapshot, error) {
+	return validateProductSnapshot(p, EventProductSnapshotV1, true)
+}
+
+// validateProductSnapshot is the shared strict product validator.
+// requireSKU keeps the frozen v1 SKU contract (1..64 chars) for v1
+// events; v2 relaxes only emptiness (bounded strings stay strict).
+func validateProductSnapshot(p ProductSnapshot, event string, requireSKU bool) (ProductSnapshot, error) {
 	fail := func(format string, args ...any) (ProductSnapshot, error) {
-		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSnapshotV1+": "+fmt.Sprintf(format, args...))
+		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+event+": "+fmt.Sprintf(format, args...))
 	}
 	if !isUUID(p.ProductID) {
 		return fail("product_id must be a UUID")
 	}
 	sku := strings.TrimSpace(p.SKU)
-	if sku == "" || len(sku) > 64 || strings.ContainsAny(sku, "\r\n\t") {
+	if sku == "" && requireSKU {
+		return fail("sku must be 1..64 chars without control whitespace")
+	}
+	if len(sku) > 64 || strings.ContainsAny(sku, "\r\n\t") {
 		return fail("sku must be 1..64 chars without control whitespace")
 	}
 	if !validName(p.Name) {

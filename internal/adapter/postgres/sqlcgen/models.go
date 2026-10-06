@@ -240,6 +240,56 @@ type CatalogProductTranslation struct {
 	Description pgtype.Text `json:"description"`
 }
 
+type CatalogProductVariant struct {
+	VariantID         pgtype.UUID        `json:"variant_id"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	Sku               string             `json:"sku"`
+	IsActive          bool               `json:"is_active"`
+	Deleted           bool               `json:"deleted"`
+	PriceEgpCents     pgtype.Int8        `json:"price_egp_cents"`
+	PriceUsdCents     pgtype.Int8        `json:"price_usd_cents"`
+	Position          int32              `json:"position"`
+	CombinationKey    string             `json:"combination_key"`
+	VariantRevision   int64              `json:"variant_revision"`
+	CatalogRevision   int64              `json:"catalog_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+}
+
+type CatalogProductVariantAttributeValue struct {
+	VariantID        pgtype.UUID `json:"variant_id"`
+	DefinitionCode   string      `json:"definition_code"`
+	ValueCode        string      `json:"value_code"`
+	NameAr           string      `json:"name_ar"`
+	NameEn           pgtype.Text `json:"name_en"`
+	DefinitionNameAr string      `json:"definition_name_ar"`
+	DefinitionNameEn pgtype.Text `json:"definition_name_en"`
+	Position         int32       `json:"position"`
+}
+
+type CatalogProductVariantInventory struct {
+	VariantID             pgtype.UUID        `json:"variant_id"`
+	ProductID             pgtype.UUID        `json:"product_id"`
+	Sku                   string             `json:"sku"`
+	StockQuantity         int64              `json:"stock_quantity"`
+	Ready                 bool               `json:"ready"`
+	SellOnline            bool               `json:"sell_online"`
+	OnlineAllocationLimit pgtype.Int8        `json:"online_allocation_limit"`
+	PolicyRevision        int64              `json:"policy_revision"`
+	CatalogRevision       int64              `json:"catalog_revision"`
+	SourceRevision        int64              `json:"source_revision"`
+	SourceEventID         pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID        pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash     []byte             `json:"source_payload_hash"`
+	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+	StoreID               pgtype.UUID        `json:"store_id"`
+}
+
 type CatalogTag struct {
 	TagID             pgtype.UUID        `json:"tag_id"`
 	Slug              string             `json:"slug"`
@@ -332,6 +382,9 @@ type CommerceOnlineOrderLine struct {
 	ConfigurationPriceDeltaMinor pgtype.Int8 `json:"configuration_price_delta_minor"`
 	ProviderConfigurationID      pgtype.Text `json:"provider_configuration_id"`
 	ConfigurationUnresolved      bool        `json:"configuration_unresolved"`
+	VariantID                    pgtype.UUID `json:"variant_id"`
+	VariantSku                   pgtype.Text `json:"variant_sku"`
+	VariantAttributeSnapshot     []byte      `json:"variant_attribute_snapshot"`
 }
 
 type CommerceOnlineOrderReconcileFence struct {
@@ -419,6 +472,17 @@ type CommerceProductReevaluation struct {
 	LeaseGeneration     int64              `json:"lease_generation"`
 	LeaseToken          pgtype.UUID        `json:"lease_token"`
 	LeaseUntil          pgtype.Timestamptz `json:"lease_until"`
+}
+
+type CommerceProductVariantMapping struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	VariantID         pgtype.UUID        `json:"variant_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	ExternalVariantID string             `json:"external_variant_id"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Device struct {

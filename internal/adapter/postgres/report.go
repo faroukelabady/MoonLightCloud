@@ -810,3 +810,83 @@ func (d Devices) RefundsByChannelForStore(ctx context.Context, storeID string, s
 	}
 	return out, nil
 }
+
+// ---- Phase 17 optional variant breakdown ----
+
+// variantReportRow flattens the identical variant breakdown row shape
+// both queries return.
+type variantReportRow struct {
+	VariantID   pgtype.UUID
+	ProductID   pgtype.UUID
+	Sku         string
+	ProductName string
+	Currency    string
+	Units       int64
+	LineSales   int64
+	LineCost    int64
+}
+
+func variantReportToDomain(r variantReportRow) report.VariantRow {
+	var vid, pid *string
+	if r.VariantID.Valid {
+		s := uuidString(r.VariantID)
+		vid = &s
+	}
+	if r.ProductID.Valid {
+		s := uuidString(r.ProductID)
+		pid = &s
+	}
+	return report.VariantRow{
+		VariantID: vid, ProductID: pid, SKU: r.Sku, ProductName: r.ProductName,
+		Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
+	}
+}
+
+// SalesByVariant groups sale lines by their frozen per-line variant
+// identity columns (Phase 17). History never joins the current-state
+// variant projection.
+func (d Devices) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportSalesByVariant(ctx, sqlcgen.ReportSalesByVariantParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("sales by variant", err)
+	}
+	out := make([]report.VariantRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, variantReportToDomain(variantReportRow{
+			VariantID: r.VariantID, ProductID: r.ProductID, Sku: r.Sku,
+			ProductName: r.ProductName, Currency: r.Currency,
+			Units: r.Units, LineSales: r.LineSales, LineCost: r.LineCost,
+		}))
+	}
+	return out, nil
+}
+
+// SalesByVariantForStore is SalesByVariant restricted to one proven
+// Store (Phase 9B scope semantics).
+func (d Devices) SalesByVariantForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("sales by variant for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportSalesByVariantForStore(ctx, sqlcgen.ReportSalesByVariantForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("sales by variant for store", err)
+	}
+	out := make([]report.VariantRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, variantReportToDomain(variantReportRow{
+			VariantID: r.VariantID, ProductID: r.ProductID, Sku: r.Sku,
+			ProductName: r.ProductName, Currency: r.Currency,
+			Units: r.Units, LineSales: r.LineSales, LineCost: r.LineCost,
+		}))
+	}
+	return out, nil
+}

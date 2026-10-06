@@ -203,6 +203,7 @@ func (s *stubSource) GetDesiredCommerceProduct(_ context.Context, productID stri
 // stubMappings is an in-memory mapping repository with injectable failure.
 type stubMappings struct {
 	rows      map[string]ProductMapping
+	variants  map[string]ProductVariantMapping
 	failNext  error
 	failCount int
 }
@@ -262,6 +263,68 @@ func (s *stubMappings) CreateProductMapping(_ context.Context, key ProviderKey, 
 		s.rows = map[string]ProductMapping{}
 	}
 	s.rows[k] = mapping
+	return mapping, nil
+}
+
+func variantMappingKey(key ProviderKey, variantID string) string {
+	return string(key) + "/" + variantID
+}
+
+func (s *stubMappings) GetProductVariantMapping(_ context.Context, key ProviderKey, variantID string) (ProductVariantMapping, error) {
+	if s.variants == nil {
+		return ProductVariantMapping{}, errMappingNotFoundStub()
+	}
+	mapping, ok := s.variants[variantMappingKey(key, variantID)]
+	if !ok {
+		return ProductVariantMapping{}, errMappingNotFoundStub()
+	}
+	return mapping, nil
+}
+
+func (s *stubMappings) ListProductVariantMappings(_ context.Context, key ProviderKey, productID string) ([]ProductVariantMapping, error) {
+	out := []ProductVariantMapping{}
+	for _, mapping := range s.variants {
+		if mapping.ProviderKey == key && mapping.ProductID == productID {
+			out = append(out, mapping)
+		}
+	}
+	return out, nil
+}
+
+func (s *stubMappings) FindProductVariantMappingByExternal(_ context.Context, key ProviderKey, externalProductID, externalVariantID string) (ProductVariantMapping, error) {
+	for _, mapping := range s.variants {
+		if mapping.ProviderKey == key && mapping.ExternalProductID == externalProductID &&
+			mapping.ExternalVariantID == externalVariantID {
+			return mapping, nil
+		}
+	}
+	return ProductVariantMapping{}, errMappingNotFoundStub()
+}
+
+func (s *stubMappings) CreateProductVariantMapping(_ context.Context, key ProviderKey, productID, variantID, externalProductID, externalVariantID string) (ProductVariantMapping, error) {
+	if s.failCount > 0 {
+		s.failCount--
+		return ProductVariantMapping{}, s.failNext
+	}
+	k := variantMappingKey(key, variantID)
+	if s.variants == nil {
+		s.variants = map[string]ProductVariantMapping{}
+	}
+	if existing, ok := s.variants[k]; ok {
+		if existing.ExternalVariantID != externalVariantID {
+			return ProductVariantMapping{}, apperr.New(apperr.Conflict, "variant mapping conflict")
+		}
+		return existing, nil
+	}
+	for _, mapping := range s.variants {
+		if mapping.ProviderKey == key && mapping.ExternalProductID == externalProductID &&
+			mapping.ExternalVariantID == externalVariantID {
+			return ProductVariantMapping{}, apperr.New(apperr.Conflict, "variant mapping conflict")
+		}
+	}
+	mapping := ProductVariantMapping{ProviderKey: key, ProductID: productID, VariantID: variantID,
+		ExternalProductID: externalProductID, ExternalVariantID: externalVariantID}
+	s.variants[k] = mapping
 	return mapping, nil
 }
 

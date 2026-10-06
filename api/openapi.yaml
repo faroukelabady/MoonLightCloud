@@ -630,6 +630,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/products/{id}/variants:
+    get:
+      summary: Projected product variants (Phase 17)
+      operationId: catalogAdminProductVariants
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Variant rows with option attributes, exact minor-unit prices and read-only last-known stock. Tombstones are flagged (deleted), never hidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminProductVariantList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown Product or wrong Store scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/categories:
     get:
       summary: Store-scoped Category tree rows
@@ -1312,6 +1345,12 @@ paths:
               - COMMERCE_SYNC_AMBIGUOUS
               - COMMERCE_STORE_CONFLICT
               - CATEGORY_ONLINE_DISABLED
+              - PRODUCT_NO_ACTIVE_VARIANTS
+              - PRODUCT_NO_SELLABLE_VARIANT
+              - VARIANT_DUPLICATE_COMBINATION
+              - VARIANT_MISSING_SKU
+              - VARIANT_MAPPING_MISSING
+              - VARIANT_INTENTIONALLY_OFFLINE
           description: Narrow detail rows to one stable health reason code (empty = all).
         - name: limit
           in: query
@@ -2722,7 +2761,7 @@ components:
           description: Authoritative Store scope. Never global.
         type:
           type: string
-          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1]
+          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1, catalog.product.variants.update.v1, catalog.product.variant.update.v1, catalog.variant.attributes.update.v1]
           description: Immutable versioned command type. No generic patch exists.
         entity_id:
           type: string
@@ -2930,6 +2969,52 @@ components:
         sales_policy_revision: {type: integer}
         configuration_revision: {type: integer}
         has_pending: {type: boolean}
+        variants:
+          type: array
+          description: Phase 17 SKU/inventory-owning variants with attributes, prices and stock.
+          items:
+            $ref: '#/components/schemas/CatalogAdminProductVariant'
+    CatalogAdminProductVariantList:
+      type: object
+      required: [variants]
+      properties:
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogAdminProductVariant'
+    CatalogAdminProductVariant:
+      type: object
+      required: [variant_id, product_id, sku, is_active, deleted, price_egp_minor, stock_quantity, position, combination_key, variant_revision, catalog_revision, inventory_revision, has_pending, attributes]
+      properties:
+        variant_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        sku: {type: string, description: Variant SKU identity. Read-only here; Phase 17 commands update it through catalog.product.variant.update.v1.}
+        is_active: {type: boolean}
+        deleted: {type: boolean, description: Tombstone flag. Deleted variants keep their rows for historical safety.}
+        price_egp_minor: {type: string, description: Exact minor units. Never a JSON number.}
+        price_usd_minor: {type: string, nullable: true, description: Null means unpriced in USD; zero is an explicit zero price.}
+        stock_quantity: {type: integer, format: int64, description: Read-only last-known variant stock.}
+        position: {type: integer}
+        combination_key: {type: string, description: Normalized stable option identity (entries joined with U+001F).}
+        variant_revision: {type: integer, format: int64}
+        catalog_revision: {type: integer, format: int64}
+        inventory_revision: {type: integer, format: int64}
+        has_pending: {type: boolean}
+        attributes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogAdminProductVariantAttribute'
+    CatalogAdminProductVariantAttribute:
+      type: object
+      required: [definition_code, value_code, name_ar, definition_name_ar, position]
+      properties:
+        definition_code: {type: string}
+        value_code: {type: string}
+        name_ar: {type: string}
+        name_en: {type: string}
+        definition_name_ar: {type: string}
+        definition_name_en: {type: string}
+        position: {type: integer}
     CatalogAdminConfigurationList:
       type: object
       required: [configurations]
@@ -4137,7 +4222,7 @@ components:
             properties:
               reason_code:
                 type: string
-                enum: [CATALOG_MISSING_SKU, CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY, COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS, COMMERCE_STORE_CONFLICT]
+                enum: [CATALOG_MISSING_SKU, CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY, COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS, COMMERCE_STORE_CONFLICT, CATEGORY_ONLINE_DISABLED, PRODUCT_NO_ACTIVE_VARIANTS, PRODUCT_NO_SELLABLE_VARIANT, VARIANT_DUPLICATE_COMBINATION, VARIANT_MISSING_SKU, VARIANT_MAPPING_MISSING, VARIANT_INTENTIONALLY_OFFLINE]
               products: {type: integer, format: int64}
         detail:
           type: array

@@ -256,6 +256,7 @@ func normalizeWooLine(item wooOrderLine, currency string, position int) (orders.
 	}
 	if variationID, err := wooJSONID(item.VariationID); err == nil && variationID > 0 {
 		line.VariationID = variationID
+		line.ProviderVariantID = strconv.FormatInt(variationID, 10)
 		line.UnsupportedReason = "variation"
 	}
 	if line.Name == "" {

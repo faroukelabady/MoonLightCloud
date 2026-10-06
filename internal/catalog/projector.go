@@ -32,6 +32,12 @@ const (
 	// Phase 15: independent ONLINE product-option (frame configuration)
 	// stream with its own processing identity.
 	ProcessorProductConfigurationProjectionV1 = "catalog_product_configuration_projection.v1"
+	// Phase 17: independent variant catalog stream (variant_revision)
+	// with its own processing identity.
+	ProcessorProductVariantProjectionV1 = "catalog_product_variant_projection.v1"
+	// Phase 17: independent variant inventory stream (inventory_revision)
+	// with its own processing identity.
+	ProcessorProductVariantInventoryProjectionV1 = "inventory_product_variant_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -84,6 +90,8 @@ type Store interface {
 	ProjectProductSalesPolicy(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductConfigurations(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductVariant(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductVariantInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -156,6 +164,19 @@ func NewProductInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Pro
 // product-option stream (Retail-authoritative frame configurations).
 func NewProductConfigurationsProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductConfigurationProjectionV1, EventProductConfigurationSnapshotV1, s.ProjectProductConfigurations, c, log)
+}
+
+// NewProductVariantProjector projects the Phase 17 variant catalog
+// stream (variant_revision gated). Variant blocks are terminal-
+// deterministic (the product dependency is the only wait); no re-arm hook.
+func NewProductVariantProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductVariantProjectionV1, EventProductVariantSnapshotV1, s.ProjectProductVariant, c, log)
+}
+
+// NewProductVariantInventoryProjector projects the Phase 17 variant
+// inventory stream (inventory_revision gated).
+func NewProductVariantInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductVariantInventoryProjectionV1, EventInventoryProductVariantSnapshotV1, s.ProjectProductVariantInventory, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

@@ -72,6 +72,8 @@ type App struct {
 	PolicyProjector               *catalog.Projector
 	InventoryProjector            *catalog.Projector
 	ProductConfigurationProjector *catalog.Projector
+	ProductVariantProjector       *catalog.Projector
+	VariantInventoryProjector     *catalog.Projector
 	Catalog                       catalog.Service
 	CommerceRegistry              *commerce.Registry
 	CommerceService               *commerce.CommerceService
@@ -137,9 +139,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	sync.RegisterEventType(catalog.EventCategorySnapshotV2, ValidateCatalogCategoryV2Payload)
 	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
 	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
+	sync.RegisterEventType(catalog.EventProductSnapshotV2, ValidateCatalogProductV2Payload)
 	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
 	sync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, ValidateCatalogProductInventoryPayload)
 	sync.RegisterEventType(catalog.EventProductConfigurationSnapshotV1, ValidateCatalogProductConfigurationsPayload)
+	sync.RegisterEventType(catalog.EventProductVariantSnapshotV1, ValidateCatalogProductVariantPayload)
+	sync.RegisterEventType(catalog.EventInventoryProductVariantSnapshotV1, ValidateCatalogProductVariantInventoryPayload)
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store
@@ -151,6 +156,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
 	a.InventoryProjector = catalog.NewProductInventoryProjector(store, clock.System{}, log)
 	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(store, clock.System{}, log)
+	a.ProductVariantProjector = catalog.NewProductVariantProjector(store, clock.System{}, log)
+	a.VariantInventoryProjector = catalog.NewProductVariantInventoryProjector(store, clock.System{}, log)
 	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -463,6 +470,44 @@ func ValidateCatalogProductPayload(raw json.RawMessage) error {
 	return err
 }
 
+// ValidateCatalogProductV2Payload is the ingestion-time
+// catalog.product.snapshot.v2 gate (Phase 17): the v1 invariants with the
+// deprecated primary_variant_sku display mirror in place of sku.
+func ValidateCatalogProductV2Payload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductSnapshotV2(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductSnapshotV2(p)
+	return err
+}
+
+// ValidateCatalogProductVariantPayload is the ingestion-time
+// catalog.product_variant.snapshot.v1 gate (Phase 17): event-local
+// validation only. A missing core product is a projection wait, never an
+// ingestion rejection.
+func ValidateCatalogProductVariantPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductVariantSnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductVariantSnapshot(p)
+	return err
+}
+
+// ValidateCatalogProductVariantInventoryPayload is the ingestion-time
+// inventory.product_variant.snapshot.v1 gate (Phase 17): event-local
+// validation only. A missing variant is a projection wait, never an
+// ingestion rejection.
+func ValidateCatalogProductVariantInventoryPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductVariantInventorySnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductVariantInventorySnapshot(p)
+	return err
+}
+
 // ValidateCatalogProductInventoryPayload is the ingestion-time
 // inventory.product.snapshot.v1 gate: event-local validation only. A
 // missing core product is a projection wait, never an ingestion rejection.
@@ -515,6 +560,12 @@ func (a *App) notifyProjectors() {
 	a.InventoryProjector.Notify()
 	if a.ProductConfigurationProjector != nil {
 		a.ProductConfigurationProjector.Notify()
+	}
+	if a.ProductVariantProjector != nil {
+		a.ProductVariantProjector.Notify()
+	}
+	if a.VariantInventoryProjector != nil {
+		a.VariantInventoryProjector.Notify()
 	}
 }
 

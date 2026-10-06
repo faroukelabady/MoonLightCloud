@@ -159,6 +159,12 @@ func serve(args []string) error {
 	if a.ProductConfigurationProjector != nil {
 		go a.ProductConfigurationProjector.Run(projCtx)
 	}
+	if a.ProductVariantProjector != nil {
+		go a.ProductVariantProjector.Run(projCtx)
+	}
+	if a.VariantInventoryProjector != nil {
+		go a.VariantInventoryProjector.Run(projCtx)
+	}
 	if a.OrderProcessor != nil {
 		go a.OrderProcessor.Run(projCtx)
 	}

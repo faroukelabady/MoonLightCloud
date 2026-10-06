@@ -100,6 +100,30 @@ func TestMain(m *testing.M) {
 		_, err = catalog.ValidateProductInventorySnapshot(p)
 		return err
 	})
+	isync.RegisterEventType(catalog.EventProductSnapshotV2, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductSnapshotV2(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductSnapshotV2(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventProductVariantSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductVariantSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductVariantSnapshot(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventInventoryProductVariantSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductVariantInventorySnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductVariantInventorySnapshot(p)
+		return err
+	})
 	os.Exit(m.Run())
 }
 

@@ -1650,6 +1650,133 @@ func (q *Queries) ReportSalesByTagForStore(ctx context.Context, arg ReportSalesB
 	return items, nil
 }
 
+const reportSalesByVariant = `-- name: ReportSalesByVariant :many
+SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+  AND ($3::text = '' OR l.line_currency = $3::text)
+GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency
+`
+
+type ReportSalesByVariantParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportSalesByVariantRow struct {
+	VariantID   pgtype.UUID `json:"variant_id"`
+	ProductID   pgtype.UUID `json:"product_id"`
+	Sku         string      `json:"sku"`
+	ProductName string      `json:"product_name"`
+	Currency    string      `json:"currency"`
+	Units       int64       `json:"units"`
+	LineSales   int64       `json:"line_sales"`
+	LineCost    int64       `json:"line_cost"`
+}
+
+// Phase 17 optional variant breakdown: GROUP BY the line's frozen variant
+// identity columns (sale_lines_projection is append-only history, never
+// joined to the current-state variant projection). Legacy lines without a
+// variant identity group under NULL variant_id.
+func (q *Queries) ReportSalesByVariant(ctx context.Context, arg ReportSalesByVariantParams) ([]ReportSalesByVariantRow, error) {
+	rows, err := q.db.Query(ctx, reportSalesByVariant, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportSalesByVariantRow{}
+	for rows.Next() {
+		var i ReportSalesByVariantRow
+		if err := rows.Scan(
+			&i.VariantID,
+			&i.ProductID,
+			&i.Sku,
+			&i.ProductName,
+			&i.Currency,
+			&i.Units,
+			&i.LineSales,
+			&i.LineCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportSalesByVariantForStore = `-- name: ReportSalesByVariantForStore :many
+SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND s.store_id = $4::uuid
+GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency
+`
+
+type ReportSalesByVariantForStoreParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+	StoreID  pgtype.UUID        `json:"store_id"`
+}
+
+type ReportSalesByVariantForStoreRow struct {
+	VariantID   pgtype.UUID `json:"variant_id"`
+	ProductID   pgtype.UUID `json:"product_id"`
+	Sku         string      `json:"sku"`
+	ProductName string      `json:"product_name"`
+	Currency    string      `json:"currency"`
+	Units       int64       `json:"units"`
+	LineSales   int64       `json:"line_sales"`
+	LineCost    int64       `json:"line_cost"`
+}
+
+func (q *Queries) ReportSalesByVariantForStore(ctx context.Context, arg ReportSalesByVariantForStoreParams) ([]ReportSalesByVariantForStoreRow, error) {
+	rows, err := q.db.Query(ctx, reportSalesByVariantForStore,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.Currency,
+		arg.StoreID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportSalesByVariantForStoreRow{}
+	for rows.Next() {
+		var i ReportSalesByVariantForStoreRow
+		if err := rows.Scan(
+			&i.VariantID,
+			&i.ProductID,
+			&i.Sku,
+			&i.ProductName,
+			&i.Currency,
+			&i.Units,
+			&i.LineSales,
+			&i.LineCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportSalesDaily = `-- name: ReportSalesDaily :many
 SELECT ((s.occurred_at AT TIME ZONE $1::text)::date)::text AS day,
     s.currency,

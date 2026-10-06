@@ -64,6 +64,28 @@ type Tag struct {
 	SourceEventID string
 }
 
+// Variant is the projected product variant aggregate (Phase 17): the
+// SKU/inventory-owning physical option identity of a product. Tombstoned
+// variants are never returned here (historical rows stay queryable only
+// through admin/health surfaces).
+type Variant struct {
+	VariantID       string
+	ProductID       string
+	SKU             string
+	IsActive        bool
+	PriceEGPCents   *int64
+	PriceUSDCents   *int64
+	Position        int
+	CombinationKey  string
+	VariantRevision int64
+	CatalogRevision int64
+	Attributes      []VariantAttribute
+	// Stock is the projected variant inventory when known.
+	StockQuantity     *int
+	InventoryRevision int64
+	SourceEventID     string
+}
+
 // ProductSalesPolicy is the projected channel/allocation configuration.
 // Effective eligibility always conjoins the product lifecycle state (see
 // IsStoreEligible/IsOnlineEligible): the policy never claims availability,
@@ -108,6 +130,10 @@ type Repository interface {
 	CatalogProductAvailability(ctx context.Context, id string) (ProductAvailability, error)
 	CatalogProductOnlinePolicy(ctx context.Context, id string) (ProductOnlinePolicy, error)
 	CatalogProductConfigurations(ctx context.Context, id string) ([]ProductConfiguration, error)
+	// Phase 17 variant reads (SKU/inventory ownership moved to variant).
+	CatalogProductVariants(ctx context.Context, productID string) ([]Variant, error)
+	CatalogProductVariantInventory(ctx context.Context, variantID string) (VariantInventory, error)
+	CatalogProductVariantAvailability(ctx context.Context, variantID string) (VariantAvailability, error)
 }
 
 // Service fronts catalog reads for future phases.

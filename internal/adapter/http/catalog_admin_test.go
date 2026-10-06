@@ -162,6 +162,14 @@ func (s *stubCatalogStore) AdminTagList(_ context.Context, _ string) ([]cataloga
 	return nil, nil
 }
 
+func (s *stubCatalogStore) AdminProductVariants(_ context.Context, _, _ string) ([]catalogadmin.AdminProductVariant, error) {
+	return nil, nil
+}
+
+func (s *stubCatalogStore) AdminProductVariant(_ context.Context, _, _ string) (catalogadmin.AdminProductVariant, error) {
+	return catalogadmin.AdminProductVariant{Attributes: []catalogadmin.AdminProductVariantAttribute{}}, nil
+}
+
 type stubCatalogDevices struct {
 	binding map[string]string
 	active  map[string]bool

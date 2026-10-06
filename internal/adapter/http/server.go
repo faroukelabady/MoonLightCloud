@@ -123,6 +123,8 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductDetail)))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/configurations",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminConfigurations)))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/variants",
+			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductVariants)))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/categories",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminCategories)))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags",

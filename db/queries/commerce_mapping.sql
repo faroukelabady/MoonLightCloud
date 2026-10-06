@@ -46,3 +46,34 @@ UPDATE commerce_product_mappings
 SET external_product_id = $4, updated_at = now()
 WHERE provider_key = $1 AND product_id = $2 AND external_product_id = $3
 RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at;
+
+-- Phase 17 durable ProductVariant mappings (00033): one MoonLight
+-- variant ↔ one provider variation per provider instance. Integration
+-- state, not a projection: never cleared by rebuilds, no FK to
+-- rebuildable projections.
+
+-- name: GetCommerceProductVariantMapping :one
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND variant_id = $2;
+
+-- name: ListCommerceProductVariantMappings :many
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND product_id = $2
+ORDER BY variant_id;
+
+-- name: FindCommerceProductVariantMappingByExternal :one
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND external_product_id = $2 AND external_variant_id = $3;
+
+-- name: CreateCommerceProductVariantMapping :one
+-- store_id mirrors the authoritative catalog product at creation (NULL
+-- for legacy/unprojected products). ON CONFLICT DO NOTHING keeps
+-- same-pair idempotency; remaps and cross-variant external reuse are
+-- classified in Go before insert.
+INSERT INTO commerce_product_variant_mappings (provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT DO NOTHING
+RETURNING provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at;

@@ -240,8 +240,16 @@ func normalizeLine(line gqlLineItem, currency string) (orders.OrderLine, error) 
 	// is carried raw; resolution goes through the durable configuration
 	// mapping — never label matching.
 	providerConfigurationID := ""
+	providerVariantID := ""
 	if line.Variant != nil {
 		providerConfigurationID = line.Variant.ID
+		// Phase 17: the purchased provider variation resolves to a
+		// MoonLight ProductVariant through commerce_product_variant_
+		// mappings — canonical decimal identity, exactly like external
+		// product IDs (GID form is transport-only).
+		if variantID, err := ParseGID(line.Variant.ID, ResourceProductVariant); err == nil {
+			providerVariantID = variantID
+		}
 	}
 	var lineTax int64
 	for _, taxLine := range line.TaxLines {
@@ -264,6 +272,7 @@ func normalizeLine(line gqlLineItem, currency string) (orders.OrderLine, error) 
 		ExternalLineID:          parsedID,
 		ExternalProductID:       externalProductID,
 		ProviderConfigurationID: providerConfigurationID,
+		ProviderVariantID:       providerVariantID,
 		// Phase 15 §119: Shopify selections ride the variant identity
 		// (bundle variant GID for framed choices) and resolve through
 		// the durable configuration mapping — never by labels.

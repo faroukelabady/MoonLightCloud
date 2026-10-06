@@ -119,6 +119,9 @@ type AdminProductDetail struct {
 	SalesPolicyRevision   int64    `json:"sales_policy_revision"`
 	ConfigurationRevision int64    `json:"configuration_revision"`
 	HasPending            bool     `json:"has_pending"`
+	// Variants are the product's Phase 17 SKU/inventory-owning rows with
+	// attributes, prices and last-known stock.
+	Variants []AdminProductVariant `json:"variants"`
 }
 
 // AdminCategoryRow is one Store-scoped Category with DAG position.
@@ -159,6 +162,39 @@ type AdminConfigurationRow struct {
 	Position      int     `json:"position"`
 }
 
+// AdminProductVariantAttribute is one projected physical option of a
+// variant with its bilingual display labels (projection-only display).
+type AdminProductVariantAttribute struct {
+	DefinitionCode   string `json:"definition_code"`
+	ValueCode        string `json:"value_code"`
+	NameAR           string `json:"name_ar"`
+	NameEN           string `json:"name_en"`
+	DefinitionNameAR string `json:"definition_name_ar"`
+	DefinitionNameEN string `json:"definition_name_en"`
+	Position         int    `json:"position"`
+}
+
+// AdminProductVariant is one projected product variant for the editor:
+// identity, exact minor-unit prices, last-known stock, and options.
+// Tombstones keep their rows (deleted=true) for historical safety.
+type AdminProductVariant struct {
+	VariantID         string                         `json:"variant_id"`
+	ProductID         string                         `json:"product_id"`
+	SKU               string                         `json:"sku"`
+	IsActive          bool                           `json:"is_active"`
+	Deleted           bool                           `json:"deleted"`
+	PriceEGPMinor     string                         `json:"price_egp_minor"`
+	PriceUSDMinor     *string                        `json:"price_usd_minor"`
+	StockQuantity     int64                          `json:"stock_quantity"`
+	Position          int                            `json:"position"`
+	CombinationKey    string                         `json:"combination_key"`
+	VariantRevision   int64                          `json:"variant_revision"`
+	CatalogRevision   int64                          `json:"catalog_revision"`
+	InventoryRevision int64                          `json:"inventory_revision"`
+	HasPending        bool                           `json:"has_pending"`
+	Attributes        []AdminProductVariantAttribute `json:"attributes"`
+}
+
 // Store persists commands, targets and capabilities plus projection
 // ownership/convergence reads. Implemented in adapter/postgres.
 type Store interface {
@@ -186,6 +222,9 @@ type Store interface {
 	AdminProductConfigurations(ctx context.Context, storeID, productID string) ([]AdminConfigurationRow, error)
 	AdminCategoryList(ctx context.Context, storeID string) ([]AdminCategoryRow, error)
 	AdminTagList(ctx context.Context, storeID string) ([]AdminTagRow, error)
+	// Phase 17 variant reads (Store-scoped, projection only).
+	AdminProductVariants(ctx context.Context, storeID, productID string) ([]AdminProductVariant, error)
+	AdminProductVariant(ctx context.Context, storeID, variantID string) (AdminProductVariant, error)
 }
 
 // DeviceDirectory resolves device bindings and lifecycle.
@@ -687,7 +726,26 @@ func (s *Service) AdminProduct(ctx context.Context, storeID, productID string) (
 	if detail.ProductID == "" {
 		return AdminProductDetail{}, apperr.New(apperr.NotFound, CodeEntityNotFound)
 	}
+	variants, err := s.store.AdminProductVariants(ctx, strings.TrimSpace(storeID), strings.TrimSpace(productID))
+	if err != nil {
+		return AdminProductDetail{}, err
+	}
+	detail.Variants = variants
 	return detail, nil
+}
+
+// AdminProductVariants lists one Product's projected variants for the
+// operator UI (identity, prices, stock, option attributes). Unknown
+// Stores and foreign Products yield empty results (never a global
+// fallback).
+func (s *Service) AdminProductVariants(ctx context.Context, storeID, productID string) ([]AdminProductVariant, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(productID)); err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "invalid product id")
+	}
+	return s.store.AdminProductVariants(ctx, strings.TrimSpace(storeID), strings.TrimSpace(productID))
 }
 
 // AdminCategories lists the Store-scoped Category tree rows.
@@ -822,8 +880,177 @@ func (s *Service) noopProjected(ctx context.Context, view CommandView) bool {
 			}
 		}
 		return true
+	case TypeProductVariantUpdateV1:
+		row, err := s.store.AdminProductVariant(ctx, view.StoreID, view.EntityID)
+		return err == nil && variantStateMatches(row, payload)
+	case TypeVariantAttributesUpdateV1:
+		row, err := s.store.AdminProductVariant(ctx, view.StoreID, view.EntityID)
+		if err != nil {
+			return false
+		}
+		desired, ok := payload["attributes"].([]any)
+		if !ok {
+			return false
+		}
+		return attributesMatch(row.Attributes, desired)
+	case TypeProductVariantsUpdateV1:
+		rows, err := s.store.AdminProductVariants(ctx, view.StoreID, view.EntityID)
+		if err != nil {
+			return false
+		}
+		desired, ok := payload["variants"].([]any)
+		if !ok {
+			return false
+		}
+		matched := make(map[string]bool, len(rows))
+		for _, item := range desired {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return false
+			}
+			found := false
+			for _, row := range rows {
+				if matched[row.VariantID] {
+					continue
+				}
+				if sameVariantIdentity(row, entry) && variantStateMatches(row, entry) {
+					matched[row.VariantID] = true
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		// Replace-set semantics: every projected variant must already be
+		// requested for a genuine no-op.
+		for _, row := range rows {
+			if !matched[row.VariantID] {
+				return false
+			}
+		}
+		return true
 	}
 	return false
+}
+
+// sameVariantIdentity reports whether a bulk variants entry targets a
+// projected variant by explicit ID or by normalized combination key.
+func sameVariantIdentity(row AdminProductVariant, entry map[string]any) bool {
+	if id := payloadText(entry, "id"); id != "" {
+		parsed := id
+		if canonical, err := uuid.Parse(id); err == nil {
+			parsed = canonical.String()
+		}
+		return parsed == row.VariantID
+	}
+	if key := payloadText(entry, "combination_key"); key != "" {
+		return key == row.CombinationKey
+	}
+	return false
+}
+
+// variantStateMatches verifies every requested variant field against the
+// projection (fields absent from the payload are unconstrained). Money
+// compares as exact decimal strings, never floats.
+func variantStateMatches(row AdminProductVariant, entry map[string]any) bool {
+	if raw, present := entry["sku"]; present {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) != row.SKU {
+			return false
+		}
+	}
+	if raw, present := entry["combination_key"]; present {
+		value, ok := raw.(string)
+		if !ok || strings.TrimSpace(value) != row.CombinationKey {
+			return false
+		}
+	}
+	if raw, present := entry["is_active"]; present {
+		value, ok := raw.(bool)
+		if !ok || value != row.IsActive {
+			return false
+		}
+	}
+	if raw, present := entry["deleted"]; present {
+		value, ok := raw.(bool)
+		if !ok || value != row.Deleted {
+			return false
+		}
+	}
+	if raw, present := entry["position"]; present {
+		value, ok := raw.(float64)
+		if !ok || value != float64(row.Position) {
+			return false
+		}
+	}
+	if raw, present := entry["price_egp_cents"]; present {
+		if raw == nil || !minorTextEqual(row.PriceEGPMinor, raw) {
+			return false
+		}
+	}
+	if raw, present := entry["price_usd_cents"]; present {
+		if raw == nil {
+			if row.PriceUSDMinor != nil {
+				return false
+			}
+		} else if row.PriceUSDMinor == nil || !minorTextEqual(*row.PriceUSDMinor, raw) {
+			return false
+		}
+	}
+	return attributesOptionalMatch(row.Attributes, entry)
+}
+
+// attributesOptionalMatch verifies the requested attribute list when
+// present (absent = unconstrained).
+func attributesOptionalMatch(projected []AdminProductVariantAttribute, entry map[string]any) bool {
+	raw, present := entry["attributes"]
+	if !present {
+		return true
+	}
+	desired, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	return attributesMatch(projected, desired)
+}
+
+// attributesMatch verifies a full requested attribute list against the
+// projection: same definition codes with identical value codes, labels
+// and positions.
+func attributesMatch(projected []AdminProductVariantAttribute, desired []any) bool {
+	if len(desired) != len(projected) {
+		return false
+	}
+	byCode := make(map[string]AdminProductVariantAttribute, len(projected))
+	for _, attr := range projected {
+		byCode[attr.DefinitionCode] = attr
+	}
+	for _, item := range desired {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return false
+		}
+		row, ok := byCode[payloadText(entry, "definition_code")]
+		if !ok {
+			return false
+		}
+		if payloadText(entry, "value_code") != row.ValueCode ||
+			!optionalTextEqual(&row.NameAR, entry["name_ar"]) ||
+			!optionalTextEqual(&row.NameEN, entry["name_en"]) ||
+			!optionalTextEqual(&row.DefinitionNameAR, entry["definition_name_ar"]) ||
+			!optionalTextEqual(&row.DefinitionNameEN, entry["definition_name_en"]) {
+			return false
+		}
+		if raw, present := entry["position"]; present {
+			value, ok := raw.(float64)
+			if !ok || value != float64(row.Position) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func optionalTextEqual(stored *string, requested any) bool {

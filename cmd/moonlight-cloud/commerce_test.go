@@ -68,6 +68,22 @@ func (s *cliStubMappings) CreateProductMapping(_ context.Context, key commerce.P
 	return mapping, nil
 }
 
+func (s *cliStubMappings) GetProductVariantMapping(context.Context, commerce.ProviderKey, string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{}, errCLINoMapping
+}
+
+func (s *cliStubMappings) ListProductVariantMappings(context.Context, commerce.ProviderKey, string) ([]commerce.ProductVariantMapping, error) {
+	return nil, nil
+}
+
+func (s *cliStubMappings) FindProductVariantMappingByExternal(context.Context, commerce.ProviderKey, string, string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{}, errCLINoMapping
+}
+
+func (s *cliStubMappings) CreateProductVariantMapping(_ context.Context, key commerce.ProviderKey, productID, variantID, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+	return commerce.ProductVariantMapping{ProviderKey: key, ProductID: productID, VariantID: variantID, ExternalProductID: externalProductID, ExternalVariantID: externalVariantID}, nil
+}
+
 func cliDesiredState(published bool, online int, ready bool) commerce.DesiredProduct {
 	stock := online
 	return commerce.DesiredProduct{

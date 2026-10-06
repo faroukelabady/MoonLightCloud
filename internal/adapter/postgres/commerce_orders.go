@@ -3,14 +3,15 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/jackc/pgx/v5"
@@ -335,6 +336,18 @@ func (d Devices) LoadProjectedOrder(ctx context.Context, providerKey, externalOr
 			productID := uuidString(line.MoonlightProductID)
 			resolved.MoonlightProduct = &productID
 		}
+		if line.VariantID.Valid {
+			variantID := uuidString(line.VariantID)
+			resolved.VariantID = &variantID
+		}
+		resolved.VariantSKU = optionalTextPtr(line.VariantSku)
+		if len(line.VariantAttributeSnapshot) > 0 {
+			var attributes []orders.OrderLineVariantAttribute
+			if err := json.Unmarshal(line.VariantAttributeSnapshot, &attributes); err != nil {
+				return orders.OrderSnapshot{}, 0, false, apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+			}
+			resolved.VariantAttributeSnapshot = attributes
+		}
 		snapshot.Lines = append(snapshot.Lines, resolved)
 	}
 	for _, address := range addresses {
@@ -372,6 +385,9 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 		line.MoonlightProduct = nil
 		line.Mapped = false
 		line.UnsupportedReason = ""
+		line.VariantID = nil
+		line.VariantSKU = nil
+		line.VariantAttributeSnapshot = nil
 		if line.ProviderConfigurationID != "" || line.VariationID != 0 {
 			// Phase 15 §117/§118: a provider configuration identity is
 			// resolved through the durable configuration mapping — never
@@ -429,6 +445,14 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 		line.MoonlightProduct = &productID
 		line.Mapped = true
 		lineStores[productID] = storeString(mapping.StoreID)
+		// Phase 17 §33-§37: provider variation → durable variant mapping
+		// → MoonLight variant identity snapshot (00034). Never label
+		// matching; an unresolved variation stays truthful NULL.
+		if line.ProviderVariantID != "" {
+			if err := snapshotOrderLineVariant(ctx, q, snapshot.ProviderKey, line, mapping.ProductID); err != nil {
+				return orders.OrderSnapshot{}, nil, err
+			}
+		}
 	}
 	for _, line := range snapshot.Lines {
 		if line.ConfigurationUnresolved {
@@ -438,6 +462,75 @@ func resolveOrderLines(ctx context.Context, q *sqlcgen.Queries, snapshot orders.
 	snapshot.UnmappedLines = unmapped
 	snapshot.MappingComplete = unmapped == 0 && unresolvedSelections == 0
 	return snapshot, lineStores, nil
+}
+
+// snapshotOrderLineVariant resolves one provider variation to its
+// durable MoonLight ProductVariant mapping (Phase 17 §33-§37) and
+// captures the immutable variant snapshot at ingestion (00034):
+// identity, SKU, and option attributes are copied — later rename, price
+// change, disable or tombstone can never rewrite history. A product
+// with exactly ONE mapped variant owns every frame-layer selection of
+// that variant (all frame choices consume that one variant's stock
+// pool), so an unresolved variation on a single-variant product adopts
+// that variant's identity; products with several variants require the
+// exact provider variation mapping and NEVER guess.
+func snapshotOrderLineVariant(ctx context.Context, q *sqlcgen.Queries, providerKey string, line *orders.OrderLine, productID pgtype.UUID) error {
+	var variantMapping *sqlcgen.CommerceProductVariantMapping
+	row, err := q.FindCommerceProductVariantMappingByExternal(ctx, sqlcgen.FindCommerceProductVariantMappingByExternalParams{
+		ProviderKey: providerKey, ExternalProductID: line.ExternalProductID, ExternalVariantID: line.ProviderVariantID,
+	})
+	switch {
+	case err == nil:
+		variantMapping = &row
+	case errors.Is(err, pgx.ErrNoRows):
+		rows, listErr := q.ListCommerceProductVariantMappings(ctx, sqlcgen.ListCommerceProductVariantMappingsParams{
+			ProviderKey: providerKey, ProductID: productID,
+		})
+		if listErr != nil {
+			return apperr.Wrap(apperr.Internal, "order reconcile", redact(listErr))
+		}
+		if len(rows) == 1 {
+			variantMapping = &rows[0]
+		}
+	default:
+		return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	}
+	if variantMapping == nil {
+		return nil
+	}
+	variantID := uuidString(variantMapping.VariantID)
+	line.VariantID = &variantID
+	captured := ""
+	if variantRow, err := q.CatalogProductVariantByID(ctx, variantMapping.VariantID); err == nil {
+		captured = variantRow.Sku
+		attrs, attrErr := q.CatalogProductVariantAttributes(ctx, variantMapping.VariantID)
+		if attrErr != nil {
+			return apperr.Wrap(apperr.Internal, "order reconcile", redact(attrErr))
+		}
+		for _, attr := range attrs {
+			entry := orders.OrderLineVariantAttribute{
+				DefinitionCode: attr.DefinitionCode, ValueCode: attr.ValueCode,
+				NameAR: attr.NameAr, DefinitionNameAR: attr.DefinitionNameAr,
+				Position: int(attr.Position),
+			}
+			if attr.NameEn.Valid {
+				value := attr.NameEn.String
+				entry.NameEN = &value
+			}
+			if attr.DefinitionNameEn.Valid {
+				value := attr.DefinitionNameEn.String
+				entry.DefinitionNameEN = &value
+			}
+			line.VariantAttributeSnapshot = append(line.VariantAttributeSnapshot, entry)
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+	}
+	if captured == "" {
+		captured = line.SKU
+	}
+	line.VariantSKU = &captured
+	return nil
 }
 
 // snapshotConfiguration copies the selection into the order line at
@@ -634,6 +727,21 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 			FrameColorNameAr:             textFromPtr(line.FrameColorNameAR),
 			FrameColorNameEn:             textFromPtr(line.FrameColorNameEN),
 			ConfigurationPriceDeltaMinor: int8FromPtr(line.ConfigurationPriceDeltaMinor),
+			VariantSku:                   textFromPtr(line.VariantSKU),
+		}
+		if line.VariantID != nil {
+			vuid, err := parseUUID(*line.VariantID)
+			if err != nil {
+				return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+			}
+			params.VariantID = vuid
+		}
+		if len(line.VariantAttributeSnapshot) > 0 {
+			encoded, err := json.Marshal(line.VariantAttributeSnapshot)
+			if err != nil {
+				return apperr.Wrap(apperr.Internal, "order reconcile", redact(err))
+			}
+			params.VariantAttributeSnapshot = encoded
 		}
 		if line.ConfigurationID != nil {
 			cuid, err := parseUUID(*line.ConfigurationID)
@@ -1162,6 +1270,19 @@ func orderLineViewFromRow(line sqlcgen.CommerceOnlineOrderLine) orders.OrderLine
 	if line.ConfigurationPriceDeltaMinor.Valid {
 		value := orders.MinorString(line.ConfigurationPriceDeltaMinor.Int64)
 		view.ConfigurationPriceDeltaMinor = &value
+	}
+	if line.VariantID.Valid {
+		value := uuidString(line.VariantID)
+		view.VariantID = &value
+	}
+	view.VariantSKU = optionalTextPtr(line.VariantSku)
+	if len(line.VariantAttributeSnapshot) > 0 {
+		var attributes []orders.OrderLineVariantAttribute
+		if err := json.Unmarshal(line.VariantAttributeSnapshot, &attributes); err != nil {
+			// Corrupt snapshot bytes are never presented as data.
+			attributes = nil
+		}
+		view.VariantAttributes = attributes
 	}
 	return view
 }

@@ -170,6 +170,14 @@ func (s *fakeStore) AdminTagList(_ context.Context, _ string) ([]AdminTagRow, er
 	return nil, nil
 }
 
+func (s *fakeStore) AdminProductVariants(_ context.Context, _, _ string) ([]AdminProductVariant, error) {
+	return nil, nil
+}
+
+func (s *fakeStore) AdminProductVariant(_ context.Context, _, _ string) (AdminProductVariant, error) {
+	return AdminProductVariant{Attributes: []AdminProductVariantAttribute{}}, nil
+}
+
 type fakeDevices struct {
 	binding map[string]string
 	active  map[string]bool

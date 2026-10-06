@@ -96,6 +96,49 @@ func (q *Queries) CreateCommerceProductMapping(ctx context.Context, arg CreateCo
 	return i, err
 }
 
+const createCommerceProductVariantMapping = `-- name: CreateCommerceProductVariantMapping :one
+INSERT INTO commerce_product_variant_mappings (provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT DO NOTHING
+RETURNING provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+`
+
+type CreateCommerceProductVariantMappingParams struct {
+	ProviderKey       string      `json:"provider_key"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	VariantID         pgtype.UUID `json:"variant_id"`
+	ExternalProductID string      `json:"external_product_id"`
+	ExternalVariantID string      `json:"external_variant_id"`
+	StoreID           pgtype.UUID `json:"store_id"`
+}
+
+// store_id mirrors the authoritative catalog product at creation (NULL
+// for legacy/unprojected products). ON CONFLICT DO NOTHING keeps
+// same-pair idempotency; remaps and cross-variant external reuse are
+// classified in Go before insert.
+func (q *Queries) CreateCommerceProductVariantMapping(ctx context.Context, arg CreateCommerceProductVariantMappingParams) (CommerceProductVariantMapping, error) {
+	row := q.db.QueryRow(ctx, createCommerceProductVariantMapping,
+		arg.ProviderKey,
+		arg.ProductID,
+		arg.VariantID,
+		arg.ExternalProductID,
+		arg.ExternalVariantID,
+		arg.StoreID,
+	)
+	var i CommerceProductVariantMapping
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.VariantID,
+		&i.ExternalProductID,
+		&i.ExternalVariantID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const findCommerceProductMappingByExternal = `-- name: FindCommerceProductMappingByExternal :one
 SELECT provider_key, product_id, external_product_id, store_id, created_at, updated_at
 FROM commerce_product_mappings
@@ -123,6 +166,34 @@ func (q *Queries) FindCommerceProductMappingByExternal(ctx context.Context, arg 
 		&i.ProviderKey,
 		&i.ProductID,
 		&i.ExternalProductID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const findCommerceProductVariantMappingByExternal = `-- name: FindCommerceProductVariantMappingByExternal :one
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND external_product_id = $2 AND external_variant_id = $3
+`
+
+type FindCommerceProductVariantMappingByExternalParams struct {
+	ProviderKey       string `json:"provider_key"`
+	ExternalProductID string `json:"external_product_id"`
+	ExternalVariantID string `json:"external_variant_id"`
+}
+
+func (q *Queries) FindCommerceProductVariantMappingByExternal(ctx context.Context, arg FindCommerceProductVariantMappingByExternalParams) (CommerceProductVariantMapping, error) {
+	row := q.db.QueryRow(ctx, findCommerceProductVariantMappingByExternal, arg.ProviderKey, arg.ExternalProductID, arg.ExternalVariantID)
+	var i CommerceProductVariantMapping
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.VariantID,
+		&i.ExternalProductID,
+		&i.ExternalVariantID,
 		&i.StoreID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -167,6 +238,38 @@ func (q *Queries) GetCommerceProductMapping(ctx context.Context, arg GetCommerce
 	return i, err
 }
 
+const getCommerceProductVariantMapping = `-- name: GetCommerceProductVariantMapping :one
+
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND variant_id = $2
+`
+
+type GetCommerceProductVariantMappingParams struct {
+	ProviderKey string      `json:"provider_key"`
+	VariantID   pgtype.UUID `json:"variant_id"`
+}
+
+// Phase 17 durable ProductVariant mappings (00033): one MoonLight
+// variant ↔ one provider variation per provider instance. Integration
+// state, not a projection: never cleared by rebuilds, no FK to
+// rebuildable projections.
+func (q *Queries) GetCommerceProductVariantMapping(ctx context.Context, arg GetCommerceProductVariantMappingParams) (CommerceProductVariantMapping, error) {
+	row := q.db.QueryRow(ctx, getCommerceProductVariantMapping, arg.ProviderKey, arg.VariantID)
+	var i CommerceProductVariantMapping
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.VariantID,
+		&i.ExternalProductID,
+		&i.ExternalVariantID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listCommerceProductMappingsForStore = `-- name: ListCommerceProductMappingsForStore :many
 SELECT provider_key, product_id, external_product_id, store_id, created_at, updated_at
 FROM commerce_product_mappings
@@ -203,6 +306,47 @@ func (q *Queries) ListCommerceProductMappingsForStore(ctx context.Context, arg L
 			&i.ProviderKey,
 			&i.ProductID,
 			&i.ExternalProductID,
+			&i.StoreID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCommerceProductVariantMappings = `-- name: ListCommerceProductVariantMappings :many
+SELECT provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at
+FROM commerce_product_variant_mappings
+WHERE provider_key = $1 AND product_id = $2
+ORDER BY variant_id
+`
+
+type ListCommerceProductVariantMappingsParams struct {
+	ProviderKey string      `json:"provider_key"`
+	ProductID   pgtype.UUID `json:"product_id"`
+}
+
+func (q *Queries) ListCommerceProductVariantMappings(ctx context.Context, arg ListCommerceProductVariantMappingsParams) ([]CommerceProductVariantMapping, error) {
+	rows, err := q.db.Query(ctx, listCommerceProductVariantMappings, arg.ProviderKey, arg.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CommerceProductVariantMapping{}
+	for rows.Next() {
+		var i CommerceProductVariantMapping
+		if err := rows.Scan(
+			&i.ProviderKey,
+			&i.ProductID,
+			&i.VariantID,
+			&i.ExternalProductID,
+			&i.ExternalVariantID,
 			&i.StoreID,
 			&i.CreatedAt,
 			&i.UpdatedAt,

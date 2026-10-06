@@ -208,6 +208,32 @@ type OrderLine struct {
 	ConfigurationPriceDeltaMinor *int64
 	ProviderConfigurationID      string
 	ConfigurationUnresolved      bool
+	// Phase 17: immutable ONLINE variant identity snapshot (00034).
+	// ProviderVariantID is the normalized provider variation identity
+	// carried at ingestion (canonical decimal; never display labels).
+	// VariantID/VariantSKU/VariantAttributeSnapshot are captured only
+	// when commerce_product_variant_mappings proves the MoonLight
+	// ProductVariant — current catalog rows are NEVER authority for past
+	// purchases, and an unresolved variation stays truthful NULL (never
+	// guessed).
+	ProviderVariantID        string
+	VariantID                *string
+	VariantSKU               *string
+	VariantAttributeSnapshot []OrderLineVariantAttribute
+}
+
+// OrderLineVariantAttribute is one captured option attribute of the
+// purchased ProductVariant (Phase 17): identity codes plus bilingual
+// display labels frozen at ingestion. Display data only; money never
+// lives here.
+type OrderLineVariantAttribute struct {
+	DefinitionCode   string  `json:"definition_code"`
+	ValueCode        string  `json:"value_code"`
+	NameAR           string  `json:"name_ar"`
+	NameEN           *string `json:"name_en,omitempty"`
+	DefinitionNameAR string  `json:"definition_name_ar"`
+	DefinitionNameEN *string `json:"definition_name_en,omitempty"`
+	Position         int     `json:"position"`
 }
 
 // OrderSnapshot is the normalized immutable provider order state used

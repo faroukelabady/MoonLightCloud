@@ -268,6 +268,16 @@ type (
 		LineSales   int64
 		LineCost    int64
 	}
+	VariantRow struct {
+		VariantID   *string
+		ProductID   *string
+		SKU         string
+		ProductName string
+		Units       int64
+		Currency    string
+		LineSales   int64
+		LineCost    int64
+	}
 	CategoryRow struct {
 		Kind     string
 		ID       string
@@ -403,6 +413,7 @@ type Repository interface {
 	SalesPayments(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]PaymentRow, error)
 	SalesDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
 	SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
+	SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]VariantRow, error)
 	SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
@@ -424,6 +435,7 @@ type Repository interface {
 	SalesSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]SummaryRow, error)
 	SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
 	SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
+	SalesByVariantForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]VariantRow, error)
 	SalesByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
@@ -623,6 +635,36 @@ func (s Service) scopedSalesByProduct(ctx context.Context, req Request) ([]Produ
 		return s.repo.SalesByProductForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	}
 	return s.repo.SalesByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByVariant(ctx context.Context, req Request) ([]VariantRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByVariantForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByVariant(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+// SalesByVariant returns the optional Phase 17 variant breakdown:
+// sale lines grouped by their frozen per-line variant identity columns
+// (append-only history — never joined to the current-state variant
+// projection). Lines without a variant identity group under a NULL
+// variant ID. Existing product/category/tag breakdowns are unchanged.
+func (s Service) SalesByVariant(ctx context.Context, req Request) ([]VariantRow, error) {
+	rows, err := s.scopedSalesByVariant(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return applyVariantLimit(rows, req.Limit), nil
+}
+
+// applyVariantLimit keeps the largest rows by line sales when a limit is
+// set (0 = unbounded), mirroring applyLimit.
+func applyVariantLimit(rows []VariantRow, limit int) []VariantRow {
+	if limit <= 0 || len(rows) <= limit {
+		return rows
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].LineSales > rows[j].LineSales })
+	return rows[:limit]
 }
 
 func (s Service) scopedRefundsByProduct(ctx context.Context, req Request) ([]RefundProductRow, error) {

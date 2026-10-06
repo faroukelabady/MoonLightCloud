@@ -36,12 +36,14 @@ type recordedRequest struct {
 }
 
 type fakeVariant struct {
-	gid     string
-	sku     string
-	price   string
-	itemGID string
-	tracked bool
-	levels  map[string]int64 // location decimal -> available
+	gid        string
+	sku        string
+	price      string
+	title      string
+	itemGID    string
+	tracked    bool
+	levels     map[string]int64 // location decimal -> available
+	metafields map[string]string
 }
 
 type fakeProduct struct {
@@ -230,6 +232,8 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(body.Query, "MoonlightShopCurrency"):
 		payload = map[string]any{"data": map[string]any{"shop": map[string]any{"currencyCode": h.shopCurrency}}}
+	case strings.Contains(body.Query, "MoonlightVariantSet"):
+		payload = h.opVariantSet(body.Variables)
 	case strings.Contains(body.Query, "MoonlightProductCreate"):
 		payload = h.opProductCreate(body.Variables)
 	case strings.Contains(body.Query, "MoonlightProductUpdate"):
@@ -342,7 +346,8 @@ func operationName(query string) string {
 		"MoonlightShopCurrency", "MoonlightProductCreate", "MoonlightProductUpdate",
 		"MoonlightManagedVariantUpdate", "MoonlightMetafieldsSet", "MoonlightPublish",
 		"MoonlightUnpublish", "MoonlightInventoryActivate", "MoonlightInventorySet",
-		"MoonlightVariantsBySKU", "MoonlightOrder", "MoonlightInventoryVariant", "MoonlightProduct",
+		"MoonlightVariantsBySKU", "MoonlightOrder", "MoonlightInventoryVariant",
+		"MoonlightVariantSet", "MoonlightProduct",
 	} {
 		if strings.Contains(query, name) {
 			return name
@@ -395,15 +400,38 @@ func (h *shopifyHarness) opProductCreate(vars map[string]any) map[string]any {
 	}
 	variantID := h.allocateID()
 	variant := &fakeVariant{
-		gid:     "gid://shopify/ProductVariant/" + variantID,
-		itemGID: "gid://shopify/InventoryItem/" + h.allocateID(),
-		tracked: true,
-		levels:  map[string]int64{},
+		gid:        "gid://shopify/ProductVariant/" + variantID,
+		itemGID:    "gid://shopify/InventoryItem/" + h.allocateID(),
+		tracked:    true,
+		levels:     map[string]int64{},
+		metafields: map[string]string{},
 	}
 	if variants, ok := input["variants"].([]any); ok && len(variants) == 1 {
 		if v, ok := variants[0].(map[string]any); ok {
 			variant.sku = str(v["sku"])
 			variant.price = str(v["price"])
+			h.applyVariantMetafields(variant, v)
+		}
+	}
+	if variants, ok := input["variants"].([]any); ok && len(variants) > 1 {
+		// Phase 17 multi-variant create: one tracked variant per entry.
+		product.variants = nil
+		for _, raw := range variants {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			created := &fakeVariant{
+				gid:        "gid://shopify/ProductVariant/" + h.allocateID(),
+				itemGID:    "gid://shopify/InventoryItem/" + h.allocateID(),
+				tracked:    true,
+				levels:     map[string]int64{},
+				metafields: map[string]string{},
+				sku:        str(entry["sku"]),
+				price:      str(entry["price"]),
+			}
+			h.applyVariantMetafields(created, entry)
+			product.variants = append(product.variants, created)
 		}
 	}
 	if metafields, ok := input["metafields"].([]any); ok {
@@ -421,12 +449,97 @@ func (h *shopifyHarness) opProductCreate(vars map[string]any) map[string]any {
 	if _, ok := input["collectionsToJoin"]; ok {
 		product.metafields["__violation.collections"] = "sent"
 	}
-	product.variants = []*fakeVariant{variant}
+	if product.variants == nil {
+		product.variants = []*fakeVariant{variant}
+	}
+	nodes := []any{}
+	for _, created := range product.variants {
+		nodes = append(nodes, map[string]any{"id": created.gid, "sku": created.sku})
+	}
 	h.products[id] = product
 	return map[string]any{"data": map[string]any{"productSet": map[string]any{
 		"product": map[string]any{
 			"id":       product.gid,
-			"variants": map[string]any{"nodes": []any{map[string]any{"id": variant.gid, "sku": variant.sku}}},
+			"variants": map[string]any{"nodes": nodes},
+		},
+		"userErrors": []any{},
+	}}}
+}
+
+// opVariantSet converges one product's explicit variant set (Phase 17):
+// entries with an id update the owned variant, entries without create a
+// new tracked variant, and unlisted variants are removed (the same
+// explicit-set semantics the frame component relies on).
+func (h *shopifyHarness) opVariantSet(vars map[string]any) map[string]any {
+	fail := func(message string) map[string]any {
+		return map[string]any{"data": map[string]any{"productSet": map[string]any{
+			"product": nil, "userErrors": []any{map[string]any{"message": message}}}}}
+	}
+	input, _ := vars["input"].(map[string]any)
+	productID, err := ParseGID(str(input["id"]), ResourceProduct)
+	if err != nil {
+		return fail("product not found")
+	}
+	product := h.products[productID]
+	if product == nil {
+		return fail("product not found")
+	}
+	byID := map[string]*fakeVariant{}
+	for _, existing := range product.variants {
+		byID[strings.TrimPrefix(existing.gid, "gid://shopify/ProductVariant/")] = existing
+	}
+	entries, _ := input["variants"].([]any)
+	kept := []*fakeVariant{}
+	nodes := []any{}
+	for _, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		target := &fakeVariant{
+			gid:        "gid://shopify/ProductVariant/" + h.allocateID(),
+			itemGID:    "gid://shopify/InventoryItem/" + h.allocateID(),
+			tracked:    true,
+			levels:     map[string]int64{},
+			metafields: map[string]string{},
+		}
+		if id := str(entry["id"]); id != "" {
+			decimal, err := ParseGID(id, ResourceProductVariant)
+			if err != nil {
+				return fail("variant identity malformed")
+			}
+			existing := byID[decimal]
+			if existing == nil {
+				return fail("variant not found")
+			}
+			target = existing
+		}
+		if sku := str(entry["sku"]); sku != "" {
+			target.sku = sku
+		}
+		if price := str(entry["price"]); price != "" {
+			target.price = price
+		}
+		h.applyVariantMetafields(target, entry)
+		kept = append(kept, target)
+		nodes = append(nodes, map[string]any{"id": target.gid, "name": target.sku})
+	}
+	product.variants = kept
+	options := []any{}
+	if raw, ok := input["productOptions"].([]any); ok {
+		for _, entry := range raw {
+			option := entry.(map[string]any)
+			options = append(options, map[string]any{
+				"id":   "gid://shopify/ProductOption/" + h.allocateID(),
+				"name": str(option["name"]),
+			})
+		}
+	}
+	return map[string]any{"data": map[string]any{"productSet": map[string]any{
+		"product": map[string]any{
+			"id":       product.gid,
+			"options":  options,
+			"variants": map[string]any{"nodes": nodes},
 		},
 		"userErrors": []any{},
 	}}}
@@ -495,20 +608,66 @@ func (h *shopifyHarness) opMetafieldsSet(vars map[string]any) map[string]any {
 	for _, raw := range list {
 		entry, _ := raw.(map[string]any)
 		ownerGID := str(entry["ownerId"])
+		key := str(entry["namespace"]) + "." + str(entry["key"])
+		value := str(entry["value"])
 		productID, err := ParseGID(ownerGID, ResourceProduct)
+		if err == nil {
+			product := h.products[productID]
+			if product == nil {
+				continue
+			}
+			product.metafields[key] = value
+			written = append(written, map[string]any{
+				"namespace": str(entry["namespace"]), "key": str(entry["key"])})
+			continue
+		}
+		// Phase 17: variant-level ownership/metafields (moonlight.variant_id
+		// and the per-variant inventory revision fence).
+		variantID, err := ParseGID(ownerGID, ResourceProductVariant)
 		if err != nil {
 			continue
 		}
-		product := h.products[productID]
-		if product == nil {
+		if !h.applyVariantMetafieldGID(variantID, key, value) {
 			continue
 		}
-		product.metafields[str(entry["namespace"])+"."+str(entry["key"])] = str(entry["value"])
 		written = append(written, map[string]any{
 			"namespace": str(entry["namespace"]), "key": str(entry["key"])})
 	}
 	return map[string]any{"data": map[string]any{"metafieldsSet": map[string]any{
 		"metafields": written, "userErrors": []any{}}}}
+}
+
+// applyVariantMetafields copies create/update inline metafields onto one
+// fake variant.
+func (h *shopifyHarness) applyVariantMetafields(variant *fakeVariant, entry map[string]any) {
+	list, _ := entry["metafields"].([]any)
+	for _, raw := range list {
+		mf, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if variant.metafields == nil {
+			variant.metafields = map[string]string{}
+		}
+		variant.metafields[str(mf["namespace"])+"."+str(mf["key"])] = str(mf["value"])
+	}
+}
+
+// applyVariantMetafieldGID writes one metafield on the variant with the
+// given decimal identity.
+func (h *shopifyHarness) applyVariantMetafieldGID(variantID, key, value string) bool {
+	for _, product := range h.products {
+		for _, variant := range product.variants {
+			if strings.HasSuffix(variant.gid, variantID) {
+				if variant.metafields == nil {
+					variant.metafields = map[string]string{}
+				}
+				variant.metafields[key] = value
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *shopifyHarness) opPublish(vars map[string]any, publish bool) map[string]any {
@@ -691,7 +850,9 @@ func (h *shopifyHarness) opProductQuery(vars map[string]any) map[string]any {
 		variants = append(variants, map[string]any{
 			"id":              variant.gid,
 			"sku":             variant.sku,
+			"title":           variant.title,
 			"selectedOptions": []any{map[string]any{"name": "Title", "value": "Default Title"}},
+			"metafields":      map[string]any{"nodes": metafieldNodes(variant.metafields)},
 			"inventoryItem": map[string]any{
 				"id":              variant.itemGID,
 				"tracked":         variant.tracked,
@@ -778,6 +939,38 @@ func (h *shopifyHarness) productOf(productDecimal string) *fakeProduct {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.products[productDecimal]
+}
+
+// variantQuantityOf returns one variant's available quantity at the
+// configured location (Phase 17 per-variant stock assertions).
+func (h *shopifyHarness) variantQuantityOf(productDecimal, variantGID, locationGID string) int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	product := h.products[productDecimal]
+	if product == nil {
+		return -1
+	}
+	for _, variant := range product.variants {
+		if variant.gid == variantGID {
+			if quantity, ok := variant.levels[locationGID]; ok {
+				return quantity
+			}
+			return 0
+		}
+	}
+	return -1
+}
+
+// seedProduct registers fake remote product state (ownership metadata
+// included) for mapping/recovery fixtures.
+func (h *shopifyHarness) seedProduct(product *fakeProduct) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if product.metafields == nil {
+		product.metafields = map[string]string{}
+	}
+	id := strings.TrimPrefix(product.gid, "gid://shopify/Product/")
+	h.products[id] = product
 }
 
 func (h *shopifyHarness) creations() int {

@@ -291,3 +291,184 @@ func (d Devices) UpdateProductMappingExternal(ctx context.Context, providerKey c
 	}
 	return commerceMappingFromRow(row.ProviderKey, row.ProductID, row.ExternalProductID, row.StoreID, row.CreatedAt, row.UpdatedAt), nil
 }
+
+// Phase 17 ProductVariant mappings (§33-§37): durable, ownership-keyed
+// by (provider, variant). Never matched by labels or SKU; SKU/ownership
+// metadata on the REMOTE variation is adapter recovery evidence, never
+// mapping identity. Rows survive disable/re-enable and catalog rebuilds.
+
+func variantMappingFromRow(row sqlcgen.CommerceProductVariantMapping) commerce.ProductVariantMapping {
+	mapping := commerce.ProductVariantMapping{
+		ProviderKey: commerce.ProviderKey(row.ProviderKey),
+		ProductID:   uuidString(row.ProductID), VariantID: uuidString(row.VariantID),
+		ExternalProductID: row.ExternalProductID, ExternalVariantID: row.ExternalVariantID,
+		StoreID:   storeString(row.StoreID),
+		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
+	}
+	return mapping
+}
+
+// GetProductVariantMapping returns one provider variant mapping.
+func (d Devices) GetProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, variantID string) (commerce.ProductVariantMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, err.Error())
+	}
+	vuid, err := parseUUID(variantID)
+	if err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "variant_id must be a UUID")
+	}
+	row, err := sqlcgen.New(d.pool).GetCommerceProductVariantMapping(ctx, sqlcgen.GetCommerceProductVariantMappingParams{
+		ProviderKey: string(providerKey), VariantID: vuid,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return commerce.ProductVariantMapping{}, apperr.New(apperr.NotFound, "no commerce variant mapping")
+		}
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+	}
+	return variantMappingFromRow(row), nil
+}
+
+// ListProductVariantMappings returns every mapped variant of one product
+// for one provider instance (adapter reconciliation input).
+func (d Devices) ListProductVariantMappings(ctx context.Context, providerKey commerce.ProviderKey, productID string) ([]commerce.ProductVariantMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
+		return nil, apperr.New(apperr.InvalidInput, err.Error())
+	}
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "product_id must be a UUID")
+	}
+	rows, err := sqlcgen.New(d.pool).ListCommerceProductVariantMappings(ctx, sqlcgen.ListCommerceProductVariantMappingsParams{
+		ProviderKey: string(providerKey), ProductID: puid,
+	})
+	if err != nil {
+		return nil, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+	}
+	out := make([]commerce.ProductVariantMapping, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, variantMappingFromRow(row))
+	}
+	return out, nil
+}
+
+// FindProductVariantMappingByExternal returns the mapping holding one
+// provider variation identity (order-line variant resolution and
+// mapping-loss recovery evidence).
+func (d Devices) FindProductVariantMappingByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, err.Error())
+	}
+	if len(externalProductID) == 0 || len(externalProductID) > 200 {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "external product id must be 1..200 characters")
+	}
+	if len(externalVariantID) == 0 || len(externalVariantID) > 200 {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "external variant id must be 1..200 characters")
+	}
+	row, err := sqlcgen.New(d.pool).FindCommerceProductVariantMappingByExternal(ctx, sqlcgen.FindCommerceProductVariantMappingByExternalParams{
+		ProviderKey: string(providerKey), ExternalProductID: externalProductID, ExternalVariantID: externalVariantID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return commerce.ProductVariantMapping{}, apperr.New(apperr.NotFound, "no commerce variant mapping")
+		}
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+	}
+	return variantMappingFromRow(row), nil
+}
+
+// CreateProductVariantMapping persists one variant mapping. The exact
+// same pair is idempotent; a different external variant for the same
+// variant, or the same external pair for a different variant, is a typed
+// conflict. Uniqueness constraints are the backstop under concurrency:
+// the insert wins or the read-back classifies.
+func (d Devices) CreateProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, variantID, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, err.Error())
+	}
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "product_id must be a UUID")
+	}
+	vuid, err := parseUUID(variantID)
+	if err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "variant_id must be a UUID")
+	}
+	if len(externalProductID) == 0 || len(externalProductID) > 200 {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "external product id must be 1..200 characters")
+	}
+	if len(externalVariantID) == 0 || len(externalVariantID) > 200 {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "external variant id must be 1..200 characters")
+	}
+	q := sqlcgen.New(d.pool)
+	// The mapping mirrors its authoritative catalog product's Store
+	// (Phase 9C authority): a missing product yields a legacy NULL
+	// mapping; ownership is never manufactured.
+	var productStore pgtype.UUID
+	if prow, err := q.CatalogProductByID(ctx, puid); err == nil {
+		productStore = prow.StoreID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+	}
+	// Remaps and cross-variant external reuse are classified BEFORE the
+	// insert: the Store-scoped unique indexes never bind legacy NULL
+	// rows (00023), so Go owns the classification in all cases and the
+	// constraints stay the concurrency backstop.
+	if existing, readErr := q.GetCommerceProductVariantMapping(ctx, sqlcgen.GetCommerceProductVariantMappingParams{
+		ProviderKey: string(providerKey), VariantID: vuid,
+	}); readErr == nil {
+		if existing.ExternalProductID == externalProductID && existing.ExternalVariantID == externalVariantID {
+			// Same-pair idempotent replay (mapping-loss recovery re-adopting
+			// the same remote variation).
+			if existing.StoreID.Valid && productStore.Valid &&
+				uuidString(existing.StoreID) != uuidString(productStore) {
+				return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict,
+					"STORE_SCOPE_CONFLICT: commerce variant mapping owned by another store")
+			}
+			return variantMappingFromRow(existing), nil
+		}
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict,
+			"commerce variant mapping conflict: variant already maps to a different external id")
+	} else if !errors.Is(readErr, pgx.ErrNoRows) {
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(readErr))
+	}
+	if existing, readErr := q.FindCommerceProductVariantMappingByExternal(ctx, sqlcgen.FindCommerceProductVariantMappingByExternalParams{
+		ProviderKey: string(providerKey), ExternalProductID: externalProductID, ExternalVariantID: externalVariantID,
+	}); readErr == nil {
+		_ = existing
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict,
+			"commerce variant mapping conflict: external variant already maps to a different variant")
+	} else if !errors.Is(readErr, pgx.ErrNoRows) {
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(readErr))
+	}
+	row, err := q.CreateCommerceProductVariantMapping(ctx, sqlcgen.CreateCommerceProductVariantMappingParams{
+		ProviderKey: string(providerKey), ProductID: puid, VariantID: vuid,
+		ExternalProductID: externalProductID, ExternalVariantID: externalVariantID,
+		StoreID: productStore,
+	})
+	if err == nil {
+		return variantMappingFromRow(row), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+	}
+	// A conflicting row won the race: classify the winner.
+	if existing, readErr := q.GetCommerceProductVariantMapping(ctx, sqlcgen.GetCommerceProductVariantMappingParams{
+		ProviderKey: string(providerKey), VariantID: vuid,
+	}); readErr == nil {
+		if existing.ExternalProductID == externalProductID && existing.ExternalVariantID == externalVariantID {
+			return variantMappingFromRow(existing), nil
+		}
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict,
+			"commerce variant mapping conflict: variant already maps to a different external id")
+	}
+	return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
+}

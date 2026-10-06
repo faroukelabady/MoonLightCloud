@@ -101,6 +101,13 @@ func (p *WooCommerceProvider) UpsertProduct(ctx context.Context, req commerce.Pr
 	if req.ProductID == "" || req.OperationKey == "" {
 		return commerce.ProductUpsertResult{}, apperr.New(apperr.InvalidInput, "product id and operation key are required")
 	}
+	// Phase 17 SKU ownership: a single-variant product publishes the
+	// VARIANT's SKU as the remote SKU (catalog_products.sku is its
+	// deprecated display mirror). Multi-variant parents keep the product
+	// SKU; provider variations carry the variant SKUs.
+	if len(req.Product.Variants) == 1 && req.Product.Variants[0].SKU != "" {
+		req.Product.SKU = req.Product.Variants[0].SKU
+	}
 	payload, err := buildProductPayload(req, p.currency, p.dimUnit)
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err

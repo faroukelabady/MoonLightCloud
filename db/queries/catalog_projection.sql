@@ -10,7 +10,11 @@ SELECT e.event_id
 FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $1
-WHERE (e.event_type = $2 OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
+WHERE (e.event_type = $2
+       OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
+           AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
+       OR ($2 IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
+           AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')))
   AND (p.event_id IS NULL
        OR p.status = 'pending'
        OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
@@ -198,7 +202,11 @@ SELECT e.event_id,
 FROM sync_events e
 LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $4
-WHERE (e.event_type = $1 OR ($1 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2') AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')))
+WHERE (e.event_type = $1
+       OR ($1 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
+           AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
+       OR ($1 IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
+           AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')))
   AND e.payload->>($2::text) = ($3::text)
   AND (CASE WHEN sqlc.arg(store_scoped_default)::boolean
        THEN e.store_id IS NOT DISTINCT FROM sqlc.narg(store_id)::uuid
@@ -227,7 +235,7 @@ WHERE processor = 'catalog_product_projection.v1'
     SELECT e.event_id FROM sync_events e
     JOIN catalog_categories c ON c.category_id = $1::uuid
     JOIN sync_events source ON source.event_id = c.source_event_id
-    WHERE e.event_type = 'catalog.product.snapshot.v1'
+    WHERE e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
       AND ((c.default_algorithm = 1 AND e.store_id = c.store_id)
         OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
       AND (e.payload->>'top_category_id' IN (c.category_id::text, source.payload->>'category_id')
@@ -261,10 +269,10 @@ WHERE p.event_id = e.event_id
   AND p.processor = 'catalog_product_projection.v1'
   AND p.status = 'blocked'
   AND p.last_error_code = 'CATALOG_INVALID_RELATION'
-  AND e.event_type = 'catalog.product.snapshot.v1'
+  AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
   AND NOT EXISTS (
     SELECT 1 FROM sync_events e2
-    WHERE e2.event_type = 'catalog.product.snapshot.v1'
+    WHERE e2.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
       AND e2.payload->>'product_id' = e.payload->>'product_id'
       AND (e.store_id IS NULL OR e2.store_id IS NULL OR e2.store_id = e.store_id)
       AND (e2.payload->>'catalog_revision')::bigint > (e.payload->>'catalog_revision')::bigint
@@ -290,6 +298,8 @@ WHERE p.event_id = e.event_id
 -- provider mapping. Adopting a product into a Store that already has a
 -- dependent owned by another proven Store is rejected instead of
 -- committing a contradictory durable relationship.
+-- Phase 17: variant rows and their inventory/mappings are dependents of
+-- the product too (SKU/inventory ownership moved to variant).
 SELECT i.store_id FROM catalog_product_inventory i
 WHERE i.product_id = $1 AND i.store_id IS NOT NULL
 UNION
@@ -297,7 +307,16 @@ SELECT pol.store_id FROM catalog_product_sales_policies pol
 WHERE pol.product_id = $1 AND pol.store_id IS NOT NULL
 UNION
 SELECT m.store_id FROM commerce_product_mappings m
-WHERE m.product_id = $1 AND m.store_id IS NOT NULL;
+WHERE m.product_id = $1 AND m.store_id IS NOT NULL
+UNION
+SELECT v.store_id FROM catalog_product_variants v
+WHERE v.product_id = $1 AND v.store_id IS NOT NULL
+UNION
+SELECT vi.store_id FROM catalog_product_variant_inventory vi
+WHERE vi.product_id = $1 AND vi.store_id IS NOT NULL
+UNION
+SELECT vm.store_id FROM commerce_product_variant_mappings vm
+WHERE vm.product_id = $1 AND vm.store_id IS NOT NULL;
 
 -- name: CatalogCategoryChildStores :many
 -- Proven Store ownership of a category's existing children edges.

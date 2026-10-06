@@ -450,6 +450,189 @@ func (q *Queries) AdminProductTags(ctx context.Context, productID pgtype.UUID) (
 	return items, nil
 }
 
+const adminProductVariantAttributes = `-- name: AdminProductVariantAttributes :many
+SELECT definition_code, value_code, name_ar, name_en, definition_name_ar, definition_name_en, position
+FROM catalog_product_variant_attribute_values
+WHERE variant_id = $1::uuid
+ORDER BY position, definition_code
+`
+
+type AdminProductVariantAttributesRow struct {
+	DefinitionCode   string      `json:"definition_code"`
+	ValueCode        string      `json:"value_code"`
+	NameAr           string      `json:"name_ar"`
+	NameEn           pgtype.Text `json:"name_en"`
+	DefinitionNameAr string      `json:"definition_name_ar"`
+	DefinitionNameEn pgtype.Text `json:"definition_name_en"`
+	Position         int32       `json:"position"`
+}
+
+func (q *Queries) AdminProductVariantAttributes(ctx context.Context, variantID pgtype.UUID) ([]AdminProductVariantAttributesRow, error) {
+	rows, err := q.db.Query(ctx, adminProductVariantAttributes, variantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminProductVariantAttributesRow{}
+	for rows.Next() {
+		var i AdminProductVariantAttributesRow
+		if err := rows.Scan(
+			&i.DefinitionCode,
+			&i.ValueCode,
+			&i.NameAr,
+			&i.NameEn,
+			&i.DefinitionNameAr,
+			&i.DefinitionNameEn,
+			&i.Position,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminProductVariantByVariantID = `-- name: AdminProductVariantByVariantID :one
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
+    EXISTS (
+        SELECT 1 FROM catalog_admin_commands c
+        JOIN catalog_admin_command_targets t ON t.command_id = c.id
+        WHERE c.store_id = $1::uuid
+          AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
+          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+    ) AS has_pending
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+WHERE v.variant_id = $2::uuid AND v.store_id = $1::uuid
+`
+
+type AdminProductVariantByVariantIDParams struct {
+	StoreID   pgtype.UUID `json:"store_id"`
+	VariantID pgtype.UUID `json:"variant_id"`
+}
+
+type AdminProductVariantByVariantIDRow struct {
+	VariantID         pgtype.UUID `json:"variant_id"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	Sku               string      `json:"sku"`
+	IsActive          bool        `json:"is_active"`
+	Deleted           bool        `json:"deleted"`
+	PriceEgpCents     pgtype.Int8 `json:"price_egp_cents"`
+	PriceUsdCents     pgtype.Int8 `json:"price_usd_cents"`
+	Position          int32       `json:"position"`
+	CombinationKey    string      `json:"combination_key"`
+	VariantRevision   int64       `json:"variant_revision"`
+	CatalogRevision   int64       `json:"catalog_revision"`
+	StockQuantity     int64       `json:"stock_quantity"`
+	InventoryRevision int64       `json:"inventory_revision"`
+	HasPending        bool        `json:"has_pending"`
+}
+
+func (q *Queries) AdminProductVariantByVariantID(ctx context.Context, arg AdminProductVariantByVariantIDParams) (AdminProductVariantByVariantIDRow, error) {
+	row := q.db.QueryRow(ctx, adminProductVariantByVariantID, arg.StoreID, arg.VariantID)
+	var i AdminProductVariantByVariantIDRow
+	err := row.Scan(
+		&i.VariantID,
+		&i.ProductID,
+		&i.Sku,
+		&i.IsActive,
+		&i.Deleted,
+		&i.PriceEgpCents,
+		&i.PriceUsdCents,
+		&i.Position,
+		&i.CombinationKey,
+		&i.VariantRevision,
+		&i.CatalogRevision,
+		&i.StockQuantity,
+		&i.InventoryRevision,
+		&i.HasPending,
+	)
+	return i, err
+}
+
+const adminProductVariants = `-- name: AdminProductVariants :many
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
+    EXISTS (
+        SELECT 1 FROM catalog_admin_commands c
+        JOIN catalog_admin_command_targets t ON t.command_id = c.id
+        WHERE c.store_id = $1::uuid
+          AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
+          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+    ) AS has_pending
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+WHERE v.product_id = $2::uuid AND v.store_id = $1::uuid
+ORDER BY v.position, v.variant_id
+`
+
+type AdminProductVariantsParams struct {
+	StoreID   pgtype.UUID `json:"store_id"`
+	ProductID pgtype.UUID `json:"product_id"`
+}
+
+type AdminProductVariantsRow struct {
+	VariantID         pgtype.UUID `json:"variant_id"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	Sku               string      `json:"sku"`
+	IsActive          bool        `json:"is_active"`
+	Deleted           bool        `json:"deleted"`
+	PriceEgpCents     pgtype.Int8 `json:"price_egp_cents"`
+	PriceUsdCents     pgtype.Int8 `json:"price_usd_cents"`
+	Position          int32       `json:"position"`
+	CombinationKey    string      `json:"combination_key"`
+	VariantRevision   int64       `json:"variant_revision"`
+	CatalogRevision   int64       `json:"catalog_revision"`
+	StockQuantity     int64       `json:"stock_quantity"`
+	InventoryRevision int64       `json:"inventory_revision"`
+	HasPending        bool        `json:"has_pending"`
+}
+
+func (q *Queries) AdminProductVariants(ctx context.Context, arg AdminProductVariantsParams) ([]AdminProductVariantsRow, error) {
+	rows, err := q.db.Query(ctx, adminProductVariants, arg.StoreID, arg.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminProductVariantsRow{}
+	for rows.Next() {
+		var i AdminProductVariantsRow
+		if err := rows.Scan(
+			&i.VariantID,
+			&i.ProductID,
+			&i.Sku,
+			&i.IsActive,
+			&i.Deleted,
+			&i.PriceEgpCents,
+			&i.PriceUsdCents,
+			&i.Position,
+			&i.CombinationKey,
+			&i.VariantRevision,
+			&i.CatalogRevision,
+			&i.StockQuantity,
+			&i.InventoryRevision,
+			&i.HasPending,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const adminTagList = `-- name: AdminTagList :many
 SELECT t.tag_id, t.slug, t.name_ar, t.name_en, t.is_active,
     t.source_revision AS catalog_revision,
@@ -518,6 +701,29 @@ func (q *Queries) AdminTagOwnership(ctx context.Context, tagID pgtype.UUID) (Adm
 	row := q.db.QueryRow(ctx, adminTagOwnership, tagID)
 	var i AdminTagOwnershipRow
 	err := row.Scan(&i.TagID, &i.StoreID, &i.SourceRevision)
+	return i, err
+}
+
+const adminVariantOwnership = `-- name: AdminVariantOwnership :one
+
+SELECT variant_id, store_id, variant_revision
+FROM catalog_product_variants
+WHERE variant_id = $1::uuid
+`
+
+type AdminVariantOwnershipRow struct {
+	VariantID       pgtype.UUID `json:"variant_id"`
+	StoreID         pgtype.UUID `json:"store_id"`
+	VariantRevision int64       `json:"variant_revision"`
+}
+
+// Phase 17 variant admin reads: Store-scoped projection rows for the
+// operator (variant identity, prices, stock, option attributes). Never
+// query Retail directly; tombstones are shown but flagged.
+func (q *Queries) AdminVariantOwnership(ctx context.Context, variantID pgtype.UUID) (AdminVariantOwnershipRow, error) {
+	row := q.db.QueryRow(ctx, adminVariantOwnership, variantID)
+	var i AdminVariantOwnershipRow
+	err := row.Scan(&i.VariantID, &i.StoreID, &i.VariantRevision)
 	return i, err
 }
 

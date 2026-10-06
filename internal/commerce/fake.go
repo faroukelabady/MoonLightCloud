@@ -24,6 +24,14 @@ type FakeProvider struct {
 	overrideExternal   map[string]string
 	inventoryError     map[string]error
 	inventoryErrorOnce map[string]error
+
+	variantUpserts        []ProductVariantsUpsertRequest
+	variantInventories    []VariantInventoryUpdateRequest
+	variantExternal       map[string]string
+	variantOverride       map[string]string
+	variantCreations      int
+	variantUpsertError    map[string]error
+	variantInventoryError map[string]error
 }
 
 // NewFakeProvider returns a test provider bound to one key.
@@ -37,6 +45,11 @@ func NewFakeProvider(key ProviderKey) *FakeProvider {
 		overrideExternal:   map[string]string{},
 		inventoryError:     map[string]error{},
 		inventoryErrorOnce: map[string]error{},
+
+		variantExternal:       map[string]string{},
+		variantOverride:       map[string]string{},
+		variantUpsertError:    map[string]error{},
+		variantInventoryError: map[string]error{},
 	}
 }
 
@@ -156,3 +169,106 @@ func (f *FakeProvider) ExternalID(productID string) (string, bool) {
 	external, ok := f.byProduct[productID]
 	return external, ok
 }
+
+// Phase 17 variant capability (test-only): FakeProvider implements
+// commerce.VariantCommerceProvider so orchestration tests can prove
+// per-variant mapping and inventory semantics without any network.
+
+// UpsertProductVariants implements VariantCommerceProvider. Existing
+// remote identities are honored (never duplicated); new variants mint
+// deterministic identities. A recorded override on one variant models a
+// disputed-identity adapter.
+func (f *FakeProvider) UpsertProductVariants(_ context.Context, req ProductVariantsUpsertRequest) (ProductVariantsUpsertResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantUpserts = append(f.variantUpserts, req)
+	if err, ok := f.variantUpsertError[req.ProductID]; ok {
+		return ProductVariantsUpsertResult{}, err
+	}
+	result := ProductVariantsUpsertResult{Variants: map[string]string{}}
+	for _, variant := range req.Product.Variants {
+		if external, ok := f.variantOverride[variant.VariantID]; ok {
+			result.Variants[variant.VariantID] = external
+			continue
+		}
+		if external, ok := req.ExistingVariants[variant.VariantID]; ok && external != "" {
+			result.Variants[variant.VariantID] = external
+			continue
+		}
+		if external, ok := f.variantExternal[variant.VariantID]; ok {
+			result.Variants[variant.VariantID] = external
+			continue
+		}
+		f.variantCreations++
+		external := fmt.Sprintf("fake-variant-%s-%d", f.key, f.variantCreations)
+		f.variantExternal[variant.VariantID] = external
+		result.Variants[variant.VariantID] = external
+	}
+	return result, nil
+}
+
+// SetVariantInventory implements VariantCommerceProvider, capturing the
+// request.
+func (f *FakeProvider) SetVariantInventory(_ context.Context, req VariantInventoryUpdateRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantInventories = append(f.variantInventories, req)
+	if err, ok := f.variantInventoryError[req.VariantID]; ok {
+		return err
+	}
+	return nil
+}
+
+// VariantUpserts returns captured variant upsert requests in call order.
+func (f *FakeProvider) VariantUpserts() []ProductVariantsUpsertRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ProductVariantsUpsertRequest(nil), f.variantUpserts...)
+}
+
+// VariantInventories returns captured per-variant inventory requests.
+func (f *FakeProvider) VariantInventories() []VariantInventoryUpdateRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]VariantInventoryUpdateRequest(nil), f.variantInventories...)
+}
+
+// VariantCreations counts distinct external variants issued.
+func (f *FakeProvider) VariantCreations() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.variantCreations
+}
+
+// FailVariantUpsert injects a persistent variant upsert failure.
+func (f *FakeProvider) FailVariantUpsert(productID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantUpsertError[productID] = err
+}
+
+// FailVariantInventory injects a persistent per-variant inventory failure.
+func (f *FakeProvider) FailVariantInventory(variantID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantInventoryError[variantID] = err
+}
+
+// OverrideVariantExternal forces one variant's identity to a fixed
+// external ID, modeling an adapter that claims a disputed identity.
+func (f *FakeProvider) OverrideVariantExternal(variantID, externalID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantOverride[variantID] = externalID
+}
+
+// ResetVariantState drops recorded variant remote identities, modeling a
+// provider-side mapping loss (the remote variations still exist and must
+// be re-adopted, never duplicated).
+func (f *FakeProvider) ResetVariantState() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.variantExternal = map[string]string{}
+}
+
+var _ VariantCommerceProvider = (*FakeProvider)(nil)

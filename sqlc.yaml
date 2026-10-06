@@ -35,6 +35,8 @@ sql:
       - "db/migrations/00030_product_configurations.sql"
       - "db/migrations/00031_commerce_async_receipts.sql"
       - "db/migrations/00032_catalog_admin_commands.sql"
+      - "db/migrations/00033_product_variants.sql"
+      - "db/migrations/00034_commerce_order_variant_snap.sql"
     gen:
       go:
         package: "sqlcgen"

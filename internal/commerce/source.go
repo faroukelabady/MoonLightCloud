@@ -25,6 +25,16 @@ type CatalogReader interface {
 	GetProductAvailability(ctx context.Context, id string) (catalog.ProductAvailability, error)
 }
 
+// VariantCatalogReader is the OPTIONAL Phase 17 variant read capability
+// (detected by type assertion exactly like the provider order/variant
+// capabilities). catalog.Service satisfies it. A reader without it
+// yields no variant desired state and products keep the frozen
+// product-level behavior.
+type VariantCatalogReader interface {
+	ListProductVariants(ctx context.Context, productID string) ([]catalog.Variant, error)
+	GetVariantAvailability(ctx context.Context, variantID string) (catalog.VariantAvailability, error)
+}
+
 // DesiredProduct is the provider-neutral desired state for one MoonLight
 // product: the assembled product snapshot, whether it should be actively
 // published online (is_active AND sell_online), and the Phase 5C derived
@@ -45,6 +55,14 @@ type DesiredProduct struct {
 	Configurations            []CommerceConfiguration
 	ConfigurationsFingerprint string
 	ConfigurationsVersion     string
+	// VariantsFingerprint/VariantsVersion are the deterministic identity
+	// of the ProductVariant set (Phase 17) for provider operation keys.
+	// The fingerprint covers sellable semantics (ids, SKUs, option
+	// identity, prices, active); the version additionally rotates on
+	// label/position bookkeeping so renames never masquerade as remote
+	// variant changes. Variants themselves ride in Product.Variants.
+	VariantsFingerprint string
+	VariantsVersion     string
 	// CategoryPolicyFingerprint is the deterministic ELIGIBILITY identity
 	// of the Product's relevant Category ONLINE policy context (Phase 13),
 	// and CategoryPolicyVersion its revision-digest generation marker.
@@ -192,6 +210,52 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 	}
 	desired.Product.Configurations = desired.Configurations
 	desired.ConfigurationsFingerprint, desired.ConfigurationsVersion = configurationIdentity(configurationState)
+	// Phase 17: the complete ProductVariant set (SKU/inventory owners)
+	// with per-variant derived availability (ComputeVariantAvailability
+	// output). Optional capability: readers without variant projections
+	// keep the frozen product-level behavior.
+	if variantReader, ok := s.reader.(VariantCatalogReader); ok {
+		variants, err := variantReader.ListProductVariants(ctx, productID)
+		if err != nil {
+			return DesiredProduct{}, err
+		}
+		desired.Product.Variants = make([]CommerceVariant, 0, len(variants))
+		for _, variant := range variants {
+			availability, err := variantReader.GetVariantAvailability(ctx, variant.VariantID)
+			if err != nil {
+				return DesiredProduct{}, err
+			}
+			quantity := int64(availability.OnlineAvailable)
+			if !desired.Published {
+				// Not published means zero availability toward the
+				// provider per variant, never positive stock (§68).
+				quantity = 0
+			}
+			entry := CommerceVariant{
+				VariantID:         variant.VariantID,
+				SKU:               variant.SKU,
+				PriceEGPMinor:     variant.PriceEGPCents,
+				PriceUSDMinor:     variant.PriceUSDCents,
+				Active:            variant.IsActive,
+				AvailableQuantity: quantity,
+				Ready:             availability.Ready,
+				InventoryRevision: availability.InventoryRevision,
+			}
+			for _, attribute := range variant.Attributes {
+				entry.Attributes = append(entry.Attributes, CommerceVariantAttribute{
+					DefinitionCode:   attribute.DefinitionCode,
+					ValueCode:        attribute.ValueCode,
+					NameAR:           attribute.NameAR,
+					NameEN:           attribute.NameEN,
+					DefinitionNameAR: attribute.DefinitionNameAR,
+					DefinitionNameEN: attribute.DefinitionNameEN,
+					Position:         attribute.Position,
+				})
+			}
+			desired.Product.Variants = append(desired.Product.Variants, entry)
+		}
+		desired.VariantsFingerprint, desired.VariantsVersion = variantsIdentity(desired.Product.Variants)
+	}
 	if !desired.Published {
 		// Provider-facing quantity follows existing disabled-product
 		// semantics: not published means zero availability toward the
@@ -241,6 +305,57 @@ func configurationIdentity(configurations []catalog.ProductConfiguration) (finge
 			strconv.Itoa(configuration.Position),
 		}, ":"))
 		versions = append(versions, configuration.ID+":"+strconv.FormatInt(configuration.Revision, 10))
+	}
+	sort.Strings(parts)
+	sort.Strings(versions)
+	return strings.Join(parts, "|"), strings.Join(versions, "|")
+}
+
+// variantsIdentity derives the deterministic ProductVariant-set identity
+// (Phase 17), mirroring configurationIdentity: the fingerprint covers
+// sellable semantics (variant ids, SKUs, option identity codes, price
+// overrides, active) while the version additionally covers display
+// labels, positions and per-variant revisions — a pure label rename
+// rotates the version but NOT the fingerprint.
+func variantsIdentity(variants []CommerceVariant) (fingerprint, version string) {
+	parts := make([]string, 0, len(variants))
+	versions := make([]string, 0, len(variants))
+	for _, variant := range variants {
+		usd := "-"
+		if variant.PriceUSDMinor != nil {
+			usd = strconv.FormatInt(*variant.PriceUSDMinor, 10)
+		}
+		egp := "-"
+		if variant.PriceEGPMinor != nil {
+			egp = strconv.FormatInt(*variant.PriceEGPMinor, 10)
+		}
+		codes := make([]string, 0, len(variant.Attributes))
+		labels := make([]string, 0, len(variant.Attributes))
+		for _, attribute := range variant.Attributes {
+			codes = append(codes, attribute.DefinitionCode+"="+attribute.ValueCode)
+			nameEN := ""
+			if attribute.NameEN != nil {
+				nameEN = *attribute.NameEN
+			}
+			definitionEN := ""
+			if attribute.DefinitionNameEN != nil {
+				definitionEN = *attribute.DefinitionNameEN
+			}
+			labels = append(labels, strings.Join([]string{
+				attribute.DefinitionCode, attribute.NameAR, nameEN,
+				attribute.DefinitionNameAR, definitionEN,
+				strconv.Itoa(attribute.Position),
+			}, ":"))
+		}
+		sort.Strings(codes)
+		sort.Strings(labels)
+		parts = append(parts, strings.Join([]string{
+			variant.VariantID, variant.SKU, egp, usd,
+			strconv.FormatBool(variant.Active), strings.Join(codes, ","),
+		}, ":"))
+		versions = append(versions, strings.Join([]string{
+			variant.VariantID, strings.Join(labels, ","),
+		}, ":"))
 	}
 	sort.Strings(parts)
 	sort.Strings(versions)
