@@ -50,3 +50,15 @@ Concise, irreversible-or-important choices only.
 - [0046](0046-category-online-visibility.md) — hierarchical online catalog visibility (13)
 - [0047](0047-product-options-frame-configurations.md) — product options (frame configurations) projection & publication (15)
 - [0048](0048-cloud-admin-catalog-control.md) — Cloud admin catalog control plane (16)
+
+## Phase numbering gaps
+
+The ADR sequence is not one-per-phase. These are intentional, not missing files:
+
+- **Phase 8A / 8B** — Retail-authoritative (MoonLightRetail `ADR-029`,
+  `ADR-030`). Cloud absorbs the projected state through the Phase 5A/5B
+  projections instead of owning an ADR.
+- **Phase 14** — Retail-only. Barcode labels and HID scanner checkout input
+  have no Cloud surface (MoonLightRetail `ADR-034`, `ADR-035`).
+- **Phase 9D** — dashboard scope selection; shipped without its own ADR
+  (commit `408f388`), covered by ADR-0039 store registry intent.
