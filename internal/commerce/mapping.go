@@ -100,3 +100,8 @@ type ProductVariantMapping struct {
 // Variant mappings survive disable/re-enable and are the recovery
 // evidence for mapping-loss handling: an adapter re-adopts the owned
 // remote variation by SKU + ownership metadata — never a duplicate.
+
+// VariantMappingTransitionRepository fences explicitly proven representation changes.
+type VariantMappingTransitionRepository interface {
+	UpdateProductVariantMappingExternal(ctx context.Context, providerKey ProviderKey, productID, variantID, externalProductID, expectedExternalVariantID, newExternalVariantID string) (ProductVariantMapping, error)
+}

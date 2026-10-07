@@ -587,11 +587,13 @@ func Aggregate(commandStatus string, targets []string, converged bool) string {
 func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int64) error {
 	id, e := uuid.Parse(entity)
 	if cmd.TargetKind == TargetKindCreate {
-		// Creation intent carries no business identity: the reported
-		// entity is the RESULT (Retail-minted ID), which must be a real
-		// UUID — never the absent marker and never a placeholder the
-		// command pretended to own (the command owns none).
-		if e != nil || strings.TrimSpace(entity) == "" {
+		// Only successful creation produces an entity. A failed create
+		// truthfully reports no identity, rather than adopting a collision.
+		if status == TargetApplied {
+			if e != nil || id == uuid.Nil || strings.TrimSpace(entity) == "" {
+				return fmt.Errorf("invalid outcome identity or revision")
+			}
+		} else if entity != "" || pre != 0 || post != 0 {
 			return fmt.Errorf("invalid outcome identity or revision")
 		}
 	} else {

@@ -61,9 +61,13 @@ func (p *ShopifyProvider) UpsertProduct(ctx context.Context, req commerce.Produc
 		return commerce.ProductUpsertResult{}, commerce.ValidationError("product title is required in any locale")
 	}
 	description := localizedDescription(req.Product.Descriptions)
-	price, err := configuredPrice(req.Product.Prices, p.currency)
-	if err != nil {
-		return commerce.ProductUpsertResult{}, err
+	price := ""
+	if len(req.Product.Variants) <= 1 {
+		var err error
+		price, err = effectiveProductPrice(req.Product, p.currency)
+		if err != nil {
+			return commerce.ProductUpsertResult{}, err
+		}
 	}
 	if err := p.ensureShopCurrency(ctx); err != nil {
 		return commerce.ProductUpsertResult{}, err
@@ -751,4 +755,12 @@ func configuredPrice(prices []commerce.Money, currency string) (string, error) {
 		return formatted, nil
 	}
 	return "", commerce.ValidationError(fmt.Sprintf("product has no %s price", currency))
+}
+
+func effectiveProductPrice(product commerce.CommerceProduct, currency string) (string, error) {
+	minor, err := commerce.ProductPriceMinor(product, currency)
+	if err != nil {
+		return "", err
+	}
+	return FormatMinorUnits(minor)
 }

@@ -103,7 +103,7 @@ func testR3RealUpgrade(t *testing.T) {
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(806), catalog.ProcessorCategoryProjectionV1)
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(807), catalog.ProcessorProductProjectionV1)
 	var legacyBefore string
-	if err = pool.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku' - 'product_type_id')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
 		t.Fatal(err)
 	}
 	// A real pre-fix foreign default block must be distinguishable from
@@ -230,8 +230,12 @@ func testR3RealUpgrade(t *testing.T) {
 	}
 
 	var legacyAfter string
-	if err = restarted.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
+	if err = restarted.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku' - 'product_type_id')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
 		t.Fatalf("legacy current state changed: %v", err)
+	}
+	var legacyHasType bool
+	if err = restarted.QueryRow(ctx, `SELECT product_type_id IS NOT NULL FROM catalog_products WHERE product_id=$1`, legacyProduct).Scan(&legacyHasType); err != nil || legacyHasType {
+		t.Fatalf("legacy ProductType fabricated: %v", err)
 	}
 	if err = restarted.QueryRow(ctx, `SELECT count(*) FROM catalog_category_edges WHERE parent_id=$1 AND child_id=$2`, root, legacyChild).Scan(&rawRefs); err != nil || rawRefs != 1 {
 		t.Fatalf("legacy edge changed: %v", err)
@@ -239,6 +243,10 @@ func testR3RealUpgrade(t *testing.T) {
 
 	if after := r3HistoricalState(t, f); after != historyBefore {
 		t.Fatal("migration/recovery rewrote historical Sale/Return state")
+	}
+	var fabricatedTypes int
+	if err = restarted.QueryRow(ctx, `SELECT count(*) FROM sale_lines_projection WHERE product_type_id IS NOT NULL OR product_type_code IS NOT NULL OR product_type_name_ar IS NOT NULL OR product_type_name_en IS NOT NULL`).Scan(&fabricatedTypes); err != nil || fabricatedTypes != 0 {
+		t.Fatalf("legacy Sale Type snapshot fabricated: %d %v", fabricatedTypes, err)
 	}
 	var historicalTag string
 	if err = restarted.QueryRow(ctx, `SELECT tag_id::text FROM sale_item_tag_snapshots LIMIT 1`).Scan(&historicalTag); err != nil || historicalTag != tag {
@@ -377,10 +385,10 @@ func r3HistoricalState(t *testing.T, f *scopeFixture) string {
 	state := map[string]string{}
 	for _, table := range []string{"sales_projection", "sale_lines_projection", "sale_line_classifications_projection", "sale_item_tag_snapshots", "return_refund_projection", "return_refund_lines_projection", "return_refund_payments_projection"} {
 		var raw string
-		// 00036 appends the nullable sale-line variant snapshot columns
+		// 00036/00038 append nullable Variant and ProductType snapshot columns
 		// (Phase 17-R0): they are schema additions, not rewrites, so both
 		// sides strip them and compare every pre-existing value exactly.
-		if err := f.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'variant_sku' - 'variant_attributes' - 'variant_price_egp_cents' - 'variant_price_usd_cents' ORDER BY to_jsonb(t)::text),'[]')::text FROM `+table+` t`).Scan(&raw); err != nil {
+		if err := f.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'variant_sku' - 'variant_attributes' - 'variant_price_egp_cents' - 'variant_price_usd_cents' - 'product_type_id' - 'product_type_code' - 'product_type_name_ar' - 'product_type_name_en' ORDER BY to_jsonb(t)::text),'[]')::text FROM `+table+` t`).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
 		state[table] = raw

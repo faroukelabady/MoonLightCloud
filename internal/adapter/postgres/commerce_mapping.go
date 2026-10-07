@@ -472,3 +472,40 @@ func (d Devices) CreateProductVariantMapping(ctx context.Context, providerKey co
 	}
 	return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
 }
+
+// UpdateProductVariantMappingExternal permits only the proven parent-to-child
+// transition. Store ownership and the previous tuple are fenced in SQL.
+func (d Devices) UpdateProductVariantMappingExternal(ctx context.Context, key commerce.ProviderKey, productID, variantID, parent, previous, next string) (commerce.ProductVariantMapping, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	if _, err := commerce.ValidateProviderKey(string(key)); err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "invalid provider key")
+	}
+	p, err := parseUUID(productID)
+	if err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "invalid product identity")
+	}
+	v, err := parseUUID(variantID)
+	if err != nil {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.InvalidInput, "invalid variant identity")
+	}
+	if parent == "" || previous != parent || next == "" || next == previous || len(parent) > 200 || len(next) > 200 {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict, "invalid variant mapping transition")
+	}
+	q := sqlcgen.New(d.pool)
+	row, err := q.UpdateCommerceProductVariantMappingExternal(ctx, sqlcgen.UpdateCommerceProductVariantMappingExternalParams{ProviderKey: string(key), ProductID: p, VariantID: v, ExternalProductID: parent, ExpectedExternalVariantID: previous, NewExternalVariantID: next})
+	if err == nil {
+		return variantMappingFromRow(row), nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		current, readErr := q.GetCommerceProductVariantMapping(ctx, sqlcgen.GetCommerceProductVariantMappingParams{ProviderKey: string(key), VariantID: v})
+		if readErr == nil && current.ProductID == p && current.ExternalProductID == parent && current.ExternalVariantID == next && current.StoreID.Valid {
+			product, e := q.CatalogProductByID(ctx, p)
+			if e == nil && product.StoreID == current.StoreID {
+				return variantMappingFromRow(current), nil
+			}
+		}
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict, "variant mapping transition lost compare-and-set")
+	}
+	return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "variant mapping transition", redact(err))
+}

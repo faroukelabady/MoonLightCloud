@@ -272,7 +272,7 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 		return false, catalogAdminErr(err)
 	}
 	var cmd catalogadmin.CommandView
-	if err = tx.QueryRow(ctx, `SELECT id::text,store_id::text,entity_id,target_kind,expected_revision,status,command_type,command_version,payload FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, commandID).Scan(&cmd.ID, &cmd.StoreID, &cmd.EntityID, &cmd.TargetKind, &cmd.ExpectedRevision, &cmd.Status, &cmd.Type, &cmd.Version, &cmd.Payload); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT id::text,store_id::text,entity_id,target_kind,expected_revision,status,command_type,command_version,payload,COALESCE(result_entity_id,'') FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, commandID).Scan(&cmd.ID, &cmd.StoreID, &cmd.EntityID, &cmd.TargetKind, &cmd.ExpectedRevision, &cmd.Status, &cmd.Type, &cmd.Version, &cmd.Payload, &cmd.ResultEntityID); err != nil {
 		return false, catalogAdminErr(err)
 	}
 	var currentStatus string
@@ -312,8 +312,25 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 			return false, apperr.New(apperr.InvalidInput, err.Error())
 		}
 	}
+	persistResult := func() error {
+		if status != catalogadmin.TargetApplied {
+			return nil
+		}
+		if cmd.ResultEntityID != "" && !strings.EqualFold(cmd.ResultEntityID, entityID) {
+			return apperr.New(apperr.Conflict, "contradictory command result identity")
+		}
+		_, err := sqlcgen.New(tx).SetCommandResultEntity(ctx, sqlcgen.SetCommandResultEntityParams{
+			TargetID: tid, ResultEntityID: entityID,
+		})
+		return catalogAdminErr(err)
+	}
 	if currentStatus != catalogadmin.TargetPending && currentStatus != catalogadmin.TargetDelivered {
 		if currentStatus == status && currentCode == code && currentEntity == entityID && currentPre == pre && currentPost == post {
+			// A replay also repairs a pre-remediation APPLIED target whose
+			// parent result identity was never durably recorded.
+			if err := persistResult(); err != nil {
+				return false, err
+			}
 			return true, tx.Commit(ctx)
 		}
 		return false, apperr.New(apperr.Conflict, "contradictory terminal outcome")
@@ -324,6 +341,9 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 	_, err = sqlcgen.New(tx).FinishCatalogAdminTarget(ctx, sqlcgen.FinishCatalogAdminTargetParams{ID: tid, DeviceID: duid, Status: status, ResultCode: code, EntityID: entityID, PreRevision: pre, PostRevision: post})
 	if err != nil {
 		return false, catalogAdminErr(err)
+	}
+	if err = persistResult(); err != nil {
+		return false, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return false, catalogAdminErr(err)

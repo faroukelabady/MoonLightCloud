@@ -154,3 +154,10 @@ Provider limitations are documented, never papered over.**
   decoding, explicit versioning).
 - `sale.finalized.v3` is additive; v1/v2 clients keep working. Retail
   emits v3 when it can freeze variant identity at sale time.
+
+
+## Phase 17 R1 provider representation correction
+
+Woo variable parents use a stable integration-only `MLP-<sha256(provider + NUL + ProductID)>` SKU. Physical SKUs belong to child variations. An existing single physical parent is converted before creating children, and the parent-to-child mapping change uses Store-verified compare-and-set against its prior parent identity. Multiple-to-single retains the owned child representation; recovery verifies provider/Product/Variant metadata. Adding frames to that retained child representation is refused before writes, because the supported frame pool cannot safely change that historical representation. Fresh single-Variant frame pools remain supported.
+
+Provider prices use the physical Variant override when present, including explicit zero, then Product base inheritance; frame deltas are applied separately with checked integer arithmetic. Multiple-Variant parents do not require an unused base price. ProductType report buckets include frozen ID/code/AR/EN labels and canonical Return attribution, including refund-only negative net periods.

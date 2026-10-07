@@ -11,10 +11,11 @@ package woocommerce
 //     carries SKU = variant SKU, the effective price, and
 //     manage_stock=true with the EXACT per-variant availability
 //     (SetVariantInventory). The parent keeps no pool (§33-§37).
-//   - Exactly one physical variant (with or without frame options): the
-//     variant's stock pool IS the parent pool — frame variations stay
-//     untracked shared-pool choices (Phase 15 §85) consuming THAT one
-//     pool. There is one pool, so nothing multiplies.
+//   - A fresh single physical variant (with or without frame options)
+//     uses the parent pool; frame variations remain untracked shared-pool
+//     choices (Phase 15 §85). Once physical child variations exist, their
+//     stock identity is retained even when only one Variant remains.
+//     Adding frames to that retained child representation is refused.
 //   - Several physical variants AND frame options: Woo cannot layer
 //     frame choices on per-variant stock without a (variant × frame)
 //     Cartesian variation set whose quantities would multiply the
@@ -85,6 +86,17 @@ func (p *WooCommerceProvider) UpsertProductVariants(ctx context.Context, req com
 	}
 	result := commerce.ProductVariantsUpsertResult{Variants: map[string]string{}}
 	if len(variants) == 1 {
+		children, err := p.listAllProductVariations(ctx, canonicalExternalID(wooID))
+		if err != nil {
+			return commerce.ProductVariantsUpsertResult{}, err
+		}
+		if hasOwnedPhysicalVariations(children, req.ProductID, req.ProviderKey) {
+			if len(req.Product.Configurations) > 0 {
+				return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError(WooVariantOptionsCapabilityCode +
+					": frame options cannot share an existing physical-variation inventory representation")
+			}
+			return p.syncWooVariantVariations(ctx, wooID, req)
+		}
 		// The single variant's stock pool IS the parent pool: the parent
 		// product is the provider variation identity for mapping and
 		// inventory purposes (frame choices share that pool, §85).
@@ -92,6 +104,17 @@ func (p *WooCommerceProvider) UpsertProductVariants(ctx context.Context, req com
 		return result, nil
 	}
 	return p.syncWooVariantVariations(ctx, wooID, req)
+}
+
+func hasOwnedPhysicalVariations(variations []wooVariation, productID string, key commerce.ProviderKey) bool {
+	for _, variation := range variations {
+		if metaValue(variation.MetaData, metaVariantID) != "" &&
+			metaValue(variation.MetaData, metaProductID) == productID &&
+			metaValue(variation.MetaData, metaProviderKey) == string(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetVariantInventory implements commerce.VariantCommerceProvider: the
@@ -210,7 +233,7 @@ func (p *WooCommerceProvider) syncWooVariantVariations(ctx context.Context, wooI
 			ownedByVariant[id] = variation
 		}
 	}
-	result := commerce.ProductVariantsUpsertResult{Variants: map[string]string{}}
+	result := commerce.ProductVariantsUpsertResult{Variants: map[string]string{}, Transitions: map[string]string{}}
 	for _, variant := range req.Product.Variants {
 		payload, err := p.buildVariantVariationPayload(req, variant)
 		if err != nil {
@@ -226,20 +249,23 @@ func (p *WooCommerceProvider) syncWooVariantVariations(ctx context.Context, wooI
 				if err != nil {
 					return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("mapped woo variation identity is malformed")
 				}
-				for _, variation := range all {
-					if variation.ID == mappedID {
-						current, found = variation, true
-						break
+				// The verified owned parent was the old single-Variant
+				// inventory representation. The gateway released its SKU
+				// before this child creation; authorize only that forward
+				// representation transition, never an arbitrary missing ID.
+				if mappedID != wooID {
+					for _, variation := range all {
+						if variation.ID == mappedID {
+							current, found = variation, true
+							break
+						}
 					}
-				}
-				if !found {
-					// Remote variation gone: never create a silent
-					// replacement and never rewrite the mapping (Phase 11
-					// semantics) — operator action is required.
-					return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("mapped woo variation no longer exists")
-				}
-				if !variantVariationAdoptable(current, req.ProductID, req.ProviderKey, variant) {
-					return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("mapped woo variation is not owned by this product or provider")
+					if !found {
+						return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("mapped woo variation no longer exists")
+					}
+					if !variantVariationAdoptable(current, req.ProductID, req.ProviderKey, variant) {
+						return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("mapped woo variation is not owned by this product or provider")
+					}
 				}
 			}
 		}
@@ -264,6 +290,9 @@ func (p *WooCommerceProvider) syncWooVariantVariations(ctx context.Context, wooI
 				return commerce.ProductVariantsUpsertResult{}, err
 			}
 			result.Variants[variant.VariantID] = canonicalExternalID(updated)
+			if req.ExistingVariants[variant.VariantID] == canonicalExternalID(wooID) {
+				result.Transitions[variant.VariantID] = canonicalExternalID(wooID)
+			}
 			continue
 		}
 		created, err := p.createVariantVariation(ctx, wooID, variant, payload, req.ProductID)
@@ -271,6 +300,9 @@ func (p *WooCommerceProvider) syncWooVariantVariations(ctx context.Context, wooI
 			return commerce.ProductVariantsUpsertResult{}, err
 		}
 		result.Variants[variant.VariantID] = canonicalExternalID(created)
+		if req.ExistingVariants[variant.VariantID] == canonicalExternalID(wooID) {
+			result.Transitions[variant.VariantID] = canonicalExternalID(wooID)
+		}
 	}
 	// Tombstoned/removed variants stop being sellable (§63): owned
 	// variations outside the desired set are hidden by withholding their

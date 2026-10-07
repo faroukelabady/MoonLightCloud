@@ -99,6 +99,11 @@ func (s *fakeStore) FinishCatalogAdminTarget(_ context.Context, targetID, device
 				list[i].PreRevision = pre
 				list[i].PostRevision = post
 				s.targets[cmdID] = list
+				if status == TargetApplied {
+					if err := s.SetCommandResultEntity(context.Background(), targetID, entityID); err != nil {
+						return false, err
+					}
+				}
 				return true, nil
 			}
 		}

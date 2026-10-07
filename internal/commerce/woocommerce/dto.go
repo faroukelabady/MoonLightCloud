@@ -235,12 +235,11 @@ func selectDescription(product commerce.CommerceProduct) string {
 // currency. No silent cross-currency fallback: a missing configured
 // price is a validation failure.
 func selectPrice(product commerce.CommerceProduct, currency string) (string, error) {
-	for _, price := range product.Prices {
-		if strings.EqualFold(price.Currency, currency) {
-			return minorToDecimal(price.AmountMinor)
-		}
+	price, err := commerce.ProductPriceMinor(product, currency)
+	if err != nil {
+		return "", err
 	}
-	return "", commerce.ValidationError(fmt.Sprintf("product has no %s price", currency))
+	return minorToDecimal(price)
 }
 
 // buildProductPayload maps the frozen provider-neutral DTO into the Woo
@@ -269,9 +268,12 @@ func buildProductPayload(req commerce.ProductUpsertRequest, currency, dimensionU
 	if err != nil {
 		return wooProductPayload{}, err
 	}
-	price, err := selectPrice(product, currency)
-	if err != nil {
-		return wooProductPayload{}, err
+	price := ""
+	if !varianted {
+		price, err = selectPrice(product, currency)
+		if err != nil {
+			return wooProductPayload{}, err
+		}
 	}
 	status, visibility := wooStatusDraft, wooVisibilityHidden
 	if req.Published {

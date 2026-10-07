@@ -206,17 +206,9 @@ func resolveDelta(configuration commerce.CommerceConfiguration, currency string)
 // configuredPrice formats base + delta as the exact decimal Woo price
 // for the adapter currency (§87).
 func configuredPrice(product commerce.CommerceProduct, currency string, delta int64) (string, error) {
-	base := int64(0)
-	found := false
-	for _, price := range product.Prices {
-		if strings.EqualFold(price.Currency, currency) {
-			base = price.AmountMinor
-			found = true
-			break
-		}
-	}
-	if !found {
-		return "", commerce.ValidationError(fmt.Sprintf("product has no %s price", currency))
+	base, err := commerce.ProductPriceMinor(product, currency)
+	if err != nil {
+		return "", err
 	}
 	total, err := commerce.ConfiguredPrice(base, delta)
 	if err != nil {

@@ -252,6 +252,9 @@ type ProductVariantsUpsertRequest struct {
 // inventory is published.
 type ProductVariantsUpsertResult struct {
 	Variants map[string]string
+	// Transitions proves a forward parent-to-child representation change.
+	// Values are the expected previous mapping identity, never a blind remap.
+	Transitions map[string]string
 }
 
 // VariantInventoryUpdateRequest asks the adapter to set provider-facing

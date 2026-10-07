@@ -485,3 +485,13 @@ func TestReportServerErrorEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func (stubReportRepo) RefundsByProductType(context.Context, time.Time, time.Time, string) ([]report.RefundProductTypeRow, error) {
+	return nil, nil
+}
+func (stubReportRepo) RefundsByProductTypeForStore(context.Context, string, time.Time, time.Time, string) ([]report.RefundProductTypeRow, error) {
+	return nil, nil
+}
+func (shapeRepo) RefundsByProductType(context.Context, time.Time, time.Time, string) ([]report.RefundProductTypeRow, error) {
+	return nil, nil
+}

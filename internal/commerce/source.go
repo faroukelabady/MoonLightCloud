@@ -383,3 +383,40 @@ func ConfiguredPrice(base, delta int64) (int64, error) {
 	}
 	return total, nil
 }
+
+// VariantPriceMinor resolves an optional physical Variant override without FX.
+// A non-nil zero is an explicit price, not inheritance.
+func VariantPriceMinor(product CommerceProduct, variant CommerceVariant, currency string) (int64, error) {
+	var override *int64
+	switch strings.ToUpper(currency) {
+	case "EGP":
+		override = variant.PriceEGPMinor
+	case "USD":
+		override = variant.PriceUSDMinor
+	default:
+		return 0, ValidationError("unsupported price currency")
+	}
+	if override != nil {
+		if *override < 0 {
+			return 0, ValidationError("negative variant price")
+		}
+		return *override, nil
+	}
+	for _, price := range product.Prices {
+		if strings.EqualFold(price.Currency, currency) {
+			if price.AmountMinor < 0 {
+				return 0, ValidationError("negative product price")
+			}
+			return price.AmountMinor, nil
+		}
+	}
+	return 0, ValidationError("product price missing for configured currency")
+}
+
+// ProductPriceMinor resolves a single physical Variant before configuration deltas.
+func ProductPriceMinor(product CommerceProduct, currency string) (int64, error) {
+	if len(product.Variants) == 1 {
+		return VariantPriceMinor(product, product.Variants[0], currency)
+	}
+	return VariantPriceMinor(product, CommerceVariant{}, currency)
+}

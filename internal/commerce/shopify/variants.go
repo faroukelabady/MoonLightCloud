@@ -699,12 +699,9 @@ func variantValueLabel(attribute commerce.CommerceVariantAttribute) string {
 // the variant's exact int64 minor-unit override when present, otherwise
 // the Product base price. No floats, no FX.
 func (p *ShopifyProvider) variantPrice(product commerce.CommerceProduct, variant commerce.CommerceVariant) (string, error) {
-	override := variant.PriceEGPMinor
-	if strings.EqualFold(p.currency, "USD") {
-		override = variant.PriceUSDMinor
+	minor, err := commerce.VariantPriceMinor(product, variant, p.currency)
+	if err != nil {
+		return "", err
 	}
-	if override != nil {
-		return FormatMinorUnits(*override)
-	}
-	return configuredPrice(product.Prices, p.currency)
+	return FormatMinorUnits(minor)
 }

@@ -606,13 +606,8 @@ func (s *Service) ReportOutcome(ctx context.Context, deviceID, targetID, status,
 	if !ok {
 		return apperr.New(apperr.NotFound, "unknown command target")
 	}
-	if status == TargetApplied && strings.TrimSpace(entityID) != "" {
-		// Persist the actual resulting entity identity on the command
-		// (C02/C08): for creates this is the Retail-minted ID the
-		// convergence check and history must use — never the absent
-		// marker. First writer wins; intent rows are never rewritten.
-		_ = s.store.SetCommandResultEntity(ctx, targetID, strings.TrimSpace(entityID))
-	}
+	// The repository commits the target outcome and actual result identity
+	// together. An acknowledged create must never lose its result identity.
 	return nil
 }
 

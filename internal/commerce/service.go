@@ -283,13 +283,9 @@ func (s *CommerceService) syncVariants(ctx context.Context, provider CommercePro
 			return "", apperr.New(apperr.Internal, "provider returned overlong external variant id")
 		}
 		if mapped, ok := existing[variant.VariantID]; ok && mapped != externalVariantID {
-			// The adapter claims a different remote variation for an
-			// already-mapped variant: never silently remap (generic
-			// protection). Variant inventory is not addressed while
-			// identity is disputed.
-			return "", apperr.New(apperr.Conflict, fmt.Sprintf(
-				"provider variant mapping conflict for %s/%s: mapped %q, adapter returned %q",
-				key, variant.VariantID, mapped, externalVariantID))
+			if upserted.Transitions[variant.VariantID] != mapped || mapped != externalProductID {
+				return "", apperr.New(apperr.Conflict, "provider variant mapping conflict")
+			}
 		}
 	}
 	for variantID := range upserted.Variants {
@@ -297,8 +293,22 @@ func (s *CommerceService) syncVariants(ctx context.Context, provider CommercePro
 			return "", apperr.New(apperr.Internal, "provider returned external variant id for an unknown variant")
 		}
 	}
+	for variantID, previous := range upserted.Transitions {
+		if !desiredIDs[variantID] || existing[variantID] != previous || previous != externalProductID || upserted.Variants[variantID] == previous {
+			return "", apperr.New(apperr.Conflict, "invalid provider variant transition")
+		}
+	}
 	for _, variant := range variants {
-		if _, ok := existing[variant.VariantID]; ok {
+		if old, ok := existing[variant.VariantID]; ok {
+			if old != upserted.Variants[variant.VariantID] {
+				transitions, ok := s.mappings.(VariantMappingTransitionRepository)
+				if !ok {
+					return "", apperr.New(apperr.Conflict, "variant mapping transition unsupported")
+				}
+				if _, err := transitions.UpdateProductVariantMappingExternal(ctx, key, productID, variant.VariantID, externalProductID, old, upserted.Variants[variant.VariantID]); err != nil {
+					return "", err
+				}
+			}
 			continue
 		}
 		if _, err := s.mappings.CreateProductVariantMapping(ctx, key, productID, variant.VariantID,

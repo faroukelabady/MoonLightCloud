@@ -239,6 +239,24 @@ WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
  AND (@currency::text = '' OR l.refund_currency = @currency::text)
 GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency;
 
+-- name: ReportRefundsByProductType :many
+-- Attribute canonical return economics to the original frozen Sale-line
+-- type snapshot, windowed on return time rather than the original Sale.
+SELECT sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en,
+ l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+ ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+GROUP BY sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency;
+
 -- name: ReportRefundsByCategory :many
 SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,
  l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
@@ -491,6 +509,23 @@ WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
  AND (@currency::text = '' OR l.refund_currency = @currency::text)
  AND r.store_id = @store_id::uuid
 GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency;
+
+-- name: ReportRefundsByProductTypeForStore :many
+SELECT sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en,
+ l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+ ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+ AND (@currency::text = '' OR l.refund_currency = @currency::text)
+ AND r.store_id = @store_id::uuid
+GROUP BY sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency;
 
 -- name: ReportRefundsByCategoryForStore :many
 SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,

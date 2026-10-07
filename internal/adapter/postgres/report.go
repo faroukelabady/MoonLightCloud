@@ -321,6 +321,26 @@ func (d Devices) RefundsByProduct(ctx context.Context, startUTC, endUTC time.Tim
 	return out, nil
 }
 
+func (d Devices) RefundsByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByProductType(ctx, sqlcgen.ReportRefundsByProductTypeParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by product type", err)
+	}
+	out := make([]report.RefundProductTypeRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundProductTypeRow{
+			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
+			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
 func refundCategoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByCategory(ctx, sqlcgen.ReportRefundsByCategoryParams{
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind, Currency: currency,
@@ -616,6 +636,30 @@ func (d Devices) RefundsByProductForStore(ctx context.Context, storeID string, s
 	for _, r := range rows {
 		out = append(out, report.RefundProductRow{
 			ProductID: uuidPtr(r.ProductID), SKU: r.Sku, ProductName: r.ProductName,
+			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
+		})
+	}
+	return out, nil
+}
+
+func (d Devices) RefundsByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("refunds by product type for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportRefundsByProductTypeForStore(ctx, sqlcgen.ReportRefundsByProductTypeForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("refunds by product type for store", err)
+	}
+	out := make([]report.RefundProductTypeRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.RefundProductTypeRow{
+			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
 			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
 		})
 	}

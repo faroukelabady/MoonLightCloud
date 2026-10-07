@@ -396,6 +396,16 @@ type (
 		Refund       int64
 		ReturnedCost int64
 	}
+	RefundProductTypeRow struct {
+		ProductTypeID     *string
+		ProductTypeCode   *string
+		ProductTypeNameAR *string
+		ProductTypeNameEN *string
+		Units             int64
+		Currency          string
+		Refund            int64
+		ReturnedCost      int64
+	}
 	RefundCategoryRow struct {
 		Kind         string
 		ID           string
@@ -463,6 +473,7 @@ type Repository interface {
 	RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
 	RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]RefundDailyRow, error)
 	RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
+	RefundsByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductTypeRow, error)
 	RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
@@ -483,6 +494,7 @@ type Repository interface {
 	RefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
 	RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]RefundDailyRow, error)
 	RefundsByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
+	RefundsByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundProductTypeRow, error)
 	RefundsByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
 	RefundsByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
@@ -690,6 +702,13 @@ func (s Service) scopedSalesByProductType(ctx context.Context, req Request) ([]P
 		return s.repo.SalesByProductTypeForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	}
 	return s.repo.SalesByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedRefundsByProductType(ctx context.Context, req Request) ([]RefundProductTypeRow, error) {
+	if req.Scoped() {
+		return s.repo.RefundsByProductTypeForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.RefundsByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 }
 
 // SalesByProductType returns the Phase 17-R2 type breakdown: sale lines
@@ -1077,6 +1096,10 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		if err != nil {
 			return Breakdown{}, err
 		}
+		refundRows, err := s.scopedRefundsByProductType(ctx, req)
+		if err != nil {
+			return Breakdown{}, err
+		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
 		lineEntry := map[string]map[string]int{}
@@ -1102,20 +1125,34 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			return &row.LineSales[ei]
 		}
 		for _, r := range rows {
-			key := ptrStr(r.ProductTypeID) + "\x00" + ptrStr(r.ProductTypeCode)
+			key := productTypeSnapshotKey(r.ProductTypeID, r.ProductTypeCode, r.ProductTypeNameAR, r.ProductTypeNameEN)
 			row := getRow(key, func(row *BreakdownRow) {
 				row.ProductTypeID, row.ProductTypeCode = r.ProductTypeID, r.ProductTypeCode
 				row.ProductTypeNameAR, row.ProductTypeNameEN = r.ProductTypeNameAR, r.ProductTypeNameEN
 			})
-			row.Units += r.Units
+			row.Units, err = addChecked(row.Units, r.Units)
+			if err != nil {
+				return Breakdown{}, err
+			}
 			entry := entryOf(key, r.Currency)
 			entry.LineSalesMinor = r.LineSales
 			entry.LineCostMinor = r.LineCost
 		}
-		for _, row := range byKey {
-			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
+		for _, r := range refundRows {
+			key := productTypeSnapshotKey(r.ProductTypeID, r.ProductTypeCode, r.ProductTypeNameAR, r.ProductTypeNameEN)
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ProductTypeID, row.ProductTypeCode = r.ProductTypeID, r.ProductTypeCode
+				row.ProductTypeNameAR, row.ProductTypeNameEN = r.ProductTypeNameAR, r.ProductTypeNameEN
+			})
+			row.UnitsReturned, err = addChecked(row.UnitsReturned, r.Units)
+			if err != nil {
+				return Breakdown{}, err
+			}
+			entry := entryOf(key, r.Currency)
+			entry.LineRefundMinor = r.Refund
+			entry.LineReturnedCostMinor = r.ReturnedCost
 		}
-		out.Rows = applyLimit(sortProductRows(byKey, order, req.Currency), req.Limit)
+		out.Rows = applyLimit(sortProductTypeRows(byKey, order, req.Currency), req.Limit)
 	case DimensionRootCategory, DimensionSubcategory:
 		var rows []CategoryRow
 		var refundRows []RefundCategoryRow
@@ -1445,6 +1482,58 @@ func sortProductRows(byKey map[string]*BreakdownRow, order []string, currencySco
 			return ptrStr(out[i].SKU) < ptrStr(out[j].SKU)
 		}
 		return ptrStr(out[i].ProductName) < ptrStr(out[j].ProductName)
+	})
+	return out
+}
+
+// productTypeSnapshotKey mirrors the complete historical SQL grouping.
+// Length prefixes preserve arbitrary labels; NULL remains distinct from
+// an explicitly empty value, including the legacy unknown-type bucket.
+func productTypeSnapshotKey(id, code, nameAR, nameEN *string) string {
+	var key strings.Builder
+	for _, field := range []*string{id, code, nameAR, nameEN} {
+		if field == nil {
+			key.WriteString("N;")
+			continue
+		}
+		key.WriteString("S")
+		key.WriteString(strconv.Itoa(len(*field)))
+		key.WriteString(":")
+		key.WriteString(*field)
+		key.WriteString(";")
+	}
+	return key.String()
+}
+
+func sortProductTypeRows(byKey map[string]*BreakdownRow, order []string, currencyScope string) []BreakdownRow {
+	out := rowsInOrder(byKey, order)
+	for i := range out {
+		sortLineSales(out[i].LineSales)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if currencyScope != "" {
+			ni, nj := bucketNet(out[i].LineSales, currencyScope), bucketNet(out[j].LineSales, currencyScope)
+			if ni != nj {
+				return ni > nj
+			}
+		}
+		if out[i].Units != out[j].Units {
+			return out[i].Units > out[j].Units
+		}
+		left := [4]*string{out[i].ProductTypeID, out[i].ProductTypeCode, out[i].ProductTypeNameAR, out[i].ProductTypeNameEN}
+		right := [4]*string{out[j].ProductTypeID, out[j].ProductTypeCode, out[j].ProductTypeNameAR, out[j].ProductTypeNameEN}
+		for k := range left {
+			if left[k] == nil || right[k] == nil {
+				if (left[k] == nil) != (right[k] == nil) {
+					return left[k] == nil
+				}
+				continue
+			}
+			if *left[k] != *right[k] {
+				return *left[k] < *right[k]
+			}
+		}
+		return false
 	})
 	return out
 }

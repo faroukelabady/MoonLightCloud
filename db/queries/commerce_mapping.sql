@@ -77,3 +77,13 @@ INSERT INTO commerce_product_variant_mappings (provider_key, product_id, variant
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT DO NOTHING
 RETURNING provider_key, product_id, variant_id, external_product_id, external_variant_id, store_id, created_at, updated_at;
+
+-- name: UpdateCommerceProductVariantMappingExternal :one
+UPDATE commerce_product_variant_mappings m
+SET external_variant_id = sqlc.arg(new_external_variant_id), updated_at = now()
+WHERE m.provider_key = sqlc.arg(provider_key) AND m.product_id = sqlc.arg(product_id)
+ AND m.variant_id = sqlc.arg(variant_id) AND m.external_product_id = sqlc.arg(external_product_id)
+ AND m.external_variant_id = sqlc.arg(expected_external_variant_id)
+ AND m.store_id IS NOT NULL
+ AND EXISTS (SELECT 1 FROM catalog_products p WHERE p.product_id=m.product_id AND p.store_id=m.store_id)
+RETURNING m.provider_key, m.product_id, m.variant_id, m.external_product_id, m.external_variant_id, m.store_id, m.created_at, m.updated_at;

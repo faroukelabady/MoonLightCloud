@@ -40,6 +40,11 @@ func parseUUID(s string) (pgtype.UUID, error) {
 }
 
 func uuidString(u pgtype.UUID) string {
+	// Preserve SQL NULL as absent identity; the zero UUID is still a
+	// distinct, valid stored value when Valid is true.
+	if !u.Valid {
+		return ""
+	}
 	var arr uuid.UUID
 	copy(arr[:], u.Bytes[:])
 	return arr.String()

@@ -2,6 +2,7 @@ package woocommerce
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -101,16 +102,18 @@ func (p *WooCommerceProvider) UpsertProduct(ctx context.Context, req commerce.Pr
 	if req.ProductID == "" || req.OperationKey == "" {
 		return commerce.ProductUpsertResult{}, apperr.New(apperr.InvalidInput, "product id and operation key are required")
 	}
-	// Phase 17 SKU ownership: a single-variant product publishes the
-	// VARIANT's SKU as the remote SKU (catalog_products.sku is its
-	// deprecated display mirror). Multi-variant parents keep the product
-	// SKU; provider variations carry the variant SKUs.
+	// A fresh single-variant representation may use its physical SKU on
+	// the parent. A variable parent uses a separate integration identity:
+	// Woo requires globally unique SKUs across parents and variations.
 	if len(req.Product.Variants) == 1 && req.Product.Variants[0].SKU != "" {
 		req.Product.SKU = req.Product.Variants[0].SKU
 	}
 	payload, err := buildProductPayload(req, p.currency, p.dimUnit)
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err
+	}
+	if len(req.Product.Variants) > 1 {
+		payload.SKU = wooPhysicalParentSKU(req.ProviderKey, req.ProductID)
 	}
 	var result commerce.ProductUpsertResult
 	var err2 error
@@ -151,6 +154,10 @@ func (p *WooCommerceProvider) updateMapped(ctx context.Context, req commerce.Pro
 		return commerce.ProductUpsertResult{}, commerce.ConflictError(
 			fmt.Sprintf("woo product %d owned by another product or provider", wooID))
 	}
+	payload, err = p.retainPhysicalParent(ctx, req, wooID, payload)
+	if err != nil {
+		return commerce.ProductUpsertResult{}, err
+	}
 	updated, err := p.putProduct(ctx, wooID, payload)
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err
@@ -165,7 +172,7 @@ func (p *WooCommerceProvider) updateMapped(ctx context.Context, req commerce.Pro
 // createWithRecovery runs SKU preflight: empty → POST; one owned →
 // update and return; foreign/multiple → conflict.
 func (p *WooCommerceProvider) createWithRecovery(ctx context.Context, req commerce.ProductUpsertRequest, payload wooProductPayload) (commerce.ProductUpsertResult, error) {
-	found, err := p.lookupBySKU(ctx, req.Product.SKU)
+	found, err := p.lookupPhysicalParent(ctx, req)
 	if err != nil {
 		return commerce.ProductUpsertResult{}, err
 	}
@@ -181,14 +188,8 @@ func (p *WooCommerceProvider) createWithRecovery(ctx context.Context, req commer
 		if err != nil {
 			return commerce.ProductUpsertResult{}, err
 		}
-		updated, err := p.putProduct(ctx, wooID, payload)
-		if err != nil {
-			return commerce.ProductUpsertResult{}, err
-		}
-		if updated != wooID {
-			return commerce.ProductUpsertResult{}, commerce.ConflictError("woo update identity mismatch")
-		}
-		return commerce.ProductUpsertResult{ExternalProductID: canonicalExternalID(updated)}, nil
+		req.ExistingExternal = &commerce.ProviderProductRef{ExternalProductID: canonicalExternalID(wooID)}
+		return p.updateMapped(ctx, req, payload)
 	default:
 		return commerce.ProductUpsertResult{}, commerce.ConflictError(
 			fmt.Sprintf("multiple woo products share sku %q", req.Product.SKU))
@@ -210,7 +211,7 @@ func (p *WooCommerceProvider) postProduct(ctx context.Context, req commerce.Prod
 		return commerce.ProductUpsertResult{ExternalProductID: canonicalExternalID(wooID)}, nil
 	}
 	if isDuplicateSKU(err) {
-		found, lookupErr := p.lookupBySKU(ctx, req.Product.SKU)
+		found, lookupErr := p.lookupPhysicalParent(ctx, req)
 		if lookupErr != nil {
 			return commerce.ProductUpsertResult{}, lookupErr
 		}
@@ -219,19 +220,58 @@ func (p *WooCommerceProvider) postProduct(ctx context.Context, req commerce.Prod
 			if idErr != nil {
 				return commerce.ProductUpsertResult{}, commerce.TemporaryError("woo recovery response missing product id")
 			}
-			updated, putErr := p.putProduct(ctx, wooID, payload)
-			if putErr != nil {
-				return commerce.ProductUpsertResult{}, putErr
-			}
-			if updated != wooID {
-				return commerce.ProductUpsertResult{}, commerce.ConflictError("woo update identity mismatch")
-			}
-			return commerce.ProductUpsertResult{ExternalProductID: canonicalExternalID(updated)}, nil
+			req.ExistingExternal = &commerce.ProviderProductRef{ExternalProductID: canonicalExternalID(wooID)}
+			return p.updateMapped(ctx, req, payload)
 		}
 		return commerce.ProductUpsertResult{}, commerce.ConflictError(
 			fmt.Sprintf("sku %q conflicts with an existing woo product", req.Product.SKU))
 	}
 	return commerce.ProductUpsertResult{}, err
+}
+
+// wooPhysicalParentSKU is a provider representation key, not a Retail
+// business SKU. It stays stable across variant changes and mapping loss.
+func wooPhysicalParentSKU(key commerce.ProviderKey, productID string) string {
+	digest := sha256.Sum256([]byte(string(key) + "\x00" + productID))
+	return fmt.Sprintf("MLP-%x", digest)
+}
+
+// Look for the stable variable parent before the legacy physical-SKU
+// representation. A nonempty foreign/ambiguous result is never bypassed.
+func (p *WooCommerceProvider) lookupPhysicalParent(ctx context.Context, req commerce.ProductUpsertRequest) ([]wooProductResponse, error) {
+	if len(req.Product.Variants) > 0 {
+		found, err := p.lookupBySKU(ctx, wooPhysicalParentSKU(req.ProviderKey, req.ProductID))
+		if err != nil || len(found) > 0 {
+			return found, err
+		}
+	}
+	return p.lookupBySKU(ctx, req.Product.SKU)
+}
+
+// Once physical stock lives on owned child variations, keep that shape
+// even when only one physical Variant remains. Returning its SKU to the
+// parent would collide with the retained child and invalidate mappings.
+func (p *WooCommerceProvider) retainPhysicalParent(ctx context.Context, req commerce.ProductUpsertRequest, wooID int64, payload wooProductPayload) (wooProductPayload, error) {
+	if len(req.Product.Variants) == 0 {
+		return payload, nil
+	}
+	children, err := p.listAllProductVariations(ctx, canonicalExternalID(wooID))
+	if err != nil {
+		return wooProductPayload{}, err
+	}
+	if !hasOwnedPhysicalVariations(children, req.ProductID, req.ProviderKey) {
+		return payload, nil
+	}
+	if len(req.Product.Configurations) > 0 {
+		return wooProductPayload{}, commerce.ConflictError(WooVariantOptionsCapabilityCode +
+			": frame options cannot share an existing physical-variation inventory representation")
+	}
+	payload.SKU = wooPhysicalParentSKU(req.ProviderKey, req.ProductID)
+	payload.Type = wooTypeVariable
+	payload.RegularPrice = ""
+	payload.ManageStock = false
+	payload.Attributes = variantAttributes(req.Product.Variants)
+	return payload, nil
 }
 
 // SetInventory sets remote availability with a narrow payload: stock

@@ -83,3 +83,8 @@ business identity. Final semantics:
 
 Same as Retail ADR-039 §92. No Cloud-only attribute definitions; Cloud
 projects/displays Retail definitions, never invents them.
+
+
+## Phase 17 R1 result durability correction
+
+The target APPLIED outcome and actual result entity ID are committed in one locked PostgreSQL transaction. A failed result write rolls back the target outcome. Identical replay repairs a legacy applied target missing parent identity; a contradictory stored parent identity is rejected. Failed create outcomes carry an empty entity ID and zero revisions. No placeholder business entity is manufactured.

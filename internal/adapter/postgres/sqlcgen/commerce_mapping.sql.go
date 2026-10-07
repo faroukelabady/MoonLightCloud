@@ -405,3 +405,46 @@ func (q *Queries) UpdateCommerceProductMappingExternal(ctx context.Context, arg 
 	)
 	return i, err
 }
+
+const updateCommerceProductVariantMappingExternal = `-- name: UpdateCommerceProductVariantMappingExternal :one
+UPDATE commerce_product_variant_mappings m
+SET external_variant_id = $1, updated_at = now()
+WHERE m.provider_key = $2 AND m.product_id = $3
+ AND m.variant_id = $4 AND m.external_product_id = $5
+ AND m.external_variant_id = $6
+ AND m.store_id IS NOT NULL
+ AND EXISTS (SELECT 1 FROM catalog_products p WHERE p.product_id=m.product_id AND p.store_id=m.store_id)
+RETURNING m.provider_key, m.product_id, m.variant_id, m.external_product_id, m.external_variant_id, m.store_id, m.created_at, m.updated_at
+`
+
+type UpdateCommerceProductVariantMappingExternalParams struct {
+	NewExternalVariantID      string      `json:"new_external_variant_id"`
+	ProviderKey               string      `json:"provider_key"`
+	ProductID                 pgtype.UUID `json:"product_id"`
+	VariantID                 pgtype.UUID `json:"variant_id"`
+	ExternalProductID         string      `json:"external_product_id"`
+	ExpectedExternalVariantID string      `json:"expected_external_variant_id"`
+}
+
+func (q *Queries) UpdateCommerceProductVariantMappingExternal(ctx context.Context, arg UpdateCommerceProductVariantMappingExternalParams) (CommerceProductVariantMapping, error) {
+	row := q.db.QueryRow(ctx, updateCommerceProductVariantMappingExternal,
+		arg.NewExternalVariantID,
+		arg.ProviderKey,
+		arg.ProductID,
+		arg.VariantID,
+		arg.ExternalProductID,
+		arg.ExpectedExternalVariantID,
+	)
+	var i CommerceProductVariantMapping
+	err := row.Scan(
+		&i.ProviderKey,
+		&i.ProductID,
+		&i.VariantID,
+		&i.ExternalProductID,
+		&i.ExternalVariantID,
+		&i.StoreID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

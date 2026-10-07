@@ -479,6 +479,10 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 		// values stay byte-identical across the upgrade cycle.
 		if after && name == "catalog_products" {
 			expr += "-'configuration_revision'"
+			// Phase 17 00037 adds a nullable structural Type reference.
+			// Compare all pre-existing values; assert the new column's
+			// no-backfill semantics separately below.
+			expr += "-'product_type_id'"
 		}
 		// Phase 17-R0 00035 RETIRES catalog_products.sku (Product has no
 		// SKU authority anywhere, ADR-0049): the column is dropped in the
@@ -511,6 +515,10 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 	version, err := migrate.Current(ctx, conn)
 	if err != nil || version != migrate.TargetVersion {
 		t.Fatalf("schema %d %v", version, err)
+	}
+	var assignedTypes int64
+	if err := pf.pool.QueryRow(ctx, `SELECT count(*) FROM catalog_products WHERE product_type_id IS NOT NULL`).Scan(&assignedTypes); err != nil || assignedTypes != 0 {
+		t.Fatalf("migration fabricated ProductType references: %d %v", assignedTypes, err)
 	}
 	for _, name := range names {
 		if snapshot(name, true) != before[name] {

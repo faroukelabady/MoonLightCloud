@@ -553,6 +553,141 @@ func (q *Queries) ReportRefundsByProductForStore(ctx context.Context, arg Report
 	return items, nil
 }
 
+const reportRefundsByProductType = `-- name: ReportRefundsByProductType :many
+SELECT sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en,
+ l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+ ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR l.refund_currency = $3::text)
+GROUP BY sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency
+`
+
+type ReportRefundsByProductTypeParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportRefundsByProductTypeRow struct {
+	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeCode   pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	Refund            int64       `json:"refund"`
+	ReturnedCost      int64       `json:"returned_cost"`
+}
+
+// Attribute canonical return economics to the original frozen Sale-line
+// type snapshot, windowed on return time rather than the original Sale.
+func (q *Queries) ReportRefundsByProductType(ctx context.Context, arg ReportRefundsByProductTypeParams) ([]ReportRefundsByProductTypeRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByProductType, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByProductTypeRow{}
+	for rows.Next() {
+		var i ReportRefundsByProductTypeRow
+		if err := rows.Scan(
+			&i.ProductTypeID,
+			&i.ProductTypeCode,
+			&i.ProductTypeNameAr,
+			&i.ProductTypeNameEn,
+			&i.Currency,
+			&i.Units,
+			&i.Refund,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportRefundsByProductTypeForStore = `-- name: ReportRefundsByProductTypeForStore :many
+SELECT sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en,
+ l.refund_currency AS currency,
+ COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
+ COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
+FROM return_refund_lines_projection l
+JOIN sale_lines_projection sl
+ ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
+JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
+WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+ AND ($3::text = '' OR l.refund_currency = $3::text)
+ AND r.store_id = $4::uuid
+GROUP BY sl.product_type_id, sl.product_type_code,
+ sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency
+`
+
+type ReportRefundsByProductTypeForStoreParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+	StoreID  pgtype.UUID        `json:"store_id"`
+}
+
+type ReportRefundsByProductTypeForStoreRow struct {
+	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeCode   pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	Refund            int64       `json:"refund"`
+	ReturnedCost      int64       `json:"returned_cost"`
+}
+
+func (q *Queries) ReportRefundsByProductTypeForStore(ctx context.Context, arg ReportRefundsByProductTypeForStoreParams) ([]ReportRefundsByProductTypeForStoreRow, error) {
+	rows, err := q.db.Query(ctx, reportRefundsByProductTypeForStore,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.Currency,
+		arg.StoreID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRefundsByProductTypeForStoreRow{}
+	for rows.Next() {
+		var i ReportRefundsByProductTypeForStoreRow
+		if err := rows.Scan(
+			&i.ProductTypeID,
+			&i.ProductTypeCode,
+			&i.ProductTypeNameAr,
+			&i.ProductTypeNameEn,
+			&i.Currency,
+			&i.Units,
+			&i.Refund,
+			&i.ReturnedCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportRefundsByTag = `-- name: ReportRefundsByTag :many
 SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
  l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,

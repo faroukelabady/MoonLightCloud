@@ -913,7 +913,7 @@ func (p *ShopifyProvider) bundleVariantIdentities(ctx context.Context, bundlePro
 // userErrors are decoded and never ignored (F10): a refusal is a bounded
 // failure, never a silent success.
 func (p *ShopifyProvider) setBundleVariantPrices(ctx context.Context, bundleProductID string, product commerce.CommerceProduct, identities map[string]string, choices []commerce.CommerceConfiguration) error {
-	base, err := configuredPrice(product.Prices, p.currency)
+	base, err := effectiveProductPrice(product, p.currency)
 	if err != nil {
 		return err
 	}
