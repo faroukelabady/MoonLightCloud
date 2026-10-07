@@ -1,0 +1,119 @@
+{
+  "sale_id": "99999999-0000-4000-8000-000000000001",
+  "sale_number": "MLR-20261006-00000001",
+  "channel": "STORE",
+  "occurred_at": "2026-10-06T10:00:00Z",
+  "paid_at": "2026-10-06T10:00:00Z",
+  "shop": {
+    "name_ar": "مكتبة البردي",
+    "name_en": "Papyrus Shop",
+    "address_ar": "القاهرة",
+    "address_en": "Cairo",
+    "phone": "+201000000000",
+    "receipt_footer_ar": "شكرا",
+    "receipt_footer_en": "Thanks"
+  },
+  "actor": {
+    "cashier_id": "cashier-1",
+    "cashier_name": "Amal"
+  },
+  "currency": "EGP",
+  "totals": {
+    "subtotal": {
+      "amount_minor": 100000,
+      "currency": "EGP"
+    },
+    "discount": {
+      "amount_minor": 0,
+      "currency": "EGP"
+    },
+    "tax": {
+      "amount_minor": 0,
+      "currency": "EGP"
+    },
+    "total": {
+      "amount_minor": 100000,
+      "currency": "EGP"
+    }
+  },
+  "lines": [
+    {
+      "sale_item_id": "99999999-0000-4000-8000-000000000002",
+      "product_id": "77777777-0000-4000-8000-000000000001",
+      "variant_id": "77777777-0000-4000-8000-000000000002",
+      "sku": "NEF-BLU-TRA",
+      "product_name": "نفرتيتي",
+      "width_cm": 60,
+      "height_cm": 80,
+      "quantity": 1,
+      "unit_price": {
+        "amount_minor": 100000,
+        "currency": "EGP"
+      },
+      "cost": {
+        "amount_minor": 32000,
+        "currency": "EGP"
+      },
+      "line_total": {
+        "amount_minor": 100000,
+        "currency": "EGP"
+      },
+      "classifications": {
+        "roots": [
+          {
+            "category_id": "00000000-0000-4000-8000-000000000101",
+            "name_ar": "المتحف المصري",
+            "name_en": "Egyptian Museum"
+          }
+        ],
+        "subcategories": []
+      },
+      "tags": [
+        {
+          "tag_id": "88888888-0000-4000-8000-000000000001",
+          "slug": "featured",
+          "name_ar": "مميز",
+          "name_en": "Featured"
+        }
+      ],
+      "variant_sku": "NEF-BLU-TRA",
+      "variant_attributes": [
+        {
+          "definition_code": "color",
+          "value_code": "blue",
+          "name_ar": "أزرق",
+          "name_en": "Blue",
+          "definition_name_ar": "اللون",
+          "definition_name_en": "Color"
+        },
+        {
+          "definition_code": "painting_style",
+          "value_code": "traditional",
+          "name_ar": "تقليدي",
+          "name_en": "Traditional",
+          "definition_name_ar": "أسلوب الرسم",
+          "definition_name_en": "Painting Style"
+        }
+      ],
+      "variant_price_egp_cents": 100000,
+      "variant_price_usd_cents": null,
+      "product_type_id": "10000000-0000-4000-8000-000000000001",
+      "product_type_code": "papyrus",
+      "product_type_name_ar": "برديات",
+      "product_type_name_en": "Papyrus"
+    }
+  ],
+  "payments": [
+    {
+      "method": "cash",
+      "amount": {
+        "amount_minor": 100000,
+        "currency": "EGP"
+      },
+      "change_given": {
+        "amount_minor": 0,
+        "currency": "EGP"
+      }
+    }
+  ]
+}

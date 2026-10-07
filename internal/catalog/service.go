@@ -18,9 +18,10 @@ type Price struct {
 }
 
 // ProductHeader is the list-safe product identity (no relations).
+// Phase 17-R0 (ADR-0049): no SKU — ProductVariant owns SKU/stock; product
+// stock is derived only.
 type ProductHeader struct {
 	ID            string
-	SKU           string
 	Name          string
 	IsActive      bool
 	Revision      int64

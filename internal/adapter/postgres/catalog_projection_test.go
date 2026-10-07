@@ -425,7 +425,7 @@ func TestCatalogProductProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read service: %v", err)
 	}
-	if product.SKU != "PAP-001" || product.TopCategoryID != root || len(product.SubcategoryIDs) != 1 || len(product.TagIDs) != 1 {
+	if product.TopCategoryID != root || len(product.SubcategoryIDs) != 1 || len(product.TagIDs) != 1 {
 		t.Fatalf("product: %+v", product)
 	}
 	if len(product.Prices) != 2 || product.Prices[0].PriceCents != 65000 {
@@ -607,7 +607,7 @@ func dumpCatalog(t *testing.T, env *saleEnv) string {
 		FROM catalog_categories ORDER BY category_id::text`)
 	dump(`SELECT parent_id::text, child_id::text, position FROM catalog_category_edges ORDER BY parent_id::text, child_id::text`)
 	dump(`SELECT tag_id::text, slug, is_active, name_en, source_revision FROM catalog_tags ORDER BY tag_id::text`)
-	dump(`SELECT product_id::text, sku, name, top_category_id::text, is_active, source_revision
+	dump(`SELECT product_id::text, name, top_category_id::text, is_active, source_revision
 		FROM catalog_products ORDER BY product_id::text`)
 	dump(`SELECT product_id::text, currency, price_minor, cost_minor FROM catalog_product_prices ORDER BY product_id::text, currency`)
 	dump(`SELECT product_id::text, locale, name FROM catalog_product_translations ORDER BY product_id::text, locale`)

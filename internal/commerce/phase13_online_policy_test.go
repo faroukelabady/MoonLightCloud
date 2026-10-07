@@ -77,7 +77,7 @@ func TestEffectiveOnlinePublicationFormula(t *testing.T) {
 				reason = catalog.OnlineBlockedCategory
 			}
 			reader := stubReader{
-				product:      catalog.Product{ID: "p1", SKU: "S1", IsActive: tc.active, Revision: 7},
+				product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: tc.active, Revision: 7}},
 				policy:       catalog.ProductSalesPolicy{SellOnline: tc.sellOnline, Revision: 3},
 				policyFound:  true,
 				availability: catalog.ProductAvailability{OnlineAvailable: 10, Ready: true, InventoryRevision: 5},
@@ -113,7 +113,7 @@ func TestEffectiveOnlinePublicationFormula(t *testing.T) {
 // publish positive inventory on unproven hierarchy.
 func TestMissingCategoryStateFailsSafe(t *testing.T) {
 	reader := stubReader{
-		product:      catalog.Product{ID: "p1", SKU: "S1", IsActive: true, Revision: 1},
+		product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: true, Revision: 1}},
 		policy:       catalog.ProductSalesPolicy{SellOnline: true, Revision: 1},
 		policyFound:  true,
 		availability: catalog.ProductAvailability{OnlineAvailable: 10, Ready: true},
@@ -137,7 +137,7 @@ func TestMissingCategoryStateFailsSafe(t *testing.T) {
 // §66: missing Product sales policy can never publish (frozen).
 func TestMissingPolicyCannotPublish(t *testing.T) {
 	reader := stubReader{
-		product:      catalog.Product{ID: "p1", SKU: "S1", IsActive: true, Revision: 1},
+		product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: true, Revision: 1}},
 		policyFound:  false,
 		availability: catalog.ProductAvailability{OnlineAvailable: 0, Ready: false},
 		online:       catalog.ProductOnlinePolicy{Allowed: true, Reason: catalog.OnlineAllowed},

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
@@ -274,7 +275,7 @@ func currentProductSnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype
 		return catalog.NormalizedProduct{}, false, err
 	}
 	snapshot := catalog.ProductSnapshot{
-		ProductID: uuidString(row.ProductID), SKU: row.Sku, Name: row.Name,
+		ProductID: uuidString(row.ProductID), ProductTypeID: uuidString(row.ProductTypeID), Name: row.Name,
 		TopCategoryID: uuidString(row.TopCategoryID), IsActive: row.IsActive,
 		CatalogRevision: row.SourceRevision,
 	}
@@ -1483,6 +1484,21 @@ const (
 // required (mirrors Retail retained-assignment semantics). Invalidity
 // under an unsettled graph waits; invalidity under a settled graph blocks.
 func (d Devices) checkProductStructure(ctx context.Context, q *sqlcgen.Queries, valid catalog.ProductSnapshot) (structureVerdict, error) {
+	// Phase 17-R2 §77: product → type dependency ordering. If the product
+	// references a type not yet projected, wait (the type event may still
+	// arrive). Never create fake types, never drop the relation.
+	if strings.TrimSpace(valid.ProductTypeID) != "" {
+		tuid, err := parseUUID(valid.ProductTypeID)
+		if err != nil {
+			return structureTerminal, nil
+		}
+		if _, err := q.CatalogProductTypeByID(ctx, tuid); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return structureWait, nil
+			}
+			return structureWait, err
+		}
+	}
 	edgeRows, err := q.AllCatalogCategoryEdges(ctx)
 	if err != nil {
 		return structureWait, err
@@ -1758,7 +1774,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	if derr != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
 	}
-	valid, verr := catalog.ValidateProductSnapshot(raw)
+	valid, verr := validateProductSnapshotEvent(event, raw)
 	if verr != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
 	}
@@ -1769,6 +1785,15 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	topUID, err := parseUUID(valid.TopCategoryID)
 	if err != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, "top_category_id must be a UUID")
+	}
+	// Phase 17-R2: structural type identity is validated at ingestion;
+	// legacy v1 products (no type) project with NULL type.
+	var typeUID pgtype.UUID
+	if strings.TrimSpace(valid.ProductTypeID) != "" {
+		typeUID, err = parseUUID(valid.ProductTypeID)
+		if err != nil {
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, "product_type_id must be a UUID")
+		}
 	}
 
 	tx, err := d.beginCatalogTx(ctx)
@@ -1972,6 +1997,27 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "tag owned by another store")
 		}
 	}
+	// Phase 17-R2 §41/§77: product → type Store ownership. A product cannot
+	// assign a type owned by another Store; a missing type is a wait.
+	if strings.TrimSpace(valid.ProductTypeID) != "" {
+		tuid, err := parseUUID(valid.ProductTypeID)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, "product_type_id must be a UUID")
+		}
+		typeRow, err := q.CatalogProductTypeByID(ctx, tuid)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return wait("product type not yet projected")
+			}
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type lookup failed")
+		}
+		if !tagScopeCompatible(effStore, valid.ProductTypeID, storeString(typeRow.StoreID)) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product type owned by another store")
+		}
+	}
 	// Phase 9-R1 F02: adopting a product into a Store must not leave an
 	// inventory, policy, or provider mapping owned by another proven Store.
 	// The outgoing classification/tag edges were checked above; this closes
@@ -2031,8 +2077,9 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product state read failed")
 	}
 	if err := q.UpsertCatalogProduct(ctx, sqlcgen.UpsertCatalogProductParams{
-		ProductID: puid, Sku: valid.SKU, Name: valid.Name, Description: description,
+		ProductID: puid, Name: valid.Name, Description: description,
 		TopCategoryID: topUID, WidthCm: width, HeightCm: height, IsActive: valid.IsActive,
+		ProductTypeID:  typeUID,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
 		StoreID: writeStore,
@@ -2501,7 +2548,7 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 	}
 	product := catalog.Product{
 		ProductHeader: catalog.ProductHeader{
-			ID: uuidString(row.ProductID), SKU: row.Sku, Name: row.Name,
+			ID: uuidString(row.ProductID), Name: row.Name,
 			IsActive: row.IsActive, Revision: row.SourceRevision,
 			SourceEventID: uuidString(row.SourceEventID),
 			StoreID:       storeString(row.StoreID),
@@ -2556,7 +2603,7 @@ func (d Devices) CatalogActiveProducts(ctx context.Context, limit int) ([]catalo
 	out := make([]catalog.ProductHeader, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, catalog.ProductHeader{
-			ID: uuidString(row.ProductID), SKU: row.Sku, Name: row.Name,
+			ID: uuidString(row.ProductID), Name: row.Name,
 			IsActive: true, Revision: row.SourceRevision,
 			SourceEventID: uuidString(row.SourceEventID),
 		})
@@ -3161,6 +3208,16 @@ func decodeProductSnapshotEvent(event catalog.EventRecord, payload []byte) (cata
 	return catalog.DecodeProductSnapshot(payload)
 }
 
+// validateProductSnapshotEvent validates the decoded product snapshot
+// with the wire version's own contract: v2 carries NO SKU-bearing field,
+// so the frozen v1 SKU requirement must never run against it (17-R0).
+func validateProductSnapshotEvent(event catalog.EventRecord, snapshot catalog.ProductSnapshot) (catalog.ProductSnapshot, error) {
+	if event.EventType == catalog.EventProductSnapshotV2 {
+		return catalog.ValidateProductSnapshotV2(snapshot)
+	}
+	return catalog.ValidateProductSnapshot(snapshot)
+}
+
 // currentProductVariantSnapshot reconstructs the normalized semantic
 // state of a projected variant (identity, prices, attributes) for
 // equal-revision comparison. Inventory mirrors never participate.
@@ -3752,4 +3809,204 @@ func (d Devices) CatalogProductVariantAvailability(ctx context.Context, id strin
 	)
 	availability.Ready = !availability.MissingProduct && !availability.MissingPolicy && !availability.MissingInventory
 	return availability, nil
+}
+
+// ProjectProductType projects one catalog.product_type.snapshot.v1 with
+// revision ordering (ADR-0050 §75). Types are roots (no product
+// dependency): the only waits are store scoping and revision order.
+// Either the type row plus its dimension/capability sets commit, or
+// nothing does; failure leaves the previous revision visible.
+func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	attempt, blocked := startCatalogAttempt(event, now)
+	if blocked != nil {
+		euid, _ := parseUUID(event.EventID)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, euid, now, blocked.ErrorCode, "event identity must be UUIDs")
+	}
+	raw, derr := catalog.DecodeProductTypeSnapshot(attempt.payload)
+	if derr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrValidation, safeErr(derr))
+	}
+	valid, verr := catalog.ValidateProductTypeSnapshot(raw)
+	if verr != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
+	}
+	tuid, err := parseUUID(valid.ProductTypeID)
+	if err != nil {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrValidation, "product_type_id must be a UUID")
+	}
+
+	tx, err := d.beginCatalogTx(ctx)
+	if err != nil {
+		return catalog.ProjectResult{}, transient(redact(err))
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := sqlcgen.New(tx)
+	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+	}
+	if hasDone {
+		if done.Outcome == catalog.OutcomeBlocked {
+			return catalog.ProjectResult{Outcome: catalog.OutcomeBlocked, ErrorCode: ErrProjection}, nil
+		}
+		return done, nil
+	}
+
+	// Entity lock: own the type row so concurrent type writes serialize.
+	if err := lockCatalogEntities(ctx, q,
+		[2]string{"product-type", valid.ProductTypeID},
+	); err != nil {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+	}
+
+	storedRevision := int64(-1)
+	var existingStore pgtype.UUID
+	if row, err := q.CatalogProductTypeByID(ctx, tuid); err == nil {
+		storedRevision = row.TypeRevision
+		existingStore = row.StoreID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		_ = tx.Rollback(ctx)
+		if isSerializationFailure(err) {
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type lookup failed")
+	}
+	// Phase 9B ownership gate: a scoped event for a type owned by another
+	// Store blocks here; a scoped event adopts a NULL legacy row by
+	// aggregate-ID + revision continuity.
+	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
+	if !scopeOK {
+		_ = tx.Rollback(ctx)
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "product type owned by another store")
+	}
+	storeScope := storeUUID(effectiveScope(writeStore, existingStore))
+	proceed, stale := revisionGate(valid.TypeRevision, storedRevision)
+	if stale {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	if !proceed {
+		supersededEqual, err := entitySuperseded(ctx, q,
+			catalog.EventProductTypeSnapshotV1, "product_type_id", valid.ProductTypeID,
+			catalog.ProcessorProductTypeProjectionV1, "type_revision", valid.TypeRevision, storeScope)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		}
+		if supersededEqual {
+			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+		}
+		currentSnapshot, exists, err := currentProductTypeSnapshot(ctx, q, tuid)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+		}
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductTypeSnapshot(valid), currentSnapshot) {
+			_ = tx.Rollback(ctx)
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
+		}
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+	superseded, err := entitySuperseded(ctx, q,
+		catalog.EventProductTypeSnapshotV1, "product_type_id", valid.ProductTypeID,
+		catalog.ProcessorProductTypeProjectionV1, "type_revision", valid.TypeRevision, storeScope)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+	}
+	if superseded {
+		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+	}
+
+	var descriptionAR, descriptionEN pgtype.Text
+	if valid.DescriptionAR != nil {
+		descriptionAR = pgText(*valid.DescriptionAR)
+	}
+	if valid.DescriptionEN != nil {
+		descriptionEN = pgText(*valid.DescriptionEN)
+	}
+	fingerprint := catalog.FingerprintProductType(valid)
+	if err := q.UpsertCatalogProductType(ctx, sqlcgen.UpsertCatalogProductTypeParams{
+		TypeID: tuid, Code: valid.Code, NameAr: valid.NameAR, NameEn: valid.NameEN,
+		DescriptionAr: descriptionAR, DescriptionEn: descriptionEN,
+		IsActive: valid.IsActive, Position: int32(valid.Position),
+		TypeRevision:  valid.TypeRevision,
+		SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
+		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
+		StoreID: writeStore,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		if isUniqueViolation(err) {
+			// A proven-Store identity collision (duplicate code) is
+			// deterministic, never a crash. Legacy NULL ownership can
+			// never collide here (NULLS DISTINCT).
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type identity collision")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type upsert failed")
+	}
+	if err := q.DeleteCatalogProductTypeDimensions(ctx, tuid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension replace failed")
+	}
+	for position, code := range valid.Dimensions {
+		if err := q.InsertCatalogProductTypeDimension(ctx, sqlcgen.InsertCatalogProductTypeDimensionParams{
+			TypeID: tuid, DefinitionCode: code, Position: int32(position),
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension insert failed")
+		}
+	}
+	if err := q.DeleteCatalogProductTypeCapabilities(ctx, tuid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability replace failed")
+	}
+	for _, code := range valid.Capabilities {
+		if err := q.InsertCatalogProductTypeCapability(ctx, sqlcgen.InsertCatalogProductTypeCapabilityParams{
+			TypeID: tuid, CapabilityCode: code,
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability insert failed")
+		}
+	}
+	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
+}
+
+// currentProductTypeSnapshot reads the canonical current state for
+// equal-revision conflict comparison.
+func currentProductTypeSnapshot(ctx context.Context, q *sqlcgen.Queries, tuid pgtype.UUID) (catalog.NormalizedProductType, bool, error) {
+	row, err := q.CatalogProductTypeByID(ctx, tuid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.NormalizedProductType{}, false, nil
+		}
+		return catalog.NormalizedProductType{}, false, err
+	}
+	dims, err := q.CatalogProductTypeDimensions(ctx, tuid)
+	if err != nil {
+		return catalog.NormalizedProductType{}, false, err
+	}
+	caps, err := q.CatalogProductTypeCapabilities(ctx, tuid)
+	if err != nil {
+		return catalog.NormalizedProductType{}, false, err
+	}
+	var descAR, descEN *string
+	if row.DescriptionAr.Valid {
+		descAR = &row.DescriptionAr.String
+	}
+	if row.DescriptionEn.Valid {
+		descEN = &row.DescriptionEn.String
+	}
+	return catalog.NormalizedProductType{
+		ProductTypeID: uuidString(tuid), Code: row.Code,
+		NameAR: row.NameAr, NameEN: row.NameEn,
+		DescriptionAR: descAR, DescriptionEN: descEN,
+		IsActive: row.IsActive, Position: int(row.Position),
+		Dimensions: dims, Capabilities: caps, Revision: row.TypeRevision,
+	}, true, nil
 }

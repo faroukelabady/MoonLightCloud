@@ -53,8 +53,9 @@ func TestV32To33PreservesExistingRows(t *testing.T) {
 		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
 	}
 	// Every pre-existing business value preserved byte-identically.
+	// Phase 17-R0 00035 retires catalog_products.sku (ADR-0049): the
+	// value is deliberately dropped and asserted retired below.
 	queries := map[string]string{
-		"product sku":     `SELECT sku FROM catalog_products WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
 		"product rev":     `SELECT source_revision FROM catalog_products WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
 		"product store":   `SELECT COALESCE(store_id::text,'') FROM catalog_products WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
 		"inventory":       `SELECT stock_quantity FROM catalog_product_inventory WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
@@ -65,7 +66,7 @@ func TestV32To33PreservesExistingRows(t *testing.T) {
 		"admin command":   `SELECT command_type FROM catalog_admin_commands WHERE id='aaaaaaaa-0000-4000-8000-0000000000c1'`,
 	}
 	want := map[string]string{
-		"product sku": "ML-001", "product rev": "4", "product store": "",
+		"product rev": "4", "product store": "",
 		"inventory": "5", "policy rev": "2",
 		"sale total": "10000", "sale line total": "10000",
 		"tag slug": "horse", "admin command": "catalog.product.details.update.v1",

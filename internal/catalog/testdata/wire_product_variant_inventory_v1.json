@@ -1,0 +1,12 @@
+{
+  "variant_id": "77777777-0000-4000-8000-000000000002",
+  "product_id": "77777777-0000-4000-8000-000000000001",
+  "sku": "NEF-BLU-TRA",
+  "stock_quantity": 4,
+  "inventory_revision": 1,
+  "ready": true,
+  "sell_online": false,
+  "online_allocation_limit": null,
+  "policy_revision": 1,
+  "catalog_revision": 1
+}

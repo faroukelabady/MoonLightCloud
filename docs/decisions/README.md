@@ -51,6 +51,7 @@ Concise, irreversible-or-important choices only.
 - [0047](0047-product-options-frame-configurations.md) — product options (frame configurations) projection & publication (15)
 - [0048](0048-cloud-admin-catalog-control.md) — Cloud admin catalog control plane (16)
 - [0049](0049-product-physical-variant-architecture.md) — product & physical variant architecture (17)
+- [0050](0050-product-type-projection-admin.md) — ProductType projection & admin control (17-R2)
 
 ## Phase numbering gaps
 

@@ -23,14 +23,22 @@
 	} = $props();
 
 	// Stable reason codes are the API contract; bilingual labels are display only.
+	// Phase 17-R0 retired the product-level CATALOG_MISSING_SKU (Product
+	// has no SKU authority anywhere — ADR-0049); VARIANT_MISSING_SKU is
+	// the single SKU health code.
 	const labels: Record<string, { ar: string; en: string }> = {
-		CATALOG_MISSING_SKU: { ar: 'بدون رقم SKU', en: 'Missing SKU' },
 		CATALOG_MISSING_CATEGORY: { ar: 'بدون فئة', en: 'Missing Category' },
 		AVAILABILITY_NOT_READY: { ar: 'التوافر غير جاهز', en: 'Availability not ready' },
 		COMMERCE_MAPPING_MISSING: { ar: 'غير مربوط', en: 'Unmapped' },
 		COMMERCE_SYNC_AMBIGUOUS: { ar: 'يلحق الانتباه للمزامنة', en: 'Synchronization attention' },
 		COMMERCE_STORE_CONFLICT: { ar: 'تعارض ملكية المتجر', en: 'Store ownership conflict' },
-		CATEGORY_ONLINE_DISABLED: { ar: 'مغلق عبر الإنترنت بسياسة الفئة', en: 'Disabled online by Category' }
+		CATEGORY_ONLINE_DISABLED: { ar: 'مغلق عبر الإنترنت بسياسة الفئة', en: 'Disabled online by Category' },
+		PRODUCT_NO_ACTIVE_VARIANTS: { ar: 'بدون متغيرات نشطة', en: 'No active variants' },
+		PRODUCT_NO_SELLABLE_VARIANT: { ar: 'بدون متغير قابل للبيع', en: 'No sellable variant' },
+		VARIANT_DUPLICATE_COMBINATION: { ar: 'تكرار تركيبة المتغير', en: 'Duplicate variant combination' },
+		VARIANT_MISSING_SKU: { ar: 'المتغير بدون رقم SKU', en: 'Variant missing SKU' },
+		VARIANT_MAPPING_MISSING: { ar: 'المتغير غير مربوط', en: 'Variant unmapped' },
+		VARIANT_INTENTIONALLY_OFFLINE: { ar: 'المتغير مغلق عمدًا', en: 'Variant intentionally offline' }
 	};
 	function label(code: string): string {
 		const l = labels[code];

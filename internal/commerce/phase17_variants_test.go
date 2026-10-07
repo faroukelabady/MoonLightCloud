@@ -321,7 +321,7 @@ func TestPhase17AvailabilityVariantAwarePublish(t *testing.T) {
 	limit := 3
 	reader := &p17Reader{
 		product: catalog.Product{ProductHeader: catalog.ProductHeader{
-			ID: "p1", SKU: "PAP-1", IsActive: true, Revision: 12,
+			ID: "p1", IsActive: true, Revision: 12,
 		}},
 		policy: catalog.ProductSalesPolicy{ProductID: "p1", SellOnline: true, Revision: 4},
 		onlinePolicy: catalog.ProductOnlinePolicy{

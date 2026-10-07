@@ -1,0 +1,35 @@
+{
+  "product_id": "77777777-0000-4000-8000-000000000001",
+  "product_type_id": "10000000-0000-4000-8000-000000000001",
+  "name": "نفرتيتي",
+  "description": "Nefertiti fixture",
+  "translations": [
+    {
+      "locale": "ar",
+      "name": "نفرتيتي"
+    },
+    {
+      "locale": "en",
+      "name": "Nefertiti"
+    }
+  ],
+  "prices": [
+    {
+      "currency": "EGP",
+      "price_cents": 65000,
+      "cost_cents": 32000
+    },
+    {
+      "currency": "USD",
+      "price_cents": 1250,
+      "cost_cents": 615
+    }
+  ],
+  "top_category_id": "00000000-0000-4000-8000-000000000101",
+  "subcategory_ids": [],
+  "tag_ids": [],
+  "width_cm": 60,
+  "height_cm": 80,
+  "is_active": true,
+  "catalog_revision": 1
+}

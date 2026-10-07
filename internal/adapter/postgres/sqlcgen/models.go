@@ -92,6 +92,9 @@ type CatalogAdminCommand struct {
 	Status           string             `json:"status"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	TargetKind       string             `json:"target_kind"`
+	RequestedKey     pgtype.Text        `json:"requested_key"`
+	ResultEntityID   pgtype.Text        `json:"result_entity_id"`
 }
 
 type CatalogAdminCommandTarget struct {
@@ -139,7 +142,6 @@ type CatalogCategoryEdge struct {
 
 type CatalogProduct struct {
 	ProductID             pgtype.UUID        `json:"product_id"`
-	Sku                   string             `json:"sku"`
 	Name                  string             `json:"name"`
 	Description           pgtype.Text        `json:"description"`
 	TopCategoryID         pgtype.UUID        `json:"top_category_id"`
@@ -154,6 +156,7 @@ type CatalogProduct struct {
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
 	StoreID               pgtype.UUID        `json:"store_id"`
 	ConfigurationRevision int64              `json:"configuration_revision"`
+	ProductTypeID         pgtype.UUID        `json:"product_type_id"`
 }
 
 type CatalogProductConfiguration struct {
@@ -238,6 +241,35 @@ type CatalogProductTranslation struct {
 	Locale      string      `json:"locale"`
 	Name        string      `json:"name"`
 	Description pgtype.Text `json:"description"`
+}
+
+type CatalogProductType struct {
+	TypeID            pgtype.UUID        `json:"type_id"`
+	Code              string             `json:"code"`
+	NameAr            string             `json:"name_ar"`
+	NameEn            string             `json:"name_en"`
+	DescriptionAr     pgtype.Text        `json:"description_ar"`
+	DescriptionEn     pgtype.Text        `json:"description_en"`
+	IsActive          bool               `json:"is_active"`
+	Position          int32              `json:"position"`
+	TypeRevision      int64              `json:"type_revision"`
+	SourceEventID     pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
+	SourcePayloadHash []byte             `json:"source_payload_hash"`
+	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+}
+
+type CatalogProductTypeCapability struct {
+	TypeID         pgtype.UUID `json:"type_id"`
+	CapabilityCode string      `json:"capability_code"`
+}
+
+type CatalogProductTypeVariantDimension struct {
+	TypeID         pgtype.UUID `json:"type_id"`
+	DefinitionCode string      `json:"definition_code"`
+	Position       int32       `json:"position"`
 }
 
 type CatalogProductVariant struct {
@@ -759,22 +791,30 @@ type SaleLineClassificationsProjection struct {
 }
 
 type SaleLinesProjection struct {
-	SaleID         pgtype.UUID `json:"sale_id"`
-	SaleItemID     pgtype.UUID `json:"sale_item_id"`
-	Position       int32       `json:"position"`
-	ProductID      pgtype.UUID `json:"product_id"`
-	VariantID      pgtype.UUID `json:"variant_id"`
-	Sku            string      `json:"sku"`
-	ProductName    string      `json:"product_name"`
-	WidthCm        pgtype.Int4 `json:"width_cm"`
-	HeightCm       pgtype.Int4 `json:"height_cm"`
-	Quantity       int32       `json:"quantity"`
-	UnitPriceMinor int64       `json:"unit_price_minor"`
-	UnitCurrency   string      `json:"unit_currency"`
-	CostMinor      pgtype.Int8 `json:"cost_minor"`
-	CostCurrency   pgtype.Text `json:"cost_currency"`
-	LineTotalMinor int64       `json:"line_total_minor"`
-	LineCurrency   string      `json:"line_currency"`
+	SaleID               pgtype.UUID `json:"sale_id"`
+	SaleItemID           pgtype.UUID `json:"sale_item_id"`
+	Position             int32       `json:"position"`
+	ProductID            pgtype.UUID `json:"product_id"`
+	VariantID            pgtype.UUID `json:"variant_id"`
+	Sku                  string      `json:"sku"`
+	ProductName          string      `json:"product_name"`
+	WidthCm              pgtype.Int4 `json:"width_cm"`
+	HeightCm             pgtype.Int4 `json:"height_cm"`
+	Quantity             int32       `json:"quantity"`
+	UnitPriceMinor       int64       `json:"unit_price_minor"`
+	UnitCurrency         string      `json:"unit_currency"`
+	CostMinor            pgtype.Int8 `json:"cost_minor"`
+	CostCurrency         pgtype.Text `json:"cost_currency"`
+	LineTotalMinor       int64       `json:"line_total_minor"`
+	LineCurrency         string      `json:"line_currency"`
+	VariantSku           pgtype.Text `json:"variant_sku"`
+	VariantAttributes    []byte      `json:"variant_attributes"`
+	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
+	VariantPriceUsdCents pgtype.Int8 `json:"variant_price_usd_cents"`
+	ProductTypeID        pgtype.Text `json:"product_type_id"`
+	ProductTypeCode      pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr    pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn    pgtype.Text `json:"product_type_name_en"`
 }
 
 type SalePaymentsProjection struct {

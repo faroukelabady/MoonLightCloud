@@ -103,7 +103,7 @@ func testR3RealUpgrade(t *testing.T) {
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(806), catalog.ProcessorCategoryProjectionV1)
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, r2EventID(807), catalog.ProcessorProductProjectionV1)
 	var legacyBefore string
-	if err = pool.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyBefore); err != nil {
 		t.Fatal(err)
 	}
 	// A real pre-fix foreign default block must be distinguishable from
@@ -230,7 +230,7 @@ func testR3RealUpgrade(t *testing.T) {
 	}
 
 	var legacyAfter string
-	if err = restarted.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
+	if err = restarted.QueryRow(ctx, `SELECT (to_jsonb(p) - 'configuration_revision' - 'sku')::text FROM catalog_products p WHERE product_id=$1`, legacyProduct).Scan(&legacyAfter); err != nil || legacyBefore != legacyAfter {
 		t.Fatalf("legacy current state changed: %v", err)
 	}
 	if err = restarted.QueryRow(ctx, `SELECT count(*) FROM catalog_category_edges WHERE parent_id=$1 AND child_id=$2`, root, legacyChild).Scan(&rawRefs); err != nil || rawRefs != 1 {
@@ -377,7 +377,10 @@ func r3HistoricalState(t *testing.T, f *scopeFixture) string {
 	state := map[string]string{}
 	for _, table := range []string{"sales_projection", "sale_lines_projection", "sale_line_classifications_projection", "sale_item_tag_snapshots", "return_refund_projection", "return_refund_lines_projection", "return_refund_payments_projection"} {
 		var raw string
-		if err := f.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]')::text FROM `+table+` t`).Scan(&raw); err != nil {
+		// 00036 appends the nullable sale-line variant snapshot columns
+		// (Phase 17-R0): they are schema additions, not rewrites, so both
+		// sides strip them and compare every pre-existing value exactly.
+		if err := f.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'variant_sku' - 'variant_attributes' - 'variant_price_egp_cents' - 'variant_price_usd_cents' ORDER BY to_jsonb(t)::text),'[]')::text FROM `+table+` t`).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
 		state[table] = raw

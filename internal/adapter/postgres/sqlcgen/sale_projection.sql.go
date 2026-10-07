@@ -125,6 +125,83 @@ func (q *Queries) InsertSaleLine(ctx context.Context, arg InsertSaleLineParams) 
 	return err
 }
 
+const insertSaleLineWithVariantSnapshot = `-- name: InsertSaleLineWithVariantSnapshot :exec
+INSERT INTO sale_lines_projection (
+    sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
+    width_cm, height_cm, quantity,
+    unit_price_minor, unit_currency, cost_minor, cost_currency,
+    line_total_minor, line_currency,
+    variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
+    product_type_id, product_type_code, product_type_name_ar, product_type_name_en
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21, $22, $23, $24
+)
+ON CONFLICT (sale_id, sale_item_id) DO NOTHING
+`
+
+type InsertSaleLineWithVariantSnapshotParams struct {
+	SaleID               pgtype.UUID `json:"sale_id"`
+	SaleItemID           pgtype.UUID `json:"sale_item_id"`
+	Position             int32       `json:"position"`
+	ProductID            pgtype.UUID `json:"product_id"`
+	VariantID            pgtype.UUID `json:"variant_id"`
+	Sku                  string      `json:"sku"`
+	ProductName          string      `json:"product_name"`
+	WidthCm              pgtype.Int4 `json:"width_cm"`
+	HeightCm             pgtype.Int4 `json:"height_cm"`
+	Quantity             int32       `json:"quantity"`
+	UnitPriceMinor       int64       `json:"unit_price_minor"`
+	UnitCurrency         string      `json:"unit_currency"`
+	CostMinor            pgtype.Int8 `json:"cost_minor"`
+	CostCurrency         pgtype.Text `json:"cost_currency"`
+	LineTotalMinor       int64       `json:"line_total_minor"`
+	LineCurrency         string      `json:"line_currency"`
+	VariantSku           pgtype.Text `json:"variant_sku"`
+	VariantAttributes    []byte      `json:"variant_attributes"`
+	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
+	VariantPriceUsdCents pgtype.Int8 `json:"variant_price_usd_cents"`
+	ProductTypeID        pgtype.Text `json:"product_type_id"`
+	ProductTypeCode      pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr    pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn    pgtype.Text `json:"product_type_name_en"`
+}
+
+// sale.finalized.v3 (00036): one immutable line INCLUDING its frozen
+// ProductVariant snapshot (variant SKU, option attribute labels, sale-time
+// pricing override). Sourced ONLY from the event snapshot — never joined
+// from current catalog state, never refreshed. Lines without variant data
+// (and every v1/v2 line) stay truthful NULL via InsertSaleLine.
+func (q *Queries) InsertSaleLineWithVariantSnapshot(ctx context.Context, arg InsertSaleLineWithVariantSnapshotParams) error {
+	_, err := q.db.Exec(ctx, insertSaleLineWithVariantSnapshot,
+		arg.SaleID,
+		arg.SaleItemID,
+		arg.Position,
+		arg.ProductID,
+		arg.VariantID,
+		arg.Sku,
+		arg.ProductName,
+		arg.WidthCm,
+		arg.HeightCm,
+		arg.Quantity,
+		arg.UnitPriceMinor,
+		arg.UnitCurrency,
+		arg.CostMinor,
+		arg.CostCurrency,
+		arg.LineTotalMinor,
+		arg.LineCurrency,
+		arg.VariantSku,
+		arg.VariantAttributes,
+		arg.VariantPriceEgpCents,
+		arg.VariantPriceUsdCents,
+		arg.ProductTypeID,
+		arg.ProductTypeCode,
+		arg.ProductTypeNameAr,
+		arg.ProductTypeNameEn,
+	)
+	return err
+}
+
 const insertSalePayment = `-- name: InsertSalePayment :exec
 INSERT INTO sale_payments_projection (
     sale_id, position, method, amount_minor, amount_currency,

@@ -165,6 +165,9 @@ func serve(args []string) error {
 	if a.VariantInventoryProjector != nil {
 		go a.VariantInventoryProjector.Run(projCtx)
 	}
+	if a.ProductTypeProjector != nil {
+		go a.ProductTypeProjector.Run(projCtx)
+	}
 	if a.OrderProcessor != nil {
 		go a.OrderProcessor.Run(projCtx)
 	}
@@ -296,6 +299,8 @@ func dashboardCmd(args []string) error {
 func allProjectionProcessors() []string {
 	return []string{
 		sale.ProcessorSaleProjectionV1,
+		sale.ProcessorSaleProjectionV2,
+		sale.ProcessorSaleProjectionV3,
 		returnrefund.ProcessorReturnProjectionV1,
 		catalog.ProcessorCategoryProjectionV1,
 		catalog.ProcessorTagProjectionV1,
@@ -305,6 +310,7 @@ func allProjectionProcessors() []string {
 		catalog.ProcessorProductConfigurationProjectionV1,
 		catalog.ProcessorProductVariantProjectionV1,
 		catalog.ProcessorProductVariantInventoryProjectionV1,
+		catalog.ProcessorProductTypeProjectionV1,
 	}
 }
 

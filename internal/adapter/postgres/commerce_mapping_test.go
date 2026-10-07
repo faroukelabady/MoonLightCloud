@@ -205,6 +205,19 @@ func commerceFixture(t *testing.T, env *saleEnv, base int, prefix, sku string, s
 	ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
 		inventoryPayload(productID, 1, stock))
 	projectCatalogOnce(t, env, ie)
+	// Phase 17-R0 (ADR-0049): SKU authority lives on ProductVariant —
+	// one live variant carrying the SKU proves the provider-facing
+	// product SKU is DERIVED from variant SKU ownership (the product
+	// carries none; catalog_products.sku was retired by 00035).
+	vid := commerceIDs(t, base+3000, "variant")["variant"]
+	ve := commerceIDs(t, base+3100, "variant-event")["variant-event"]
+	ingestCatalog(t, env, ve, catalog.EventProductVariantSnapshotV1, "2026-09-20T12:03:00Z",
+		variantPayload(vid, productID, sku, true, false, "default", []any{variantAttr("color", "blue", 0)}, 1))
+	projectCatalogOnce(t, env, ve)
+	vie := commerceIDs(t, base+3200, "variant-inventory")["variant-inventory"]
+	ingestCatalog(t, env, vie, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:04:00Z",
+		variantInventoryPayload(vid, productID, sku, stock, 1, true, nil))
+	projectCatalogOnce(t, env, vie)
 	return productID
 }
 
@@ -229,16 +242,28 @@ func TestCommerceSyncEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if result.Outcome != commerce.SyncProduct || !result.MappingCreated || !result.InventoryUpdated {
+	if result.Outcome != commerce.SyncProduct || !result.MappingCreated {
 		t.Fatalf("create: %+v", result)
+	}
+	// Phase 17: with variants present stock converges per variant — the
+	// product-level pool push is superseded (SKU/stock authority lives on
+	// ProductVariant).
+	if result.VariantsSynced != 1 || result.VariantMappingsCreated != 1 || result.VariantInventoryUpdated != 1 {
+		t.Fatalf("variant convergence: %+v", result)
 	}
 	upserts := provider.Upserts()
 	if len(upserts) != 1 {
 		t.Fatalf("one upsert: %d", len(upserts))
 	}
 	req := upserts[0]
+	// Phase 17-R0: the provider-facing product SKU is DERIVED from the
+	// product's variant SKU (Product has no SKU authority anywhere —
+	// ADR-0049).
 	if req.Product.SKU != "PAP-CE2E" || !req.Published || req.CatalogRevision != 1 || req.PolicyRevision != 1 {
 		t.Fatalf("request: %+v", req.Product)
+	}
+	if len(req.Product.Variants) != 1 || req.Product.Variants[0].SKU != "PAP-CE2E" {
+		t.Fatalf("variants: %+v", req.Product.Variants)
 	}
 	if len(req.Product.Prices) != 2 || req.Product.Prices[0].AmountMinor != 65000 {
 		t.Fatalf("prices: %+v", req.Product.Prices)
@@ -252,12 +277,14 @@ func TestCommerceSyncEndToEnd(t *testing.T) {
 	if req.Product.WidthCM == nil || *req.Product.WidthCM != 70 {
 		t.Fatalf("dimensions: %+v", req.Product)
 	}
-	inventories := provider.Inventories()
-	if len(inventories) != 1 || inventories[0].AvailableQuantity != 10 || !inventories[0].Ready {
-		t.Fatalf("availability: %+v", inventories)
+	// Per-variant inventory (never the product pool): exactly one
+	// variant inventory at its own derived availability 10.
+	vInventories := provider.VariantInventories()
+	if len(vInventories) != 1 || vInventories[0].AvailableQuantity != 10 || !vInventories[0].Ready {
+		t.Fatalf("variant availability: %+v", vInventories)
 	}
-	if inventories[0].InventoryRevision != 1 || inventories[0].ExternalProductID != result.ExternalProductID {
-		t.Fatalf("inventory linkage: %+v", inventories[0])
+	if vInventories[0].InventoryRevision != 1 || vInventories[0].ExternalProductID != result.ExternalProductID {
+		t.Fatalf("variant inventory linkage: %+v", vInventories[0])
 	}
 
 	// Idempotent repeat: same keys, one remote product, mapping reused.
@@ -500,7 +527,9 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	rank := map[string]int{
 		catalog.EventCategorySnapshotV1: 0, catalog.EventTagSnapshotV1: 1,
 		catalog.EventProductSnapshotV1: 2, catalog.EventProductSalesPolicySnapshotV1: 3,
-		catalog.EventInventoryProductSnapshotV1: 4,
+		catalog.EventInventoryProductSnapshotV1:        4,
+		catalog.EventProductVariantSnapshotV1:          5,
+		catalog.EventInventoryProductVariantSnapshotV1: 6,
 	}
 	sort.SliceStable(order, func(i, j int) bool { return rank[order[i].typ] < rank[order[j].typ] })
 	for _, entry := range order {
@@ -518,6 +547,10 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 			res, err = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
 		case catalog.EventInventoryProductSnapshotV1:
 			res, err = store.ProjectProductInventory(ctx, rec, time.Now())
+		case catalog.EventProductVariantSnapshotV1:
+			res, err = store.ProjectProductVariant(ctx, rec, time.Now())
+		case catalog.EventInventoryProductVariantSnapshotV1:
+			res, err = store.ProjectProductVariantInventory(ctx, rec, time.Now())
 		default:
 			res, err = store.ProjectProduct(ctx, rec, time.Now())
 		}

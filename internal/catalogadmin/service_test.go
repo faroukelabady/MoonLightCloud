@@ -17,17 +17,19 @@ func errFakeNotFoundValue() error {
 }
 
 type fakeStore struct {
-	commands map[string]CommandView
-	targets  map[string][]TargetView
-	owner    map[string]string
-	rev      map[string]int64
-	bound    map[string][]BoundDevice
-	capable  map[string]bool
+	commands  map[string]CommandView
+	targets   map[string][]TargetView
+	owner     map[string]string
+	rev       map[string]int64
+	bound     map[string][]BoundDevice
+	capable   map[string]bool
+	resultSet [][2]string
 }
 
 func (s *fakeStore) CreateCatalogAdminCommand(_ context.Context, cmd NewCommand) (CommandView, error) {
 	view := CommandView{ID: cmd.ID, StoreID: cmd.StoreID, Type: cmd.Type, Version: cmd.Version,
-		EntityID: cmd.EntityID, PayloadHash: cmd.PayloadHash, ExpectedRevision: cmd.ExpectedRevision,
+		EntityID: cmd.EntityID, TargetKind: cmd.TargetKind, RequestedKey: cmd.RequestedKey,
+		PayloadHash: cmd.PayloadHash, ExpectedRevision: cmd.ExpectedRevision,
 		Actor: cmd.Actor, Status: CommandPending}
 	s.commands[cmd.ID] = view
 	return view, nil
@@ -176,6 +178,30 @@ func (s *fakeStore) AdminProductVariants(_ context.Context, _, _ string) ([]Admi
 
 func (s *fakeStore) AdminProductVariant(_ context.Context, _, _ string) (AdminProductVariant, error) {
 	return AdminProductVariant{Attributes: []AdminProductVariantAttribute{}}, nil
+}
+
+func (s *fakeStore) AdminProductTypeList(_ context.Context, _ string) ([]AdminProductType, error) {
+	return nil, nil
+}
+
+func (s *fakeStore) AdminProductType(_ context.Context, _, _ string) (AdminProductType, error) {
+	return AdminProductType{}, errFakeNotFound()
+}
+
+func (s *fakeStore) SetCommandResultEntity(_ context.Context, targetID, entityID string) error {
+	s.resultSet = append(s.resultSet, [2]string{targetID, entityID})
+	for cmdID, list := range s.targets {
+		for _, t := range list {
+			if t.ID == targetID {
+				if view, ok := s.commands[cmdID]; ok && view.ResultEntityID == "" {
+					view.ResultEntityID = entityID
+					s.commands[cmdID] = view
+				}
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 type fakeDevices struct {
@@ -426,5 +452,105 @@ func TestNoopConfigurationsPreservesExactMoneyAndLabels(t *testing.T) {
 	store.rows[0].Position = 1
 	if svc.noopProjected(context.Background(), view) {
 		t.Fatal("different position cannot converge")
+	}
+}
+
+// TestServiceCreateCarriesNoFakeEntity proves the R3 closure at the
+// service boundary: a create stores target_kind=create with the absent
+// entity marker (""), the requested code separately, and never a
+// placeholder business UUID.
+func TestServiceCreateCarriesNoFakeEntity(t *testing.T) {
+	svc, store, devices, storeID, _ := testService()
+	ctx := context.Background()
+	dev := uuid.NewString()
+	devices.binding[dev] = storeID
+	devices.active[dev] = true
+	store.capable[dev] = true
+	store.bound[storeID] = []BoundDevice{{DeviceID: dev}}
+
+	payload, _ := json.Marshal(map[string]any{
+		"code": "ledger", "name_ar": "دفتر", "name_en": "Ledger",
+		"dimensions": []any{}, "capabilities": []any{},
+		"expected_type_revision": float64(0),
+	})
+	view, err := svc.Create(ctx, "op", storeID, TypeProductTypeCreateV1, "", 0, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TargetKind != TargetKindCreate {
+		t.Fatalf("target kind: %q", view.TargetKind)
+	}
+	if view.EntityID != "" {
+		t.Fatalf("create must carry no business entity, got %q", view.EntityID)
+	}
+	if view.RequestedKey != "ledger" {
+		t.Fatalf("requested key: %q", view.RequestedKey)
+	}
+	if view.ResultEntityID != "" {
+		t.Fatalf("unapplied create must carry no result identity, got %q", view.ResultEntityID)
+	}
+	if _, err := uuid.Parse(view.EntityID); view.EntityID != "" && err != nil {
+		t.Fatalf("entity marker must never look like a faked UUID: %q", view.EntityID)
+	}
+
+	// A placeholder UUID is rejected for creates (C01).
+	if _, err := svc.Create(ctx, "op", storeID, TypeProductTypeCreateV1, uuid.NewString(), 0, payload); err == nil {
+		t.Fatal("placeholder entity UUID must be rejected for creates")
+	}
+	// Bad codes are rejected at creation (C06).
+	bad, _ := json.Marshal(map[string]any{"code": "BAD CODE", "expected_type_revision": float64(0)})
+	if _, err := svc.Create(ctx, "op", storeID, TypeProductTypeCreateV1, "", 0, bad); err == nil {
+		t.Fatal("bad code must be rejected at creation")
+	}
+}
+
+// TestServiceCreateConvergesOnResultID proves C04: APPLIED alone never
+// converges a create; convergence evaluates the Retail-minted result
+// identity (ownership + revision on the ACTUAL type, never the marker).
+func TestServiceCreateConvergesOnResultID(t *testing.T) {
+	svc, store, devices, storeID, _ := testService()
+	ctx := context.Background()
+	dev := uuid.NewString()
+	devices.binding[dev] = storeID
+	devices.active[dev] = true
+	store.capable[dev] = true
+	store.bound[storeID] = []BoundDevice{{DeviceID: dev}}
+
+	payload, _ := json.Marshal(map[string]any{
+		"code": "ledger", "name_ar": "دفتر", "name_en": "Ledger",
+		"dimensions": []any{}, "capabilities": []any{},
+		"expected_type_revision": float64(0),
+	})
+	view, err := svc.Create(ctx, "op", storeID, TypeProductTypeCreateV1, "", 0, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realID := uuid.NewString()
+	targetID := view.Targets[0].ID
+	if err := svc.ReportOutcome(ctx, dev, targetID, TargetApplied, CodeApplied, realID, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.resultSet) != 1 || store.resultSet[0][1] != realID {
+		t.Fatalf("result identity must persist on the command: %+v", store.resultSet)
+	}
+	got, err := svc.Get(ctx, storeID, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ResultEntityID != realID {
+		t.Fatalf("history must expose the actual result identity: %+v", got)
+	}
+	if got.Aggregate != AggregateApplied || got.Converged {
+		t.Fatalf("applied without projection must not converge: %+v", got.Aggregate)
+	}
+	// Projection of the ACTUAL type converges (ownership + revision).
+	store.owner[realID] = storeID
+	store.rev[realID] = 1
+	got, err = svc.Get(ctx, storeID, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Aggregate != AggregateConverged || !got.Converged {
+		t.Fatalf("must converge on the result identity: %+v %v", got.Aggregate, got.Converged)
 	}
 }

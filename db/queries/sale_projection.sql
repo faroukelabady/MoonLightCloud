@@ -38,6 +38,25 @@ INSERT INTO sale_lines_projection (
 )
 ON CONFLICT (sale_id, sale_item_id) DO NOTHING;
 
+-- name: InsertSaleLineWithVariantSnapshot :exec
+-- sale.finalized.v3 (00036): one immutable line INCLUDING its frozen
+-- ProductVariant snapshot (variant SKU, option attribute labels, sale-time
+-- pricing override). Sourced ONLY from the event snapshot — never joined
+-- from current catalog state, never refreshed. Lines without variant data
+-- (and every v1/v2 line) stay truthful NULL via InsertSaleLine.
+INSERT INTO sale_lines_projection (
+    sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
+    width_cm, height_cm, quantity,
+    unit_price_minor, unit_currency, cost_minor, cost_currency,
+    line_total_minor, line_currency,
+    variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
+    product_type_id, product_type_code, product_type_name_ar, product_type_name_en
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21, $22, $23, $24
+)
+ON CONFLICT (sale_id, sale_item_id) DO NOTHING;
+
 -- name: InsertSalePayment :exec
 INSERT INTO sale_payments_projection (
     sale_id, position, method, amount_minor, amount_currency,

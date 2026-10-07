@@ -47,7 +47,10 @@ func TestR3AsyncReceiptMigrationPreservation(t *testing.T) {
 	}
 	type frozen struct{ query, value string }
 	all := []frozen{}
-	rows, e := conn.QueryContext(ctx, `SELECT table_name,string_agg(quote_ident(column_name),',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='public' AND table_name<>'goose_db_version' GROUP BY table_name ORDER BY table_name`)
+	// Phase 17-R0 00035 retires catalog_products.sku (ADR-0049): the
+	// frozen v30 column set excludes the retired column so the 30→36→30
+	// cycle compares every remaining business value byte-identically.
+	rows, e := conn.QueryContext(ctx, `SELECT table_name,string_agg(quote_ident(column_name),',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='public' AND table_name<>'goose_db_version' AND NOT (table_name='catalog_products' AND column_name='sku') GROUP BY table_name ORDER BY table_name`)
 	if e != nil {
 		t.Fatal(e)
 	}

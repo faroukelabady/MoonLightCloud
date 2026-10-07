@@ -494,8 +494,8 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 	// p4: online-eligible, one live variant with stock but no mapping.
 	for i := 1; i <= 4; i++ {
 		p := fmt.Sprintf("f0000000-0000-4000-8000-00000000000%d", 2+i)
-		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, sku, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', 'SKU-%d', 'p%d', 'f0000000-0000-4000-8000-000000000002', true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, i, i, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+			VALUES ('%s', 'p%d', 'f0000000-0000-4000-8000-000000000002', true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, i, devID))
 		exec(fmt.Sprintf(`INSERT INTO catalog_product_sales_policies (product_id, sell_offline, sell_online, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 			VALUES ('%s', true, true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, devID))
 	}
@@ -539,12 +539,21 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 		}
 	}
 
-	// Detail rows carry variant/product identity only.
+	// Product-level detail rows carry NO sku (Phase 17-R0: product SKU
+	// retired everywhere — row identity is the product); variant-level
+	// rows keep their variant SKU.
 	detail, err := devices.CatalogHealthDetailRows(context.Background(), "", "", "PRODUCT_NO_ACTIVE_VARIANTS", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail) != 2 || detail[0].SKU != "SKU-1" {
+	if len(detail) != 2 || detail[0].SKU != "" || detail[0].Name != "p1" {
 		t.Fatalf("detail: %+v", detail)
+	}
+	variantDetail, err := devices.CatalogHealthDetailRows(context.Background(), "", "", "VARIANT_INTENTIONALLY_OFFLINE", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variantDetail) != 1 || variantDetail[0].SKU != "V-3" {
+		t.Fatalf("variant detail must carry the variant SKU: %+v", variantDetail)
 	}
 }

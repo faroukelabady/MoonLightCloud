@@ -222,6 +222,48 @@ func (q *Queries) PendingSaleV2Events(ctx context.Context, arg PendingSaleV2Even
 	return items, nil
 }
 
+const pendingSaleV3Events = `-- name: PendingSaleV3Events :many
+SELECT e.event_id
+FROM sync_events e
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = $1
+WHERE e.event_type = 'sale.finalized.v3'
+  AND (p.event_id IS NULL
+       OR p.status = 'pending'
+       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
+ORDER BY e.received_at
+LIMIT $2
+`
+
+type PendingSaleV3EventsParams struct {
+	Processor string `json:"processor"`
+	Limit     int32  `json:"limit"`
+}
+
+// Durable discovery for sale.finalized.v3 under the v3 processor (Phase
+// 17-R0: per-line frozen variant snapshots). v1/v2 rows are never returned
+// here; their processors own them independently. All three versions stay
+// fully supported.
+func (q *Queries) PendingSaleV3Events(ctx context.Context, arg PendingSaleV3EventsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, pendingSaleV3Events, arg.Processor, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var event_id pgtype.UUID
+		if err := rows.Scan(&event_id); err != nil {
+			return nil, err
+		}
+		items = append(items, event_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const processingStatus = `-- name: ProcessingStatus :many
 SELECT status, count(*)::bigint AS total,
     COALESCE(max(last_error_code), '')::text AS err, max(updated_at)::timestamptz AS at

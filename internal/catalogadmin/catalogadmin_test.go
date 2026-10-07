@@ -16,8 +16,19 @@ func TestKnownTypesHaveNoGenericPatch(t *testing.T) {
 		if !strings.HasSuffix(typ, ".v1") {
 			t.Fatalf("%s must be versioned", typ)
 		}
-		if EntityKeyOf(typ) == "" || ExpectedRevisionKeyOf(typ) == "" {
-			t.Fatalf("%s must map entity + revision keys", typ)
+		if ExpectedRevisionKeyOf(typ) == "" {
+			t.Fatalf("%s must map a revision key", typ)
+		}
+		if typ == TypeProductTypeCreateV1 {
+			// R3 closure: creates address a not-yet-existing entity, so
+			// they map NO entity key (the requested key is payload code).
+			if EntityKeyOf(typ) != "" {
+				t.Fatalf("%s must not map an entity key", typ)
+			}
+			continue
+		}
+		if EntityKeyOf(typ) == "" {
+			t.Fatalf("%s must map an entity key", typ)
 		}
 	}
 }

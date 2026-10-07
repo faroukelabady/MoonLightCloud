@@ -10,9 +10,11 @@ source events.
 moonlight-cloud projection status
 ```
 
-Shows per-status counts for `sale_projection.v1` and
-`return_refund_projection.v1`, oldest pending age, and the latest error
-(code + bounded safe message) per processor. No dashboard required.
+Shows per-status counts for the sale processors (`sale_projection.v1`,
+`sale_projection.v2`, `sale_projection.v3` — one per frozen sale event
+version, all fully supported) and `return_refund_projection.v1`, oldest
+pending age, and the latest error (code + bounded safe message) per
+processor. No dashboard required.
 
 ## Retry one event
 
@@ -20,8 +22,8 @@ Shows per-status counts for `sale_projection.v1` and
 moonlight-cloud projection retry <event-id> [processor]
 ```
 
-Processor defaults to `sale_projection.v1`; pass
-`return_refund_projection.v1` for returns.
+Processor defaults to `sale_projection.v1`; pass `sale_projection.v2`,
+`sale_projection.v3`, or `return_refund_projection.v1` explicitly.
 
 Returns a `retry`/`blocked` event to `pending` with `next_attempt_at = NULL`
 (immediately discoverable on the next scan). The source event is untouched.
@@ -218,13 +220,15 @@ authoritative and reprocessing reproduces identical rows (tested by
    DELETE FROM return_refund_projection; -- return lines + payments
    DELETE FROM sales_projection; -- sale lines/payments/classifications
    ```
-4. Reset BOTH processing identities (resetting only `sale_projection.v1`
-   leaves Return events marked `processed` while their projection rows are
-   gone — reports would silently lose refunds):
+4. Reset ALL processing identities (resetting only `sale_projection.v1`
+   leaves v2/v3 Sale events — and Return events — marked `processed`
+   while their projection rows are gone; reports would silently lose
+   them):
    ```sql
    UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
      attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-     WHERE processor IN ('sale_projection.v1', 'return_refund_projection.v1');
+     WHERE processor IN ('sale_projection.v1', 'sale_projection.v2',
+                         'sale_projection.v3', 'return_refund_projection.v1');
    ```
 5. Replay the Sale processor first (restart projector / wait for scan),
    then allow the dependent Return processor to replay. Returns whose

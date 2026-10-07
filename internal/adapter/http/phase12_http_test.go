@@ -110,7 +110,7 @@ func TestPhase12HTTPValidationMatrix(t *testing.T) {
 	for _, tc := range []testCase{
 		tags("/api/v1/dashboard/tags?period=today&limit=10"),
 		orders("/api/v1/dashboard/orders/summary?period=today&provider_key=shopify-main"),
-		health("/api/v1/dashboard/catalog-health?limit=10&provider_key=woo-main&reason=CATALOG_MISSING_SKU"),
+		health("/api/v1/dashboard/catalog-health?limit=10&provider_key=woo-main&reason=VARIANT_MISSING_SKU"),
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.url, nil)
 		rec := httptest.NewRecorder()

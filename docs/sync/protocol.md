@@ -57,20 +57,32 @@ Field rules:
   Supported business events: `sale.finalized.v1`, `sale.finalized.v2`
   (v1 stays accepted with unknown tag capture; v2 projects historical
   tags idempotently under a separate processor with shared sale-id
-  arbitration),
+  arbitration) and `sale.finalized.v3` (v2 shape plus per-line frozen
+  ProductVariant snapshots: `variant_sku`, sale-time attribute labels,
+  nullable sale-time price override — sourced ONLY from the event; see
+  `docs/operations/product-variants.md`. Phase 17-R2: v3 lines also carry
+  the frozen sale-time ProductType snapshot (`product_type_id/code/labels`,
+  all-or-nothing; absent for pre-R2 lines),
   `sale.return_refund.finalized.v1` (one immutable event per finalized
   Retail return/refund transaction; see `docs/sync/returns.md`),
   `catalog.category.snapshot.v1`/`v2` and `catalog.tag.snapshot.v1`
   (current Catalog state; v2 adds `online_enabled`),
-  `catalog.product.snapshot.v1`/`v2` (v2 removes the product `sku` and
-  carries a deprecated `primary_variant_sku` mirror; SKU authority moves to
-  the variant),
-  `catalog.product.sales_policy.snapshot.v1`, 
-  `inventory.product.snapshot.v1`, 
+  `catalog.product.snapshot.v1`/`v2` (Phase 17-R0: v2 carries NO
+  SKU-bearing field at all — Product has no SKU authority anywhere;
+  SKU authority lives on the variant. For one release Cloud
+  tolerates-and-ignores a leftover `primary_variant_sku` mirror; v1's
+  historical `sku` field still validates, then is discarded. Phase 17-R2:
+  v2 also carries `product_type_id` — structural type identity, never
+  inferred from Category; empty is tolerated for legacy rows only),
+  `catalog.product.sales_policy.snapshot.v1`,
+  `inventory.product.snapshot.v1`,
   `catalog.product.configuration.snapshot.v1` (Phase 15 frame options),
   `catalog.product_variant.snapshot.v1` and
   `inventory.product_variant.snapshot.v1` (Phase 17 physical variants:
-  SKU/stock/attributes; see `docs/operations/product-variants.md`).
+  SKU/stock/attributes; see `docs/operations/product-variants.md`),
+  `catalog.product_type.snapshot.v1` (Phase 17-R2 structural types:
+  identity, code, translations, status, position, type_revision, allowed
+  dimensions and capabilities; Retail authority, ADR-0050).
 - `occurred_at`: RFC3339 business timestamp. Recorded, never authority for
   auth/dedup/ordering. Bounds: not before 2020-01-01, not more than 24h in
   the future, else `422`. Desktop clocks are untrusted.

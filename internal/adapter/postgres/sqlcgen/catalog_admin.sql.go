@@ -159,18 +159,22 @@ func (q *Queries) AdminProductConfigurations(ctx context.Context, productID pgty
 }
 
 const adminProductDetail = `-- name: AdminProductDetail :one
-SELECT p.product_id, p.sku, p.name AS name_ar,
+SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
     p.description AS description_ar,
     COALESCE((SELECT t.description FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS description_en,
-    p.width_cm, p.height_cm, p.top_category_id, p.is_active,
+    p.width_cm, p.height_cm, p.top_category_id, p.is_active, p.product_type_id,
     p.source_revision AS catalog_revision, p.configuration_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     COALESCE(s.sell_offline, TRUE) AS sell_offline,
-    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity
+    (SELECT count(*) FROM catalog_product_variants v
+     WHERE v.product_id = p.product_id AND NOT v.deleted)::bigint AS variant_count,
+    COALESCE((SELECT sum(vi.stock_quantity)
+     FROM catalog_product_variant_inventory vi
+     JOIN catalog_product_variants v ON v.variant_id = vi.variant_id
+     WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.product_id = $1::uuid AND p.store_id = $2::uuid
 `
 
@@ -181,7 +185,6 @@ type AdminProductDetailParams struct {
 
 type AdminProductDetailRow struct {
 	ProductID             pgtype.UUID `json:"product_id"`
-	Sku                   string      `json:"sku"`
 	NameAr                string      `json:"name_ar"`
 	NameEn                interface{} `json:"name_en"`
 	DescriptionAr         pgtype.Text `json:"description_ar"`
@@ -190,11 +193,13 @@ type AdminProductDetailRow struct {
 	HeightCm              pgtype.Int4 `json:"height_cm"`
 	TopCategoryID         pgtype.UUID `json:"top_category_id"`
 	IsActive              bool        `json:"is_active"`
+	ProductTypeID         pgtype.UUID `json:"product_type_id"`
 	CatalogRevision       int64       `json:"catalog_revision"`
 	ConfigurationRevision int64       `json:"configuration_revision"`
 	SellOnline            bool        `json:"sell_online"`
 	SellOffline           bool        `json:"sell_offline"`
-	StockQuantity         int64       `json:"stock_quantity"`
+	VariantCount          int64       `json:"variant_count"`
+	DerivedStock          int64       `json:"derived_stock"`
 }
 
 func (q *Queries) AdminProductDetail(ctx context.Context, arg AdminProductDetailParams) (AdminProductDetailRow, error) {
@@ -202,7 +207,6 @@ func (q *Queries) AdminProductDetail(ctx context.Context, arg AdminProductDetail
 	var i AdminProductDetailRow
 	err := row.Scan(
 		&i.ProductID,
-		&i.Sku,
 		&i.NameAr,
 		&i.NameEn,
 		&i.DescriptionAr,
@@ -211,11 +215,13 @@ func (q *Queries) AdminProductDetail(ctx context.Context, arg AdminProductDetail
 		&i.HeightCm,
 		&i.TopCategoryID,
 		&i.IsActive,
+		&i.ProductTypeID,
 		&i.CatalogRevision,
 		&i.ConfigurationRevision,
 		&i.SellOnline,
 		&i.SellOffline,
-		&i.StockQuantity,
+		&i.VariantCount,
+		&i.DerivedStock,
 	)
 	return i, err
 }
@@ -243,12 +249,17 @@ func (q *Queries) AdminProductHasPending(ctx context.Context, arg AdminProductHa
 
 const adminProductList = `-- name: AdminProductList :many
 
-SELECT p.product_id, p.sku, p.name AS name_ar,
+SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
-    p.is_active,
+    p.is_active, p.product_type_id,
     p.source_revision AS catalog_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
-    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    (SELECT count(*) FROM catalog_product_variants v
+     WHERE v.product_id = p.product_id AND NOT v.deleted)::bigint AS variant_count,
+    COALESCE((SELECT sum(vi.stock_quantity)
+     FROM catalog_product_variant_inventory vi
+     JOIN catalog_product_variants v ON v.variant_id = vi.variant_id
+     WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock,
     p.configuration_revision,
     EXISTS (
         SELECT 1 FROM catalog_admin_commands c
@@ -258,9 +269,11 @@ SELECT p.product_id, p.sku, p.name AS name_ar,
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.store_id = $1::uuid
-  AND ($2::text = '' OR p.sku ILIKE '%'||$2::text||'%' OR p.name ILIKE '%'||$2::text||'%')
+  AND ($2::text = '' OR p.name ILIKE '%'||$2::text||'%'
+       OR EXISTS (SELECT 1 FROM catalog_product_variants v
+                  WHERE v.product_id = p.product_id
+                    AND v.sku ILIKE '%'||$2::text||'%'))
   AND (p.product_id::text < $3::text OR $3::text = '')
 ORDER BY p.product_id DESC
 LIMIT $4::int
@@ -275,21 +288,26 @@ type AdminProductListParams struct {
 
 type AdminProductListRow struct {
 	ProductID             pgtype.UUID `json:"product_id"`
-	Sku                   string      `json:"sku"`
 	NameAr                string      `json:"name_ar"`
 	NameEn                interface{} `json:"name_en"`
 	IsActive              bool        `json:"is_active"`
+	ProductTypeID         pgtype.UUID `json:"product_type_id"`
 	CatalogRevision       int64       `json:"catalog_revision"`
 	SellOnline            bool        `json:"sell_online"`
-	StockQuantity         int64       `json:"stock_quantity"`
+	VariantCount          int64       `json:"variant_count"`
+	DerivedStock          int64       `json:"derived_stock"`
 	ConfigurationRevision int64       `json:"configuration_revision"`
 	HasPending            bool        `json:"has_pending"`
 }
 
 // Admin catalog reads: Store-scoped projection lists for the operator.
-// Never query Retail directly. Search is bounded ILIKE on SKU/name
+// Never query Retail directly. Search is bounded ILIKE on variant SKU/name
 // with keyset pagination; pending flags come from a single EXISTS
 // per row (no per-row status queries from the frontend).
+// Phase 17-R0 (ADR-0049): product rows carry NO sku/stock — they carry
+// variant_count and derived_stock (SUM of active, non-tombstoned variant
+// stock; product stock is derived, never authoritative). Variant rows own
+// the SKU.
 func (q *Queries) AdminProductList(ctx context.Context, arg AdminProductListParams) ([]AdminProductListRow, error) {
 	rows, err := q.db.Query(ctx, adminProductList,
 		arg.StoreID,
@@ -306,13 +324,14 @@ func (q *Queries) AdminProductList(ctx context.Context, arg AdminProductListPara
 		var i AdminProductListRow
 		if err := rows.Scan(
 			&i.ProductID,
-			&i.Sku,
 			&i.NameAr,
 			&i.NameEn,
 			&i.IsActive,
+			&i.ProductTypeID,
 			&i.CatalogRevision,
 			&i.SellOnline,
-			&i.StockQuantity,
+			&i.VariantCount,
+			&i.DerivedStock,
 			&i.ConfigurationRevision,
 			&i.HasPending,
 		); err != nil {
@@ -448,6 +467,145 @@ func (q *Queries) AdminProductTags(ctx context.Context, productID pgtype.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const adminProductTypeByCode = `-- name: AdminProductTypeByCode :one
+SELECT type_id, store_id, type_revision
+FROM catalog_product_types
+WHERE code = $1::text AND ((store_id::text = $2::text) OR ($2::text = '' AND store_id IS NULL))
+`
+
+type AdminProductTypeByCodeParams struct {
+	Code    string `json:"code"`
+	StoreID string `json:"store_id"`
+}
+
+type AdminProductTypeByCodeRow struct {
+	TypeID       pgtype.UUID `json:"type_id"`
+	StoreID      pgtype.UUID `json:"store_id"`
+	TypeRevision int64       `json:"type_revision"`
+}
+
+func (q *Queries) AdminProductTypeByCode(ctx context.Context, arg AdminProductTypeByCodeParams) (AdminProductTypeByCodeRow, error) {
+	row := q.db.QueryRow(ctx, adminProductTypeByCode, arg.Code, arg.StoreID)
+	var i AdminProductTypeByCodeRow
+	err := row.Scan(&i.TypeID, &i.StoreID, &i.TypeRevision)
+	return i, err
+}
+
+const adminProductTypeDetail = `-- name: AdminProductTypeDetail :one
+SELECT t.type_id, t.code, t.name_ar, t.name_en,
+    t.description_ar, t.description_en,
+    t.is_active, t.position, t.type_revision
+FROM catalog_product_types t
+WHERE t.type_id = $1::uuid
+  AND (t.store_id::text = $2::text OR ($2::text = '' AND t.store_id IS NULL))
+`
+
+type AdminProductTypeDetailParams struct {
+	TypeID  pgtype.UUID `json:"type_id"`
+	StoreID string      `json:"store_id"`
+}
+
+type AdminProductTypeDetailRow struct {
+	TypeID        pgtype.UUID `json:"type_id"`
+	Code          string      `json:"code"`
+	NameAr        string      `json:"name_ar"`
+	NameEn        string      `json:"name_en"`
+	DescriptionAr pgtype.Text `json:"description_ar"`
+	DescriptionEn pgtype.Text `json:"description_en"`
+	IsActive      bool        `json:"is_active"`
+	Position      int32       `json:"position"`
+	TypeRevision  int64       `json:"type_revision"`
+}
+
+func (q *Queries) AdminProductTypeDetail(ctx context.Context, arg AdminProductTypeDetailParams) (AdminProductTypeDetailRow, error) {
+	row := q.db.QueryRow(ctx, adminProductTypeDetail, arg.TypeID, arg.StoreID)
+	var i AdminProductTypeDetailRow
+	err := row.Scan(
+		&i.TypeID,
+		&i.Code,
+		&i.NameAr,
+		&i.NameEn,
+		&i.DescriptionAr,
+		&i.DescriptionEn,
+		&i.IsActive,
+		&i.Position,
+		&i.TypeRevision,
+	)
+	return i, err
+}
+
+const adminProductTypeList = `-- name: AdminProductTypeList :many
+SELECT t.type_id, t.code, t.name_ar, t.name_en,
+    t.description_ar, t.description_en, t.is_active, t.position,
+    t.type_revision
+FROM catalog_product_types t
+WHERE (t.store_id::text = $1::text OR ($1::text = '' AND t.store_id IS NULL))
+ORDER BY t.position, t.code
+`
+
+type AdminProductTypeListRow struct {
+	TypeID        pgtype.UUID `json:"type_id"`
+	Code          string      `json:"code"`
+	NameAr        string      `json:"name_ar"`
+	NameEn        string      `json:"name_en"`
+	DescriptionAr pgtype.Text `json:"description_ar"`
+	DescriptionEn pgtype.Text `json:"description_en"`
+	IsActive      bool        `json:"is_active"`
+	Position      int32       `json:"position"`
+	TypeRevision  int64       `json:"type_revision"`
+}
+
+// Phase 17-R2 type reads (Store-scoped, projection only).
+func (q *Queries) AdminProductTypeList(ctx context.Context, storeID string) ([]AdminProductTypeListRow, error) {
+	rows, err := q.db.Query(ctx, adminProductTypeList, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminProductTypeListRow{}
+	for rows.Next() {
+		var i AdminProductTypeListRow
+		if err := rows.Scan(
+			&i.TypeID,
+			&i.Code,
+			&i.NameAr,
+			&i.NameEn,
+			&i.DescriptionAr,
+			&i.DescriptionEn,
+			&i.IsActive,
+			&i.Position,
+			&i.TypeRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminProductTypeOwnership = `-- name: AdminProductTypeOwnership :one
+SELECT type_id, store_id, type_revision
+FROM catalog_product_types
+WHERE type_id = $1::uuid
+`
+
+type AdminProductTypeOwnershipRow struct {
+	TypeID       pgtype.UUID `json:"type_id"`
+	StoreID      pgtype.UUID `json:"store_id"`
+	TypeRevision int64       `json:"type_revision"`
+}
+
+// Phase 17-R2 type ownership (type_revision is the type stream gate).
+func (q *Queries) AdminProductTypeOwnership(ctx context.Context, typeID pgtype.UUID) (AdminProductTypeOwnershipRow, error) {
+	row := q.db.QueryRow(ctx, adminProductTypeOwnership, typeID)
+	var i AdminProductTypeOwnershipRow
+	err := row.Scan(&i.TypeID, &i.StoreID, &i.TypeRevision)
+	return i, err
 }
 
 const adminProductVariantAttributes = `-- name: AdminProductVariantAttributes :many
@@ -760,11 +918,12 @@ func (q *Queries) CancelPendingCatalogAdminTargets(ctx context.Context, commandI
 const createCatalogAdminCommand = `-- name: CreateCatalogAdminCommand :one
 
 INSERT INTO catalog_admin_commands
-    (id, store_id, command_type, command_version, entity_id, payload, payload_hash, expected_revision, actor)
+    (id, store_id, command_type, command_version, entity_id, target_kind, requested_key, payload, payload_hash, expected_revision, actor)
 VALUES
     ($1::uuid, $2::uuid, $3::text, $4::int, $5::text,
-     $6::jsonb, $7::text, $8::bigint, $9::text)
-RETURNING id, store_id, command_type, command_version, entity_id, payload, payload_hash,
+     $6::text, $7,
+     $8::jsonb, $9::text, $10::bigint, $11::text)
+RETURNING id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload, payload_hash,
     expected_revision, actor, status, created_at, updated_at
 `
 
@@ -774,34 +933,62 @@ type CreateCatalogAdminCommandParams struct {
 	CommandType      string      `json:"command_type"`
 	CommandVersion   int32       `json:"command_version"`
 	EntityID         string      `json:"entity_id"`
+	TargetKind       string      `json:"target_kind"`
+	RequestedKey     pgtype.Text `json:"requested_key"`
 	Payload          []byte      `json:"payload"`
 	PayloadHash      string      `json:"payload_hash"`
 	ExpectedRevision int64       `json:"expected_revision"`
 	Actor            string      `json:"actor"`
 }
 
+type CreateCatalogAdminCommandRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	StoreID          pgtype.UUID        `json:"store_id"`
+	CommandType      string             `json:"command_type"`
+	CommandVersion   int32              `json:"command_version"`
+	EntityID         string             `json:"entity_id"`
+	TargetKind       string             `json:"target_kind"`
+	RequestedKey     pgtype.Text        `json:"requested_key"`
+	ResultEntityID   pgtype.Text        `json:"result_entity_id"`
+	Payload          []byte             `json:"payload"`
+	PayloadHash      string             `json:"payload_hash"`
+	ExpectedRevision int64              `json:"expected_revision"`
+	Actor            string             `json:"actor"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Phase 16 catalog-admin command persistence. Commands and targets
 // are immutable once created except for status transitions; audit
 // history is never deleted.
-func (q *Queries) CreateCatalogAdminCommand(ctx context.Context, arg CreateCatalogAdminCommandParams) (CatalogAdminCommand, error) {
+// Phase 17-R3 create identity: target_kind/requested_key distinguish a
+// creation intent (entity_id = explicit absent marker ”) from an entity
+// command (entity_id = business UUID). No fake business identity, ever.
+func (q *Queries) CreateCatalogAdminCommand(ctx context.Context, arg CreateCatalogAdminCommandParams) (CreateCatalogAdminCommandRow, error) {
 	row := q.db.QueryRow(ctx, createCatalogAdminCommand,
 		arg.ID,
 		arg.StoreID,
 		arg.CommandType,
 		arg.CommandVersion,
 		arg.EntityID,
+		arg.TargetKind,
+		arg.RequestedKey,
 		arg.Payload,
 		arg.PayloadHash,
 		arg.ExpectedRevision,
 		arg.Actor,
 	)
-	var i CatalogAdminCommand
+	var i CreateCatalogAdminCommandRow
 	err := row.Scan(
 		&i.ID,
 		&i.StoreID,
 		&i.CommandType,
 		&i.CommandVersion,
 		&i.EntityID,
+		&i.TargetKind,
+		&i.RequestedKey,
+		&i.ResultEntityID,
 		&i.Payload,
 		&i.PayloadHash,
 		&i.ExpectedRevision,
@@ -974,21 +1161,42 @@ func (q *Queries) GetCatalogAdminCapability(ctx context.Context, deviceID pgtype
 }
 
 const getCatalogAdminCommand = `-- name: GetCatalogAdminCommand :one
-SELECT id, store_id, command_type, command_version, entity_id, payload, payload_hash,
+SELECT id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload, payload_hash,
     expected_revision, actor, status, created_at, updated_at
 FROM catalog_admin_commands
 WHERE id = $1::uuid
 `
 
-func (q *Queries) GetCatalogAdminCommand(ctx context.Context, id pgtype.UUID) (CatalogAdminCommand, error) {
+type GetCatalogAdminCommandRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	StoreID          pgtype.UUID        `json:"store_id"`
+	CommandType      string             `json:"command_type"`
+	CommandVersion   int32              `json:"command_version"`
+	EntityID         string             `json:"entity_id"`
+	TargetKind       string             `json:"target_kind"`
+	RequestedKey     pgtype.Text        `json:"requested_key"`
+	ResultEntityID   pgtype.Text        `json:"result_entity_id"`
+	Payload          []byte             `json:"payload"`
+	PayloadHash      string             `json:"payload_hash"`
+	ExpectedRevision int64              `json:"expected_revision"`
+	Actor            string             `json:"actor"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetCatalogAdminCommand(ctx context.Context, id pgtype.UUID) (GetCatalogAdminCommandRow, error) {
 	row := q.db.QueryRow(ctx, getCatalogAdminCommand, id)
-	var i CatalogAdminCommand
+	var i GetCatalogAdminCommandRow
 	err := row.Scan(
 		&i.ID,
 		&i.StoreID,
 		&i.CommandType,
 		&i.CommandVersion,
 		&i.EntityID,
+		&i.TargetKind,
+		&i.RequestedKey,
+		&i.ResultEntityID,
 		&i.Payload,
 		&i.PayloadHash,
 		&i.ExpectedRevision,
@@ -1001,7 +1209,7 @@ func (q *Queries) GetCatalogAdminCommand(ctx context.Context, id pgtype.UUID) (C
 }
 
 const listCatalogAdminCommands = `-- name: ListCatalogAdminCommands :many
-SELECT id, store_id, command_type, command_version, entity_id, payload_hash,
+SELECT id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload_hash,
     expected_revision, actor, status, created_at, updated_at
 FROM catalog_admin_commands
 WHERE store_id = $1::uuid
@@ -1030,6 +1238,9 @@ type ListCatalogAdminCommandsRow struct {
 	CommandType      string             `json:"command_type"`
 	CommandVersion   int32              `json:"command_version"`
 	EntityID         string             `json:"entity_id"`
+	TargetKind       string             `json:"target_kind"`
+	RequestedKey     pgtype.Text        `json:"requested_key"`
+	ResultEntityID   pgtype.Text        `json:"result_entity_id"`
 	PayloadHash      string             `json:"payload_hash"`
 	ExpectedRevision int64              `json:"expected_revision"`
 	Actor            string             `json:"actor"`
@@ -1061,6 +1272,9 @@ func (q *Queries) ListCatalogAdminCommands(ctx context.Context, arg ListCatalogA
 			&i.CommandType,
 			&i.CommandVersion,
 			&i.EntityID,
+			&i.TargetKind,
+			&i.RequestedKey,
+			&i.ResultEntityID,
 			&i.PayloadHash,
 			&i.ExpectedRevision,
 			&i.Actor,
@@ -1215,6 +1429,31 @@ func (q *Queries) MarkCatalogAdminTargetDelivered(ctx context.Context, arg MarkC
 	var i MarkCatalogAdminTargetDeliveredRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
+}
+
+const setCommandResultEntity = `-- name: SetCommandResultEntity :execrows
+UPDATE catalog_admin_commands
+SET result_entity_id = $1::text, updated_at = now()
+WHERE id IN (SELECT command_id FROM catalog_admin_command_targets WHERE id = $2::uuid)
+  AND result_entity_id IS NULL
+`
+
+type SetCommandResultEntityParams struct {
+	ResultEntityID string      `json:"result_entity_id"`
+	TargetID       pgtype.UUID `json:"target_id"`
+}
+
+// Phase 17-R3 result identity: the actual Retail-minted entity ID for a
+// command, set when one of its targets reports APPLIED. First writer wins
+// (at most one APPLIED per create intent exists); intent rows are never
+// rewritten, only the result evidence is appended. Keyed by target so the
+// outcome path (which binds targets, not commands) needs no extra lookup.
+func (q *Queries) SetCommandResultEntity(ctx context.Context, arg SetCommandResultEntityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCommandResultEntity, arg.ResultEntityID, arg.TargetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertCatalogAdminCapability = `-- name: UpsertCatalogAdminCapability :one

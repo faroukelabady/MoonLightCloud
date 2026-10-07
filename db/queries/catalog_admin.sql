@@ -3,12 +3,16 @@
 -- history is never deleted.
 
 -- name: CreateCatalogAdminCommand :one
+-- Phase 17-R3 create identity: target_kind/requested_key distinguish a
+-- creation intent (entity_id = explicit absent marker '') from an entity
+-- command (entity_id = business UUID). No fake business identity, ever.
 INSERT INTO catalog_admin_commands
-    (id, store_id, command_type, command_version, entity_id, payload, payload_hash, expected_revision, actor)
+    (id, store_id, command_type, command_version, entity_id, target_kind, requested_key, payload, payload_hash, expected_revision, actor)
 VALUES
     (@id::uuid, @store_id::uuid, @command_type::text, @command_version::int, @entity_id::text,
+     @target_kind::text, sqlc.narg(requested_key),
      @payload::jsonb, @payload_hash::text, @expected_revision::bigint, @actor::text)
-RETURNING id, store_id, command_type, command_version, entity_id, payload, payload_hash,
+RETURNING id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload, payload_hash,
     expected_revision, actor, status, created_at, updated_at;
 
 -- name: CreateCatalogAdminTarget :one
@@ -20,7 +24,7 @@ RETURNING id, command_id, device_id, status, result_code, entity_id, pre_revisio
     delivered_at, finished_at, created_at, updated_at;
 
 -- name: GetCatalogAdminCommand :one
-SELECT id, store_id, command_type, command_version, entity_id, payload, payload_hash,
+SELECT id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload, payload_hash,
     expected_revision, actor, status, created_at, updated_at
 FROM catalog_admin_commands
 WHERE id = @id::uuid;
@@ -32,7 +36,7 @@ WHERE id = @id::uuid AND status = 'PENDING'
 RETURNING id, status;
 
 -- name: ListCatalogAdminCommands :many
-SELECT id, store_id, command_type, command_version, entity_id, payload_hash,
+SELECT id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload_hash,
     expected_revision, actor, status, created_at, updated_at
 FROM catalog_admin_commands
 WHERE store_id = @store_id::uuid
@@ -132,18 +136,55 @@ SELECT tag_id, store_id, source_revision
 FROM catalog_tags
 WHERE tag_id = @tag_id::uuid;
 
+-- Phase 17-R2 type ownership (type_revision is the type stream gate).
+-- name: AdminProductTypeOwnership :one
+SELECT type_id, store_id, type_revision
+FROM catalog_product_types
+WHERE type_id = @type_id::uuid;
+
+-- name: AdminProductTypeByCode :one
+SELECT type_id, store_id, type_revision
+FROM catalog_product_types
+WHERE code = @code::text AND ((store_id::text = @store_id::text) OR (@store_id::text = '' AND store_id IS NULL));
+
+-- Phase 17-R2 type reads (Store-scoped, projection only).
+-- name: AdminProductTypeList :many
+SELECT t.type_id, t.code, t.name_ar, t.name_en,
+    t.description_ar, t.description_en, t.is_active, t.position,
+    t.type_revision
+FROM catalog_product_types t
+WHERE (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL))
+ORDER BY t.position, t.code;
+
+-- name: AdminProductTypeDetail :one
+SELECT t.type_id, t.code, t.name_ar, t.name_en,
+    t.description_ar, t.description_en,
+    t.is_active, t.position, t.type_revision
+FROM catalog_product_types t
+WHERE t.type_id = @type_id::uuid
+  AND (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL));
+
 -- Admin catalog reads: Store-scoped projection lists for the operator.
--- Never query Retail directly. Search is bounded ILIKE on SKU/name
+-- Never query Retail directly. Search is bounded ILIKE on variant SKU/name
 -- with keyset pagination; pending flags come from a single EXISTS
 -- per row (no per-row status queries from the frontend).
+-- Phase 17-R0 (ADR-0049): product rows carry NO sku/stock — they carry
+-- variant_count and derived_stock (SUM of active, non-tombstoned variant
+-- stock; product stock is derived, never authoritative). Variant rows own
+-- the SKU.
 
 -- name: AdminProductList :many
-SELECT p.product_id, p.sku, p.name AS name_ar,
+SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
-    p.is_active,
+    p.is_active, p.product_type_id,
     p.source_revision AS catalog_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
-    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
+    (SELECT count(*) FROM catalog_product_variants v
+     WHERE v.product_id = p.product_id AND NOT v.deleted)::bigint AS variant_count,
+    COALESCE((SELECT sum(vi.stock_quantity)
+     FROM catalog_product_variant_inventory vi
+     JOIN catalog_product_variants v ON v.variant_id = vi.variant_id
+     WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock,
     p.configuration_revision,
     EXISTS (
         SELECT 1 FROM catalog_admin_commands c
@@ -153,26 +194,32 @@ SELECT p.product_id, p.sku, p.name AS name_ar,
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.store_id = @store_id::uuid
-  AND (sqlc.arg(search)::text = '' OR p.sku ILIKE '%'||sqlc.arg(search)::text||'%' OR p.name ILIKE '%'||sqlc.arg(search)::text||'%')
+  AND (sqlc.arg(search)::text = '' OR p.name ILIKE '%'||sqlc.arg(search)::text||'%'
+       OR EXISTS (SELECT 1 FROM catalog_product_variants v
+                  WHERE v.product_id = p.product_id
+                    AND v.sku ILIKE '%'||sqlc.arg(search)::text||'%'))
   AND (p.product_id::text < @cursor::text OR @cursor::text = '')
 ORDER BY p.product_id DESC
 LIMIT @limit_n::int;
 
 -- name: AdminProductDetail :one
-SELECT p.product_id, p.sku, p.name AS name_ar,
+SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
     p.description AS description_ar,
     COALESCE((SELECT t.description FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS description_en,
-    p.width_cm, p.height_cm, p.top_category_id, p.is_active,
+    p.width_cm, p.height_cm, p.top_category_id, p.is_active, p.product_type_id,
     p.source_revision AS catalog_revision, p.configuration_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     COALESCE(s.sell_offline, TRUE) AS sell_offline,
-    COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity
+    (SELECT count(*) FROM catalog_product_variants v
+     WHERE v.product_id = p.product_id AND NOT v.deleted)::bigint AS variant_count,
+    COALESCE((SELECT sum(vi.stock_quantity)
+     FROM catalog_product_variant_inventory vi
+     JOIN catalog_product_variants v ON v.variant_id = vi.variant_id
+     WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
 WHERE p.product_id = @product_id::uuid AND p.store_id = @store_id::uuid;
 
 -- name: AdminProductPrices :many
@@ -289,3 +336,14 @@ SELECT definition_code, value_code, name_ar, name_en, definition_name_ar, defini
 FROM catalog_product_variant_attribute_values
 WHERE variant_id = @variant_id::uuid
 ORDER BY position, definition_code;
+
+-- Phase 17-R3 result identity: the actual Retail-minted entity ID for a
+-- command, set when one of its targets reports APPLIED. First writer wins
+-- (at most one APPLIED per create intent exists); intent rows are never
+-- rewritten, only the result evidence is appended. Keyed by target so the
+-- outcome path (which binds targets, not commands) needs no extra lookup.
+-- name: SetCommandResultEntity :execrows
+UPDATE catalog_admin_commands
+SET result_entity_id = @result_entity_id::text, updated_at = now()
+WHERE id IN (SELECT command_id FROM catalog_admin_command_targets WHERE id = @target_id::uuid)
+  AND result_entity_id IS NULL;

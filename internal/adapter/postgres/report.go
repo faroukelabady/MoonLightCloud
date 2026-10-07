@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -814,20 +815,23 @@ func (d Devices) RefundsByChannelForStore(ctx context.Context, storeID string, s
 // ---- Phase 17 optional variant breakdown ----
 
 // variantReportRow flattens the identical variant breakdown row shape
-// both queries return.
+// both queries return. VariantSku/VariantAttributes are the frozen
+// sale-time snapshot columns (00036) — never joined from catalog.
 type variantReportRow struct {
-	VariantID   pgtype.UUID
-	ProductID   pgtype.UUID
-	Sku         string
-	ProductName string
-	Currency    string
-	Units       int64
-	LineSales   int64
-	LineCost    int64
+	VariantID         pgtype.UUID
+	VariantSku        pgtype.Text
+	VariantAttributes []byte
+	ProductID         pgtype.UUID
+	Sku               string
+	ProductName       string
+	Currency          string
+	Units             int64
+	LineSales         int64
+	LineCost          int64
 }
 
 func variantReportToDomain(r variantReportRow) report.VariantRow {
-	var vid, pid *string
+	var vid, pid, vsku *string
 	if r.VariantID.Valid {
 		s := uuidString(r.VariantID)
 		vid = &s
@@ -836,15 +840,30 @@ func variantReportToDomain(r variantReportRow) report.VariantRow {
 		s := uuidString(r.ProductID)
 		pid = &s
 	}
+	if r.VariantSku.Valid {
+		s := r.VariantSku.String
+		vsku = &s
+	}
+	var attrs []report.VariantAttributeSnapshot
+	if len(r.VariantAttributes) > 0 {
+		if err := json.Unmarshal(r.VariantAttributes, &attrs); err != nil {
+			// Stored JSONB is projection-owned and validated at ingest;
+			// a parse failure here is an internal invariant breach, not
+			// caller input. Surface no labels, never a crash.
+			attrs = nil
+		}
+	}
 	return report.VariantRow{
-		VariantID: vid, ProductID: pid, SKU: r.Sku, ProductName: r.ProductName,
+		VariantID: vid, VariantSKU: vsku, VariantAttributes: attrs,
+		ProductID: pid, SKU: r.Sku, ProductName: r.ProductName,
 		Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
 	}
 }
 
-// SalesByVariant groups sale lines by their frozen per-line variant
-// identity columns (Phase 17). History never joins the current-state
-// variant projection.
+// SalesByVariant groups sale lines by their FROZEN per-line variant
+// identity/labels (Phase 17 + 17-R0). History never joins the
+// current-state variant projection: a later catalog label rename can
+// never move these rows.
 func (d Devices) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -857,7 +876,8 @@ func (d Devices) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time,
 	out := make([]report.VariantRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, variantReportToDomain(variantReportRow{
-			VariantID: r.VariantID, ProductID: r.ProductID, Sku: r.Sku,
+			VariantID: r.VariantID, VariantSku: r.VariantSku,
+			VariantAttributes: r.VariantAttributes, ProductID: r.ProductID, Sku: r.Sku,
 			ProductName: r.ProductName, Currency: r.Currency,
 			Units: r.Units, LineSales: r.LineSales, LineCost: r.LineCost,
 		}))
@@ -883,10 +903,59 @@ func (d Devices) SalesByVariantForStore(ctx context.Context, storeID string, sta
 	out := make([]report.VariantRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, variantReportToDomain(variantReportRow{
-			VariantID: r.VariantID, ProductID: r.ProductID, Sku: r.Sku,
+			VariantID: r.VariantID, VariantSku: r.VariantSku,
+			VariantAttributes: r.VariantAttributes, ProductID: r.ProductID, Sku: r.Sku,
 			ProductName: r.ProductName, Currency: r.Currency,
 			Units: r.Units, LineSales: r.LineSales, LineCost: r.LineCost,
 		}))
+	}
+	return out, nil
+}
+
+// SalesByProductType groups sale lines by their FROZEN per-line type
+// snapshot (Phase 17-R2, 00038). History never joins the current-state
+// type projection: renames/reassignments never move rows.
+func (d Devices) SalesByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	rows, err := sqlcgen.New(d.pool).ReportSalesByProductType(ctx, sqlcgen.ReportSalesByProductTypeParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency,
+	})
+	if err != nil {
+		return nil, reportErr("sales by product type", err)
+	}
+	out := make([]report.ProductTypeRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.ProductTypeRow{
+			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
+			Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
+		})
+	}
+	return out, nil
+}
+
+// SalesByProductTypeForStore is SalesByProductType restricted to one Store.
+func (d Devices) SalesByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := scopedStore("sales by product type for store", storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).ReportSalesByProductTypeForStore(ctx, sqlcgen.ReportSalesByProductTypeForStoreParams{
+		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Currency: currency, StoreID: uid,
+	})
+	if err != nil {
+		return nil, reportErr("sales by product type for store", err)
+	}
+	out := make([]report.ProductTypeRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, report.ProductTypeRow{
+			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
+			Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
+		})
 	}
 	return out, nil
 }

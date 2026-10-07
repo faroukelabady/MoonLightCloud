@@ -526,6 +526,13 @@ func strPtr(s *string) string {
 	return *s
 }
 
+func pgTextPtr(s *string) pgtype.Text {
+	if s == nil || *s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
 func pgStrPtr(m *sale.Money) string {
 	if m == nil {
 		return ""

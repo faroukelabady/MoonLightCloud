@@ -39,8 +39,8 @@ const health: CatalogHealthResponse = {
 	generated_at: '2026-10-03T00:00:00Z',
 	store_id: null,
 	provider_key: '',
-	reason_codes: ['CATALOG_MISSING_SKU'],
-	counts: [{ reason_code: 'CATALOG_MISSING_SKU', products: 0 }],
+	reason_codes: ['VARIANT_MISSING_SKU'],
+	counts: [{ reason_code: 'VARIANT_MISSING_SKU', products: 0 }],
 	detail: [],
 	detail_limit: 50,
 	detail_truncated: false
@@ -83,7 +83,7 @@ describe('Phase12 widgets', () => {
 			}
 		});
 		const text = container.textContent ?? '';
-		expect(text).toMatch(/CATALOG_MISSING_SKU/);
+		expect(text).toMatch(/VARIANT_MISSING_SKU/);
 		expect(text).toMatch(/Diagnostic only/);
 	});
 });

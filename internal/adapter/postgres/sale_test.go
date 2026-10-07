@@ -36,6 +36,14 @@ func TestMain(m *testing.M) {
 		_, err = sale.ValidateV2(p)
 		return err
 	})
+	isync.RegisterEventType(sale.EventSaleFinalizedV3, func(raw json.RawMessage) error {
+		p, err := sale.DecodeV3(raw)
+		if err != nil {
+			return err
+		}
+		_, err = sale.ValidateV3(p)
+		return err
+	})
 	isync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, func(raw json.RawMessage) error {
 		p, err := returnrefund.Decode(raw)
 		if err != nil {
@@ -122,6 +130,14 @@ func TestMain(m *testing.M) {
 			return err
 		}
 		_, err = catalog.ValidateProductVariantInventorySnapshot(p)
+		return err
+	})
+	isync.RegisterEventType(catalog.EventProductTypeSnapshotV1, func(raw json.RawMessage) error {
+		p, err := catalog.DecodeProductTypeSnapshot(raw)
+		if err != nil {
+			return err
+		}
+		_, err = catalog.ValidateProductTypeSnapshot(p)
 		return err
 	})
 	os.Exit(m.Run())

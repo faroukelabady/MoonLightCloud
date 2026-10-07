@@ -16,6 +16,7 @@ import (
 // Breakdown dimensions (fixed enum; handlers switch, queries stay static).
 const (
 	DimensionProduct      = "product"
+	DimensionProductType  = "product_type"
 	DimensionRootCategory = "root_category"
 	DimensionSubcategory  = "subcategory"
 	DimensionTag          = "tag"
@@ -177,6 +178,12 @@ type BreakdownRow struct {
 	ProductID   *string `json:"product_id,omitempty"`
 	SKU         *string `json:"sku,omitempty"`
 	ProductName *string `json:"product_name,omitempty"`
+	// ProductType fields (dimension=product_type only; frozen sale-time
+	// snapshot labels, never current catalog joins).
+	ProductTypeID     *string `json:"product_type_id,omitempty"`
+	ProductTypeCode   *string `json:"product_type_code,omitempty"`
+	ProductTypeNameAR *string `json:"product_type_name_ar,omitempty"`
+	ProductTypeNameEN *string `json:"product_type_name_en,omitempty"`
 	// Category fields.
 	ClassificationKind *string `json:"classification_kind,omitempty"`
 	ClassificationID   *string `json:"classification_id,omitempty"`
@@ -230,6 +237,19 @@ type Breakdown struct {
 	Freshness Freshness      `json:"freshness"`
 }
 
+// VariantAttributeSnapshot is one frozen sale-time option attribute of a
+// purchased variant (00036): identity codes plus the bilingual labels
+// EXACTLY as they read at sale time. Display history only; identity is
+// (DefinitionCode, ValueCode).
+type VariantAttributeSnapshot struct {
+	DefinitionCode   string  `json:"definition_code"`
+	ValueCode        string  `json:"value_code"`
+	NameAR           string  `json:"name_ar"`
+	NameEN           *string `json:"name_en,omitempty"`
+	DefinitionNameAR string  `json:"definition_name_ar"`
+	DefinitionNameEN *string `json:"definition_name_en,omitempty"`
+}
+
 // SummaryRow, DailyRowRaw, etc. are repository row shapes (currency-split).
 type (
 	SummaryRow struct {
@@ -269,14 +289,33 @@ type (
 		LineCost    int64
 	}
 	VariantRow struct {
-		VariantID   *string
-		ProductID   *string
-		SKU         string
-		ProductName string
-		Units       int64
-		Currency    string
-		LineSales   int64
-		LineCost    int64
+		VariantID *string
+		// VariantSKU and VariantAttributes are the FROZEN sale-time
+		// variant snapshot (00036 / sale.finalized.v3), served exactly as
+		// sold: later catalog label renames can never move these rows.
+		// NULL/absent for lines without variant data (v1/v2 coexistence).
+		VariantSKU        *string
+		VariantAttributes []VariantAttributeSnapshot
+		ProductID         *string
+		SKU               string
+		ProductName       string
+		Units             int64
+		Currency          string
+		LineSales         int64
+		LineCost          int64
+	}
+	// ProductTypeRow is one frozen sale-time type bucket (00038): the
+	// type id/code/labels exactly as sold. NULL type groups legacy
+	// pre-R2 lines.
+	ProductTypeRow struct {
+		ProductTypeID     *string
+		ProductTypeCode   *string
+		ProductTypeNameAR *string
+		ProductTypeNameEN *string
+		Units             int64
+		Currency          string
+		LineSales         int64
+		LineCost          int64
 	}
 	CategoryRow struct {
 		Kind     string
@@ -414,6 +453,7 @@ type Repository interface {
 	SalesDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
 	SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
 	SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]VariantRow, error)
+	SalesByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductTypeRow, error)
 	SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
@@ -436,6 +476,7 @@ type Repository interface {
 	SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
 	SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
 	SalesByVariantForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]VariantRow, error)
+	SalesByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ProductTypeRow, error)
 	SalesByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
 	SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
@@ -584,11 +625,11 @@ func (s Service) ParseRequest(kind, fromDate, toDate, currency string) (Request,
 // callers switch on the returned constant).
 func ParseDimension(d string) (string, error) {
 	switch d {
-	case DimensionProduct, DimensionRootCategory, DimensionSubcategory, DimensionTag, DimensionCashier, DimensionChannel:
+	case DimensionProduct, DimensionProductType, DimensionRootCategory, DimensionSubcategory, DimensionTag, DimensionCashier, DimensionChannel:
 		return d, nil
 	default:
 		return "", apperr.New(apperr.InvalidInput,
-			fmt.Sprintf("unsupported dimension %q: want product|root_category|subcategory|cashier|channel", d))
+			fmt.Sprintf("unsupported dimension %q: want product|product_type|root_category|subcategory|cashier|channel", d))
 	}
 }
 
@@ -642,6 +683,23 @@ func (s Service) scopedSalesByVariant(ctx context.Context, req Request) ([]Varia
 		return s.repo.SalesByVariantForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	}
 	return s.repo.SalesByVariant(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+func (s Service) scopedSalesByProductType(ctx context.Context, req Request) ([]ProductTypeRow, error) {
+	if req.Scoped() {
+		return s.repo.SalesByProductTypeForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+	}
+	return s.repo.SalesByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
+}
+
+// SalesByProductType returns the Phase 17-R2 type breakdown: sale lines
+// grouped by their frozen per-line type snapshot (never current catalog).
+func (s Service) SalesByProductType(ctx context.Context, req Request) ([]ProductTypeRow, error) {
+	rows, err := s.scopedSalesByProductType(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // SalesByVariant returns the optional Phase 17 variant breakdown:
@@ -1009,6 +1067,50 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 			entry := entryOf(key, r.Currency)
 			entry.LineRefundMinor = r.Refund
 			entry.LineReturnedCostMinor = r.ReturnedCost
+		}
+		for _, row := range byKey {
+			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })
+		}
+		out.Rows = applyLimit(sortProductRows(byKey, order, req.Currency), req.Limit)
+	case DimensionProductType:
+		rows, err := s.scopedSalesByProductType(ctx, req)
+		if err != nil {
+			return Breakdown{}, err
+		}
+		byKey := map[string]*BreakdownRow{}
+		order := []string{}
+		lineEntry := map[string]map[string]int{}
+		getRow := func(key string, fill func(*BreakdownRow)) *BreakdownRow {
+			row, ok := byKey[key]
+			if !ok {
+				row = &BreakdownRow{Dimension: dimension, LineSales: []LineSaleTotal{}}
+				fill(row)
+				byKey[key] = row
+				order = append(order, key)
+				lineEntry[key] = map[string]int{}
+			}
+			return row
+		}
+		entryOf := func(key, currency string) *LineSaleTotal {
+			row := byKey[key]
+			if ei, ok := lineEntry[key][currency]; ok {
+				return &row.LineSales[ei]
+			}
+			row.LineSales = append(row.LineSales, LineSaleTotal{Currency: currency})
+			ei := len(row.LineSales) - 1
+			lineEntry[key][currency] = ei
+			return &row.LineSales[ei]
+		}
+		for _, r := range rows {
+			key := ptrStr(r.ProductTypeID) + "\x00" + ptrStr(r.ProductTypeCode)
+			row := getRow(key, func(row *BreakdownRow) {
+				row.ProductTypeID, row.ProductTypeCode = r.ProductTypeID, r.ProductTypeCode
+				row.ProductTypeNameAR, row.ProductTypeNameEN = r.ProductTypeNameAR, r.ProductTypeNameEN
+			})
+			row.Units += r.Units
+			entry := entryOf(key, r.Currency)
+			entry.LineSalesMinor = r.LineSales
+			entry.LineCostMinor = r.LineCost
 		}
 		for _, row := range byKey {
 			sort.Slice(row.LineSales, func(i, j int) bool { return row.LineSales[i].Currency < row.LineSales[j].Currency })

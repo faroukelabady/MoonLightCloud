@@ -45,7 +45,7 @@ it('R1 regression: Store B selected while loaded Store A health remains visible'
  vi.mocked(dashboardApi.activity).mockResolvedValue({items:[]});vi.mocked(dashboardApi.latestSales).mockResolvedValue({sales:[]});
  vi.mocked(dashboardApi.orders).mockResolvedValue({orders:[],next_cursor:null,status_counts:[],webhook_inbox:{}} as any);
  vi.mocked(dashboardApi.orderSummary).mockResolvedValue({currency_totals:[],status_counts:[],provider_totals:[]} as any);
- vi.mocked(dashboardApi.catalogHealth).mockImplementation(async(s)=>s===A?{generated_at:'',store_id:null,provider_key:'',reason_codes:[],counts:[{reason_code:'CATALOG_MISSING_SKU',products:1}],detail:[{reason_code:'CATALOG_MISSING_SKU',provider_key:'',sku:'ONLY_STORE_A'}],detail_limit:50,detail_truncated:false}:await new Promise(()=>{}));
+ vi.mocked(dashboardApi.catalogHealth).mockImplementation(async(s)=>s===A?{generated_at:'',store_id:null,provider_key:'',reason_codes:[],counts:[{reason_code:'VARIANT_MISSING_SKU',products:1}],detail:[{reason_code:'VARIANT_MISSING_SKU',provider_key:'',sku:'ONLY_STORE_A'}],detail_limit:50,detail_truncated:false}:await new Promise(()=>{}));
  vi.mocked(dashboardApi.tags).mockResolvedValue({rows:[],overlap_note:''} as any);
  const r=render(App);
  await waitFor(()=>expect(r.container.textContent).toContain('ONLY_STORE_A'));

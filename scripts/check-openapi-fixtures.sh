@@ -90,6 +90,42 @@ check("minimal-shop return", "ReturnRefundFinalizedV1", minimal_ret)
 bad_return = load_fixture("internal/returnrefund/testdata/return_partial.json")
 bad_return["lines"] = []
 check("empty-lines return", "ReturnRefundFinalizedV1", bad_return, expect_valid=False)
+# Phase 8C v2 (per-line tag snapshots) and Phase 17-R0 v3 (per-line
+# frozen variant snapshots) keep every v1 invariant and validate through
+# the published union. History law: v3 snapshots are event-sourced only.
+sale_v2 = load_fixture("internal/sale/testdata/sale_usd.json")
+for line in sale_v2["lines"]:
+    line["tags"] = [{"tag_id": "aaaaaaaa-0000-4000-8000-000000000001",
+                     "slug": "horse", "name_ar": "حصان", "name_en": "Horse"}]
+check("sale_v2", "SaleFinalizedV2", sale_v2)
+sale_v3 = copy.deepcopy(sale_v2)
+for line in sale_v3["lines"]:
+    line["variant_id"] = "bbbbbbbb-0000-4000-8000-000000000001"
+    line["variant_sku"] = "NFT-BLU-TRD"
+    line["variant_attributes"] = [{
+        "definition_code": "color", "value_code": "blue",
+        "name_ar": "أزرق", "name_en": "Blue",
+        "definition_name_ar": "اللون", "definition_name_en": "Color"}]
+    line["variant_price_egp_cents"] = 65000
+    line["variant_price_usd_cents"] = None
+check("sale_v3", "SaleFinalizedV3", sale_v3)
+bad_override = copy.deepcopy(sale_v3)
+bad_override["lines"][0]["variant_price_egp_cents"] = -1
+check("sale_v3_negative_override", "SaleFinalizedV3", bad_override, expect_valid=False)
+too_many = copy.deepcopy(sale_v3)
+too_many["lines"][0]["variant_attributes"] = [
+    {"definition_code": "d%d" % i, "value_code": "v", "name_ar": "أ", "definition_name_ar": "د"}
+    for i in range(33)]
+check("sale_v3_too_many_attributes", "SaleFinalizedV3", too_many, expect_valid=False)
+sale_v3_envelope = {
+    "event_id": "22222222-2222-4222-8222-222222222222",
+    "device_id": "11111111-1111-4111-8111-111111111111",
+    "event_type": "sale.finalized.v3",
+    "occurred_at": "2026-10-05T00:00:00Z",
+    "payload": sale_v3,
+}
+check("sync_event_union_sale_v3", "SyncEvent", sale_v3_envelope)
+check("sync_batch_sale_v3", "SyncBatch", {"events": [sale_v3_envelope]})
 bad_sale = load_fixture("internal/sale/testdata/sale_usd.json")
 bad_sale["lines"] = []
 check("empty-lines sale", "SaleFinalizedV1", bad_sale, expect_valid=False)
@@ -325,6 +361,16 @@ order_line_unresolved = {
     "configuration_unresolved": True,
 }
 check("order_line_unresolved", "DashboardOrderLine", order_line_unresolved)
+# Phase 17 order-line variant snapshot (00034): frozen purchase-time
+# variant identity and labels, served exactly as captured.
+order_line_variant = dict(order_line_selection,
+    variant_id="11111111-0000-4000-8000-0000000000b1",
+    variant_sku="ML-1-A",
+    variant_attributes=[{"definition_code": "size", "value_code": "a5",
+                         "name_ar": "أ5", "name_en": "A5",
+                         "definition_name_ar": "المقاس", "definition_name_en": "Size",
+                         "position": 0}])
+check("order_line_variant_snapshot", "DashboardOrderLine", order_line_variant)
 
 # Phase 15-R2 F15: the configuration event must validate through the
 # FULL published SyncEvent union (and SyncBatch), not only its leaf.
@@ -349,13 +395,17 @@ check("category_v2_missing_policy", "CatalogCategorySnapshotV2", load_fixture("i
 
 # Phase 17: product v2 (SKU authority moved to the variant) and physical
 # variants must validate through the published union, and reject bad leaf
-# shapes.
+# shapes. Phase 17-R0 (ADR-0049): v2 carries NO SKU-bearing field at all
+# — both `sku` and the retired `primary_variant_sku` mirror are outside
+# the contract (Cloud's decoder tolerates-and-ignores the mirror for one
+# release; see TestProductSnapshotV2Contract).
 product_v2 = load_fixture("internal/catalog/testdata/product_valid.json")
 product_v2.pop("sku")
-product_v2["primary_variant_sku"] = "PAP-001"
 check("product_v2", "CatalogProductSnapshotV2", product_v2)
 product_v2_bad = dict(product_v2, sku="PAP-001")
 check("product_v2_rejects_sku", "CatalogProductSnapshotV2", product_v2_bad, expect_valid=False)
+product_v2_mirror = dict(product_v2, primary_variant_sku="PAP-001")
+check("product_v2_rejects_retired_mirror", "CatalogProductSnapshotV2", product_v2_mirror, expect_valid=False)
 product_v2_envelope = dict(config_envelope, event_type="catalog.product.snapshot.v2", payload=product_v2)
 check("sync_event_union_product_v2", "SyncEvent", product_v2_envelope)
 

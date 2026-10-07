@@ -37,6 +37,12 @@ sql:
       - "db/migrations/00032_catalog_admin_commands.sql"
       - "db/migrations/00033_product_variants.sql"
       - "db/migrations/00034_commerce_order_variant_snap.sql"
+      - "db/migrations/00035_product_sku_retirement.sql"
+      - "db/migrations/00036_sale_line_variant_snapshots.sql"
+      - "db/migrations/00037_product_types.sql"
+      - "db/migrations/00038_sale_line_product_type_snapshot.sql"
+      - "db/migrations/00039_admin_type_command_vocabulary.sql"
+      - "db/migrations/00040_create_command_identity.sql"
     gen:
       go:
         package: "sqlcgen"

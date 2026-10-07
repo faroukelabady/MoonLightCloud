@@ -254,9 +254,14 @@ func TestShopifyVariantFrameCapabilityConflict(t *testing.T) {
 	if !strings.Contains(err.Error(), CapabilityCode) {
 		t.Fatalf("expected the stable capability code, got: %v", err)
 	}
+	// R14: the capability refusal yields ZERO provider mutations — the
+	// gate runs before any remote call of any kind (reads included).
+	if len(h.recorded()) != 0 {
+		t.Fatalf("capability refusal must issue no provider calls, saw %d", len(h.recorded()))
+	}
 	for _, record := range h.recorded() {
-		if strings.Contains(record.Query, "MoonlightVariantSet") || strings.Contains(record.Query, "MoonlightProductCreate") {
-			t.Fatal("capability refusal must happen before any remote variant write")
+		if strings.Contains(record.Query, "mutation ") {
+			t.Fatal("capability refusal must yield zero provider mutations")
 		}
 	}
 }

@@ -96,6 +96,22 @@ func (p *ShopifyProvider) SetInventory(ctx context.Context, req commerce.Invento
 	if fence.supersedes(req.CatalogRevision, req.PolicyRevision) {
 		return errSuperseded()
 	}
+	// Phase 17-R0 (R08): when MoonLight OWNS several variants on the
+	// product (multi-variant shape), stock is variant-scoped and this
+	// product-level path refuses BEFORE touching anything: the (possibly
+	// stale) managed_variant_id metafield is NEVER read for that shape —
+	// per-variant SetVariantInventory owns it. A single stamped managed
+	// variant (plus any unmanaged manual variants) keeps the frozen
+	// behavior: only the managed inventory item is ever mutated.
+	ownedVariants := 0
+	for _, candidate := range product.Variants.Nodes {
+		if metafieldValue(candidate.Metafields.Nodes, metafieldVariantID) != "" {
+			ownedVariants++
+		}
+	}
+	if ownedVariants > 1 {
+		return commerce.ValidationError("shopify multi-variant product stock is variant-scoped")
+	}
 	variant, err := recordedVariant(product, values[metafieldManagedVariantID])
 	if err != nil {
 		return err

@@ -1523,6 +1523,139 @@ func (q *Queries) ReportSalesByProductForStore(ctx context.Context, arg ReportSa
 	return items, nil
 }
 
+const reportSalesByProductType = `-- name: ReportSalesByProductType :many
+SELECT l.product_type_id, l.product_type_code,
+    l.product_type_name_ar, l.product_type_name_en,
+    l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+  AND ($3::text = '' OR l.line_currency = $3::text)
+GROUP BY l.product_type_id, l.product_type_code,
+    l.product_type_name_ar, l.product_type_name_en, l.line_currency
+`
+
+type ReportSalesByProductTypeParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+}
+
+type ReportSalesByProductTypeRow struct {
+	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeCode   pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	LineSales         int64       `json:"line_sales"`
+	LineCost          int64       `json:"line_cost"`
+}
+
+// Phase 17-R2 type breakdown: GROUP BY the line's FROZEN type snapshot
+// (product_type_id/code/labels at sale time, 00038). History never joins
+// current catalog_product_types: renames/reassignments never move rows.
+// One sale line = one financial contribution (no join multiplication).
+func (q *Queries) ReportSalesByProductType(ctx context.Context, arg ReportSalesByProductTypeParams) ([]ReportSalesByProductTypeRow, error) {
+	rows, err := q.db.Query(ctx, reportSalesByProductType, arg.StartUtc, arg.EndUtc, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportSalesByProductTypeRow{}
+	for rows.Next() {
+		var i ReportSalesByProductTypeRow
+		if err := rows.Scan(
+			&i.ProductTypeID,
+			&i.ProductTypeCode,
+			&i.ProductTypeNameAr,
+			&i.ProductTypeNameEn,
+			&i.Currency,
+			&i.Units,
+			&i.LineSales,
+			&i.LineCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportSalesByProductTypeForStore = `-- name: ReportSalesByProductTypeForStore :many
+SELECT l.product_type_id, l.product_type_code,
+    l.product_type_name_ar, l.product_type_name_en,
+    l.line_currency AS currency,
+    COALESCE(SUM(l.quantity), 0)::bigint AS units,
+    COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
+    COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
+FROM sale_lines_projection l
+JOIN sales_projection s ON s.sale_id = l.sale_id
+WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND s.store_id = $4::uuid
+GROUP BY l.product_type_id, l.product_type_code,
+    l.product_type_name_ar, l.product_type_name_en, l.line_currency
+`
+
+type ReportSalesByProductTypeForStoreParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	Currency string             `json:"currency"`
+	StoreID  pgtype.UUID        `json:"store_id"`
+}
+
+type ReportSalesByProductTypeForStoreRow struct {
+	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeCode   pgtype.Text `json:"product_type_code"`
+	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
+	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	LineSales         int64       `json:"line_sales"`
+	LineCost          int64       `json:"line_cost"`
+}
+
+func (q *Queries) ReportSalesByProductTypeForStore(ctx context.Context, arg ReportSalesByProductTypeForStoreParams) ([]ReportSalesByProductTypeForStoreRow, error) {
+	rows, err := q.db.Query(ctx, reportSalesByProductTypeForStore,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.Currency,
+		arg.StoreID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportSalesByProductTypeForStoreRow{}
+	for rows.Next() {
+		var i ReportSalesByProductTypeForStoreRow
+		if err := rows.Scan(
+			&i.ProductTypeID,
+			&i.ProductTypeCode,
+			&i.ProductTypeNameAr,
+			&i.ProductTypeNameEn,
+			&i.Currency,
+			&i.Units,
+			&i.LineSales,
+			&i.LineCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportSalesByTag = `-- name: ReportSalesByTag :many
 SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
@@ -1651,7 +1784,8 @@ func (q *Queries) ReportSalesByTagForStore(ctx context.Context, arg ReportSalesB
 }
 
 const reportSalesByVariant = `-- name: ReportSalesByVariant :many
-SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+SELECT l.variant_id, l.variant_sku, l.variant_attributes,
+    l.product_id, l.sku, l.product_name, l.line_currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
@@ -1659,7 +1793,8 @@ FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
   AND ($3::text = '' OR l.line_currency = $3::text)
-GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency
+GROUP BY l.variant_id, l.variant_sku, l.variant_attributes,
+    l.product_id, l.sku, l.product_name, l.line_currency
 `
 
 type ReportSalesByVariantParams struct {
@@ -1669,20 +1804,26 @@ type ReportSalesByVariantParams struct {
 }
 
 type ReportSalesByVariantRow struct {
-	VariantID   pgtype.UUID `json:"variant_id"`
-	ProductID   pgtype.UUID `json:"product_id"`
-	Sku         string      `json:"sku"`
-	ProductName string      `json:"product_name"`
-	Currency    string      `json:"currency"`
-	Units       int64       `json:"units"`
-	LineSales   int64       `json:"line_sales"`
-	LineCost    int64       `json:"line_cost"`
+	VariantID         pgtype.UUID `json:"variant_id"`
+	VariantSku        pgtype.Text `json:"variant_sku"`
+	VariantAttributes []byte      `json:"variant_attributes"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	Sku               string      `json:"sku"`
+	ProductName       string      `json:"product_name"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	LineSales         int64       `json:"line_sales"`
+	LineCost          int64       `json:"line_cost"`
 }
 
-// Phase 17 optional variant breakdown: GROUP BY the line's frozen variant
-// identity columns (sale_lines_projection is append-only history, never
-// joined to the current-state variant projection). Legacy lines without a
-// variant identity group under NULL variant_id.
+// Phase 17 variant breakdown, extended by 17-R0 (sale.finalized.v3):
+// GROUP BY the line's FROZEN variant identity/labels (variant_id,
+// variant_sku, sale-time variant_attributes). sale_lines_projection is
+// append-only history, never joined to the current-state variant
+// projection: later catalog label renames can never move these rows.
+// Legacy lines without a variant snapshot group under NULL variant_id/
+// variant_sku/variant_attributes; the sale-line snapshot sku stays the
+// historical line SKU (v1..v3 invariant).
 func (q *Queries) ReportSalesByVariant(ctx context.Context, arg ReportSalesByVariantParams) ([]ReportSalesByVariantRow, error) {
 	rows, err := q.db.Query(ctx, reportSalesByVariant, arg.StartUtc, arg.EndUtc, arg.Currency)
 	if err != nil {
@@ -1694,6 +1835,8 @@ func (q *Queries) ReportSalesByVariant(ctx context.Context, arg ReportSalesByVar
 		var i ReportSalesByVariantRow
 		if err := rows.Scan(
 			&i.VariantID,
+			&i.VariantSku,
+			&i.VariantAttributes,
 			&i.ProductID,
 			&i.Sku,
 			&i.ProductName,
@@ -1713,7 +1856,8 @@ func (q *Queries) ReportSalesByVariant(ctx context.Context, arg ReportSalesByVar
 }
 
 const reportSalesByVariantForStore = `-- name: ReportSalesByVariantForStore :many
-SELECT l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+SELECT l.variant_id, l.variant_sku, l.variant_attributes,
+    l.product_id, l.sku, l.product_name, l.line_currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
@@ -1722,7 +1866,8 @@ JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
   AND ($3::text = '' OR l.line_currency = $3::text)
   AND s.store_id = $4::uuid
-GROUP BY l.variant_id, l.product_id, l.sku, l.product_name, l.line_currency
+GROUP BY l.variant_id, l.variant_sku, l.variant_attributes,
+    l.product_id, l.sku, l.product_name, l.line_currency
 `
 
 type ReportSalesByVariantForStoreParams struct {
@@ -1733,14 +1878,16 @@ type ReportSalesByVariantForStoreParams struct {
 }
 
 type ReportSalesByVariantForStoreRow struct {
-	VariantID   pgtype.UUID `json:"variant_id"`
-	ProductID   pgtype.UUID `json:"product_id"`
-	Sku         string      `json:"sku"`
-	ProductName string      `json:"product_name"`
-	Currency    string      `json:"currency"`
-	Units       int64       `json:"units"`
-	LineSales   int64       `json:"line_sales"`
-	LineCost    int64       `json:"line_cost"`
+	VariantID         pgtype.UUID `json:"variant_id"`
+	VariantSku        pgtype.Text `json:"variant_sku"`
+	VariantAttributes []byte      `json:"variant_attributes"`
+	ProductID         pgtype.UUID `json:"product_id"`
+	Sku               string      `json:"sku"`
+	ProductName       string      `json:"product_name"`
+	Currency          string      `json:"currency"`
+	Units             int64       `json:"units"`
+	LineSales         int64       `json:"line_sales"`
+	LineCost          int64       `json:"line_cost"`
 }
 
 func (q *Queries) ReportSalesByVariantForStore(ctx context.Context, arg ReportSalesByVariantForStoreParams) ([]ReportSalesByVariantForStoreRow, error) {
@@ -1759,6 +1906,8 @@ func (q *Queries) ReportSalesByVariantForStore(ctx context.Context, arg ReportSa
 		var i ReportSalesByVariantForStoreRow
 		if err := rows.Scan(
 			&i.VariantID,
+			&i.VariantSku,
+			&i.VariantAttributes,
 			&i.ProductID,
 			&i.Sku,
 			&i.ProductName,

@@ -125,22 +125,22 @@ func TestOrderAnalyticsProviderFilter(t *testing.T) {
 func TestCatalogHealthCodesAndBounds(t *testing.T) {
 	sku, name := "PAP-1", "Papyrus"
 	repo := &stubAnalyticsRepo{
-		counts: []CatalogHealthCountRaw{{ReasonCode: "CATALOG_MISSING_SKU", Products: 3}},
+		counts: []CatalogHealthCountRaw{{ReasonCode: "VARIANT_MISSING_SKU", Products: 3}},
 		detail: []CatalogHealthRowRaw{
-			{ReasonCode: "CATALOG_MISSING_SKU", ProviderKey: "", SKU: sku, Name: name},
-			{ReasonCode: "CATALOG_MISSING_SKU", ProviderKey: "", SKU: sku, Name: name},
+			{ReasonCode: "VARIANT_MISSING_SKU", ProviderKey: "", SKU: sku, Name: name},
+			{ReasonCode: "VARIANT_MISSING_SKU", ProviderKey: "", SKU: sku, Name: name},
 		},
 	}
 	svc := NewService(report.NewService(repo, clock.System{}, time.UTC), repo, nil, clock.System{})
 	req := analyticsRequest()
-	out, err := svc.CatalogHealth(context.Background(), req, "shopify-main", "CATALOG_MISSING_SKU", 1)
+	out, err := svc.CatalogHealth(context.Background(), req, "shopify-main", "VARIANT_MISSING_SKU", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.ProviderKey != "shopify-main" || repo.lastProvider != "shopify-main" {
 		t.Fatal("provider scope not applied")
 	}
-	if repo.lastReason != "CATALOG_MISSING_SKU" || repo.lastLimit != 2 {
+	if repo.lastReason != "VARIANT_MISSING_SKU" || repo.lastLimit != 2 {
 		t.Fatalf("reason/limit not applied: %q %d", repo.lastReason, repo.lastLimit)
 	}
 	// Bounded: limit=1 with 2 rows → truncated, exactly 1 row kept.

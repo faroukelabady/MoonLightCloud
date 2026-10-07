@@ -29,9 +29,6 @@ GROUP BY provider_key, canonical_status, currency;
 -- name: CatalogHealthSummary :many
 -- Bounded summary counts per stable health reason code. Exact predicates
 -- (documented in docs/decisions/0045 and tested):
---   CATALOG_MISSING_SKU       — projected SKU absent/blank (missing only;
---                               legacy stored SKUs are preserved, never
---                               regex-rejected).
 --   CATALOG_MISSING_CATEGORY  — required root/top category absent or
 --                               unresolved (optional subcategories and
 --                               hidden categories are NOT failures).
@@ -66,12 +63,7 @@ GROUP BY provider_key, canonical_status, currency;
 -- universe (provider keys observed in mappings or barriers).
 SELECT reason_code, count(*)::bigint AS products
 FROM (
-    SELECT 'CATALOG_MISSING_SKU' AS reason_code
-    FROM catalog_products p
-    WHERE (p.sku IS NULL OR btrim(p.sku) = '')
-      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
-    UNION ALL
-    SELECT 'CATALOG_MISSING_CATEGORY'
+    SELECT 'CATALOG_MISSING_CATEGORY' AS reason_code
     FROM catalog_products p
     WHERE (p.top_category_id IS NULL OR
            NOT EXISTS (SELECT 1 FROM catalog_categories c WHERE c.category_id = p.top_category_id))
@@ -139,8 +131,11 @@ FROM (
     --                               duplicates are tolerated at
     --                               projection and surfaced here.
     --   VARIANT_MISSING_SKU          — projected variant SKU absent/blank
-    --                               (defensive mirror of
-    --                               CATALOG_MISSING_SKU).
+    --                               (Phase 17-R0: the ONLY SKU health
+    --                               code — Product carries no SKU
+    --                               authority anywhere (ADR-0049), so the
+    --                               product-level CATALOG_MISSING_SKU was
+    --                               retired with catalog_products.sku).
     --   VARIANT_MAPPING_MISSING      — EFFECTIVELY online-eligible live
     --                               variant with no mapping for a known
     --                               provider (variant-granularity mirror
@@ -148,6 +143,22 @@ FROM (
     --   VARIANT_INTENTIONALLY_OFFLINE— INFORMATIONAL (never a defect):
     --                               variant of an online-eligible product
     --                               deliberately inactive or tombstoned.
+    -- Phase 17-R2 type health (structural metadata, never inventory):
+    --   PRODUCT_TYPE_MISSING         — product references no type
+    --                               (legacy v1 projection or pre-R2 row).
+    --   PRODUCT_TYPE_PROJECTION_MISSING — product references a type with
+    --                               no projected type row (out-of-order
+    --                               arrival; the projector waits).
+    --   PRODUCT_TYPE_INACTIVE        — INFORMATIONAL: product under an
+    --                               inactive type (still interpretable and
+    --                               sellable per lifecycle policy).
+    --   PRODUCT_DIMENSION_NOT_ALLOWED_BY_TYPE — product declares a
+    --                               dimension outside its type's allowed set
+    --                               (canonical services prevent this; a hit
+    --                               means out-of-band drift).
+    --   PRODUCT_FRAME_CAPABILITY_MISMATCH — product carries frame
+    --                               configurations while its type lacks
+    --                               frame_configuration.
     SELECT 'PRODUCT_NO_ACTIVE_VARIANTS'
     FROM catalog_products p
     WHERE p.is_active
@@ -207,6 +218,34 @@ FROM (
     WHERE p.is_active AND pol.sell_online AND s.category_allows_online
       AND (NOT v.is_active OR v.deleted)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_MISSING'
+    FROM catalog_products p
+    WHERE p.product_type_id IS NULL
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_PROJECTION_MISSING'
+    FROM catalog_products p
+    WHERE p.product_type_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_product_types t
+                      WHERE t.type_id = p.product_type_id)
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_INACTIVE'
+    FROM catalog_products p
+    JOIN catalog_product_types t ON t.type_id = p.product_type_id
+    WHERE NOT t.is_active
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_FRAME_CAPABILITY_MISMATCH'
+    FROM catalog_products p
+    JOIN catalog_product_types t ON t.type_id = p.product_type_id
+    WHERE NOT EXISTS (SELECT 1 FROM catalog_product_type_capabilities c
+                      WHERE c.type_id = t.type_id
+                        AND c.capability_code = 'frame_configuration')
+      AND EXISTS (SELECT 1 FROM catalog_product_configurations cfg
+                  WHERE cfg.product_id = p.product_id)
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
 ) reasons
 GROUP BY reason_code;
 
@@ -215,21 +254,15 @@ GROUP BY reason_code;
 -- Row identity only: no raw provider errors, no credentials, no SQL.
 SELECT reason_code, provider_key, product_id, sku, name, store_id
 FROM (
-    SELECT 'CATALOG_MISSING_SKU' AS reason_code, ''::text AS provider_key,
-           p.product_id, p.sku, p.name, p.store_id
-    FROM catalog_products p
-    WHERE (p.sku IS NULL OR btrim(p.sku) = '')
-      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
-    UNION ALL
-    SELECT 'CATALOG_MISSING_CATEGORY', ''::text,
-           p.product_id, p.sku, p.name, p.store_id
+    SELECT 'CATALOG_MISSING_CATEGORY' AS reason_code, ''::text AS provider_key,
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     WHERE (p.top_category_id IS NULL OR
            NOT EXISTS (SELECT 1 FROM catalog_categories c WHERE c.category_id = p.top_category_id))
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'AVAILABILITY_NOT_READY', ''::text,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -239,7 +272,7 @@ FROM (
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_MAPPING_MISSING', u.provider_key,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN (
@@ -254,7 +287,7 @@ FROM (
                       WHERE m.provider_key = u.provider_key AND m.product_id = p.product_id)
     UNION ALL
     SELECT 'CATEGORY_ONLINE_DISABLED', ''::text,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -263,7 +296,7 @@ FROM (
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_SYNC_AMBIGUOUS', b.provider_key,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM commerce_product_mutation_barriers b
     JOIN catalog_products p ON p.product_id = b.product_id
     WHERE b.state IN ('in_flight', 'uncertain')
@@ -271,7 +304,7 @@ FROM (
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_STORE_CONFLICT', m.provider_key,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM commerce_product_mappings m
     JOIN catalog_products p ON p.product_id = m.product_id
     WHERE m.store_id IS NOT NULL AND p.store_id IS NOT NULL
@@ -282,7 +315,7 @@ FROM (
     -- Phase 17 variant detail: row identity per variant (its SKU) or per
     -- product (its SKU) for product-level codes; no raw provider errors.
     SELECT 'PRODUCT_NO_ACTIVE_VARIANTS', ''::text,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     WHERE p.is_active
       AND NOT EXISTS (SELECT 1 FROM catalog_product_variants v
@@ -290,7 +323,7 @@ FROM (
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'PRODUCT_NO_SELLABLE_VARIANT', ''::text,
-           p.product_id, p.sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -347,6 +380,38 @@ FROM (
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
     WHERE p.is_active AND pol.sell_online AND s.category_allows_online
       AND (NOT v.is_active OR v.deleted)
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_MISSING', ''::text,
+           p.product_id, ''::text AS sku, p.name, p.store_id
+    FROM catalog_products p
+    WHERE p.product_type_id IS NULL
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_PROJECTION_MISSING', ''::text,
+           p.product_id, ''::text AS sku, p.name, p.store_id
+    FROM catalog_products p
+    WHERE p.product_type_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_product_types t
+                      WHERE t.type_id = p.product_type_id)
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_TYPE_INACTIVE', ''::text,
+           p.product_id, ''::text AS sku, p.name, p.store_id
+    FROM catalog_products p
+    JOIN catalog_product_types t ON t.type_id = p.product_type_id
+    WHERE NOT t.is_active
+      AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
+    UNION ALL
+    SELECT 'PRODUCT_FRAME_CAPABILITY_MISMATCH', ''::text,
+           p.product_id, ''::text AS sku, p.name, p.store_id
+    FROM catalog_products p
+    JOIN catalog_product_types t ON t.type_id = p.product_type_id
+    WHERE NOT EXISTS (SELECT 1 FROM catalog_product_type_capabilities c
+                      WHERE c.type_id = t.type_id
+                        AND c.capability_code = 'frame_configuration')
+      AND EXISTS (SELECT 1 FROM catalog_product_configurations cfg
+                  WHERE cfg.product_id = p.product_id)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
 ) details
 WHERE (@reason::text = '' OR reason_code = @reason::text)

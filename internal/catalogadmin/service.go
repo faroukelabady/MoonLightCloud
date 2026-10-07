@@ -16,16 +16,34 @@ import (
 
 // NewCommand is the validated creation intent.
 type NewCommand struct {
-	ID               string
-	StoreID          string
-	Type             string
-	Version          int
-	EntityID         string
+	ID       string
+	StoreID  string
+	Type     string
+	Version  int
+	EntityID string
+	// TargetKind is "entity" (default: the command addresses a
+	// pre-existing business entity) or "create" (creation intent: the
+	// entity does not exist yet; EntityID must be the absent marker "").
+	TargetKind string
+	// RequestedKey is the stable requested key for creates (ProductType
+	// code); empty for entity commands.
+	RequestedKey     string
 	Payload          []byte
 	PayloadHash      string
 	ExpectedRevision int64
 	Actor            string
 }
+
+// Command target kinds.
+const (
+	// TargetKindEntity addresses a pre-existing business entity.
+	TargetKindEntity = "entity"
+	// TargetKindCreate is a creation intent: no business identity exists
+	// yet. EntityID is the explicit absent marker ""; the requested
+	// stable key travels in RequestedKey and the Retail-minted identity
+	// returns in ResultEntityID. Never a placeholder UUID.
+	TargetKindCreate = "create"
+)
 
 // CommandView is one command row for API/UI.
 type CommandView struct {
@@ -34,6 +52,9 @@ type CommandView struct {
 	Type             string       `json:"type"`
 	Version          int          `json:"version"`
 	EntityID         string       `json:"entity_id"`
+	TargetKind       string       `json:"target_kind"`
+	RequestedKey     string       `json:"requested_key,omitempty"`
+	ResultEntityID   string       `json:"result_entity_id,omitempty"`
 	Payload          []byte       `json:"payload,omitempty"`
 	PayloadHash      string       `json:"payload_hash"`
 	ExpectedRevision int64        `json:"expected_revision"`
@@ -81,24 +102,31 @@ type BoundDevice struct {
 }
 
 // AdminProductRow is one Store-scoped Product for the operator list.
+// Phase 17-R0 (ADR-0049): products carry NO sku/stock — they carry
+// variant_count and derived_stock (SUM of active, non-tombstoned variant
+// stock; product stock is derived only). Variant rows own the SKU.
 type AdminProductRow struct {
-	ProductID             string `json:"product_id"`
-	SKU                   string `json:"sku"`
+	ProductID string `json:"product_id"`
+	// Phase 17-R2: structural type identity (never inferred).
+	ProductTypeID         string `json:"product_type_id"`
 	NameAR                string `json:"name_ar"`
 	NameEN                string `json:"name_en"`
 	IsActive              bool   `json:"is_active"`
 	CatalogRevision       int64  `json:"catalog_revision"`
 	SellOnline            bool   `json:"sell_online"`
-	StockQuantity         int64  `json:"stock_quantity"`
+	VariantCount          int64  `json:"variant_count"`
+	DerivedStock          int64  `json:"derived_stock"`
 	ConfigurationRevision int64  `json:"configuration_revision"`
 	HasPending            bool   `json:"has_pending"`
 }
 
 // AdminProductDetail is the full projection snapshot an editor needs:
-// current values, all three revision streams, read-only stock/SKU.
+// current values, all three revision streams, and the derived variant
+// rollup (variant_count/derived_stock; no product SKU — 17-R0).
 type AdminProductDetail struct {
-	ProductID             string   `json:"product_id"`
-	SKU                   string   `json:"sku"`
+	ProductID string `json:"product_id"`
+	// Phase 17-R2: structural type identity (never inferred).
+	ProductTypeID         string   `json:"product_type_id"`
 	NameAR                string   `json:"name_ar"`
 	NameEN                string   `json:"name_en"`
 	DescriptionAR         string   `json:"description_ar"`
@@ -114,7 +142,8 @@ type AdminProductDetail struct {
 	IsActive              bool     `json:"is_active"`
 	SellOnline            bool     `json:"sell_online"`
 	SellOffline           bool     `json:"sell_offline"`
-	StockQuantity         int64    `json:"stock_quantity"`
+	VariantCount          int64    `json:"variant_count"`
+	DerivedStock          int64    `json:"derived_stock"`
 	CatalogRevision       int64    `json:"catalog_revision"`
 	SalesPolicyRevision   int64    `json:"sales_policy_revision"`
 	ConfigurationRevision int64    `json:"configuration_revision"`
@@ -207,6 +236,9 @@ type Store interface {
 	ListCatalogAdminTargetsBatch(ctx context.Context, commandIDs []string) (map[string][]TargetView, error)
 	DueCatalogAdminTargets(ctx context.Context, deviceID string, limit int) ([]DueTarget, error)
 	FinishCatalogAdminTarget(ctx context.Context, targetID, deviceID, status, code, entityID string, pre, post int64) (bool, error)
+	// SetCommandResultEntity records a command's actual resulting entity
+	// (Retail-minted on APPLIED). First writer wins; intent never moves.
+	SetCommandResultEntity(ctx context.Context, targetID, entityID string) error
 	MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, deviceID string) error
 	CancelCatalogAdminCommand(ctx context.Context, commandID string) (bool, error)
 	UpsertCatalogAdminCapability(ctx context.Context, deviceID string, capable bool) error
@@ -225,6 +257,26 @@ type Store interface {
 	// Phase 17 variant reads (Store-scoped, projection only).
 	AdminProductVariants(ctx context.Context, storeID, productID string) ([]AdminProductVariant, error)
 	AdminProductVariant(ctx context.Context, storeID, variantID string) (AdminProductVariant, error)
+	// Phase 17-R2 type reads (Store-scoped, projection only).
+	AdminProductTypeList(ctx context.Context, storeID string) ([]AdminProductType, error)
+	AdminProductType(ctx context.Context, storeID, typeID string) (AdminProductType, error)
+}
+
+// AdminProductType is one projected structural type for the editor:
+// identity, labels, lifecycle, allowed dimensions and capabilities.
+type AdminProductType struct {
+	TypeID        string   `json:"type_id"`
+	Code          string   `json:"code"`
+	NameAR        string   `json:"name_ar"`
+	NameEN        string   `json:"name_en"`
+	DescriptionAR *string  `json:"description_ar,omitempty"`
+	DescriptionEN *string  `json:"description_en,omitempty"`
+	IsActive      bool     `json:"is_active"`
+	Position      int      `json:"position"`
+	TypeRevision  int64    `json:"type_revision"`
+	Dimensions    []string `json:"dimensions"`
+	Capabilities  []string `json:"capabilities"`
+	HasPending    bool     `json:"has_pending"`
 }
 
 // DeviceDirectory resolves device bindings and lifecycle.
@@ -253,7 +305,10 @@ func NewService(store Store, devices DeviceDirectory) *Service {
 // Create validates operator intent, verifies the entity projection
 // belongs to the selected Store, persists the immutable command and
 // snapshots the current eligible device set. No projection writes, no
-// provider calls: only durable intent.
+// provider calls: only durable intent. Create-kind commands carry NO
+// business entity (entity_id is the explicit absent marker ""); the
+// requested stable key is stored separately and the Retail-minted
+// identity returns later in ResultEntityID.
 func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID string, expectedRevision int64, payload []byte) (CommandView, error) {
 	actor = strings.TrimSpace(actor)
 	if actor == "" || len(actor) > 128 {
@@ -268,14 +323,31 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 		return CommandView{}, apperr.New(apperr.InvalidInput, "invalid command payload")
 	}
 	storeUUID, _ := uuid.Parse(strings.TrimSpace(storeID))
-	entityUUID, _ := uuid.Parse(strings.TrimSpace(entityID))
-	storeID, entityID = storeUUID.String(), entityUUID.String()
-	ownerStore, _, found, err := s.store.CatalogAdminOwnership(ctx, typ, entityID)
-	if err != nil {
-		return CommandView{}, err
+	storeID = storeUUID.String()
+	targetKind := TargetKindEntity
+	requestedKey := ""
+	if typ == TypeProductTypeCreateV1 {
+		// No entity to own yet: skip the ownership lookup entirely.
+		// Retail validates code uniqueness and owns acceptance (and the
+		// canonical ID) at apply time. requested_key is the normalized
+		// code from the validated payload.
+		targetKind = TargetKindCreate
+		requestedKey, _ = decoded["code"].(string)
+		entityID = ""
+	} else {
+		entityUUID, _ := uuid.Parse(strings.TrimSpace(entityID))
+		entityID = entityUUID.String()
 	}
-	if !found {
-		return CommandView{}, apperr.New(apperr.NotFound, CodeEntityNotFound)
+	ownerStore := strings.TrimSpace(storeID)
+	if targetKind == TargetKindEntity {
+		var found bool
+		ownerStore, _, found, err = s.store.CatalogAdminOwnership(ctx, typ, entityID)
+		if err != nil {
+			return CommandView{}, err
+		}
+		if !found {
+			return CommandView{}, apperr.New(apperr.NotFound, CodeEntityNotFound)
+		}
 	}
 	if ownerStore == "" || !strings.EqualFold(ownerStore, strings.TrimSpace(storeID)) {
 		// Legacy NULL rows and cross-Store entities are never
@@ -289,6 +361,7 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 	cmd := NewCommand{
 		ID: (ids.System{}).New(), StoreID: strings.TrimSpace(storeID),
 		Type: typ, Version: 1, EntityID: strings.TrimSpace(entityID),
+		TargetKind: targetKind, RequestedKey: requestedKey,
 		Payload: payload, PayloadHash: hash,
 		ExpectedRevision: expectedRevision, Actor: actor,
 	}
@@ -533,6 +606,13 @@ func (s *Service) ReportOutcome(ctx context.Context, deviceID, targetID, status,
 	if !ok {
 		return apperr.New(apperr.NotFound, "unknown command target")
 	}
+	if status == TargetApplied && strings.TrimSpace(entityID) != "" {
+		// Persist the actual resulting entity identity on the command
+		// (C02/C08): for creates this is the Retail-minted ID the
+		// convergence check and history must use — never the absent
+		// marker. First writer wins; intent rows are never rewritten.
+		_ = s.store.SetCommandResultEntity(ctx, targetID, strings.TrimSpace(entityID))
+	}
 	return nil
 }
 
@@ -605,7 +685,9 @@ func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView
 
 // aggregate derives the Store-level state plus convergence: CONVERGED
 // requires every applied target's post_revision to be visible in the
-// Cloud projection for its stream.
+// Cloud projection for its stream. For create-kind commands the effective
+// entity is the Retail-minted ResultEntityID (the command carries no
+// business identity); APPLIED without a result yet cannot converge.
 func (s *Service) aggregate(ctx context.Context, view CommandView, targets []TargetView) (string, bool) {
 	states := make([]string, 0, len(targets))
 	for _, t := range targets {
@@ -615,14 +697,21 @@ func (s *Service) aggregate(ctx context.Context, view CommandView, targets []Tar
 	if agg != AggregateApplied {
 		return agg, false
 	}
+	effEntity := view.EntityID
+	if view.TargetKind == TargetKindCreate {
+		if strings.TrimSpace(view.ResultEntityID) == "" {
+			return AggregateApplied, false
+		}
+		effEntity = view.ResultEntityID
+	}
 	converged := true
 	for _, t := range targets {
 		if t.Status != TargetApplied {
 			converged = false
 			break
 		}
-		owner, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, view.EntityID)
-		if err != nil || !found || !strings.EqualFold(owner, view.StoreID) || t.EntityID != view.EntityID || t.PostRevision < view.ExpectedRevision || revision < t.PostRevision || (t.PostRevision == view.ExpectedRevision && !s.noopProjected(ctx, view)) {
+		owner, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, effEntity)
+		if err != nil || !found || !strings.EqualFold(owner, view.StoreID) || t.EntityID != effEntity || t.PostRevision < view.ExpectedRevision || revision < t.PostRevision || (t.PostRevision == view.ExpectedRevision && !s.noopProjected(ctx, view)) {
 			converged = false
 			break
 		}
@@ -634,6 +723,27 @@ func (s *Service) aggregate(ctx context.Context, view CommandView, targets []Tar
 }
 
 var _ = fmt.Sprintf
+
+// AdminProductTypes lists Store-scoped ProductTypes for the operator UI.
+// Malformed Store IDs fail; unknown Stores yield empty results (never a
+// global fallback).
+func (s *Service) AdminProductTypes(ctx context.Context, storeID string) ([]AdminProductType, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
+		return nil, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	return s.store.AdminProductTypeList(ctx, strings.TrimSpace(storeID))
+}
+
+// AdminProductType serves one Store-scoped ProductType for the editor.
+func (s *Service) AdminProductType(ctx context.Context, storeID, typeID string) (AdminProductType, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
+		return AdminProductType{}, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(typeID)); err != nil {
+		return AdminProductType{}, apperr.New(apperr.InvalidInput, "invalid product_type_id")
+	}
+	return s.store.AdminProductType(ctx, strings.TrimSpace(storeID), strings.TrimSpace(typeID))
+}
 
 // AdminProducts lists Store-scoped Products for the operator UI.
 // Malformed Store IDs fail; unknown Stores yield empty results

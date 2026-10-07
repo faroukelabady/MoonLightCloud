@@ -325,3 +325,33 @@ func (h *CatalogAdminHandlers) AdminTags(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tags": rows})
 }
+
+// AdminProductTypes serves GET /api/v1/dashboard/catalog-admin/product-types.
+func (h *CatalogAdminHandlers) AdminProductTypes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return
+	}
+	q := r.URL.Query()
+	rows, err := h.Svc.AdminProductTypes(r.Context(), q.Get("store_id"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"product_types": rows})
+}
+
+// AdminProductTypeDetail serves GET /api/v1/dashboard/catalog-admin/product-types/{id}.
+func (h *CatalogAdminHandlers) AdminProductTypeDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return
+	}
+	q := r.URL.Query()
+	row, err := h.Svc.AdminProductType(r.Context(), q.Get("store_id"), r.PathValue("id"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"product_type": row})
+}

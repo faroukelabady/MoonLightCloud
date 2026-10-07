@@ -1,0 +1,35 @@
+{
+  "variant_id": "77777777-0000-4000-8000-000000000002",
+  "product_id": "77777777-0000-4000-8000-000000000001",
+  "sku": "NEF-BLU-TRA",
+  "is_active": true,
+  "deleted": false,
+  "price_egp_cents": 100000,
+  "price_usd_cents": null,
+  "stock_quantity": 4,
+  "inventory_revision": 1,
+  "variant_revision": 1,
+  "position": 0,
+  "combination_key": "color=blue\u001fpainting_style=traditional",
+  "attributes": [
+    {
+      "definition_code": "color",
+      "value_code": "blue",
+      "name_ar": "أزرق",
+      "name_en": "Blue",
+      "definition_name_ar": "اللون",
+      "definition_name_en": "Color",
+      "position": 0
+    },
+    {
+      "definition_code": "painting_style",
+      "value_code": "traditional",
+      "name_ar": "تقليدي",
+      "name_en": "Traditional",
+      "definition_name_ar": "أسلوب الرسم",
+      "definition_name_en": "Painting Style",
+      "position": 1
+    }
+  ],
+  "catalog_revision": 1
+}

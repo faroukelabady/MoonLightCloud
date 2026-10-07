@@ -202,7 +202,18 @@ func (p *ShopifyProvider) singleVariantIdentity(ctx context.Context, req commerc
 	values := ownership(product.Metafields.Nodes)
 	managed, err := managedVariant(product, variant.SKU, values[metafieldManagedVariantID])
 	if err != nil {
-		return commerce.ProductVariantsUpsertResult{}, err
+		// Phase 17-R0 (R08): a recorded managed identity that no longer
+		// matches the unique exact-SKU variant is a STALE transition
+		// leftover (crash between the 1↔N shape change and its tombstone)
+		// ONLY when the variant-scoped ownership stamp proves the
+		// exact-SKU variant is ours. Then it is repaired below — never
+		// blindly adopted. Every other mismatch stays fail-closed.
+		if candidate, cerr := exactSKUVariant(product, variant.SKU); cerr == nil &&
+			metafieldValue(candidate.Metafields.Nodes, metafieldVariantID) == variant.VariantID {
+			managed = candidate
+		} else {
+			return commerce.ProductVariantsUpsertResult{}, err
+		}
 	}
 	stamp := metafieldValue(managed.Metafields.Nodes, metafieldVariantID)
 	if stamp != "" && stamp != variant.VariantID {
@@ -220,7 +231,56 @@ func (p *ShopifyProvider) singleVariantIdentity(ctx context.Context, req commerc
 	if err != nil {
 		return commerce.ProductVariantsUpsertResult{}, commerce.ConflictError("shopify managed variant identity malformed")
 	}
+	// (Re)stamp the product-level managed-variant identity when it is
+	// absent, tombstoned, or stale: completing the N→1 transition here
+	// keeps product-level flows (managed-variant inventory) coherent even
+	// when only the variant reconciliation ran.
+	if values[metafieldManagedVariantID] != decimalID {
+		if err := p.setOwnership(ctx, product.ID, []map[string]any{{
+			"ownerId": product.ID, "namespace": metafieldNamespace, "key": metafieldManagedVariantID,
+			"type": "single_line_text_field", "value": decimalID,
+		}}); err != nil {
+			return commerce.ProductVariantsUpsertResult{}, err
+		}
+	}
 	return commerce.ProductVariantsUpsertResult{Variants: map[string]string{variant.VariantID: decimalID}}, nil
+}
+
+// exactSKUVariant resolves the single variant carrying an exact SKU on
+// the product (the managed-variant shape's identity tuple). Zero or
+// several matches fail closed.
+func exactSKUVariant(product *gqlProduct, sku string) (gqlVariant, error) {
+	if product == nil {
+		return gqlVariant{}, commerce.ConflictError("shopify product missing")
+	}
+	var exact []gqlVariant
+	for _, variant := range product.Variants.Nodes {
+		if variant.SKU == sku && sku != "" {
+			exact = append(exact, variant)
+		}
+	}
+	if len(exact) != 1 {
+		return gqlVariant{}, commerce.ConflictError(
+			fmt.Sprintf("shopify product has %d exact sku matches for the managed variant", len(exact)))
+	}
+	return exact[0], nil
+}
+
+// clearStaleManagedVariant durably tombstones the product-level
+// managed_variant_id metafield when the multi-variant shape supersedes
+// the managed-variant shape (Phase 17-R0, R08). The write is an empty
+// value through metafieldsSet (the documented tombstone): the key must
+// never keep pointing at a variant that no longer plays the managed role
+// across a 1↔N transition. Idempotent: an already-empty or absent key is
+// never rewritten.
+func (p *ShopifyProvider) clearStaleManagedVariant(ctx context.Context, productGID, current string) error {
+	if current == "" {
+		return nil
+	}
+	return p.setOwnership(ctx, productGID, []map[string]any{{
+		"ownerId": productGID, "namespace": metafieldNamespace, "key": metafieldManagedVariantID,
+		"type": "single_line_text_field", "value": "",
+	}})
 }
 
 // convergeShopifyVariants converges one product's option axes and its
@@ -299,6 +359,15 @@ func (p *ShopifyProvider) convergeShopifyVariants(ctx context.Context, req comme
 		}
 	}
 	if err := p.checkVariantFence(ctx, productGID, req.CatalogRevision, req.PolicyRevision); err != nil {
+		return commerce.ProductVariantsUpsertResult{}, err
+	}
+	// Phase 17-R0 (R08): the multi-variant shape has NO managed variant.
+	// Any product-level managed_variant_id left over from a previous
+	// single-variant shape is durably tombstoned (empty value) here so it
+	// can never drive adoption or mutation after a 1↔N transition —
+	// restart-safe because every reconcile re-runs this convergence.
+	if err := p.clearStaleManagedVariant(ctx, productGID,
+		metafieldValue(product.Metafields.Nodes, metafieldManagedVariantID)); err != nil {
 		return commerce.ProductVariantsUpsertResult{}, err
 	}
 	return p.establishShopifyVariantIdentity(ctx, productGID, req)

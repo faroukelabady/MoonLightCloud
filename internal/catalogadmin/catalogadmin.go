@@ -39,6 +39,15 @@ const (
 	TypeProductVariantsUpdateV1   = "catalog.product.variants.update.v1"
 	TypeProductVariantUpdateV1    = "catalog.product.variant.update.v1"
 	TypeVariantAttributesUpdateV1 = "catalog.variant.attributes.update.v1"
+	// Phase 17-R2 ProductType commands (ADR-0050 §45/§46). Creation
+	// mints canonical identity Retail-side (Cloud validates shape only);
+	// all mutations are expected-revision fenced.
+	TypeProductTypeCreateV1             = "catalog.product-type.create.v1"
+	TypeProductTypeDetailsUpdateV1      = "catalog.product-type.details.update.v1"
+	TypeProductTypeDimensionsUpdateV1   = "catalog.product-type.dimensions.update.v1"
+	TypeProductTypeCapabilitiesUpdateV1 = "catalog.product-type.capabilities.update.v1"
+	TypeProductTypeStatusUpdateV1       = "catalog.product-type.status.update.v1"
+	TypeProductTypeAssignV1             = "catalog.product.type.assign.v1"
 )
 
 // KnownTypes lists every creatable command type.
@@ -55,6 +64,12 @@ func KnownTypes() []string {
 		TypeProductVariantsUpdateV1,
 		TypeProductVariantUpdateV1,
 		TypeVariantAttributesUpdateV1,
+		TypeProductTypeCreateV1,
+		TypeProductTypeDetailsUpdateV1,
+		TypeProductTypeDimensionsUpdateV1,
+		TypeProductTypeCapabilitiesUpdateV1,
+		TypeProductTypeStatusUpdateV1,
+		TypeProductTypeAssignV1,
 	}
 }
 
@@ -114,7 +129,9 @@ const (
 	AggregateCancelled         = "CANCELLED"
 )
 
-// EntityKeyOf returns the payload entity-ID field for a type.
+// EntityKeyOf returns the payload entity-ID field for a type. Create
+// commands address a not-yet-existing entity: they carry NO entity key
+// ("" — the requested stable key travels as payload "code").
 func EntityKeyOf(typ string) string {
 	switch typ {
 	case TypeProductDetailsUpdateV1, TypeProductOnlinePolicyUpdateV1,
@@ -128,6 +145,14 @@ func EntityKeyOf(typ string) string {
 		return "tag_id"
 	case TypeProductVariantUpdateV1, TypeVariantAttributesUpdateV1:
 		return "variant_id"
+	case TypeProductTypeCreateV1:
+		return ""
+	case TypeProductTypeDetailsUpdateV1,
+		TypeProductTypeDimensionsUpdateV1, TypeProductTypeCapabilitiesUpdateV1,
+		TypeProductTypeStatusUpdateV1:
+		return "product_type_id"
+	case TypeProductTypeAssignV1:
+		return "product_id"
 	}
 	return ""
 }
@@ -142,6 +167,14 @@ func ExpectedRevisionKeyOf(typ string) string {
 	case TypeProductVariantUpdateV1, TypeVariantAttributesUpdateV1:
 		// Variant-scoped commands version on the variant catalog stream.
 		return "expected_variant_revision"
+	case TypeProductTypeCreateV1, TypeProductTypeDetailsUpdateV1,
+		TypeProductTypeDimensionsUpdateV1, TypeProductTypeCapabilitiesUpdateV1,
+		TypeProductTypeStatusUpdateV1:
+		// ProductType commands version on the type stream.
+		return "expected_type_revision"
+	case TypeProductTypeAssignV1:
+		// Assignment versions on the Product aggregate stream.
+		return "expected_catalog_revision"
 	default:
 		return "expected_catalog_revision"
 	}
@@ -177,7 +210,9 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
 		return nil, fmt.Errorf("invalid store_id: must be UUID")
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
+	if typ == TypeProductTypeCreateV1 {
+		// Explicit absent marker (see below); validated there.
+	} else if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
 		return nil, fmt.Errorf("invalid entity id: must be UUID")
 	}
 	if expectedRevision < 0 {
@@ -190,11 +225,29 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		return nil, fmt.Errorf("command payload must be a JSON object")
 	}
-	entity, ok := decoded[EntityKeyOf(typ)].(string)
-	parsed, e := uuid.Parse(strings.TrimSpace(entity))
-	outer, _ := uuid.Parse(strings.TrimSpace(entityID))
-	if !ok || e != nil || parsed != outer {
-		return nil, fmt.Errorf("command entity mismatch")
+	if typ == TypeProductTypeCreateV1 {
+		// Creation intent: the entity does not exist yet, so the outer
+		// entity_id must be the explicit absent marker ("") — never a
+		// placeholder UUID pretending to be the business identity. The
+		// requested stable key travels as payload "code" (validated shape
+		// here, uniqueness Retail-side at apply).
+		if strings.TrimSpace(entityID) != "" {
+			return nil, fmt.Errorf("create command entity must be absent (\"\")")
+		}
+		if err := validateTypeCode(decoded["code"]); err != nil {
+			return nil, err
+		}
+		if code, _ := decoded["code"].(string); code != "" {
+			decoded["code"] = strings.ToLower(strings.TrimSpace(code))
+		}
+	} else {
+		entity, ok := decoded[EntityKeyOf(typ)].(string)
+		parsed, e := uuid.Parse(strings.TrimSpace(entity))
+		outer, _ := uuid.Parse(strings.TrimSpace(entityID))
+		if !ok || e != nil || parsed != outer {
+			return nil, fmt.Errorf("command entity mismatch")
+		}
+		decoded[EntityKeyOf(typ)] = outer.String()
 	}
 	key := ExpectedRevisionKeyOf(typ)
 	if expectedRevision > 9007199254740991 {
@@ -208,11 +261,26 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 	} else {
 		decoded[key] = float64(expectedRevision)
 	}
-	decoded[EntityKeyOf(typ)] = outer.String()
 	if err := boundPayload(typ, decoded); err != nil {
 		return nil, err
 	}
 	return decoded, nil
+}
+
+// validateTypeCode checks the requested stable type code shape (creation
+// path only): 1..32 lowercase [a-z0-9_]. Retail re-validates at apply.
+func validateTypeCode(raw any) error {
+	code, _ := raw.(string)
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "" || len(code) > 32 {
+		return fmt.Errorf("invalid code: must be 1..32 chars")
+	}
+	for _, r := range code {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return fmt.Errorf("invalid code: lowercase letters, digits, underscore only")
+		}
+	}
+	return nil
 }
 
 // boundPayload enforces collection bounds using existing domain
@@ -283,8 +351,42 @@ func boundPayload(typ string, payload map[string]any) error {
 			return fmt.Errorf("invalid configurations: at most 100")
 		}
 	}
-	// Phase 17 variant payloads: bounded SKU/combination identity, the
-	// option attribute list, and bulk replace-set bounds.
+	// Phase 17-R2 type payloads: envelope bounds only (Retail owns
+	// acceptance at apply). Dimensions/capabilities are bounded string
+	// lists; codes are bounded here, validated canonically Retail-side.
+	if typ == TypeProductTypeCreateV1 {
+		if err := validateTypeCode(payload["code"]); err != nil {
+			return err
+		}
+	}
+	if typ == TypeProductTypeCreateV1 || typ == TypeProductTypeDimensionsUpdateV1 {
+		if raw, present := payload["dimensions"]; present && raw != nil {
+			list, ok := raw.([]any)
+			if !ok || len(list) > 64 {
+				return fmt.Errorf("invalid dimensions: at most 64")
+			}
+			for _, item := range list {
+				s, ok := item.(string)
+				if !ok || strings.TrimSpace(s) == "" || len(s) > 64 {
+					return fmt.Errorf("invalid dimensions entry")
+				}
+			}
+		}
+	}
+	if typ == TypeProductTypeCreateV1 || typ == TypeProductTypeCapabilitiesUpdateV1 {
+		if raw, present := payload["capabilities"]; present && raw != nil {
+			list, ok := raw.([]any)
+			if !ok || len(list) > 64 {
+				return fmt.Errorf("invalid capabilities: at most 64")
+			}
+			for _, item := range list {
+				s, ok := item.(string)
+				if !ok || strings.TrimSpace(s) == "" || len(s) > 64 {
+					return fmt.Errorf("invalid capabilities entry")
+				}
+			}
+		}
+	}
 	if typ == TypeProductVariantsUpdateV1 {
 		raw, present := payload["variants"]
 		if !present {
@@ -484,8 +586,21 @@ func Aggregate(commandStatus string, targets []string, converged bool) string {
 // ValidateOutcome checks bounded vocabulary and immutable command semantics.
 func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int64) error {
 	id, e := uuid.Parse(entity)
-	want, _ := uuid.Parse(cmd.EntityID)
-	if e != nil || id != want || pre < 0 || post < 0 {
+	if cmd.TargetKind == TargetKindCreate {
+		// Creation intent carries no business identity: the reported
+		// entity is the RESULT (Retail-minted ID), which must be a real
+		// UUID — never the absent marker and never a placeholder the
+		// command pretended to own (the command owns none).
+		if e != nil || strings.TrimSpace(entity) == "" {
+			return fmt.Errorf("invalid outcome identity or revision")
+		}
+	} else {
+		want, _ := uuid.Parse(cmd.EntityID)
+		if e != nil || id != want || pre < 0 || post < 0 {
+			return fmt.Errorf("invalid outcome identity or revision")
+		}
+	}
+	if pre < 0 || post < 0 {
 		return fmt.Errorf("invalid outcome identity or revision")
 	}
 	switch status {

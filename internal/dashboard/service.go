@@ -1274,9 +1274,11 @@ type CatalogHealthItem struct {
 }
 
 // CatalogHealthReasonCodes is the stable health vocabulary (labels may
-// evolve; codes are the API contract).
+// evolve; codes are the API contract). Phase 17-R0 retired the
+// product-level CATALOG_MISSING_SKU: Product carries no SKU authority
+// anywhere (ADR-0049) and catalog_products.sku is gone (00035) —
+// VARIANT_MISSING_SKU is the single SKU health code.
 var CatalogHealthReasonCodes = []string{
-	"CATALOG_MISSING_SKU",
 	"CATALOG_MISSING_CATEGORY",
 	"AVAILABILITY_NOT_READY",
 	"COMMERCE_MAPPING_MISSING",

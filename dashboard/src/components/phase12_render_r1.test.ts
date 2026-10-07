@@ -15,6 +15,6 @@ it('historical identities preserve corresponding nodes, labels and money across 
  await r.rerender(props);expect(r.container.textContent).toContain('Top Tags by Net Sales');expect(r.container.textContent).toContain('صافي المبيعات');
 });
 it('current health and complete provider choices remain explicit when detail is truncated',()=>{
- const r=render(CatalogHealthCard,{props:{data:{generated_at:'',store_id:null,provider_key:'',providers:['alpha','zeta'],reason_codes:[],counts:[{reason_code:'CATALOG_MISSING_SKU',products:60}],detail:[{reason_code:'CATALOG_MISSING_SKU',provider_key:'alpha'}],detail_limit:50,detail_truncated:true},status:'loaded',errStatus:null,onretry(){},provider:'',onprovider(){}}});
+ const r=render(CatalogHealthCard,{props:{data:{generated_at:'',store_id:null,provider_key:'',providers:['alpha','zeta'],reason_codes:[],counts:[{reason_code:'VARIANT_MISSING_SKU',products:60}],detail:[{reason_code:'VARIANT_MISSING_SKU',provider_key:'alpha'}],detail_limit:50,detail_truncated:true},status:'loaded',errStatus:null,onretry(){},provider:'',onprovider(){}}});
  expect(Array.from(r.container.querySelectorAll('option')).map(o=>o.value)).toEqual(['','alpha','zeta']);expect(r.container.textContent).toContain('summary counts are complete');expect(r.container.textContent).toContain('selected reporting period does not filter it');expect(r.container.textContent).toContain('فترة التقرير المختارة');
 });

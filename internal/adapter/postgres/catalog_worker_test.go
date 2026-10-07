@@ -48,6 +48,8 @@ func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
 		res, err = d.ProjectProductVariant(ctx, rec, time.Now())
 	case catalog.EventInventoryProductVariantSnapshotV1:
 		res, err = d.ProjectProductVariantInventory(ctx, rec, time.Now())
+	case catalog.EventProductTypeSnapshotV1:
+		res, err = d.ProjectProductType(ctx, rec, time.Now())
 	default:
 		err = fmt.Errorf("unexpected projector %s", rec.EventType)
 	}

@@ -329,7 +329,7 @@ func TestR4_MixedBoundedRecovery(t *testing.T) {
 	pe := r2EventID(9801)
 	f.ingest(t, f.devA, f.credA, pe, catalog.EventProductSnapshotV1, productPayload(product, "R4-MIXED", "Product", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, pe, catalog.ProcessorProductProjectionV1)
-	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,sku,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'R4-MIXED','Product',$3,70,100,true,1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, pe, product, sharedCatIslamic)
+	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'Product',$3,70,100,true,1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, pe, product, sharedCatIslamic)
 	r4Exec(t, f, 1, `INSERT INTO catalog_product_tags VALUES($1,$2)`, product, sharedTagGold)
 	r4Exec(t, f, 1, `INSERT INTO catalog_product_translations(product_id,locale,name) VALUES($1,'ar','Product')`, product)
 	r4Exec(t, f, 2, `INSERT INTO catalog_product_prices VALUES($1,'EGP',65000,40000),($1,'USD',1300,NULL)`, product)
@@ -347,7 +347,7 @@ func TestR4_MixedBoundedRecovery(t *testing.T) {
 	lp := "a9000000-0000-4000-8000-000000009804"
 	f.ingest(t, f.devC, f.credC, legacy, catalog.EventProductSnapshotV1, productPayload(lp, "R4-LEGACY", "Legacy", sharedCatIslamic, nil, nil, 1))
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, legacy, catalog.ProcessorProductProjectionV1)
-	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,sku,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at) SELECT $2,'R4-LEGACY','Legacy',$3,70,100,true,1,event_id,device_id,payload_hash,received_at FROM sync_events WHERE event_id=$1`, legacy, lp, sharedCatIslamic)
+	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at) SELECT $2,'Legacy',$3,70,100,true,1,event_id,device_id,payload_hash,received_at FROM sync_events WHERE event_id=$1`, legacy, lp, sharedCatIslamic)
 	before := r4Payloads(t, f)
 	d := NewDevices(f.pool, 5*time.Second)
 	// Failure after earlier reset attempts rolls the entire batch back.

@@ -41,20 +41,21 @@ func (q *Queries) AllCatalogCategoryEdges(ctx context.Context) ([]AllCatalogCate
 }
 
 const catalogActiveProducts = `-- name: CatalogActiveProducts :many
-SELECT product_id, sku, name, source_revision, source_event_id
+SELECT product_id, name, source_revision, source_event_id
 FROM catalog_products
-WHERE is_active ORDER BY sku, product_id
+WHERE is_active ORDER BY product_id
 LIMIT $1
 `
 
 type CatalogActiveProductsRow struct {
 	ProductID      pgtype.UUID `json:"product_id"`
-	Sku            string      `json:"sku"`
 	Name           string      `json:"name"`
 	SourceRevision int64       `json:"source_revision"`
 	SourceEventID  pgtype.UUID `json:"source_event_id"`
 }
 
+// Phase 17-R0: Product has no SKU (ADR-0049); deterministic product_id
+// ordering replaces the retired SKU ordering.
 func (q *Queries) CatalogActiveProducts(ctx context.Context, limit int32) ([]CatalogActiveProductsRow, error) {
 	rows, err := q.db.Query(ctx, catalogActiveProducts, limit)
 	if err != nil {
@@ -66,7 +67,6 @@ func (q *Queries) CatalogActiveProducts(ctx context.Context, limit int32) ([]Cat
 		var i CatalogActiveProductsRow
 		if err := rows.Scan(
 			&i.ProductID,
-			&i.Sku,
 			&i.Name,
 			&i.SourceRevision,
 			&i.SourceEventID,
@@ -321,21 +321,21 @@ func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEn
 }
 
 const catalogProductByID = `-- name: CatalogProductByID :one
-SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
+SELECT product_id, name, description, top_category_id, width_cm, height_cm,
+    is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
     configuration_revision
 FROM catalog_products WHERE product_id = $1
 `
 
 type CatalogProductByIDRow struct {
 	ProductID             pgtype.UUID `json:"product_id"`
-	Sku                   string      `json:"sku"`
 	Name                  string      `json:"name"`
 	Description           pgtype.Text `json:"description"`
 	TopCategoryID         pgtype.UUID `json:"top_category_id"`
 	WidthCm               pgtype.Int4 `json:"width_cm"`
 	HeightCm              pgtype.Int4 `json:"height_cm"`
 	IsActive              bool        `json:"is_active"`
+	ProductTypeID         pgtype.UUID `json:"product_type_id"`
 	SourceRevision        int64       `json:"source_revision"`
 	SourceEventID         pgtype.UUID `json:"source_event_id"`
 	SourceDeviceID        pgtype.UUID `json:"source_device_id"`
@@ -349,69 +349,19 @@ func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID)
 	var i CatalogProductByIDRow
 	err := row.Scan(
 		&i.ProductID,
-		&i.Sku,
 		&i.Name,
 		&i.Description,
 		&i.TopCategoryID,
 		&i.WidthCm,
 		&i.HeightCm,
 		&i.IsActive,
+		&i.ProductTypeID,
 		&i.SourceRevision,
 		&i.SourceEventID,
 		&i.SourceDeviceID,
 		&i.SourcePayloadHash,
 		&i.StoreID,
 		&i.ConfigurationRevision,
-	)
-	return i, err
-}
-
-const catalogProductBySKU = `-- name: CatalogProductBySKU :one
-SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
-FROM catalog_products WHERE sku = $1 AND store_id IS NOT DISTINCT FROM $2
-`
-
-type CatalogProductBySKUParams struct {
-	Sku     string      `json:"sku"`
-	StoreID pgtype.UUID `json:"store_id"`
-}
-
-type CatalogProductBySKURow struct {
-	ProductID         pgtype.UUID `json:"product_id"`
-	Sku               string      `json:"sku"`
-	Name              string      `json:"name"`
-	Description       pgtype.Text `json:"description"`
-	TopCategoryID     pgtype.UUID `json:"top_category_id"`
-	WidthCm           pgtype.Int4 `json:"width_cm"`
-	HeightCm          pgtype.Int4 `json:"height_cm"`
-	IsActive          bool        `json:"is_active"`
-	SourceRevision    int64       `json:"source_revision"`
-	SourceEventID     pgtype.UUID `json:"source_event_id"`
-	SourceDeviceID    pgtype.UUID `json:"source_device_id"`
-	SourcePayloadHash []byte      `json:"source_payload_hash"`
-	StoreID           pgtype.UUID `json:"store_id"`
-}
-
-// Phase 9B: SKU resolves only within one Store scope (NULL scope matches
-// legacy rows). A bare global SKU lookup could cross Store ownership.
-func (q *Queries) CatalogProductBySKU(ctx context.Context, arg CatalogProductBySKUParams) (CatalogProductBySKURow, error) {
-	row := q.db.QueryRow(ctx, catalogProductBySKU, arg.Sku, arg.StoreID)
-	var i CatalogProductBySKURow
-	err := row.Scan(
-		&i.ProductID,
-		&i.Sku,
-		&i.Name,
-		&i.Description,
-		&i.TopCategoryID,
-		&i.WidthCm,
-		&i.HeightCm,
-		&i.IsActive,
-		&i.SourceRevision,
-		&i.SourceEventID,
-		&i.SourceDeviceID,
-		&i.SourcePayloadHash,
-		&i.StoreID,
 	)
 	return i, err
 }
@@ -1241,14 +1191,16 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 
 const upsertCatalogProduct = `-- name: UpsertCatalogProduct :exec
 INSERT INTO catalog_products (
-    product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id,
+    product_id, name, description, top_category_id, width_cm, height_cm,
+    is_active, product_type_id,
+    source_revision, source_event_id, source_device_id,
     source_payload_hash, source_received_at, store_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (product_id) DO UPDATE SET
-    sku = excluded.sku, name = excluded.name, description = excluded.description,
+    name = excluded.name, description = excluded.description,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
+    product_type_id = excluded.product_type_id,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
@@ -1258,13 +1210,13 @@ ON CONFLICT (product_id) DO UPDATE SET
 
 type UpsertCatalogProductParams struct {
 	ProductID         pgtype.UUID        `json:"product_id"`
-	Sku               string             `json:"sku"`
 	Name              string             `json:"name"`
 	Description       pgtype.Text        `json:"description"`
 	TopCategoryID     pgtype.UUID        `json:"top_category_id"`
 	WidthCm           pgtype.Int4        `json:"width_cm"`
 	HeightCm          pgtype.Int4        `json:"height_cm"`
 	IsActive          bool               `json:"is_active"`
+	ProductTypeID     pgtype.UUID        `json:"product_type_id"`
 	SourceRevision    int64              `json:"source_revision"`
 	SourceEventID     pgtype.UUID        `json:"source_event_id"`
 	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
@@ -1274,16 +1226,18 @@ type UpsertCatalogProductParams struct {
 }
 
 // Phase 9B store ownership: see UpsertCatalogCategory.
+// Phase 17-R0 (ADR-0049): Product carries NO SKU — SKU/stock identity
+// lives on ProductVariant; the column was retired by 00035.
 func (q *Queries) UpsertCatalogProduct(ctx context.Context, arg UpsertCatalogProductParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogProduct,
 		arg.ProductID,
-		arg.Sku,
 		arg.Name,
 		arg.Description,
 		arg.TopCategoryID,
 		arg.WidthCm,
 		arg.HeightCm,
 		arg.IsActive,
+		arg.ProductTypeID,
 		arg.SourceRevision,
 		arg.SourceEventID,
 		arg.SourceDeviceID,

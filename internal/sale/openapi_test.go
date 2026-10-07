@@ -22,12 +22,16 @@ func TestOpenAPIEventModel(t *testing.T) {
 		"propertyName: event_type",
 		"sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'",
 		"sale.finalized.v2: '#/components/schemas/SaleFinalizedV2Event'",
+		"sale.finalized.v3: '#/components/schemas/SaleFinalizedV3Event'",
 		"system.test.v1: '#/components/schemas/SystemTestV1Event'",
 		"SaleFinalizedV1Event:",
 		"SaleFinalizedV2Event:",
+		"SaleFinalizedV3Event:",
 		"SaleLineTag:",
+		"SaleLineVariantAttribute:",
 		"enum: [sale.finalized.v1]",
 		"enum: [sale.finalized.v2]",
+		"enum: [sale.finalized.v3]",
 		"enum: [system.test.v1]",
 	} {
 		if !strings.Contains(spec, want) {

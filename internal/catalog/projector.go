@@ -38,6 +38,9 @@ const (
 	// Phase 17: independent variant inventory stream (inventory_revision)
 	// with its own processing identity.
 	ProcessorProductVariantInventoryProjectionV1 = "inventory_product_variant_projection.v1"
+	// Phase 17-R2: independent structural-type stream (type_revision)
+	// with its own processing identity.
+	ProcessorProductTypeProjectionV1 = "catalog_product_type_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -92,6 +95,7 @@ type Store interface {
 	ProjectProductConfigurations(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductVariant(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductVariantInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductType(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -177,6 +181,13 @@ func NewProductVariantProjector(s Store, c clock.Clock, log *slog.Logger) *Proje
 // inventory stream (inventory_revision gated).
 func NewProductVariantInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductVariantInventoryProjectionV1, EventInventoryProductVariantSnapshotV1, s.ProjectProductVariantInventory, c, log)
+}
+
+// NewProductTypeProjector projects the Phase 17-R2 structural-type
+// stream (type_revision gated). Type blocks are terminal-deterministic
+// (no product dependency); no re-arm hook.
+func NewProductTypeProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductTypeProjectionV1, EventProductTypeSnapshotV1, s.ProjectProductType, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

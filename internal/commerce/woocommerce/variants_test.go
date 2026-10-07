@@ -254,6 +254,13 @@ func TestWooVariantFrameCapabilityConflict(t *testing.T) {
 	if count := variationCount(t, harness, 500); count != 0 {
 		t.Fatalf("capability refusal must leave zero remote variations: %d", count)
 	}
+	// R14: the capability refusal yields ZERO provider mutations — no
+	// write request of any kind reaches the provider.
+	for _, record := range harness.recorded() {
+		if record.Method != "GET" {
+			t.Fatalf("capability refusal must yield zero provider mutations, saw %s %s", record.Method, record.Path)
+		}
+	}
 	// The product path fails the same way before any remote write.
 	if _, err := provider.UpsertProduct(ctx, testUpsertReq(product, true, nil)); err == nil ||
 		!strings.Contains(err.Error(), WooVariantOptionsCapabilityCode) {

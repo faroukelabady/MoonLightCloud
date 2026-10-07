@@ -170,6 +170,18 @@ func (s *stubCatalogStore) AdminProductVariant(_ context.Context, _, _ string) (
 	return catalogadmin.AdminProductVariant{Attributes: []catalogadmin.AdminProductVariantAttribute{}}, nil
 }
 
+func (s *stubCatalogStore) AdminProductTypeList(_ context.Context, _ string) ([]catalogadmin.AdminProductType, error) {
+	return nil, nil
+}
+
+func (s *stubCatalogStore) AdminProductType(_ context.Context, _, _ string) (catalogadmin.AdminProductType, error) {
+	return catalogadmin.AdminProductType{}, errNotFoundStub()
+}
+
+func (s *stubCatalogStore) SetCommandResultEntity(_ context.Context, _, _ string) error {
+	return nil
+}
+
 type stubCatalogDevices struct {
 	binding map[string]string
 	active  map[string]bool

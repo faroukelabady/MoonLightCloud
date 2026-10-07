@@ -66,7 +66,14 @@ type TagRef struct {
 // adapters. It contains only frozen Cloud state: no sqlc structs, no
 // provider identities, no invented fields.
 type CommerceProduct struct {
-	ProductID       string
+	ProductID string
+	// SKU is a DERIVED provider-facing mirror, never product identity
+	// (ADR-0049 / Phase 17-R0): Product carries no SKU authority
+	// anywhere, and ProductVariant owns SKU/stock. The source derives it
+	// from variant SKU ownership (the first live variant's SKU —
+	// providers require a product-level SKU). A product with no variant
+	// rows carries no SKU and cannot be published (documented provider
+	// limitation).
 	SKU             string
 	Names           []LocalizedName
 	Descriptions    map[string]string

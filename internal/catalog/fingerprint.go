@@ -48,9 +48,15 @@ type NormalizedTag struct {
 }
 
 // NormalizedProduct is the comparison form of a product snapshot.
+// There is deliberately NO SKU: Product carries no SKU authority anywhere
+// (ADR-0049, 17-R0). v1 still ships a frozen `sku` wire field and v2
+// carries none — excluding it here keeps the shared catalog_revision
+// stream comparing equal across both versions (and across the retired
+// field's removal).
 type NormalizedProduct struct {
-	ProductID      string                      `json:"product_id"`
-	SKU            string                      `json:"sku"`
+	ProductID string `json:"product_id"`
+	// ProductTypeID is structural identity (§43, never inferred).
+	ProductTypeID  string                      `json:"product_type_id,omitempty"`
 	Name           string                      `json:"name"`
 	Description    *string                     `json:"description,omitempty"`
 	Translations   []CatalogProductTranslation `json:"translations"`
@@ -123,7 +129,7 @@ func NormalizeProductSnapshot(v ProductSnapshot) NormalizedProduct {
 	prices = append(prices, v.Prices...)
 	sort.Slice(prices, func(i, j int) bool { return prices[i].Currency < prices[j].Currency })
 	return NormalizedProduct{
-		ProductID: v.ProductID, SKU: v.SKU, Name: v.Name,
+		ProductID: v.ProductID, ProductTypeID: v.ProductTypeID, Name: v.Name,
 		Description:  normDescription(v.Description),
 		Translations: translations, Prices: prices,
 		TopCategoryID: v.TopCategoryID, SubcategoryIDs: subs, TagIDs: tags,

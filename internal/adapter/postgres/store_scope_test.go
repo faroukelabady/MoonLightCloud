@@ -193,6 +193,20 @@ func (f *scopeFixture) projectSaleV2(t *testing.T, eventID string) sale.ProjectR
 	return res
 }
 
+func (f *scopeFixture) projectSaleV3(t *testing.T, eventID string) sale.ProjectResult {
+	t.Helper()
+	store := NewDevices(f.pool, 5*time.Second)
+	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	if err != nil || !ok {
+		t.Fatalf("load sale %s: %v %v", eventID, ok, err)
+	}
+	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
+	if err != nil {
+		t.Fatalf("project sale v3: %v", err)
+	}
+	return res
+}
+
 func (f *scopeFixture) projectReturn(t *testing.T, eventID string) returnrefund.ProjectResult {
 	t.Helper()
 	store := NewDevices(f.pool, 5*time.Second)
@@ -277,9 +291,13 @@ func TestScope_SameSKUCoexists(t *testing.T) {
 	}
 }
 
-// TestScope_SameStoreSKUConflict keeps same-Store SKU uniqueness: a
-// second product reusing Store A's SKU blocks without touching the first.
-func TestScope_SameStoreSKUConflict(t *testing.T) {
+// TestScope_ProductSKURetired (Phase 17-R0, ADR-0049): Product carries
+// NO SKU authority anywhere — catalog_products.sku (and its Store-scoped
+// UNIQUE) was retired by 00035, so same-Store product SKU reuse no longer
+// blocks at the product level and no product SKU is ever stored. SKU
+// identity lives on ProductVariant (00033 keeps Store-scoped variant SKU
+// uniqueness).
+func TestScope_ProductSKURetired(t *testing.T) {
 	f := openScopeFixture(t)
 	rootA, tagA, _, _ := f.scopeGraph(t, 120, "dup")
 	ids := catalogIDs(t, 130, "first", "second")
@@ -288,17 +306,23 @@ func TestScope_SameStoreSKUConflict(t *testing.T) {
 	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
 	f.ingest(t, f.devA, f.credA, "e0000130-0000-4000-8000-000000000002",
 		catalog.EventProductSnapshotV1, productPayload(ids["second"], "DUP-1", "Second", rootA, nil, []string{tagA}, 1))
-	res := f.projectCatalog(t, "e0000130-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1)
-	if res.Outcome != catalog.OutcomeBlocked {
-		t.Fatalf("same-store SKU reuse must block: %+v", res)
+	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+	// Both products project and stay Store-owned; the retired wire sku
+	// (still frozen on v1) is validated then discarded — never stored.
+	for _, id := range []string{ids["first"], ids["second"]} {
+		if got := f.rowStore(t, "catalog_products", "product_id", id); got == nil || *got != scopeStoreA {
+			t.Fatalf("product %s store: %v", id, got)
+		}
 	}
-	if got := f.rowStore(t, "catalog_products", "product_id", ids["first"]); got == nil || *got != scopeStoreA {
-		t.Fatalf("first product intact: %v", got)
+	var skuCols int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM information_schema.columns WHERE table_name='catalog_products' AND column_name='sku'`).Scan(&skuCols); err != nil || skuCols != 0 {
+		t.Fatalf("product sku column must be retired: %d (%v)", skuCols, err)
 	}
 	var count int
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM catalog_products WHERE sku='DUP-1'`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("exactly one DUP-1 row: %d (%v)", count, err)
+		`SELECT count(*) FROM catalog_products WHERE product_id IN ($1,$2)`, ids["first"], ids["second"]).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("both products projected: %d (%v)", count, err)
 	}
 }
 

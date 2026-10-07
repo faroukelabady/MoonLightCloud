@@ -27,10 +27,13 @@ const (
 	EventCategorySnapshotV2 = "catalog.category.snapshot.v2"
 	EventTagSnapshotV1      = "catalog.tag.snapshot.v1"
 	EventProductSnapshotV1  = "catalog.product.snapshot.v1"
-	// EventProductSnapshotV2 (Phase 17) removes `sku` from the product
-	// aggregate and replaces it with `primary_variant_sku`, a deprecated
-	// display mirror of the primary variant's SKU. v1 stays semantically
-	// immutable; both versions share one catalog_revision stream.
+	// EventProductSnapshotV2 (Phase 17, revised by 17-R0 per ADR-0049)
+	// removes `sku` from the product aggregate: the v2 payload carries NO
+	// SKU-bearing field at all — Product has no SKU authority anywhere.
+	// SKU/stock identity lives on ProductVariant. v1 stays semantically
+	// immutable (its frozen `sku` wire field still validates and is then
+	// discarded at projection: catalog_products.sku was retired by
+	// 00035). Both versions share one catalog_revision stream.
 	EventProductSnapshotV2 = "catalog.product.snapshot.v2"
 	// Phase 5B: per-product channel/allocation policy at an independent
 	// revision (never overlapping catalog_revision).
@@ -113,9 +116,15 @@ type TagSnapshot struct {
 }
 
 // ProductSnapshot is the authoritative product state at a revision.
+// SKU is the frozen v1 wire field (v1 is immutable history): it validates
+// for v1 events only and is NEVER stored or projected — catalog_products.sku
+// was retired (00035) and Product carries no SKU authority anywhere
+// (ADR-0049). v2 payloads carry no SKU-bearing field at all.
 type ProductSnapshot struct {
-	ProductID       string                      `json:"product_id"`
-	SKU             string                      `json:"sku"`
+	ProductID string `json:"product_id"`
+	SKU       string `json:"sku"`
+	// Phase 17-R2: structural type identity (v2 only; v1 never carries it).
+	ProductTypeID   string                      `json:"product_type_id,omitempty"`
 	Name            string                      `json:"name"`
 	Description     *string                     `json:"description,omitempty"`
 	Translations    []CatalogProductTranslation `json:"translations"`
@@ -304,39 +313,49 @@ func DecodeProductSnapshot(raw json.RawMessage) (ProductSnapshot, error) {
 	return p, nil
 }
 
-// ProductSnapshotV2 is the Phase 17 wire shape: identical to v1 except
-// `sku` is REMOVED and `primary_variant_sku` mirrors the primary
-// variant's SKU for deprecated display only (SKU ownership lives on
-// ProductVariant). Decoding maps the mirror into the shared
-// ProductSnapshot shape so one projector and one semantic fingerprint
-// serve both versions.
+// ProductSnapshotV2 is the Phase 17-R0 wire shape: identical to v1 except
+// the product carries NO SKU-bearing field at all (ADR-0049: Product has
+// no SKU authority anywhere; ProductVariant owns SKU/stock).
+//
+// DeprecatedPrimaryVariantSKU is NOT part of the contract — it exists
+// only so the decoder TOLERATES AND IGNORES the retired
+// `primary_variant_sku` display mirror for one release (MoonLightRetail
+// may still emit it until both trees ship together). The value is never
+// validated, never stored, never projected. The next release may reject
+// it together with `sku` (both are already outside the OpenAPI schema).
 type ProductSnapshotV2 struct {
-	ProductID         string                      `json:"product_id"`
-	PrimaryVariantSKU string                      `json:"primary_variant_sku"`
-	Name              string                      `json:"name"`
-	Description       *string                     `json:"description,omitempty"`
-	Translations      []CatalogProductTranslation `json:"translations"`
-	Prices            []CatalogPrice              `json:"prices"`
-	TopCategoryID     string                      `json:"top_category_id"`
-	SubcategoryIDs    []string                    `json:"subcategory_ids"`
-	TagIDs            []string                    `json:"tag_ids"`
-	WidthCM           *int                        `json:"width_cm,omitempty"`
-	HeightCM          *int                        `json:"height_cm,omitempty"`
-	IsActive          bool                        `json:"is_active"`
-	CatalogRevision   int64                       `json:"catalog_revision"`
+	ProductID string `json:"product_id"`
+	// Phase 17-R2: structural type identity (ADR-0050 §43). The deprecated
+	// primary_variant_sku mirror stays tolerated-and-ignored below.
+	ProductTypeID               string                      `json:"product_type_id"`
+	DeprecatedPrimaryVariantSKU *string                     `json:"primary_variant_sku,omitempty"`
+	Name                        string                      `json:"name"`
+	Description                 *string                     `json:"description,omitempty"`
+	Translations                []CatalogProductTranslation `json:"translations"`
+	Prices                      []CatalogPrice              `json:"prices"`
+	TopCategoryID               string                      `json:"top_category_id"`
+	SubcategoryIDs              []string                    `json:"subcategory_ids"`
+	TagIDs                      []string                    `json:"tag_ids"`
+	WidthCM                     *int                        `json:"width_cm,omitempty"`
+	HeightCM                    *int                        `json:"height_cm,omitempty"`
+	IsActive                    bool                        `json:"is_active"`
+	CatalogRevision             int64                       `json:"catalog_revision"`
 }
 
-// DecodeProductSnapshotV2 parses canonical v2 payload bytes and
-// normalizes to the shared ProductSnapshot shape (SKU = the deprecated
-// primary_variant_sku display mirror).
+// DecodeProductSnapshotV2 parses canonical v2 payload bytes and normalizes
+// to the shared ProductSnapshot shape. No SKU is ever carried over: the
+// deprecated `primary_variant_sku` mirror (and any stray `sku`) is
+// tolerated and ignored — unknown fields are tolerated per compatibility
+// policy, and the retired mirrors are deliberately never read.
 func DecodeProductSnapshotV2(raw json.RawMessage) (ProductSnapshot, error) {
 	var wire ProductSnapshotV2
 	if err := decodePayload(EventProductSnapshotV2, raw, &wire); err != nil {
 		return ProductSnapshot{}, err
 	}
 	return ProductSnapshot{
-		ProductID: wire.ProductID, SKU: wire.PrimaryVariantSKU,
-		Name: wire.Name, Description: wire.Description,
+		ProductID: wire.ProductID, SKU: "",
+		ProductTypeID: wire.ProductTypeID,
+		Name:          wire.Name, Description: wire.Description,
 		Translations: wire.Translations, Prices: wire.Prices,
 		TopCategoryID: wire.TopCategoryID, SubcategoryIDs: wire.SubcategoryIDs,
 		TagIDs: wire.TagIDs, WidthCM: wire.WidthCM, HeightCM: wire.HeightCM,
@@ -345,11 +364,18 @@ func DecodeProductSnapshotV2(raw json.RawMessage) (ProductSnapshot, error) {
 }
 
 // ValidateProductSnapshotV2 enforces the v2 product contract: every v1
-// invariant unchanged, except the SKU field is a deprecated display
-// mirror and may be blank (a product whose variants carry the SKUs has
-// no primary mirror yet; blank mirrors surface as CATALOG_MISSING_SKU
-// health, never as ingestion rejection).
+// invariant unchanged, except there is NO sku field to validate (a
+// tolerated deprecated mirror is ignored before this point and blank SKU
+// is the only normalized value — products with variants carry the SKUs on
+// their variants). Phase 17-R2: product_type_id is required from current
+// Retail (canonical services reject typeless products), but EMPTY is
+// tolerated for legacy rows (pre-R2 projections, direct-repo writes):
+// they project with NULL type (health PRODUCT_TYPE_MISSING) rather than
+// blocking the stream. A present type must be a UUID (never inferred).
 func ValidateProductSnapshotV2(p ProductSnapshot) (ProductSnapshot, error) {
+	if strings.TrimSpace(p.ProductTypeID) != "" && !isUUID(p.ProductTypeID) {
+		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSnapshotV2+": product_type_id must be a UUID")
+	}
 	return validateProductSnapshot(p, EventProductSnapshotV2, false)
 }
 
@@ -366,7 +392,8 @@ func ValidateProductSnapshot(p ProductSnapshot) (ProductSnapshot, error) {
 
 // validateProductSnapshot is the shared strict product validator.
 // requireSKU keeps the frozen v1 SKU contract (1..64 chars) for v1
-// events; v2 relaxes only emptiness (bounded strings stay strict).
+// events only; v2 has NO sku field (17-R0) and skips the retired check
+// entirely — its normalized SKU is always blank and never stored.
 func validateProductSnapshot(p ProductSnapshot, event string, requireSKU bool) (ProductSnapshot, error) {
 	fail := func(format string, args ...any) (ProductSnapshot, error) {
 		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+event+": "+fmt.Sprintf(format, args...))
@@ -374,12 +401,11 @@ func validateProductSnapshot(p ProductSnapshot, event string, requireSKU bool) (
 	if !isUUID(p.ProductID) {
 		return fail("product_id must be a UUID")
 	}
-	sku := strings.TrimSpace(p.SKU)
-	if sku == "" && requireSKU {
-		return fail("sku must be 1..64 chars without control whitespace")
-	}
-	if len(sku) > 64 || strings.ContainsAny(sku, "\r\n\t") {
-		return fail("sku must be 1..64 chars without control whitespace")
+	if requireSKU {
+		sku := strings.TrimSpace(p.SKU)
+		if sku == "" || len(sku) > 64 || strings.ContainsAny(sku, "\r\n\t") {
+			return fail("sku must be 1..64 chars without control whitespace")
+		}
 	}
 	if !validName(p.Name) {
 		return fail("name must be 1..200 runes")

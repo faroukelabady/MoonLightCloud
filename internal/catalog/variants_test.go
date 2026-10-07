@@ -304,13 +304,16 @@ func TestVariantInventoryFingerprintSemantics(t *testing.T) {
 	}
 }
 
-// product.snapshot.v2: sku removed, primary_variant_sku mirror in its
-// place; every v1 invariant unchanged (v1 stays frozen).
+// product.snapshot.v2 (Phase 17-R0, ADR-0049): the payload carries NO
+// SKU-bearing field at all — Product has no SKU authority anywhere. The
+// retired `primary_variant_sku` display mirror is tolerated-and-ignored
+// for one release (Retail may still emit it until both trees ship
+// together): it never validates, stores, or projects. v1 stays frozen.
 func TestProductSnapshotV2Contract(t *testing.T) {
 	wire := map[string]any{
-		"product_id":          "bbbbbbbb-0000-4000-8000-000000000002",
-		"primary_variant_sku": "ML-V-1",
-		"name":                "ساعة", "translations": []any{},
+		"product_id":      "bbbbbbbb-0000-4000-8000-000000000002",
+		"product_type_id": "10000000-0000-4000-8000-000000000001",
+		"name":            "ساعة", "translations": []any{},
 		"prices":          []any{map[string]any{"currency": "EGP", "price_cents": 100}},
 		"top_category_id": "cccccccc-0000-4000-8000-000000000003",
 		"subcategory_ids": []any{}, "tag_ids": []any{},
@@ -324,11 +327,28 @@ func TestProductSnapshotV2Contract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if valid.SKU != "ML-V-1" {
-		t.Fatalf("mirror must map to display sku: %q", valid.SKU)
+	if valid.SKU != "" {
+		t.Fatalf("v2 must never carry a sku, got %q", valid.SKU)
 	}
-	// Blank mirror is tolerated (no primary variant yet): health reports
-	// it, ingestion never rejects it.
+	// Tolerate-and-ignore: a retired primary_variant_sku mirror (blank or
+	// not) is accepted for one release and NEVER mapped into the
+	// normalized snapshot.
+	deprecated := map[string]any{}
+	for k, v := range wire {
+		deprecated[k] = v
+	}
+	deprecated["primary_variant_sku"] = "ML-V-1"
+	raw, err = DecodeProductSnapshotV2(mustJSON(t, deprecated))
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err = ValidateProductSnapshotV2(raw)
+	if err != nil {
+		t.Fatalf("deprecated mirror must be tolerated and ignored: %v", err)
+	}
+	if valid.SKU != "" {
+		t.Fatalf("deprecated mirror must never map to sku: %q", valid.SKU)
+	}
 	blank := map[string]any{}
 	for k, v := range wire {
 		blank[k] = v

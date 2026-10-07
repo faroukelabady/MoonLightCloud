@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api.js';
-	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand } from '../lib/api.js';
+	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType } from '../lib/api.js';
 
 	// CatalogAdminPage: the Cloud command/control surface for catalog
 	// state. It edits nothing directly: every Save persists a typed,
@@ -10,7 +10,7 @@
 	// the projection converges; pending badges mark in-flight work.
 	let { store }: { store: string } = $props();
 
-	type Tab = 'products' | 'categories' | 'tags' | 'commands';
+	type Tab = 'products' | 'types' | 'categories' | 'tags' | 'commands';
 	let tab: Tab = $state('products');
 
 	let epoch = 0;
@@ -425,6 +425,143 @@
 		}
 	}
 
+	// ---- types (Phase 17-R2) ----
+	let productTypes: AdminProductType[] = $state([]);
+	let typesState = $state<'idle' | 'loading' | 'loaded' | 'empty' | 'error'>('idle');
+	let selectedType: AdminProductType | null = $state(null);
+
+	async function loadTypes() {
+		if (!store) return;
+		const my = epoch;
+		const request = requests.loadTypes = (requests.loadTypes ?? 0) + 1;
+		typesState = 'loading';
+		try {
+			const v = await dashboardApi.adminProductTypes(store);
+			if (my !== epoch || request !== requests.loadTypes) return;
+			productTypes = v.product_types;
+			typesState = productTypes.length === 0 ? 'empty' : 'loaded';
+		} catch {
+			if (my !== epoch || request !== requests.loadTypes) return;
+			typesState = 'error';
+		}
+	}
+
+	async function saveTypeDetails() {
+		if (!selectedType || !store || saving) return;
+		const t = selectedType;
+		const ar = (document.getElementById('tt-ar') as HTMLInputElement)?.value.trim() ?? '';
+		const en = (document.getElementById('tt-en') as HTMLInputElement)?.value.trim() ?? '';
+		if (!ar || !en) return say('err', 'التسميات مطلوبة. / Labels required.');
+		const actionEpoch = epoch;
+		saving = true;
+		try {
+			const cmd = await dashboardApi.adminCreateCommand({
+				store_id: store,
+				type: 'catalog.product-type.details.update.v1',
+				entity_id: t.type_id,
+				expected_revision: t.type_revision,
+				payload: {
+					product_type_id: t.type_id, name_ar: ar, name_en: en,
+					description_ar: t.description_ar ?? '', description_en: t.description_en ?? '',
+					position: t.position,
+					dimensions: t.dimensions, capabilities: t.capabilities,
+					expected_type_revision: t.type_revision
+				}
+			});
+			if (actionEpoch !== epoch) return;
+			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			void loadCommands();
+		} catch (err) {
+			if (actionEpoch !== epoch) return;
+			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+		} finally {
+			if (actionEpoch === epoch) saving = false;
+		}
+	}
+
+	async function saveTypeStatus(next: boolean) {
+		if (!selectedType || !store || saving) return;
+		const t = selectedType;
+		const actionEpoch = epoch;
+		saving = true;
+		try {
+			const cmd = await dashboardApi.adminCreateCommand({
+				store_id: store,
+				type: 'catalog.product-type.status.update.v1',
+				entity_id: t.type_id,
+				expected_revision: t.type_revision,
+				payload: { product_type_id: t.type_id, is_active: next, expected_type_revision: t.type_revision }
+			});
+			if (actionEpoch !== epoch) return;
+			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			void loadCommands();
+		} catch (err) {
+			if (actionEpoch !== epoch) return;
+			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+		} finally {
+			if (actionEpoch === epoch) saving = false;
+		}
+	}
+
+	async function createType() {
+		if (!store || saving) return;
+		const code = (document.getElementById('nt-code') as HTMLInputElement)?.value.trim().toLowerCase() ?? '';
+		const ar = (document.getElementById('nt-ar') as HTMLInputElement)?.value.trim() ?? '';
+		const en = (document.getElementById('nt-en') as HTMLInputElement)?.value.trim() ?? '';
+		if (!/^[a-z0-9_]{1,32}$/.test(code)) return say('err', 'رمز غير صالح. / Invalid code.');
+		if (!ar || !en) return say('err', 'التسميات مطلوبة. / Labels required.');
+		const actionEpoch = epoch;
+		saving = true;
+		try {
+			const cmd = await dashboardApi.adminCreateCommand({
+				store_id: store,
+				type: 'catalog.product-type.create.v1',
+				entity_id: '',
+				expected_revision: 0,
+				payload: {
+					code, name_ar: ar, name_en: en,
+					position: productTypes.length, dimensions: [], capabilities: [],
+					expected_type_revision: 0
+				}
+			});
+			if (actionEpoch !== epoch) return;
+			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			void loadCommands();
+			void loadTypes();
+		} catch (err) {
+			if (actionEpoch !== epoch) return;
+			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+		} finally {
+			if (actionEpoch === epoch) saving = false;
+		}
+	}
+
+	async function assignProductType() {
+		if (!selectedProduct || !store || saving) return;
+		const p = selectedProduct;
+		const typeId = (document.getElementById('pt-assign') as HTMLSelectElement)?.value ?? '';
+		if (!typeId) return say('err', 'اختر النوع. / Select a type.');
+		const actionEpoch = epoch;
+		saving = true;
+		try {
+			const cmd = await dashboardApi.adminCreateCommand({
+				store_id: store,
+				type: 'catalog.product.type.assign.v1',
+				entity_id: p.product_id,
+				expected_revision: p.catalog_revision,
+				payload: { product_id: p.product_id, product_type_id: typeId, expected_catalog_revision: p.catalog_revision }
+			});
+			if (actionEpoch !== epoch) return;
+			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			void loadCommands();
+		} catch (err) {
+			if (actionEpoch !== epoch) return;
+			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+		} finally {
+			if (actionEpoch === epoch) saving = false;
+		}
+	}
+
 	// ---- commands ----
 	let commands: AdminCommand[] = $state([]);
 	let commandsState = $state<'idle' | 'loading' | 'loaded' | 'empty' | 'error'>('idle');
@@ -494,6 +631,17 @@
 		}
 	}
 
+	// Phase 17-R0 (ADR-0049): Product has no SKU — the row shows the
+	// variant rollup: "1 variant / SKU: X" when the single variant row is
+	// loaded (variant rows carry the SKU), otherwise "N variants".
+	function variantSummary(p: { variant_count: number; variants?: { sku: string }[] }): string {
+		const rows = p.variants ?? [];
+		if (p.variant_count === 1 && rows.length === 1) {
+			return `1 variant / SKU: ${rows[0].sku}`;
+		}
+		return `${p.variant_count} variant${p.variant_count === 1 ? '' : 's'}`;
+	}
+
 	// Store race: a slow Store A response must never overwrite Store B.
 	$effect(() => {
 		const current = store;
@@ -509,6 +657,8 @@
 		selectedCategory = null;
 		tags = [];
 		selectedTag = null;
+		productTypes = [];
+		selectedType = null;
 		commands = [];
 		selectedCommand = null;
 		notice = null;
@@ -517,6 +667,7 @@
 			void loadProducts(true);
 			void loadCategories();
 			void loadTags();
+			void loadTypes();
 			void loadCommands();
 		});
 	});
@@ -528,7 +679,7 @@
 	{:else}
 		{#if notice}<p class="notice {notice.kind}" role="status">{notice.text}</p>{/if}
 		<div class="tabs" role="tablist" aria-label="Catalog admin sections">
-			{#each [['products', 'المنتجات / Products'], ['categories', 'الفئات / Categories'], ['tags', 'الوسوم / Tags'], ['commands', 'الأوامر / Commands']] as [id, label]}
+			{#each [['products', 'المنتجات / Products'], ['types', 'الأنواع / Types'], ['categories', 'الفئات / Categories'], ['tags', 'الوسوم / Tags'], ['commands', 'الأوامر / Commands']] as [id, label]}
 				<button type="button" role="tab" aria-selected={tab === id} class:active={tab === id} onclick={() => (tab = id as typeof tab)}>{label}</button>
 			{/each}
 		</div>
@@ -543,11 +694,11 @@
 			{:else if productsState === 'empty'}<p class="muted">لا توجد منتجات. / No products.</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>SKU</th><th>الاسم / Name</th><th>أونلاين / Online</th><th>الحالة / State</th></tr></thead>
+					<thead><tr><th>المتغيرات / Variants</th><th>الاسم / Name</th><th>أونلاين / Online</th><th>الحالة / State</th></tr></thead>
 					<tbody>
 						{#each products as p (p.product_id)}
 							<tr>
-								<td class="num" dir="ltr">{p.sku}</td>
+								<td class="num" dir="ltr">{variantSummary(p)}</td>
 								<td><button type="button" class="link" onclick={() => void openProduct(p.product_id)}>{p.name_ar}</button></td>
 								<td>{p.sell_online ? 'نعم / Yes' : 'لا / No'}</td>
 								<td>{p.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
@@ -565,8 +716,24 @@
 		{#if selectedProduct}
 				{@const p = selectedProduct}
 				<section class="detail" aria-label="Product editor">
-					<h3>{p.name_ar} <span class="muted num" dir="ltr">{p.sku}</span></h3>
-					<p class="muted">مراجعة الكتالوج <span class="num" dir="ltr">{p.catalog_revision}</span> · سياسة البيع <span class="num" dir="ltr">{p.sales_policy_revision}</span> · التكوينات <span class="num" dir="ltr">{p.configuration_revision}</span> · المخزون (قراءة فقط) <span class="num" dir="ltr">{p.stock_quantity}</span></p>
+					<h3>{p.name_ar} <span class="muted num" dir="ltr">{variantSummary(p)}</span></h3>
+					<p class="muted">مراجعة الكتالوج <span class="num" dir="ltr">{p.catalog_revision}</span> · سياسة البيع <span class="num" dir="ltr">{p.sales_policy_revision}</span> · التكوينات <span class="num" dir="ltr">{p.configuration_revision}</span> · المخزون المشتق (قراءة فقط) <span class="num" dir="ltr">{p.derived_stock}</span></p>
+					{#if p.variants && p.variants.length > 0}
+						<h4>المتغيرات / Variants</h4>
+						<table class="data">
+							<thead><tr><th>SKU</th><th>الخيار / Option</th><th>المخزون / Stock</th><th>الحالة / State</th></tr></thead>
+							<tbody>
+								{#each p.variants as v (v.variant_id)}
+									<tr>
+										<td class="num" dir="ltr">{v.sku}</td>
+										<td>{v.attributes.map((a) => `${a.definition_name_ar}: ${a.name_ar}`).join(' · ') || '—'}</td>
+										<td class="num" dir="ltr">{v.stock_quantity}</td>
+										<td>{v.deleted ? 'محذوف / Deleted' : v.is_active ? 'نشط / Active' : 'معطّل / Inactive'}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
 					{#if p.has_pending}<p class="notice ok" role="status">يوجد تغيير معلق — القيم الحالية أدناه هي المعروضة من السحابة، وليست نجاحًا بعد. / Pending change exists — values below are current projections, not success.</p>{/if}
 					<h4>البيانات والأسعار / Details &amp; prices</h4>
 					<div class="grid">
@@ -577,6 +744,16 @@
 						<label>التكلفة (وحدات صغرى) / Cost minor <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
 					</div>
 					<button type="button" disabled={saving} onclick={() => void saveProductDetails()}>إدراج تعديل البيانات / Queue details change</button>
+					<h4>النوع / Product type</h4>
+					<p class="muted">النوع الحالي: <span dir="ltr">{p.product_type_id?.slice(0, 8) ?? '—'}…</span> — التغيير يخضع لتحقق التوافق في الكاشير. / Assignment is compatibility-checked by Retail.</p>
+					<div class="row">
+						<select id="pt-assign" aria-label="Assign product type">
+							{#each productTypes as t (t.type_id)}
+								<option value={t.type_id} selected={t.type_id === p.product_type_id}>{t.name_ar} ({t.code})</option>
+							{/each}
+						</select>
+						<button type="button" disabled={saving} onclick={() => void assignProductType()}>إدراج تغيير النوع / Queue type change</button>
+					</div>
 					<h4>التوفر أونلاين / Online availability</h4>
 					<p class="muted">القيمة الحالية: {p.sell_online ? 'مفعّل / On' : 'معطّل / Off'} — التبديل لا يغيّر sell_offline.</p>
 					<button type="button" disabled={saving} onclick={() => void saveProductOnline(!p.sell_online)}>{p.sell_online ? 'تعطيل البيع أونلاين / Disable online' : 'تفعيل البيع أونلاين / Enable online'}</button>
@@ -622,6 +799,51 @@
 					</div>
 				</section>
 			{/if}
+		{/if}
+
+		{#if tab === 'types'}
+			{#if typesState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
+			{:else if typesState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadTypes()}>إعادة / Retry</button></p>
+			{:else if typesState === 'empty'}<p class="muted">لا توجد أنواع. / No types.</p>
+			{:else}
+				<table class="data">
+					<thead><tr><th>النوع / Type</th><th>الرمز / Code</th><th>نشط / Active</th><th>الحالة / State</th></tr></thead>
+					<tbody>
+						{#each productTypes as t (t.type_id)}
+							<tr>
+								<td><button type="button" class="link" onclick={() => (selectedType = t)}>{t.name_ar}</button></td>
+								<td class="num" dir="ltr">{t.code}</td>
+								<td>{t.is_active ? 'نعم / Yes' : 'لا / No'}</td>
+								<td>{t.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+			{#if selectedType}
+				{@const t = selectedType}
+				<section class="detail" aria-label="Type editor">
+					<h3>{t.name_ar} <span class="muted num" dir="ltr">{t.code} · rev {t.type_revision}</span></h3>
+					<p class="muted">الأبعاد: {t.dimensions.join(', ') || '—'} · القدرات: {t.capabilities.join(', ') || '—'}</p>
+					<div class="grid">
+						<label>الاسم العربي / Arabic name <input id="tt-ar" type="text" value={t.name_ar} /></label>
+						<label>الاسم الإنجليزي / English name <input id="tt-en" type="text" value={t.name_en} dir="ltr" /></label>
+					</div>
+					<div class="row">
+						<button type="button" disabled={saving} onclick={() => void saveTypeDetails()}>إدراج تعديل النوع / Queue type change</button>
+						<button type="button" disabled={saving} onclick={() => void saveTypeStatus(!t.is_active)}>{t.is_active ? 'تعطيل / Deactivate' : 'تفعيل / Activate'}</button>
+					</div>
+				</section>
+			{/if}
+			<section class="detail" aria-label="Create type">
+				<h3>نوع جديد / New type</h3>
+				<div class="grid">
+					<label>الرمز / Code <input id="nt-code" type="text" dir="ltr" placeholder="book" /></label>
+					<label>الاسم العربي / Arabic name <input id="nt-ar" type="text" /></label>
+					<label>الاسم الإنجليزي / English name <input id="nt-en" type="text" dir="ltr" /></label>
+				</div>
+				<button type="button" disabled={saving} onclick={() => void createType()}>إدراج إنشاء النوع / Queue type creation</button>
+			</section>
 		{/if}
 
 		{#if tab === 'categories'}
@@ -728,6 +950,15 @@
 				<section class="detail" aria-label="Command detail">
 					<h3 dir="ltr">{cmd.type}</h3>
 					<p><span class="chip">{aggregateLabel(cmd.aggregate)}</span> <span class="muted num" dir="ltr">rev {cmd.expected_revision}</span></p>
+					{#if cmd.target_kind === 'create'}
+						<p class="muted">
+							{#if cmd.result_entity_id}
+								تم الإنشاء / Created — <span class="num" dir="ltr">{cmd.result_entity_id}</span>
+							{:else}
+								إنشاء “{cmd.requested_key}” — بانتظار الكاشير / Create “{cmd.requested_key}” — waiting for Retail
+							{/if}
+						</p>
+					{/if}
 					{#if cmd.targets}
 						<table class="data">
 							<thead><tr><th>الجهاز / Device</th><th>الحالة / Status</th><th>الكود / Code</th></tr></thead>

@@ -19,11 +19,20 @@ import (
 // Commands and targets are immutable except status transitions;
 // history is never deleted.
 
+// commandIdentity maps the Phase 17-R3 identity columns: TargetKind +
+// RequestedKey + ResultEntityID. EntityID "" is the explicit absent
+// marker for creates (never a placeholder UUID).
+func commandIdentity(kind string, requested, result pgtype.Text) (string, string, string) {
+	return kind, textOrEmpty(requested), textOrEmpty(result)
+}
+
 func catalogAdminCommandToDomain(row sqlcgen.CatalogAdminCommand) catalogadmin.CommandView {
+	kind, requested, result := commandIdentity(row.TargetKind, row.RequestedKey, row.ResultEntityID)
 	return catalogadmin.CommandView{
 		ID: row.ID.String(), StoreID: uuidString(row.StoreID),
 		Type: row.CommandType, Version: int(row.CommandVersion),
-		EntityID: row.EntityID, PayloadHash: row.PayloadHash,
+		EntityID: row.EntityID, TargetKind: kind, RequestedKey: requested, ResultEntityID: result,
+		PayloadHash:      row.PayloadHash,
 		ExpectedRevision: row.ExpectedRevision, Actor: row.Actor,
 		Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
@@ -41,19 +50,27 @@ func (d Devices) CreateCatalogAdminCommand(ctx context.Context, cmd catalogadmin
 	if err != nil {
 		return catalogadmin.CommandView{}, err
 	}
+	kind := cmd.TargetKind
+	if kind == "" {
+		// Legacy/entity callers predate target kinds: default to entity.
+		kind = catalogadmin.TargetKindEntity
+	}
 	row, err := sqlcgen.New(d.pool).CreateCatalogAdminCommand(ctx, sqlcgen.CreateCatalogAdminCommandParams{
 		ID: id, StoreID: storeID, CommandType: cmd.Type,
 		CommandVersion: int32(cmd.Version), EntityID: cmd.EntityID,
+		TargetKind: kind, RequestedKey: requestedKeyParam(cmd.RequestedKey),
 		Payload: cmd.Payload, PayloadHash: cmd.PayloadHash,
 		ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor,
 	})
 	if err != nil {
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
+	kind, requested, result := commandIdentity(row.TargetKind, row.RequestedKey, row.ResultEntityID)
 	return catalogadmin.CommandView{
 		ID: uuidString(row.ID), StoreID: uuidString(row.StoreID),
 		Type: row.CommandType, Version: int(row.CommandVersion),
-		EntityID: row.EntityID, PayloadHash: row.PayloadHash,
+		EntityID: row.EntityID, TargetKind: kind, RequestedKey: requested, ResultEntityID: result,
+		PayloadHash:      row.PayloadHash,
 		ExpectedRevision: row.ExpectedRevision, Actor: row.Actor,
 		Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}, nil
@@ -96,10 +113,12 @@ func (d Devices) GetCatalogAdminCommand(ctx context.Context, id string) (catalog
 	if err != nil {
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
+	kind, requested, result := commandIdentity(row.TargetKind, row.RequestedKey, row.ResultEntityID)
 	return catalogadmin.CommandView{
 		ID: uuidString(row.ID), StoreID: uuidString(row.StoreID),
 		Type: row.CommandType, Version: int(row.CommandVersion),
-		EntityID: row.EntityID, Payload: row.Payload, PayloadHash: row.PayloadHash,
+		EntityID: row.EntityID, TargetKind: kind, RequestedKey: requested, ResultEntityID: result,
+		Payload: row.Payload, PayloadHash: row.PayloadHash,
 		ExpectedRevision: row.ExpectedRevision, Actor: row.Actor,
 		Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}, nil
@@ -136,10 +155,12 @@ func (d Devices) ListCatalogAdminCommands(ctx context.Context, storeID, commandT
 	}
 	out := make([]catalogadmin.CommandView, 0, len(rows))
 	for _, row := range rows {
+		kind, requested, result := commandIdentity(row.TargetKind, row.RequestedKey, row.ResultEntityID)
 		out = append(out, catalogadmin.CommandView{
 			ID: uuidString(row.ID), StoreID: uuidString(row.StoreID),
 			Type: row.CommandType, Version: int(row.CommandVersion),
-			EntityID: row.EntityID, PayloadHash: row.PayloadHash,
+			EntityID: row.EntityID, TargetKind: kind, RequestedKey: requested, ResultEntityID: result,
+			PayloadHash:      row.PayloadHash,
 			ExpectedRevision: row.ExpectedRevision, Actor: row.Actor,
 			Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
 		})
@@ -251,7 +272,7 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 		return false, catalogAdminErr(err)
 	}
 	var cmd catalogadmin.CommandView
-	if err = tx.QueryRow(ctx, `SELECT id::text,store_id::text,entity_id,expected_revision,status,command_type,command_version,payload FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, commandID).Scan(&cmd.ID, &cmd.StoreID, &cmd.EntityID, &cmd.ExpectedRevision, &cmd.Status, &cmd.Type, &cmd.Version, &cmd.Payload); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT id::text,store_id::text,entity_id,target_kind,expected_revision,status,command_type,command_version,payload FROM catalog_admin_commands WHERE id=$1 FOR UPDATE`, commandID).Scan(&cmd.ID, &cmd.StoreID, &cmd.EntityID, &cmd.TargetKind, &cmd.ExpectedRevision, &cmd.Status, &cmd.Type, &cmd.Version, &cmd.Payload); err != nil {
 		return false, catalogAdminErr(err)
 	}
 	var currentStatus string
@@ -471,6 +492,31 @@ func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityI
 			return "", 0, false, catalogAdminErr(err)
 		}
 		return storeOrEmpty(row.StoreID), row.SourceRevision, true, nil
+	case catalogadmin.TypeProductTypeCreateV1, catalogadmin.TypeProductTypeDetailsUpdateV1,
+		catalogadmin.TypeProductTypeDimensionsUpdateV1, catalogadmin.TypeProductTypeCapabilitiesUpdateV1,
+		catalogadmin.TypeProductTypeStatusUpdateV1:
+		// Type-scoped commands converge on the type stream (type_revision).
+		// Creates evaluate on the RESULT identity (the aggregate layer
+		// passes the Retail-minted ID, never the absent marker).
+		row, err := q.AdminProductTypeOwnership(ctx, uid)
+		if err != nil {
+			if isNotFoundErr(err) {
+				return "", 0, false, nil
+			}
+			return "", 0, false, catalogAdminErr(err)
+		}
+		return storeOrEmpty(row.StoreID), row.TypeRevision, true, nil
+	case catalogadmin.TypeProductTypeAssignV1:
+		// Assignment versions on the Product aggregate stream: ownership
+		// is the product's store.
+		row, err := q.AdminProductOwnership(ctx, uid)
+		if err != nil {
+			if isNotFoundErr(err) {
+				return "", 0, false, nil
+			}
+			return "", 0, false, catalogAdminErr(err)
+		}
+		return storeOrEmpty(row.StoreID), row.SourceRevision, true, nil
 	case catalogadmin.TypeProductVariantUpdateV1, catalogadmin.TypeVariantAttributesUpdateV1:
 		// Variant-scoped commands converge on the variant catalog
 		// stream (variant_revision).
@@ -598,10 +644,12 @@ func (d Devices) AdminProductList(ctx context.Context, storeID, search, cursor s
 	out := make([]catalogadmin.AdminProductRow, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, catalogadmin.AdminProductRow{
-			ProductID: uuidString(row.ProductID), SKU: row.Sku,
-			NameAR: row.NameAr, NameEN: ifaceString(row.NameEn),
+			ProductID:     uuidString(row.ProductID),
+			ProductTypeID: uuidString(row.ProductTypeID),
+			NameAR:        row.NameAr, NameEN: ifaceString(row.NameEn),
 			IsActive: row.IsActive, CatalogRevision: row.CatalogRevision,
-			SellOnline: row.SellOnline, StockQuantity: row.StockQuantity,
+			SellOnline: row.SellOnline, VariantCount: row.VariantCount,
+			DerivedStock:          row.DerivedStock,
 			ConfigurationRevision: row.ConfigurationRevision,
 			HasPending:            row.HasPending,
 		})
@@ -610,8 +658,8 @@ func (d Devices) AdminProductList(ctx context.Context, storeID, search, cursor s
 }
 
 // AdminProductDetail serves the full editor snapshot: current values,
-// all revision streams, read-only stock/SKU. Money stays exact
-// minor-unit strings (never floats).
+// all revision streams, and the derived variant rollup. Money stays
+// exact minor-unit strings (never floats).
 func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID string) (catalogadmin.AdminProductDetail, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -647,12 +695,13 @@ func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID stri
 		return catalogadmin.AdminProductDetail{}, catalogAdminErr(err)
 	}
 	detail := catalogadmin.AdminProductDetail{
-		ProductID: uuidString(row.ProductID), SKU: row.Sku,
-		NameAR: row.NameAr, NameEN: ifaceString(row.NameEn),
+		ProductID:     uuidString(row.ProductID),
+		ProductTypeID: uuidString(row.ProductTypeID),
+		NameAR:        row.NameAr, NameEN: ifaceString(row.NameEn),
 		DescriptionAR: textOrEmpty(row.DescriptionAr), DescriptionEN: ifaceString(row.DescriptionEn),
 		TopCategoryID: uuidString(row.TopCategoryID),
 		IsActive:      row.IsActive, SellOnline: row.SellOnline, SellOffline: row.SellOffline,
-		StockQuantity:   row.StockQuantity,
+		VariantCount: row.VariantCount, DerivedStock: row.DerivedStock,
 		CatalogRevision: row.CatalogRevision, SalesPolicyRevision: pol.SourceRevision,
 		ConfigurationRevision: row.ConfigurationRevision,
 		EGPPriceMinor:         "0", CostMinor: "0",
@@ -741,6 +790,14 @@ func (d Devices) AdminTagList(ctx context.Context, storeID string) ([]catalogadm
 		})
 	}
 	return out, nil
+}
+
+func textOrEmptyPtr(v pgtype.Text) *string {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	s := v.String
+	return &s
 }
 
 func ifaceString(v any) string {
@@ -846,13 +903,32 @@ func (d Devices) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd c
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
 	q := sqlcgen.New(tx)
-	row, err := q.CreateCatalogAdminCommand(ctx, sqlcgen.CreateCatalogAdminCommandParams{ID: id, StoreID: sid, CommandType: cmd.Type, CommandVersion: int32(cmd.Version), EntityID: cmd.EntityID, Payload: cmd.Payload, PayloadHash: cmd.PayloadHash, ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor})
+	kind := cmd.TargetKind
+	if kind == "" {
+		kind = catalogadmin.TargetKindEntity
+	}
+	row, err := q.CreateCatalogAdminCommand(ctx, sqlcgen.CreateCatalogAdminCommandParams{ID: id, StoreID: sid, CommandType: cmd.Type, CommandVersion: int32(cmd.Version), EntityID: cmd.EntityID, TargetKind: kind, RequestedKey: requestedKeyParam(cmd.RequestedKey), Payload: cmd.Payload, PayloadHash: cmd.PayloadHash, ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor})
 	if err != nil {
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
 	devices, err := q.ListStoreBoundDevices(ctx, sid)
 	if err != nil {
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
+	}
+	if cmd.TargetKind == catalogadmin.TargetKindCreate && len(devices) > 1 {
+		// Phase 17-R3 §13: creation is single-flight per intent. Update
+		// commands are idempotent across devices (same entity, same
+		// revision), but two devices applying the same create would mint
+		// two divergent UUIDs under one code in two separate SQLite
+		// databases — unmergeable without operator surgery. Constrain the
+		// create to ONE authoritative target (lowest device UUID,
+		// deterministic): duplicate delivery of one intent can never
+		// create multiple authoritative entities in a Store. Trade-off,
+		// documented: if that device never polls, the command stays
+		// PENDING (cancellable while pending) until the operator retries.
+		// The code-uniqueness fence stays the last line of defense for
+		// genuinely distinct commands racing on one code.
+		devices = devices[:1]
 	}
 	for _, dev := range devices {
 		tid, _ := parseUUID((ids.System{}).New())
@@ -863,7 +939,24 @@ func (d Devices) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd c
 	if err = tx.Commit(ctx); err != nil {
 		return catalogadmin.CommandView{}, catalogAdminErr(err)
 	}
-	return catalogAdminCommandToDomain(row), nil
+	kind, requested, result := commandIdentity(row.TargetKind, row.RequestedKey, row.ResultEntityID)
+	return catalogadmin.CommandView{
+		ID: uuidString(row.ID), StoreID: uuidString(row.StoreID),
+		Type: row.CommandType, Version: int(row.CommandVersion),
+		EntityID: row.EntityID, TargetKind: kind, RequestedKey: requested, ResultEntityID: result,
+		PayloadHash:      row.PayloadHash,
+		ExpectedRevision: row.ExpectedRevision, Actor: row.Actor,
+		Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
+	}, nil
+}
+
+// requestedKeyParam maps the creation requested key to a nullable TEXT
+// param (NULL for entity commands, preserving the coherence invariant).
+func requestedKeyParam(key string) pgtype.Text {
+	if key == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: key, Valid: true}
 }
 
 // ---- Phase 17 variant admin reads ----
@@ -1008,4 +1101,101 @@ func (d Devices) AdminProductVariant(ctx context.Context, storeID, variantID str
 	}
 	entry.Attributes = attrs
 	return entry, nil
+}
+
+// AdminProductTypeList serves Store-scoped projected types for the editor.
+func (d Devices) AdminProductTypeList(ctx context.Context, storeID string) ([]catalogadmin.AdminProductType, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	q := sqlcgen.New(d.pool)
+	rows, err := q.AdminProductTypeList(ctx, storeID)
+	if err != nil {
+		return nil, catalogAdminErr(err)
+	}
+	out := make([]catalogadmin.AdminProductType, 0, len(rows))
+	for _, row := range rows {
+		dims, err := q.CatalogProductTypeDimensions(ctx, row.TypeID)
+		if err != nil {
+			return nil, catalogAdminErr(err)
+		}
+		caps, err := q.CatalogProductTypeCapabilities(ctx, row.TypeID)
+		if err != nil {
+			return nil, catalogAdminErr(err)
+		}
+		if dims == nil {
+			dims = []string{}
+		}
+		if caps == nil {
+			caps = []string{}
+		}
+		out = append(out, catalogadmin.AdminProductType{
+			TypeID: uuidString(row.TypeID), Code: row.Code,
+			NameAR: row.NameAr, NameEN: row.NameEn,
+			DescriptionAR: textOrEmptyPtr(row.DescriptionAr), DescriptionEN: textOrEmptyPtr(row.DescriptionEn),
+			IsActive: row.IsActive, Position: int(row.Position),
+			TypeRevision: row.TypeRevision,
+			Dimensions:   dims, Capabilities: caps,
+		})
+	}
+	return out, nil
+}
+
+// AdminProductType serves one projected type with its sets.
+func (d Devices) AdminProductType(ctx context.Context, storeID, typeID string) (catalogadmin.AdminProductType, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	tuid, err := parseUUID(typeID)
+	if err != nil {
+		return catalogadmin.AdminProductType{}, err
+	}
+	q := sqlcgen.New(d.pool)
+	row, err := q.AdminProductTypeDetail(ctx, sqlcgen.AdminProductTypeDetailParams{TypeID: tuid, StoreID: storeID})
+	if err != nil {
+		return catalogadmin.AdminProductType{}, catalogAdminErr(err)
+	}
+	dims, err := q.CatalogProductTypeDimensions(ctx, tuid)
+	if err != nil {
+		return catalogadmin.AdminProductType{}, catalogAdminErr(err)
+	}
+	caps, err := q.CatalogProductTypeCapabilities(ctx, tuid)
+	if err != nil {
+		return catalogadmin.AdminProductType{}, catalogAdminErr(err)
+	}
+	if dims == nil {
+		dims = []string{}
+	}
+	if caps == nil {
+		caps = []string{}
+	}
+	return catalogadmin.AdminProductType{
+		TypeID: uuidString(row.TypeID), Code: row.Code,
+		NameAR: row.NameAr, NameEN: row.NameEn,
+		DescriptionAR: textOrEmptyPtr(row.DescriptionAr), DescriptionEN: textOrEmptyPtr(row.DescriptionEn),
+		IsActive: row.IsActive, Position: int(row.Position),
+		TypeRevision: row.TypeRevision,
+		Dimensions:   dims, Capabilities: caps,
+	}, nil
+}
+
+// SetCommandResultEntity records a command's actual resulting entity ID
+// when one of its targets reports APPLIED (Phase 17-R3 create closure).
+// First writer wins; the intent row is never rewritten.
+func (d Devices) SetCommandResultEntity(ctx context.Context, targetID, entityID string) error {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	tid, err := parseUUID(targetID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(entityID) == "" {
+		return nil
+	}
+	if _, err := parseUUID(entityID); err != nil {
+		return err
+	}
+	q := sqlcgen.New(d.pool)
+	_, err = q.SetCommandResultEntity(ctx, sqlcgen.SetCommandResultEntityParams{
+		TargetID: tid, ResultEntityID: strings.TrimSpace(entityID),
+	})
+	return catalogAdminErr(err)
 }

@@ -64,8 +64,10 @@ type Stats struct {
 type Store interface {
 	PendingSaleEvents(ctx context.Context, processor string, limit int) ([]string, error)
 	PendingSaleV2Events(ctx context.Context, limit int) ([]string, error)
+	PendingSaleV3Events(ctx context.Context, limit int) ([]string, error)
 	ProjectSale(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectSaleV2(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectSaleV3(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadSaleEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -145,7 +147,7 @@ func (p *Projector) Run(ctx context.Context) {
 	}
 }
 
-// drain projects due v1 and v2 events until none remain or ctx ends.
+// drain projects due v1, v2, and v3 events until none remain or ctx ends.
 // Versions drain under independent processors; dispatch is by event type.
 func (p *Projector) drain(ctx context.Context) {
 	for {
@@ -162,7 +164,13 @@ func (p *Projector) drain(ctx context.Context) {
 			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV2, "err", err.Error())
 			return
 		}
+		v3ids, err := p.store.PendingSaleV3Events(ctx, p.batchSize)
+		if err != nil {
+			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV3, "err", err.Error())
+			return
+		}
 		ids = append(ids, v2ids...)
+		ids = append(ids, v3ids...)
 		if len(ids) == 0 {
 			return
 		}
@@ -190,9 +198,12 @@ func (p *Projector) projectOnce(ctx context.Context, eventID string) {
 		return
 	}
 	var res ProjectResult
-	if rec.EventType == EventSaleFinalizedV2 {
+	switch rec.EventType {
+	case EventSaleFinalizedV2:
 		res, err = p.store.ProjectSaleV2(ctx, rec, p.clock.Now())
-	} else {
+	case EventSaleFinalizedV3:
+		res, err = p.store.ProjectSaleV3(ctx, rec, p.clock.Now())
+	default:
 		res, err = p.store.ProjectSale(ctx, rec, p.clock.Now())
 	}
 	if err != nil {

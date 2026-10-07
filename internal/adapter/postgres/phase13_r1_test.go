@@ -480,6 +480,13 @@ func TestR1Migration28To29Preservation(t *testing.T) {
 		if after && name == "catalog_products" {
 			expr += "-'configuration_revision'"
 		}
+		// Phase 17-R0 00035 RETIRES catalog_products.sku (Product has no
+		// SKU authority anywhere, ADR-0049): the column is dropped in the
+		// after schema, so both snapshots exclude the retired key. Every
+		// remaining business value must stay byte-identical.
+		if name == "catalog_products" {
+			expr += "-'sku'"
+		}
 		if after && name == "commerce_online_order_lines" {
 			expr += "-'configuration_id'-'frame_style_code'-'frame_style_name_ar'-'frame_style_name_en'-'frame_color_code'-'frame_color_name_ar'-'frame_color_name_en'-'configuration_price_delta_minor'-'provider_configuration_id'-'configuration_unresolved'"
 		}

@@ -75,9 +75,9 @@ func seedConfiguration(t *testing.T, pool *pgxpool.Pool, productID, configID, st
 		}
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO catalog_products (
-		 product_id, sku, name, top_category_id, is_active, source_revision,
+		 product_id, name, top_category_id, is_active, source_revision,
 		 source_event_id, source_device_id, source_payload_hash, source_received_at)
-		 VALUES ($1, 'ML-SEED-1', 'Seed', '33333333-3333-4333-8333-333333333333', true, 1,
+		 VALUES ($1, 'Seed', '33333333-3333-4333-8333-333333333333', true, 1,
 		 '22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111',
 		 '\x00', now())
 		 ON CONFLICT (product_id) DO NOTHING`, productID); err != nil {

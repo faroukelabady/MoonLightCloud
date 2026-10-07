@@ -109,7 +109,6 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 	}
 	assembled := CommerceProduct{
 		ProductID:       product.ID,
-		SKU:             product.SKU,
 		IsActive:        product.IsActive,
 		WidthCM:         product.WidthCM,
 		HeightCM:        product.HeightCM,
@@ -255,6 +254,15 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 			desired.Product.Variants = append(desired.Product.Variants, entry)
 		}
 		desired.VariantsFingerprint, desired.VariantsVersion = variantsIdentity(desired.Product.Variants)
+		// Phase 17-R0 (ADR-0049): the provider-facing product SKU is
+		// DERIVED from variant SKU ownership — the first live variant by
+		// position (providers require a product-level SKU). Product
+		// itself carries no SKU authority anywhere; a product without
+		// variant rows carries no SKU and cannot be published
+		// (documented provider limitation, see docs/operations).
+		if len(desired.Product.Variants) > 0 {
+			desired.Product.SKU = desired.Product.Variants[0].SKU
+		}
 	}
 	if !desired.Published {
 		// Provider-facing quantity follows existing disabled-product

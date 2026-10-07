@@ -488,13 +488,18 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 export interface AdminProductRow {
 	product_id: string;
-	sku: string;
+	// Phase 17-R2: structural type identity (never inferred).
+	product_type_id?: string;
 	name_ar: string;
 	name_en: string;
 	is_active: boolean;
 	catalog_revision: number;
 	sell_online: boolean;
-	stock_quantity: number;
+	// Phase 17-R0 (ADR-0049): product rows carry NO sku/stock —
+	// variant_count/derived_stock derive from the product's variants
+	// (SKU/stock authority lives on the variant rows).
+	variant_count: number;
+	derived_stock: number;
 	configuration_revision: number;
 	has_pending: boolean;
 }
@@ -512,6 +517,53 @@ export interface AdminProductDetail extends AdminProductRow {
 	cost_minor: string;
 	sell_offline: boolean;
 	sales_policy_revision: number;
+	// Phase 17: SKU/inventory-owning variant rows (variant rows carry the
+	// SKU; product rows carry the derived rollup only).
+	variants?: AdminProductVariant[];
+}
+
+export interface AdminProductVariantAttribute {
+	definition_code: string;
+	value_code: string;
+	name_ar: string;
+	name_en: string;
+	definition_name_ar: string;
+	definition_name_en: string;
+	position: number;
+}
+
+// Phase 17-R2: structural ProductType projection (Retail authority).
+export interface AdminProductType {
+	type_id: string;
+	code: string;
+	name_ar: string;
+	name_en: string;
+	description_ar?: string | null;
+	description_en?: string | null;
+	is_active: boolean;
+	position: number;
+	type_revision: number;
+	dimensions: string[];
+	capabilities: string[];
+	has_pending?: boolean;
+}
+
+export interface AdminProductVariant {
+	variant_id: string;
+	product_id: string;
+	sku: string;
+	is_active: boolean;
+	deleted: boolean;
+	price_egp_minor: string;
+	price_usd_minor: string | null;
+	stock_quantity: number;
+	position: number;
+	combination_key: string;
+	variant_revision: number;
+	catalog_revision: number;
+	inventory_revision: number;
+	has_pending: boolean;
+	attributes: AdminProductVariantAttribute[];
 }
 
 export interface AdminCategoryRow {
@@ -568,6 +620,9 @@ export interface AdminCommand {
 	type: string;
 	version: number;
 	entity_id: string;
+	target_kind?: string;
+	requested_key?: string;
+	result_entity_id?: string;
 	payload?: Record<string, unknown>;
 	payload_hash: string;
 	expected_revision: number;
@@ -659,6 +714,16 @@ export const dashboardApi = {
 		get<{ categories: AdminCategoryRow[] }>(`/api/v1/dashboard/catalog-admin/categories?store_id=${encodeURIComponent(store)}`, s),
 	adminTags: (store: string, s?: AbortSignal) =>
 		get<{ tags: AdminTagRow[] }>(`/api/v1/dashboard/catalog-admin/tags?store_id=${encodeURIComponent(store)}`, s),
+	adminProductTypes: (store: string, s?: AbortSignal) =>
+		get<{ product_types: AdminProductType[] }>(
+			`/api/v1/dashboard/catalog-admin/product-types?store_id=${encodeURIComponent(store)}`,
+			s
+		),
+	adminProductType: (store: string, id: string, s?: AbortSignal) =>
+		get<{ product_type: AdminProductType }>(
+			`/api/v1/dashboard/catalog-admin/product-types/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}`,
+			s
+		),
 	adminCommands: (store: string, filters: { type?: string; entity_id?: string; status?: string }, s?: AbortSignal) => {
 		const q = new URLSearchParams({ store_id: store, limit: '20' });
 		if (filters.type) q.set('type', filters.type);

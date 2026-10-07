@@ -705,6 +705,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/product-types:
+    get:
+      summary: Store-scoped ProductType rows with dimensions and capabilities
+      operationId: catalogAdminProductTypes
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Structural types (Retail authority). Codes are stable identity; labels are display state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminProductTypeList'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/product-types/{id}:
+    get:
+      summary: Store-scoped ProductType detail snapshot
+      operationId: catalogAdminProductType
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Current projection values plus the type revision stream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminProductTypeDetail'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Unknown ProductType or wrong Store scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device-control/catalog-commands:
     get:
       summary: Retail pulls due catalog command targets (outbound only)
@@ -2125,7 +2179,7 @@ paths:
       security:
         - reportAuth: []
       description: >-
-        Fixed dimensions only (product, root_category, subcategory, tag, cashier,
+        Fixed dimensions only (product, product_type, root_category, subcategory, tag, cashier,
         channel). Historical snapshots only. Tag groups overlap by design
         (one line may carry many tags) and are not additive to the total. Root-category rows are additive;
         subcategory rows are facet-style and may sum above the line total.
@@ -2141,7 +2195,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [product, root_category, subcategory, tag, cashier, channel]
+            enum: [product, product_type, root_category, subcategory, tag, cashier, channel]
         - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
@@ -2307,7 +2361,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.finalized.v3, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -2341,6 +2395,7 @@ components:
       oneOf:
         - $ref: '#/components/schemas/SaleFinalizedV1Event'
         - $ref: '#/components/schemas/SaleFinalizedV2Event'
+        - $ref: '#/components/schemas/SaleFinalizedV3Event'
         - $ref: '#/components/schemas/ReturnRefundFinalizedV1Event'
         - $ref: '#/components/schemas/CatalogCategorySnapshotV1Event'
         - $ref: '#/components/schemas/CatalogCategorySnapshotV2Event'
@@ -2358,6 +2413,7 @@ components:
         mapping:
           sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
           sale.finalized.v2: '#/components/schemas/SaleFinalizedV2Event'
+          sale.finalized.v3: '#/components/schemas/SaleFinalizedV3Event'
           sale.return_refund.finalized.v1: '#/components/schemas/ReturnRefundFinalizedV1Event'
           catalog.category.snapshot.v1: '#/components/schemas/CatalogCategorySnapshotV1Event'
           catalog.category.snapshot.v2: '#/components/schemas/CatalogCategorySnapshotV2Event'
@@ -2674,15 +2730,19 @@ components:
     CatalogProductSnapshotV2:
       type: object
       additionalProperties: false
-      required: [product_id, primary_variant_sku, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
+      required: [product_id, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
       description: >
-        Product aggregate at catalog_revision (Phase 17). `sku` is removed:
-        SKU authority lives on the ProductVariant. `primary_variant_sku` is a
-        deprecated display mirror of the primary variant's SKU. v1 stays
-        semantically immutable; both versions share one catalog_revision.
+        Product aggregate at catalog_revision (Phase 17-R0). The payload
+        carries NO SKU-bearing field at all: Product has no SKU authority
+        anywhere (ADR-0049); ProductVariant owns SKU/stock and product
+        stock is derived only. v1 stays semantically immutable; both
+        versions share one catalog_revision stream. Compatibility note:
+        for one release Cloud's decoder tolerates-and-ignores the retired
+        `primary_variant_sku` display mirror (Retail may still emit it
+        until both trees ship together); the value is never validated,
+        stored, or projected and the next release may reject it like `sku`.
       properties:
         product_id: {type: string, format: uuid}
-        primary_variant_sku: {type: string, maxLength: 64, pattern: '^[^\r\n\t]{0,64}$', description: Deprecated display mirror; never identity.}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, nullable: true}
         translations:
@@ -2890,12 +2950,11 @@ components:
           description: Authoritative Store scope. Never global.
         type:
           type: string
-          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1, catalog.product.variants.update.v1, catalog.product.variant.update.v1, catalog.variant.attributes.update.v1]
+          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1, catalog.product.variants.update.v1, catalog.product.variant.update.v1, catalog.variant.attributes.update.v1, catalog.product-type.create.v1, catalog.product-type.details.update.v1, catalog.product-type.dimensions.update.v1, catalog.product-type.capabilities.update.v1, catalog.product-type.status.update.v1, catalog.product.type.assign.v1]
           description: Immutable versioned command type. No generic patch exists.
         entity_id:
           type: string
-          format: uuid
-          description: Target Product, Category or Tag UUID. Immutable, never edited by the command.
+          description: 'Target business entity UUID for entity commands. MUST be "" (absent marker) for catalog.product-type.create.v1 — Cloud fabricates no ProductType identity; Retail mints the canonical ID and returns it as result_entity_id. Immutable, never edited by the command.'
         expected_revision:
           type: integer
           minimum: 0
@@ -2905,7 +2964,7 @@ components:
           description: Typed command fields. SKU, stock, Sales and Returns are never writable here.
     CatalogAdminCommand:
       type: object
-      required: [id, store_id, type, version, entity_id, payload_hash, expected_revision, actor, status, aggregate, converged, created_at, updated_at]
+      required: [id, store_id, type, version, entity_id, target_kind, payload_hash, expected_revision, actor, status, aggregate, converged, created_at, updated_at]
       properties:
         id:
           type: string
@@ -2919,7 +2978,18 @@ components:
           type: integer
         entity_id:
           type: string
+          description: 'Business entity UUID for entity commands. Explicit absent marker "" for create-kind commands (never a placeholder UUID).'
+        target_kind:
+          type: string
+          enum: [entity, create]
+          description: 'entity = addresses a pre-existing business entity; create = creation intent (Retail mints the canonical ID at apply).'
+        requested_key:
+          type: string
+          description: 'Stable requested key for creates (ProductType code). Absent for entity commands.'
+        result_entity_id:
+          type: string
           format: uuid
+          description: 'Actual Retail-minted entity ID once a target reports APPLIED (first writer wins). Intent rows are never rewritten.'
         payload:
           type: object
           description: Immutable command payload. Included only on detail requests with ?payload=1.
@@ -2973,6 +3043,7 @@ components:
           description: Bounded machine code (APPLIED, REVISION_CONFLICT, VALIDATION_FAILED, ENTITY_NOT_FOUND, STORE_SCOPE_CONFLICT, UNSUPPORTED_COMMAND, COMMAND_ID_PAYLOAD_MISMATCH, DEPENDENCY_MISSING, RETRYABLE_FAILURE).
         entity_id:
           type: string
+          description: 'Per-target entity evidence: the Retail-reported entity for this target (for creates, the minted ID once APPLIED). Never a placeholder.'
         pre_revision:
           type: integer
         post_revision:
@@ -3053,16 +3124,21 @@ components:
           type: array
           items:
             type: object
-            required: [product_id, sku, name_ar, is_active, catalog_revision, sell_online, stock_quantity, configuration_revision, has_pending]
+            required: [product_id, name_ar, is_active, catalog_revision, sell_online, variant_count, derived_stock, configuration_revision, has_pending]
+            description: >-
+              Phase 17-R0 (ADR-0049): product rows carry NO sku/stock.
+              variant_count/derived_stock derive from the product's
+              variants (SKU/stock authority lives on ProductVariant).
             properties:
               product_id: {type: string, format: uuid}
-              sku: {type: string, description: Read-only. Never edited by admin commands.}
+              product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred).'}
               name_ar: {type: string}
               name_en: {type: string}
               is_active: {type: boolean}
               catalog_revision: {type: integer}
               sell_online: {type: boolean}
-              stock_quantity: {type: integer, description: Read-only display. Phase16 cannot edit stock.}
+              variant_count: {type: integer, format: int64, description: 'Non-tombstoned variant rows.'}
+              derived_stock: {type: integer, format: int64, description: 'SUM of active, non-tombstoned variant stock. Derived only; never authoritative.'}
               configuration_revision: {type: integer}
               has_pending: {type: boolean}
         next_cursor:
@@ -3070,10 +3146,14 @@ components:
           description: Keyset cursor for the next page. Empty on the final page.
     CatalogAdminProductDetail:
       type: object
-      required: [product_id, sku, catalog_revision, sales_policy_revision, configuration_revision]
+      required: [product_id, catalog_revision, sales_policy_revision, configuration_revision, variant_count, derived_stock]
+      description: >-
+        Phase 17-R0 (ADR-0049): the product carries NO sku/stock — SKU and
+        stock authority live on the variants below; variant_count/
+        derived_stock are derived only.
       properties:
         product_id: {type: string, format: uuid}
-        sku: {type: string, description: Immutable barcode identity. Display only.}
+        product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred).'}
         name_ar: {type: string}
         name_en: {type: string}
         description_ar: {type: string}
@@ -3093,7 +3173,8 @@ components:
         is_active: {type: boolean}
         sell_online: {type: boolean}
         sell_offline: {type: boolean, description: Display only. Phase16 never changes sell_offline.}
-        stock_quantity: {type: integer, description: Read-only.}
+        variant_count: {type: integer, format: int64, description: 'Non-tombstoned variant rows. Derived read model.'}
+        derived_stock: {type: integer, format: int64, description: 'SUM of active, non-tombstoned variant stock. Derived only; never authoritative.'}
         catalog_revision: {type: integer}
         sales_policy_revision: {type: integer}
         configuration_revision: {type: integer}
@@ -3185,6 +3266,45 @@ components:
                 items: {type: string, format: uuid}
               catalog_revision: {type: integer}
               has_pending: {type: boolean}
+    CatalogAdminProductTypeList:
+      type: object
+      required: [product_types]
+      properties:
+        product_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogAdminProductType'
+    CatalogAdminProductTypeDetail:
+      type: object
+      required: [product_type]
+      properties:
+        product_type:
+          $ref: '#/components/schemas/CatalogAdminProductType'
+    CatalogAdminProductType:
+      type: object
+      required: [type_id, code, is_active, position, type_revision, dimensions, capabilities]
+      description: >-
+        Phase 17-R2 structural type (Retail authority, ADR-0050). Code is
+        stable machine identity; labels are display state. Dimensions bound
+        variant attributes; capabilities gate optional behaviors
+        (frame_configuration).
+      properties:
+        type_id: {type: string, format: uuid}
+        code: {type: string, description: 'Stable machine identity, immutable once created.'}
+        name_ar: {type: string}
+        name_en: {type: string}
+        description_ar: {type: string, nullable: true}
+        description_en: {type: string, nullable: true}
+        is_active: {type: boolean}
+        position: {type: integer}
+        type_revision: {type: integer}
+        dimensions:
+          type: array
+          items: {type: string}
+        capabilities:
+          type: array
+          items: {type: string, enum: [frame_configuration]}
+        has_pending: {type: boolean}
     CatalogAdminTagList:
       type: object
       required: [tags]
@@ -3651,6 +3771,104 @@ components:
       description: >-
         sale.finalized.v2 — v1 shape plus per-line historical tag
         snapshots. v1 remains accepted with unknown tag capture.
+    SaleFinalizedV3Event:
+      allOf:
+        - $ref: '#/components/schemas/SyncEventEnvelope'
+        - type: object
+          required: [event_type, payload]
+          properties:
+            event_type:
+              type: string
+              enum: [sale.finalized.v3]
+            payload:
+              $ref: '#/components/schemas/SaleFinalizedV3'
+    SaleLineVariantAttribute:
+      type: object
+      additionalProperties: false
+      required: [definition_code, value_code, name_ar, definition_name_ar]
+      properties:
+        definition_code: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
+        value_code: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
+        name_ar: {type: string, minLength: 1, maxLength: 200}
+        name_en: {type: string, maxLength: 200, nullable: true}
+        definition_name_ar: {type: string, minLength: 1, maxLength: 200}
+        definition_name_en: {type: string, maxLength: 200, nullable: true}
+      description: >-
+        One frozen sale-time option attribute of the purchased variant.
+        Identity is (definition_code, value_code); the bilingual labels
+        are display history frozen AT SALE TIME — later catalog label
+        renames never rewrite them.
+    SaleLineV3:
+      type: object
+      required: [sale_item_id, sku, product_name, quantity, unit_price, line_total, classifications, tags]
+      properties:
+        sale_item_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid, nullable: true}
+        variant_id: {type: string, format: uuid, nullable: true}
+        sku: {type: string}
+        product_name: {type: string}
+        width_cm: {type: integer, nullable: true}
+        height_cm: {type: integer, nullable: true}
+        quantity: {type: integer, minimum: 1, maximum: 2147483647}
+        unit_price: {$ref: '#/components/schemas/Money'}
+        cost: {$ref: '#/components/schemas/Money'}
+        line_total: {$ref: '#/components/schemas/Money'}
+        classifications: {$ref: '#/components/schemas/LineClassifications'}
+        tags:
+          type: array
+          items: {$ref: '#/components/schemas/SaleLineTag'}
+          description: >-
+            Always present; empty means capture occurred with zero tags.
+            Sorted by tag_id.
+        variant_sku:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[^\r\n\t]{1,64}$'
+          description: >-
+            Frozen variant SKU snapshot. Present together with variant_id
+            and variant_attributes (all-or-nothing snapshot); absent for
+            lines without variant data.
+        variant_attributes:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/SaleLineVariantAttribute'}
+          description: >-
+            Frozen sale-time option attributes (≤ 32, unique
+            definition_code). Present together with variant_id and
+            variant_sku; absent for lines without variant data.
+        variant_price_egp_cents: {type: integer, format: int64, minimum: 0, nullable: true, description: Nullable sale-time variant pricing override (minor units).}
+        variant_price_usd_cents: {type: integer, format: int64, minimum: 0, nullable: true, description: Nullable sale-time variant pricing override (minor units).}
+    SaleFinalizedV3:
+      type: object
+      required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]
+      properties:
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string}
+        channel: {type: string, enum: [STORE]}
+        occurred_at: {type: string, format: date-time}
+        paid_at: {type: string, format: date-time}
+        shop: {$ref: '#/components/schemas/ShopSnapshot'}
+        actor: {$ref: '#/components/schemas/ActorSnapshot'}
+        currency: {type: string, enum: [EGP, USD]}
+        fx:
+          $ref: '#/components/schemas/FxSnapshot'
+        totals: {$ref: '#/components/schemas/SaleTotals'}
+        lines:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/SaleLineV3'}
+        payments:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/EventPayment'}
+      description: >-
+        sale.finalized.v3 (Phase 17-R0) — the v2 shape plus per-line
+        frozen ProductVariant snapshots (variant_sku, sale-time option
+        attribute labels, nullable sale-time variant pricing override).
+        Snapshots are sourced ONLY from this event: Cloud never joins
+        current catalog state into stored history. v1 and v2 remain
+        accepted and fully supported.
     ReturnActorSnapshot:
       type: object
       properties:
@@ -3900,15 +4118,19 @@ components:
       additionalProperties: false
       required: [dimension, units, units_returned, line_sales]
       description: >-
-        Line-level dimension row (product, root_category, subcategory, tag).
+        Line-level dimension row (product, product_type, root_category, subcategory, tag).
         line_sales carries pre-adjustment historical line amounts plus
         reversal amounts; Sale-level discount/tax are never allocated.
         Never carries currency_totals.
       properties:
-        dimension: {type: string, enum: [product, root_category, subcategory, tag]}
+        dimension: {type: string, enum: [product, product_type, root_category, subcategory, tag]}
         product_id: {type: string, format: uuid, nullable: true}
         sku: {type: string, nullable: true}
         product_name: {type: string, nullable: true}
+        product_type_id: {type: string, format: uuid, nullable: true}
+        product_type_code: {type: string, nullable: true}
+        product_type_name_ar: {type: string, nullable: true}
+        product_type_name_en: {type: string, nullable: true}
         classification_kind: {type: string, enum: [root, subcategory]}
         classification_id: {type: string, format: uuid}
         tag_id: {type: string, format: uuid}
@@ -3957,7 +4179,7 @@ components:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
         period: {$ref: '#/components/schemas/PeriodMeta'}
-        dimension: {type: string, enum: [product, root_category, subcategory, cashier, channel]}
+        dimension: {type: string, enum: [product, product_type, root_category, subcategory, cashier, channel]}
         store_id:
           type: string
           format: uuid
@@ -4208,6 +4430,26 @@ components:
         configuration_price_delta_minor: {type: string, nullable: true, description: 'Exact minor units in the ORDER currency; NULL = no delta defined for that currency. Never FX, never EGP fallback.'}
         provider_configuration_id: {type: string, nullable: true, description: 'Raw bounded provider identity for the selection.'}
         configuration_unresolved: {type: boolean, description: 'True when the provider selection could not be resolved to a known configuration (F13 truthfulness).'}
+        variant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: 'Phase 17 immutable ProductVariant identity snapshot (00034). Null/absent for lines without a resolved provider variation.'
+        variant_sku: {type: string, nullable: true, description: 'Frozen variant SKU at ingestion. Never joined from current catalog.'}
+        variant_attributes:
+          type: array
+          description: 'Frozen option attributes (codes + bilingual labels) at ingestion. Later catalog label renames never rewrite them.'
+          items:
+            type: object
+            required: [definition_code, value_code, name_ar, definition_name_ar, position]
+            properties:
+              definition_code: {type: string}
+              value_code: {type: string}
+              name_ar: {type: string}
+              name_en: {type: string, nullable: true}
+              definition_name_ar: {type: string}
+              definition_name_en: {type: string, nullable: true}
+              position: {type: integer}
     DashboardOrderAddress:
       type: object
       required: [kind, first_name, last_name, company, address_1, address_2, city, state, postcode, country, email, phone]
@@ -4351,7 +4593,7 @@ components:
             properties:
               reason_code:
                 type: string
-                enum: [CATALOG_MISSING_SKU, CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY, COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS, COMMERCE_STORE_CONFLICT, CATEGORY_ONLINE_DISABLED, PRODUCT_NO_ACTIVE_VARIANTS, PRODUCT_NO_SELLABLE_VARIANT, VARIANT_DUPLICATE_COMBINATION, VARIANT_MISSING_SKU, VARIANT_MAPPING_MISSING, VARIANT_INTENTIONALLY_OFFLINE]
+                enum: [CATALOG_MISSING_CATEGORY, AVAILABILITY_NOT_READY, COMMERCE_MAPPING_MISSING, COMMERCE_SYNC_AMBIGUOUS, COMMERCE_STORE_CONFLICT, CATEGORY_ONLINE_DISABLED, PRODUCT_NO_ACTIVE_VARIANTS, PRODUCT_NO_SELLABLE_VARIANT, VARIANT_DUPLICATE_COMBINATION, VARIANT_MISSING_SKU, VARIANT_MAPPING_MISSING, VARIANT_INTENTIONALLY_OFFLINE]
               products: {type: integer, format: int64}
         detail:
           type: array

@@ -55,11 +55,15 @@ func TestV22To23PreservesBusinessValues(t *testing.T) {
 	exec(`INSERT INTO return_refund_projection (return_refund_id, source_event_id, source_device_id, return_number, kind, reason, sale_id, sale_number, channel, occurred_at, currency, gross_refunded_minor, discount_refunded_minor, tax_refunded_minor, refund_total_minor, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, received_at)
 		VALUES ('aaaaaaaa-0000-4000-8000-0000000000c1', 'aaaaaaaa-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'R-1', 'return', 'defect', 'aaaaaaaa-0000-4000-8000-0000000000a1', 'S-1', 'STORE', now(), 'EGP', 10000, 0, 0, 10000, 'a', 'b', 'c', 'd', 'e', 'f', 'g', now())`)
 
-	if err := migrate.Up(ctx, conn); err != nil {
+	// 22→23 first: the Store-scoped constraint set under test lives at 23.
+	// (Continuing to Target later: Phase 17-R0 00035 RETIRES
+	// catalog_products.sku entirely — ADR-0049 — so the SKU constraint
+	// semantics are asserted here at their own schema version.)
+	if err := migrate.UpTo(ctx, conn, 23); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != migrate.TargetVersion {
-		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	if v := version(t, conn, ctx); v != 23 {
+		t.Fatalf("want 23, got %d", v)
 	}
 	// Every business value preserved byte-identically.
 	queries := map[string]string{
@@ -121,5 +125,38 @@ func TestV22To23PreservesBusinessValues(t *testing.T) {
 		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname=$1)`, index).Scan(&exists); err != nil || !exists {
 			t.Fatalf("index %s present (%v)", index, err)
 		}
+	}
+
+	// Continuing to Target: every business value survives the appended
+	// history EXCEPT the deliberately retired product SKU (00035).
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	for name, query := range map[string]string{
+		"sale total":      `SELECT total_minor FROM sales_projection WHERE sale_id='aaaaaaaa-0000-4000-8000-0000000000a1'`,
+		"sale line total": `SELECT line_total_minor FROM sale_lines_projection WHERE sale_id='aaaaaaaa-0000-4000-8000-0000000000a1'`,
+		"refund total":    `SELECT refund_total_minor FROM return_refund_projection WHERE return_refund_id='aaaaaaaa-0000-4000-8000-0000000000c1'`,
+		"product rev":     `SELECT source_revision FROM catalog_products WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
+		"inventory":       `SELECT stock_quantity FROM catalog_product_inventory WHERE product_id='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'`,
+		"tag slug":        `SELECT slug FROM catalog_tags WHERE tag_id='dddddddd-dddd-4ddd-8ddd-dddddddddddd'`,
+		"category name":   `SELECT name_ar FROM catalog_categories WHERE category_id='cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+	} {
+		want := map[string]string{
+			"sale total": "10000", "sale line total": "10000", "refund total": "10000",
+			"product rev": "1", "inventory": "5",
+			"tag slug": "horse", "category name": "cat",
+		}[name]
+		var got string
+		if err := conn.QueryRowContext(ctx, query).Scan(&got); err != nil || got != want {
+			t.Fatalf("%s preserved at target: got %q want %q (%v)", name, got, want, err)
+		}
+	}
+	var skuCols int
+	if err := conn.QueryRowContext(ctx,
+		`SELECT count(*) FROM information_schema.columns WHERE table_name='catalog_products' AND column_name='sku'`).Scan(&skuCols); err != nil || skuCols != 0 {
+		t.Fatalf("product sku must be retired at target, columns=%d (%v)", skuCols, err)
 	}
 }

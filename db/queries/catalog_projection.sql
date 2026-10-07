@@ -100,15 +100,19 @@ FROM catalog_tags WHERE tag_id = $1;
 
 -- name: UpsertCatalogProduct :exec
 -- Phase 9B store ownership: see UpsertCatalogCategory.
+-- Phase 17-R0 (ADR-0049): Product carries NO SKU — SKU/stock identity
+-- lives on ProductVariant; the column was retired by 00035.
 INSERT INTO catalog_products (
-    product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id,
+    product_id, name, description, top_category_id, width_cm, height_cm,
+    is_active, product_type_id,
+    source_revision, source_event_id, source_device_id,
     source_payload_hash, source_received_at, store_id
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (product_id) DO UPDATE SET
-    sku = excluded.sku, name = excluded.name, description = excluded.description,
+    name = excluded.name, description = excluded.description,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
+    product_type_id = excluded.product_type_id,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
@@ -116,17 +120,10 @@ ON CONFLICT (product_id) DO UPDATE SET
     projected_at = now();
 
 -- name: CatalogProductByID :one
-SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
+SELECT product_id, name, description, top_category_id, width_cm, height_cm,
+    is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
     configuration_revision
 FROM catalog_products WHERE product_id = $1;
-
--- name: CatalogProductBySKU :one
--- Phase 9B: SKU resolves only within one Store scope (NULL scope matches
--- legacy rows). A bare global SKU lookup could cross Store ownership.
-SELECT product_id, sku, name, description, top_category_id, width_cm, height_cm,
-    is_active, source_revision, source_event_id, source_device_id, source_payload_hash, store_id
-FROM catalog_products WHERE sku = $1 AND store_id IS NOT DISTINCT FROM $2;
 
 -- name: DeleteCatalogProductPrices :exec
 DELETE FROM catalog_product_prices WHERE product_id = $1;
@@ -178,9 +175,11 @@ WHERE product_id = $1 ORDER BY position, category_id;
 SELECT tag_id FROM catalog_product_tags WHERE product_id = $1 ORDER BY tag_id;
 
 -- name: CatalogActiveProducts :many
-SELECT product_id, sku, name, source_revision, source_event_id
+-- Phase 17-R0: Product has no SKU (ADR-0049); deterministic product_id
+-- ordering replaces the retired SKU ordering.
+SELECT product_id, name, source_revision, source_event_id
 FROM catalog_products
-WHERE is_active ORDER BY sku, product_id
+WHERE is_active ORDER BY product_id
 LIMIT $1;
 
 -- Phase 5A-R1 cross-aggregate convergence (ADR-0028): accepted catalog

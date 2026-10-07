@@ -206,7 +206,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 	for _, c := range h.Counts {
 		counts[c.ReasonCode] = c.Products
 	}
-	for code, w := range map[string]int64{"CATALOG_MISSING_SKU": 0, "CATALOG_MISSING_CATEGORY": 0, "AVAILABILITY_NOT_READY": 0, "COMMERCE_MAPPING_MISSING": 1, "COMMERCE_SYNC_AMBIGUOUS": 1, "COMMERCE_STORE_CONFLICT": 1} {
+	for code, w := range map[string]int64{"CATALOG_MISSING_CATEGORY": 0, "AVAILABILITY_NOT_READY": 0, "COMMERCE_MAPPING_MISSING": 1, "COMMERCE_SYNC_AMBIGUOUS": 1, "COMMERCE_STORE_CONFLICT": 1} {
 		if counts[code] != w {
 			t.Errorf("%s=%d want=%d", code, counts[code], w)
 		}
@@ -223,7 +223,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 			// Provider narrowing applies to provider-scoped reasons
 			// only (the codes computed against the durable provider
 			// universe). Provider-independent lifecycle reasons (the
-			// original CATALOG_MISSING_SKU/AVAILABILITY_NOT_READY family
+			// original AVAILABILITY_NOT_READY family
 			// and, since Phase 17, the product/variant variant-health
 			// family) intentionally survive provider narrowing — they are
 			// not provider concepts. The Phase 12 all-zero assertion held
@@ -271,7 +271,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 	}
 	t.Log("resolved barrier excluded and NULL mapping owner not a Store conflict; read-only session PASS")
 	exec(`ALTER TABLE catalog_products ALTER COLUMN top_category_id DROP NOT NULL`)
-	exec(`UPDATE catalog_products SET sku=' ', top_category_id=NULL WHERE product_id=$1`, pA)
+	exec(`UPDATE catalog_products SET top_category_id=NULL WHERE product_id=$1`, pA)
 	exec(`DELETE FROM catalog_product_inventory WHERE product_id=$1`, pA)
 	positive, e := s.CatalogHealth(ctx, req, "", "", 100)
 	if e != nil {
@@ -281,7 +281,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 	for _, c := range positive.Counts {
 		pc[c.ReasonCode] = c.Products
 	}
-	for _, code := range []string{"CATALOG_MISSING_SKU", "CATALOG_MISSING_CATEGORY", "AVAILABILITY_NOT_READY"} {
+	for _, code := range []string{"CATALOG_MISSING_CATEGORY", "AVAILABILITY_NOT_READY"} {
 		if pc[code] != 1 {
 			t.Errorf("positive %s=%d", code, pc[code])
 		}

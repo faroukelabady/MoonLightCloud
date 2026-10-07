@@ -252,6 +252,12 @@ func (p *ShopifyProvider) ensureShopCurrency(ctx context.Context) error {
 
 // ownershipMetafields builds the targeted moonlight-namespace ownership
 // writes. Nothing outside this namespace is ever written.
+//
+// Phase 17-R0 (R08): managed_variant_id is ALWAYS written — when the
+// product no longer has a managed-variant shape (several variants) the
+// value is the documented EMPTY TOMBSTONE, so a stale identity from a
+// previous single-variant shape can never survive a 1↔N transition or
+// drive adoption/mutation afterwards.
 func ownershipMetafields(productGID string, req commerce.ProductUpsertRequest, managedVariantGID string) []map[string]any {
 	entry := func(key, value string) map[string]any {
 		return map[string]any{
@@ -268,9 +274,7 @@ func ownershipMetafields(productGID string, req commerce.ProductUpsertRequest, m
 		entry(metafieldProductOperation, req.OperationKey),
 		entry(metafieldCatalogRevision, fmt.Sprintf("%d", req.CatalogRevision)),
 		entry(metafieldPolicyRevision, fmt.Sprintf("%d", req.PolicyRevision)),
-	}
-	if managedVariantGID != "" {
-		fields = append(fields, entry(metafieldManagedVariantID, managedVariantGID))
+		entry(metafieldManagedVariantID, managedVariantGID),
 	}
 	return fields
 }
