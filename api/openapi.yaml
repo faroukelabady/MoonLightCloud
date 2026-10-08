@@ -3839,6 +3839,15 @@ components:
             variant_sku; absent for lines without variant data.
         variant_price_egp_cents: {type: integer, format: int64, minimum: 0, nullable: true, description: Nullable sale-time variant pricing override (minor units).}
         variant_price_usd_cents: {type: integer, format: int64, minimum: 0, nullable: true, description: Nullable sale-time variant pricing override (minor units).}
+        product_type_id: {type: string, format: uuid, nullable: true}
+        product_type_code: {type: string, minLength: 1, maxLength: 32, pattern: '^[^\r\n\t]{1,32}$', nullable: true}
+        product_type_name_ar: {type: string, minLength: 1, maxLength: 200, nullable: true}
+        product_type_name_en: {type: string, minLength: 1, maxLength: 200, nullable: true}
+      description: >-
+        ProductType identity, code and both labels are an all-or-nothing
+        frozen sale-time snapshot. They remain absent for history without
+        Type capture. Type codes contain 1..32 characters; generic Variant
+        attribute codes retain their separate 1..64 bound.
     SaleFinalizedV3:
       type: object
       required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]

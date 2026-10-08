@@ -31,9 +31,10 @@ const ProcessorSaleProjectionV3 = "sale_projection.v3"
 
 // Sale variant snapshot bounds (mirror the catalog variant domain).
 const (
-	MaxVariantSnapshotAttributes = 32
-	maxVariantSnapshotCodeRunes  = 64
-	maxVariantSnapshotLabelRunes = 200
+	MaxVariantSnapshotAttributes    = 32
+	maxVariantSnapshotCodeRunes     = 64
+	maxVariantSnapshotLabelRunes    = 200
+	maxProductTypeSnapshotCodeRunes = 32
 )
 
 // SaleLineVariantAttribute is one frozen sale-time option attribute of
@@ -201,8 +202,8 @@ func ValidateV3(p PayloadV3) (ValidatedV3, error) {
 			if !isUUID(*line.ProductTypeID) {
 				return fail("lines[%d].product_type_id must be a UUID", i)
 			}
-			if !validSnapshotCode(*line.ProductTypeCode) {
-				return fail("lines[%d].product_type_code must be 1..64 chars without control whitespace", i)
+			if !validSnapshotCode(*line.ProductTypeCode) || utf8.RuneCountInString(*line.ProductTypeCode) > maxProductTypeSnapshotCodeRunes {
+				return fail("lines[%d].product_type_code must be 1..32 chars without control whitespace", i)
 			}
 			if !validSnapshotLabel(*line.ProductTypeNameAR) {
 				return fail("lines[%d].product_type_name_ar must be 1..200 runes", i)

@@ -55,6 +55,38 @@ func validateV3Map(t *testing.T, m map[string]any) (ValidatedV3, error) {
 	return ValidateV3(p)
 }
 
+func TestV3ProductTypeCodeBounds(t *testing.T) {
+	for _, length := range []int{0, 1, 32, 33, 64} {
+		code := strings.Repeat("a", length)
+		t.Run("code_"+code, func(t *testing.T) {
+			payload := loadV3Base(t)
+			for _, entry := range payload["lines"].([]any) {
+				line := entry.(map[string]any)
+				line["product_type_id"] = "10000000-0000-4000-8000-000000000001"
+				line["product_type_code"] = code
+				line["product_type_name_ar"] = "نوع"
+				line["product_type_name_en"] = "Type"
+			}
+			_, err := validateV3Map(t, payload)
+			if length >= 1 && length <= 32 {
+				if err != nil {
+					t.Fatalf("supported Type code rejected: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("out-of-bound Type code accepted")
+			}
+		})
+	}
+	t.Run("generic_variant_code_retains_64", func(t *testing.T) {
+		payload := loadV3Base(t)
+		line := payload["lines"].([]any)[0].(map[string]any)
+		line["variant_attributes"].([]any)[0].(map[string]any)["definition_code"] = strings.Repeat("a", 64)
+		if _, err := validateV3Map(t, payload); err != nil {
+			t.Fatalf("Type bound changed generic Variant code compatibility: %v", err)
+		}
+	})
+}
+
 func TestDecodeV3Valid(t *testing.T) {
 	valid, err := validateV3Map(t, loadV3Base(t))
 	if err != nil {
