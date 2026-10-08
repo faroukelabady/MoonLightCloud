@@ -151,16 +151,24 @@ WHERE code = @code::text AND ((store_id::text = @store_id::text) OR (@store_id::
 -- name: AdminProductTypeList :many
 SELECT t.type_id, t.code, t.name_ar, t.name_en,
     t.description_ar, t.description_en, t.is_active, t.position,
-    t.type_revision
+    t.type_revision,
+    COALESCE(source.payload->>'product_type_id', '')::text AS source_type_id,
+    source.store_id AS source_store_id
 FROM catalog_product_types t
+LEFT JOIN sync_events source ON source.event_id = t.source_event_id
+    AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL))
 ORDER BY t.position, t.code;
 
 -- name: AdminProductTypeDetail :one
 SELECT t.type_id, t.code, t.name_ar, t.name_en,
     t.description_ar, t.description_en,
-    t.is_active, t.position, t.type_revision
+    t.is_active, t.position, t.type_revision,
+    COALESCE(source.payload->>'product_type_id', '')::text AS source_type_id,
+    source.store_id AS source_store_id
 FROM catalog_product_types t
+LEFT JOIN sync_events source ON source.event_id = t.source_event_id
+    AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE t.type_id = @type_id::uuid
   AND (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL));
 
@@ -177,6 +185,8 @@ WHERE t.type_id = @type_id::uuid
 SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
     p.is_active, p.product_type_id,
+    COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
+    type_source.store_id AS source_store_id,
     p.source_revision AS catalog_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     (SELECT count(*) FROM catalog_product_variants v
@@ -194,6 +204,10 @@ SELECT p.product_id, p.name AS name_ar,
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
+LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product_type_id
+    AND product_type.store_id = p.store_id
+LEFT JOIN sync_events type_source ON type_source.event_id = product_type.source_event_id
+    AND type_source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE p.store_id = @store_id::uuid
   AND (sqlc.arg(search)::text = '' OR p.name ILIKE '%'||sqlc.arg(search)::text||'%'
        OR EXISTS (SELECT 1 FROM catalog_product_variants v
@@ -209,6 +223,8 @@ SELECT p.product_id, p.name AS name_ar,
     p.description AS description_ar,
     COALESCE((SELECT t.description FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS description_en,
     p.width_cm, p.height_cm, p.top_category_id, p.is_active, p.product_type_id,
+    COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
+    type_source.store_id AS source_store_id,
     p.source_revision AS catalog_revision, p.configuration_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     COALESCE(s.sell_offline, TRUE) AS sell_offline,
@@ -220,6 +236,10 @@ SELECT p.product_id, p.name AS name_ar,
      WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
+LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product_type_id
+    AND product_type.store_id = p.store_id
+LEFT JOIN sync_events type_source ON type_source.event_id = product_type.source_event_id
+    AND type_source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE p.product_id = @product_id::uuid AND p.store_id = @store_id::uuid;
 
 -- name: AdminProductPrices :many

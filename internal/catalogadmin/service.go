@@ -247,7 +247,7 @@ type Store interface {
 	// CatalogAdminOwnership verifies projection ownership and reads
 	// the stream convergence revision. found=false means unknown
 	// entity; storeID "" means legacy NULL (never mutable by Store).
-	CatalogAdminOwnership(ctx context.Context, commandType, entityID string) (storeID string, revision int64, found bool, err error)
+	CatalogAdminOwnership(ctx context.Context, commandType, entityID, requestedStoreID string) (storeID string, revision int64, found bool, err error)
 	// Admin reads serve the operator UI from projections only.
 	AdminProductList(ctx context.Context, storeID, search, cursor string, limit int) ([]AdminProductRow, error)
 	AdminProductDetail(ctx context.Context, storeID, productID string) (AdminProductDetail, error)
@@ -341,7 +341,7 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 	ownerStore := strings.TrimSpace(storeID)
 	if targetKind == TargetKindEntity {
 		var found bool
-		ownerStore, _, found, err = s.store.CatalogAdminOwnership(ctx, typ, entityID)
+		ownerStore, _, found, err = s.store.CatalogAdminOwnership(ctx, typ, entityID, storeID)
 		if err != nil {
 			return CommandView{}, err
 		}
@@ -705,7 +705,7 @@ func (s *Service) aggregate(ctx context.Context, view CommandView, targets []Tar
 			converged = false
 			break
 		}
-		owner, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, effEntity)
+		owner, revision, found, err := s.store.CatalogAdminOwnership(ctx, view.Type, effEntity, view.StoreID)
 		if err != nil || !found || !strings.EqualFold(owner, view.StoreID) || t.EntityID != effEntity || t.PostRevision < view.ExpectedRevision || revision < t.PostRevision || (t.PostRevision == view.ExpectedRevision && !s.noopProjected(ctx, view)) {
 			converged = false
 			break
@@ -877,7 +877,7 @@ func (s *Service) AdminConfigurations(ctx context.Context, storeID, productID st
 	if _, err := uuid.Parse(strings.TrimSpace(productID)); err != nil {
 		return nil, apperr.New(apperr.InvalidInput, "invalid product id")
 	}
-	owner, _, found, err := s.store.CatalogAdminOwnership(ctx, TypeProductConfigurationsUpdateV1, strings.TrimSpace(productID))
+	owner, _, found, err := s.store.CatalogAdminOwnership(ctx, TypeProductConfigurationsUpdateV1, strings.TrimSpace(productID), storeID)
 	if err != nil {
 		return nil, err
 	}

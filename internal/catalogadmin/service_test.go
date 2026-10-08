@@ -149,7 +149,7 @@ func (s *fakeStore) ListCatalogAdminBoundDevices(_ context.Context, storeID stri
 	return s.bound[storeID], nil
 }
 
-func (s *fakeStore) CatalogAdminOwnership(_ context.Context, _, entityID string) (string, int64, bool, error) {
+func (s *fakeStore) CatalogAdminOwnership(_ context.Context, _, entityID, _ string) (string, int64, bool, error) {
 	owner, ok := s.owner[entityID]
 	if !ok {
 		return "", 0, false, nil

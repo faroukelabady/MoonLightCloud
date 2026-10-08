@@ -164,6 +164,8 @@ SELECT p.product_id, p.name AS name_ar,
     p.description AS description_ar,
     COALESCE((SELECT t.description FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS description_en,
     p.width_cm, p.height_cm, p.top_category_id, p.is_active, p.product_type_id,
+    COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
+    type_source.store_id AS source_store_id,
     p.source_revision AS catalog_revision, p.configuration_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     COALESCE(s.sell_offline, TRUE) AS sell_offline,
@@ -175,6 +177,10 @@ SELECT p.product_id, p.name AS name_ar,
      WHERE v.product_id = p.product_id AND v.is_active AND NOT v.deleted), 0)::bigint AS derived_stock
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
+LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product_type_id
+    AND product_type.store_id = p.store_id
+LEFT JOIN sync_events type_source ON type_source.event_id = product_type.source_event_id
+    AND type_source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE p.product_id = $1::uuid AND p.store_id = $2::uuid
 `
 
@@ -194,6 +200,8 @@ type AdminProductDetailRow struct {
 	TopCategoryID         pgtype.UUID `json:"top_category_id"`
 	IsActive              bool        `json:"is_active"`
 	ProductTypeID         pgtype.UUID `json:"product_type_id"`
+	SourceTypeID          string      `json:"source_type_id"`
+	SourceStoreID         pgtype.UUID `json:"source_store_id"`
 	CatalogRevision       int64       `json:"catalog_revision"`
 	ConfigurationRevision int64       `json:"configuration_revision"`
 	SellOnline            bool        `json:"sell_online"`
@@ -216,6 +224,8 @@ func (q *Queries) AdminProductDetail(ctx context.Context, arg AdminProductDetail
 		&i.TopCategoryID,
 		&i.IsActive,
 		&i.ProductTypeID,
+		&i.SourceTypeID,
+		&i.SourceStoreID,
 		&i.CatalogRevision,
 		&i.ConfigurationRevision,
 		&i.SellOnline,
@@ -252,6 +262,8 @@ const adminProductList = `-- name: AdminProductList :many
 SELECT p.product_id, p.name AS name_ar,
     COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
     p.is_active, p.product_type_id,
+    COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
+    type_source.store_id AS source_store_id,
     p.source_revision AS catalog_revision,
     COALESCE(s.sell_online, FALSE) AS sell_online,
     (SELECT count(*) FROM catalog_product_variants v
@@ -269,6 +281,10 @@ SELECT p.product_id, p.name AS name_ar,
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
+LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product_type_id
+    AND product_type.store_id = p.store_id
+LEFT JOIN sync_events type_source ON type_source.event_id = product_type.source_event_id
+    AND type_source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE p.store_id = $1::uuid
   AND ($2::text = '' OR p.name ILIKE '%'||$2::text||'%'
        OR EXISTS (SELECT 1 FROM catalog_product_variants v
@@ -292,6 +308,8 @@ type AdminProductListRow struct {
 	NameEn                interface{} `json:"name_en"`
 	IsActive              bool        `json:"is_active"`
 	ProductTypeID         pgtype.UUID `json:"product_type_id"`
+	SourceTypeID          string      `json:"source_type_id"`
+	SourceStoreID         pgtype.UUID `json:"source_store_id"`
 	CatalogRevision       int64       `json:"catalog_revision"`
 	SellOnline            bool        `json:"sell_online"`
 	VariantCount          int64       `json:"variant_count"`
@@ -328,6 +346,8 @@ func (q *Queries) AdminProductList(ctx context.Context, arg AdminProductListPara
 			&i.NameEn,
 			&i.IsActive,
 			&i.ProductTypeID,
+			&i.SourceTypeID,
+			&i.SourceStoreID,
 			&i.CatalogRevision,
 			&i.SellOnline,
 			&i.VariantCount,
@@ -496,8 +516,12 @@ func (q *Queries) AdminProductTypeByCode(ctx context.Context, arg AdminProductTy
 const adminProductTypeDetail = `-- name: AdminProductTypeDetail :one
 SELECT t.type_id, t.code, t.name_ar, t.name_en,
     t.description_ar, t.description_en,
-    t.is_active, t.position, t.type_revision
+    t.is_active, t.position, t.type_revision,
+    COALESCE(source.payload->>'product_type_id', '')::text AS source_type_id,
+    source.store_id AS source_store_id
 FROM catalog_product_types t
+LEFT JOIN sync_events source ON source.event_id = t.source_event_id
+    AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE t.type_id = $1::uuid
   AND (t.store_id::text = $2::text OR ($2::text = '' AND t.store_id IS NULL))
 `
@@ -517,6 +541,8 @@ type AdminProductTypeDetailRow struct {
 	IsActive      bool        `json:"is_active"`
 	Position      int32       `json:"position"`
 	TypeRevision  int64       `json:"type_revision"`
+	SourceTypeID  string      `json:"source_type_id"`
+	SourceStoreID pgtype.UUID `json:"source_store_id"`
 }
 
 func (q *Queries) AdminProductTypeDetail(ctx context.Context, arg AdminProductTypeDetailParams) (AdminProductTypeDetailRow, error) {
@@ -532,6 +558,8 @@ func (q *Queries) AdminProductTypeDetail(ctx context.Context, arg AdminProductTy
 		&i.IsActive,
 		&i.Position,
 		&i.TypeRevision,
+		&i.SourceTypeID,
+		&i.SourceStoreID,
 	)
 	return i, err
 }
@@ -539,8 +567,12 @@ func (q *Queries) AdminProductTypeDetail(ctx context.Context, arg AdminProductTy
 const adminProductTypeList = `-- name: AdminProductTypeList :many
 SELECT t.type_id, t.code, t.name_ar, t.name_en,
     t.description_ar, t.description_en, t.is_active, t.position,
-    t.type_revision
+    t.type_revision,
+    COALESCE(source.payload->>'product_type_id', '')::text AS source_type_id,
+    source.store_id AS source_store_id
 FROM catalog_product_types t
+LEFT JOIN sync_events source ON source.event_id = t.source_event_id
+    AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE (t.store_id::text = $1::text OR ($1::text = '' AND t.store_id IS NULL))
 ORDER BY t.position, t.code
 `
@@ -555,6 +587,8 @@ type AdminProductTypeListRow struct {
 	IsActive      bool        `json:"is_active"`
 	Position      int32       `json:"position"`
 	TypeRevision  int64       `json:"type_revision"`
+	SourceTypeID  string      `json:"source_type_id"`
+	SourceStoreID pgtype.UUID `json:"source_store_id"`
 }
 
 // Phase 17-R2 type reads (Store-scoped, projection only).
@@ -577,6 +611,8 @@ func (q *Queries) AdminProductTypeList(ctx context.Context, storeID string) ([]A
 			&i.IsActive,
 			&i.Position,
 			&i.TypeRevision,
+			&i.SourceTypeID,
+			&i.SourceStoreID,
 		); err != nil {
 			return nil, err
 		}

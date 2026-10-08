@@ -105,6 +105,30 @@ func (q *Queries) CatalogProductTypeDimensions(ctx context.Context, typeID pgtyp
 	return items, nil
 }
 
+const catalogProductTypeIdentity = `-- name: CatalogProductTypeIdentity :one
+SELECT t.store_id, COALESCE(e.payload->>'product_type_id', '')::text AS source_type_id,
+    e.store_id AS source_store_id
+FROM catalog_product_types t
+LEFT JOIN sync_events e ON e.event_id = t.source_event_id
+    AND e.event_type = 'catalog.product_type.snapshot.v1'
+WHERE t.type_id = $1
+`
+
+type CatalogProductTypeIdentityRow struct {
+	StoreID       pgtype.UUID `json:"store_id"`
+	SourceTypeID  string      `json:"source_type_id"`
+	SourceStoreID pgtype.UUID `json:"source_store_id"`
+}
+
+// An internal shared-default key is valid only when its authoritative
+// source event proves the original Retail seed identity and same Store.
+func (q *Queries) CatalogProductTypeIdentity(ctx context.Context, typeID pgtype.UUID) (CatalogProductTypeIdentityRow, error) {
+	row := q.db.QueryRow(ctx, catalogProductTypeIdentity, typeID)
+	var i CatalogProductTypeIdentityRow
+	err := row.Scan(&i.StoreID, &i.SourceTypeID, &i.SourceStoreID)
+	return i, err
+}
+
 const deleteCatalogProductTypeCapabilities = `-- name: DeleteCatalogProductTypeCapabilities :exec
 DELETE FROM catalog_product_type_capabilities WHERE type_id = $1
 `
@@ -225,6 +249,60 @@ type SetCatalogProductTypeIDParams struct {
 func (q *Queries) SetCatalogProductTypeID(ctx context.Context, arg SetCatalogProductTypeIDParams) error {
 	_, err := q.db.Exec(ctx, setCatalogProductTypeID, arg.ProductID, arg.ProductTypeID)
 	return err
+}
+
+const sharedProductTypeRecoveryCandidates = `-- name: SharedProductTypeRecoveryCandidates :many
+SELECT e.event_id, p.processor
+FROM sync_events e
+JOIN sync_event_processing p ON p.event_id = e.event_id
+JOIN catalog_product_types t ON t.type_id = $1::uuid
+WHERE e.store_id IS NOT NULL AND t.store_id IS NOT NULL AND t.store_id <> e.store_id
+  AND e.payload->>'product_type_id' = $1::text
+  AND p.status = 'blocked' AND p.last_error_code = 'STORE_SCOPE_CONFLICT'
+  AND ((e.event_type = 'catalog.product_type.snapshot.v1'
+        AND p.processor = 'catalog_product_type_projection.v1'
+        AND p.last_error_message = 'product type owned by another store')
+    OR (e.event_type = 'catalog.product.snapshot.v2'
+        AND p.processor = 'catalog_product_projection.v1'
+        AND p.last_error_message = 'product type owned by another store'
+        AND NOT EXISTS (SELECT 1 FROM catalog_products product
+                        WHERE product.product_id::text = e.payload->>'product_id'
+                          AND product.store_id IS NOT NULL AND product.store_id <> e.store_id)))
+ORDER BY e.received_at, e.event_id
+LIMIT $2::int
+`
+
+type SharedProductTypeRecoveryCandidatesParams struct {
+	SeedID     pgtype.UUID `json:"seed_id"`
+	BatchLimit int32       `json:"batch_limit"`
+}
+
+type SharedProductTypeRecoveryCandidatesRow struct {
+	EventID   pgtype.UUID `json:"event_id"`
+	Processor string      `json:"processor"`
+}
+
+// Recover only the exact seeded identity collision proven by the original
+// ingress Store and a foreign-owned raw projection. Never re-arm genuine
+// same-Store contradictions, custom identities or other ownership failures.
+func (q *Queries) SharedProductTypeRecoveryCandidates(ctx context.Context, arg SharedProductTypeRecoveryCandidatesParams) ([]SharedProductTypeRecoveryCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, sharedProductTypeRecoveryCandidates, arg.SeedID, arg.BatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SharedProductTypeRecoveryCandidatesRow{}
+	for rows.Next() {
+		var i SharedProductTypeRecoveryCandidatesRow
+		if err := rows.Scan(&i.EventID, &i.Processor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertCatalogProductType = `-- name: UpsertCatalogProductType :exec

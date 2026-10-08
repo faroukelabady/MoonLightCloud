@@ -493,7 +493,7 @@ func (d Devices) ListCatalogAdminBoundDevices(ctx context.Context, storeID strin
 
 // CatalogAdminOwnership verifies entity projection ownership and reads
 // the convergence revision for the command stream.
-func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityID string) (storeID string, revision int64, found bool, err error) {
+func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityID, requestedStoreID string) (storeID string, revision int64, found bool, err error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(entityID)
@@ -518,6 +518,12 @@ func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityI
 		// Type-scoped commands converge on the type stream (type_revision).
 		// Creates evaluate on the RESULT identity (the aggregate layer
 		// passes the Retail-minted ID, never the absent marker).
+		scope := storeUUID(&requestedStoreID)
+		projectedID, err := projectedProductTypeID(ctx, q, entityID, scope)
+		if err != nil {
+			return "", 0, false, catalogAdminErr(err)
+		}
+		uid, _ = parseUUID(projectedID)
 		row, err := q.AdminProductTypeOwnership(ctx, uid)
 		if err != nil {
 			if isNotFoundErr(err) {
@@ -617,6 +623,9 @@ func catalogAdminErr(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, ErrProductTypeIdentityCollision) {
+		return apperr.New(apperr.Conflict, "PRODUCT_TYPE_IDENTITY_CONFLICT")
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return apperr.New(apperr.NotFound, catalogadmin.CodeEntityNotFound)
 	}
@@ -665,7 +674,7 @@ func (d Devices) AdminProductList(ctx context.Context, storeID, search, cursor s
 	for _, row := range rows {
 		out = append(out, catalogadmin.AdminProductRow{
 			ProductID:     uuidString(row.ProductID),
-			ProductTypeID: uuidString(row.ProductTypeID),
+			ProductTypeID: retailProductTypeID(uuidString(row.ProductTypeID), storeUUID(&storeID), row.SourceTypeID, row.SourceStoreID),
 			NameAR:        row.NameAr, NameEN: ifaceString(row.NameEn),
 			IsActive: row.IsActive, CatalogRevision: row.CatalogRevision,
 			SellOnline: row.SellOnline, VariantCount: row.VariantCount,
@@ -716,7 +725,7 @@ func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID stri
 	}
 	detail := catalogadmin.AdminProductDetail{
 		ProductID:     uuidString(row.ProductID),
-		ProductTypeID: uuidString(row.ProductTypeID),
+		ProductTypeID: retailProductTypeID(uuidString(row.ProductTypeID), storeUUID(&storeID), row.SourceTypeID, row.SourceStoreID),
 		NameAR:        row.NameAr, NameEN: ifaceString(row.NameEn),
 		DescriptionAR: textOrEmpty(row.DescriptionAr), DescriptionEN: ifaceString(row.DescriptionEn),
 		TopCategoryID: uuidString(row.TopCategoryID),
@@ -1149,7 +1158,7 @@ func (d Devices) AdminProductTypeList(ctx context.Context, storeID string) ([]ca
 			caps = []string{}
 		}
 		out = append(out, catalogadmin.AdminProductType{
-			TypeID: uuidString(row.TypeID), Code: row.Code,
+			TypeID: retailProductTypeID(uuidString(row.TypeID), storeUUID(&storeID), row.SourceTypeID, row.SourceStoreID), Code: row.Code,
 			NameAR: row.NameAr, NameEN: row.NameEn,
 			DescriptionAR: textOrEmptyPtr(row.DescriptionAr), DescriptionEN: textOrEmptyPtr(row.DescriptionEn),
 			IsActive: row.IsActive, Position: int(row.Position),
@@ -1169,6 +1178,11 @@ func (d Devices) AdminProductType(ctx context.Context, storeID, typeID string) (
 		return catalogadmin.AdminProductType{}, err
 	}
 	q := sqlcgen.New(d.pool)
+	projectedID, err := projectedProductTypeID(ctx, q, typeID, storeUUID(&storeID))
+	if err != nil {
+		return catalogadmin.AdminProductType{}, catalogAdminErr(err)
+	}
+	tuid, _ = parseUUID(projectedID)
 	row, err := q.AdminProductTypeDetail(ctx, sqlcgen.AdminProductTypeDetailParams{TypeID: tuid, StoreID: storeID})
 	if err != nil {
 		return catalogadmin.AdminProductType{}, catalogAdminErr(err)
@@ -1188,7 +1202,7 @@ func (d Devices) AdminProductType(ctx context.Context, storeID, typeID string) (
 		caps = []string{}
 	}
 	return catalogadmin.AdminProductType{
-		TypeID: uuidString(row.TypeID), Code: row.Code,
+		TypeID: retailProductTypeID(uuidString(row.TypeID), storeUUID(&storeID), row.SourceTypeID, row.SourceStoreID), Code: row.Code,
 		NameAR: row.NameAr, NameEN: row.NameEn,
 		DescriptionAR: textOrEmptyPtr(row.DescriptionAr), DescriptionEN: textOrEmptyPtr(row.DescriptionEn),
 		IsActive: row.IsActive, Position: int(row.Position),

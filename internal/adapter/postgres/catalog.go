@@ -859,6 +859,19 @@ func (d Devices) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error
 		}
 		n += count
 	}
+	if n < 100 {
+		types, err := q.SharedProductTypeRecoveryCandidates(ctx, sqlcgen.SharedProductTypeRecoveryCandidatesParams{SeedID: mustProductTypeUUID(sharedProductTypeID), BatchLimit: int32(100 - n)})
+		if err != nil {
+			return 0, apperr.Wrap(apperr.Internal, "type recovery lookup failed", redact(err))
+		}
+		for _, candidate := range types {
+			count, err := q.RearmDefaultCatalogRecovery(ctx, sqlcgen.RearmDefaultCatalogRecoveryParams{EventID: candidate.EventID, Processor: candidate.Processor})
+			if err != nil {
+				return 0, apperr.Wrap(apperr.Internal, "type recovery failed", redact(err))
+			}
+			n += count
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
 	}
@@ -1875,6 +1888,18 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	projectedValid.TopCategoryID = topProjected
 	projectedValid.SubcategoryIDs = resolvedSubs
 	projectedValid.TagIDs = resolvedTags
+	if valid.ProductTypeID != "" {
+		resolvedType, err := projectedProductTypeID(ctx, q, valid.ProductTypeID, storeScope)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			if errors.Is(err, ErrProductTypeIdentityCollision) {
+				return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type storage identity collision")
+			}
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type identity lookup failed")
+		}
+		projectedValid.ProductTypeID = resolvedType
+		typeUID, _ = parseUUID(resolvedType)
+	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
 	if stale {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2000,7 +2025,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	// Phase 17-R2 §41/§77: product → type Store ownership. A product cannot
 	// assign a type owned by another Store; a missing type is a wait.
 	if strings.TrimSpace(valid.ProductTypeID) != "" {
-		tuid, err := parseUUID(valid.ProductTypeID)
+		tuid, err := parseUUID(projectedValid.ProductTypeID)
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrValidation, "product_type_id must be a UUID")
@@ -2800,7 +2825,7 @@ func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (cat
 }
 
 func defaultCatalogEntity(eventType, id string) bool {
-	return (eventType == catalog.EventCategorySnapshotV1 || eventType == catalog.EventCategorySnapshotV2) && isSharedCategoryID(id) || eventType == catalog.EventTagSnapshotV1 && isSharedTagID(id)
+	return (eventType == catalog.EventCategorySnapshotV1 || eventType == catalog.EventCategorySnapshotV2) && isSharedCategoryID(id) || eventType == catalog.EventTagSnapshotV1 && isSharedTagID(id) || eventType == catalog.EventProductTypeSnapshotV1 && id == sharedProductTypeID
 }
 func rawDefaultCategoryID(id string, scope pgtype.UUID) string {
 	for raw := range sharedCategoryIDs {
@@ -3832,6 +3857,9 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 	if verr != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrValidation, safeErr(verr))
 	}
+	if reservedProductTypeStorageID(valid.ProductTypeID, storeUUID(event.StoreID)) {
+		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type storage identity is reserved")
+	}
 	tuid, err := parseUUID(valid.ProductTypeID)
 	if err != nil {
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrValidation, "product_type_id must be a UUID")
@@ -3855,9 +3883,20 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 		return done, nil
 	}
 
+	projectedID, err := projectedProductTypeID(ctx, q, valid.ProductTypeID, storeUUID(event.StoreID))
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if errors.Is(err, ErrProductTypeIdentityCollision) {
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type storage identity collision")
+		}
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type identity lookup failed")
+	}
+	tuid, _ = parseUUID(projectedID)
+	projectedValid := valid
+	projectedValid.ProductTypeID = projectedID
 	// Entity lock: own the type row so concurrent type writes serialize.
 	if err := lockCatalogEntities(ctx, q,
-		[2]string{"product-type", valid.ProductTypeID},
+		[2]string{"product-type", projectedID},
 	); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
@@ -3907,7 +3946,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
 		}
-		if !exists || !reflect.DeepEqual(catalog.NormalizeProductTypeSnapshot(valid), currentSnapshot) {
+		if !exists || !reflect.DeepEqual(catalog.NormalizeProductTypeSnapshot(projectedValid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "equal revision with conflicting state")
 		}
