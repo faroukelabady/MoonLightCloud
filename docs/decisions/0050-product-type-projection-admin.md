@@ -88,3 +88,50 @@ projects/displays Retail definitions, never invents them.
 ## Phase 17 R1 result durability correction
 
 The target APPLIED outcome and actual result entity ID are committed in one locked PostgreSQL transaction. A failed result write rolls back the target outcome. Identical replay repairs a legacy applied target missing parent identity; a contradictory stored parent identity is rejected. Failed create outcomes carry an empty entity ID and zero revisions. No placeholder business entity is manufactured.
+
+## Phase 17-R3 amendment (2026-10-08): shared seed storage identity
+
+This section records decisions made after review rounds R2/R3. Earlier
+sections are unchanged history; where they imply one global row per
+`type_id`, this amendment governs the shared installation seed.
+
+- **Fixed Retail seed.** Retail migration 000019 assigns ProductType
+  `10000000-0000-4000-8000-000000000001` (papyrus) in every installation.
+  That identity is Retail source identity, not proof of Store ownership.
+- **Store-scoped storage key.** A scoped projection of that one enumerated
+  identity is stored under a deterministic UUIDv5 key derived from the
+  existing default namespace and `<store>:product-type:<source-id>` (the
+  established shared Category/Tag compatibility pattern). Custom Types keep
+  their Retail ID as the storage key and the normal strict ownership rules.
+- **Preservation.** An already projected raw seed row whose source event
+  proves the same Store keeps its key and Product references. NULL legacy
+  projections stay unowned and separate. No owner, revision, payload, hash or
+  historical row is rewritten.
+- **Translation.** The storage key is internal. Admin Type/Product reads,
+  command `entity_id`/payloads, receipts/results, convergence checks, Retail
+  outbox bytes and Sale/Return historical snapshots always use the Retail
+  source ID. Ownership and convergence lookups take the requested Store
+  explicitly; another Store's projection never converges a command.
+- **Recovery.** `projection recover-catalog` re-arms only Type and Product-v2
+  events blocked by the exact pre-amendment seed ownership collision, within
+  the existing bounded serializable transaction (≤100 events per run).
+- **Derived identities are never intent (F16).** Retail mints every
+  ProductType ID as random UUIDv4 and the seed is v4, so a UUIDv5
+  ProductType identity can only target a derived storage key. Cloud refuses
+  it at ingestion (Type snapshot `product_type_id`, Product-v2
+  `product_type_id`), blocks previously accepted events terminally with
+  `VALIDATION_FAILED` and no rows, and refuses it as Admin Type command
+  entity, assign target and create result identity. One Store's events can
+  therefore no longer occupy another Store's derived key.
+- **Pre-existing occupants.** An installation that accepted such an occupant
+  before F16 keeps it untouched: it is never deleted, rewritten, re-owned or
+  adopted as the seed. The affected Store's seed blocks with the diagnostic
+  `product type seed storage key occupied by another store`; recovery does
+  not re-arm it. See the operator procedure in
+  [phase17-review-remediation.md](../operations/phase17-review-remediation.md).
+- **Accepted inherited limitation.** Shared default Categories and Tags use
+  the same derivation (Phase 9, frozen) and do not yet refuse foreign
+  derived-key occupants. Exploiting it requires a malicious authenticated
+  device that knows another Store's UUID; it causes availability
+  interference only. It is accepted for Phase 17 and recorded for a later
+  phase rather than changed in frozen code.

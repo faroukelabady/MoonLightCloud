@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/google/uuid"
@@ -19,6 +20,21 @@ const sharedProductTypeID = "10000000-0000-4000-8000-000000000001"
 // occupied without the authoritative provenance needed to use that key.
 // Callers must block the event; retrying must never overwrite its occupant.
 var ErrProductTypeIdentityCollision = errors.New("product type identity collision")
+
+// errProductTypeForeignOccupant refines a collision whose derived seed key
+// is held by a row owned by, or sourced from, a different Store. Ingestion
+// refuses such identities since Phase 17-R3 (F16); this only remains for
+// installations that accepted one earlier. The occupant is never deleted,
+// rewritten or adopted; operators follow the documented procedure.
+var errProductTypeForeignOccupant = fmt.Errorf("%w: derived seed key occupied by another store", ErrProductTypeIdentityCollision)
+
+// productTypeCollisionMessage is the stable blocked-processing diagnostic.
+func productTypeCollisionMessage(err error) string {
+	if errors.Is(err, errProductTypeForeignOccupant) {
+		return "product type seed storage key occupied by another store"
+	}
+	return "product type storage identity collision"
+}
 
 func canonicalDefaultProductTypeID(id string, store pgtype.UUID) string {
 	if id != sharedProductTypeID || !store.Valid {
@@ -85,7 +101,10 @@ func projectedProductTypeID(ctx context.Context, q *sqlcgen.Queries, id string, 
 	if err != nil {
 		return "", err
 	}
-	if !row.StoreID.Valid || row.StoreID.Bytes != store.Bytes || !sharedProductTypeSource(row.SourceTypeID, row.SourceStoreID, store) {
+	if (row.StoreID.Valid && row.StoreID.Bytes != store.Bytes) || (row.SourceStoreID.Valid && row.SourceStoreID.Bytes != store.Bytes) {
+		return "", errProductTypeForeignOccupant
+	}
+	if !row.StoreID.Valid || !sharedProductTypeSource(row.SourceTypeID, row.SourceStoreID, store) {
 		return "", ErrProductTypeIdentityCollision
 	}
 	return canonical, nil

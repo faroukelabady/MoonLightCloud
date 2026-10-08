@@ -3131,7 +3131,7 @@ components:
               variants (SKU/stock authority lives on ProductVariant).
             properties:
               product_id: {type: string, format: uuid}
-              product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred).'}
+              product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred). Retail mints UUIDv4; a UUIDv5 (Cloud-derived storage key) is rejected (Phase 17-R3 F16).'}
               name_ar: {type: string}
               name_en: {type: string}
               is_active: {type: boolean}
@@ -3153,7 +3153,7 @@ components:
         derived_stock are derived only.
       properties:
         product_id: {type: string, format: uuid}
-        product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred).'}
+        product_type_id: {type: string, format: uuid, description: 'Phase 17-R2 structural type identity (never inferred). Retail mints UUIDv4; a UUIDv5 (Cloud-derived storage key) is rejected (Phase 17-R3 F16).'}
         name_ar: {type: string}
         name_en: {type: string}
         description_ar: {type: string}

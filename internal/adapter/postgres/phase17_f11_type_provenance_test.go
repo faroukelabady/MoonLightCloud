@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -20,7 +21,7 @@ func TestSharedProductTypeLegacyCustomAliasPreserved(t *testing.T) {
 	store := storeUUID(func() *string { s := scopeStoreA; return &s }())
 	alias := canonicalDefaultProductTypeID(sharedProductTypeID, store)
 	eventID := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, eventID, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 1))
+	insertPreF16Event(t, f, f.devA, eventID, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 1), scopeStoreA)
 	// This occupied alias predates the reservation guard. Its source is a
 	// genuine custom identity, not the Retail seed; never adopt or relabel it.
 	if _, err := f.pool.Exec(ctx, `INSERT INTO catalog_product_types(type_id,code,name_ar,name_en,is_active,position,type_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id)
@@ -54,9 +55,12 @@ VALUES($1,'custom','مخصص','Custom',true,0,1,$2,$3,'\x00',now(),$4)`, alias, 
 	payload["product_id"], payload["top_category_id"], payload["product_type_id"] = pid, cid, alias
 	raw, _ := json.Marshal(payload)
 	pe := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, pe, catalog.EventProductSnapshotV2, string(raw))
-	if result := projectCatalogTerminal(t, f, pe, catalog.EventProductSnapshotV2); result.Outcome != catalog.OutcomeProcessed {
-		t.Fatal(result)
+	// Its Product relationship was also projected before F16 refused
+	// derived identities at ingestion; reproduce that stored state.
+	insertPreF16Event(t, f, f.devA, pe, catalog.EventProductSnapshotV2, string(raw), scopeStoreA)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO catalog_products(product_id,name,top_category_id,is_active,product_type_id,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id)
+VALUES($1,'منتج',$2,true,$3,1,$4,$5,'\x00',now(),$6)`, pid, cid, alias, pe, f.devA, scopeStoreA); err != nil {
+		t.Fatal(err)
 	}
 	product, err := d.AdminProductDetail(ctx, scopeStoreA, pid)
 	if err != nil || product.ProductTypeID != alias {
@@ -79,16 +83,46 @@ VALUES($1,'custom','مخصص','Custom',true,0,1,$2,$3,'\x00',now(),$4)`, alias, 
 	if err := f.pool.QueryRow(ctx, `SELECT product_type_id::text FROM catalog_products WHERE product_id=$1`, pid).Scan(&relation); err != nil || relation != alias {
 		t.Fatalf("custom Product relation changed: %q %v", relation, err)
 	}
+	// Reprocessing that pre-F16 Product event refuses the derived identity
+	// terminally and leaves the preserved relationship untouched.
+	if result := projectCatalogTerminal(t, f, pe, catalog.EventProductSnapshotV2); result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrValidation {
+		t.Fatalf("pre-F16 derived Product reference must block: %+v", result)
+	}
+	if err := f.pool.QueryRow(ctx, `SELECT product_type_id::text FROM catalog_products WHERE product_id=$1`, pid).Scan(&relation); err != nil || relation != alias {
+		t.Fatalf("custom Product relation changed by reprocessing: %q %v", relation, err)
+	}
+}
+
+// insertPreF16Event persists an event exactly as ingestion stored it before
+// Phase 17-R3 F16 refused derived storage identities at the gate; store ""
+// models an unbound legacy device.
+func insertPreF16Event(t *testing.T, f *scopeFixture, deviceID, eventID, eventType, payload, store string) {
+	t.Helper()
+	hash := sha256.Sum256([]byte(payload))
+	var scope any
+	if store != "" {
+		scope = store
+	}
+	if _, err := f.pool.Exec(context.Background(), `INSERT INTO sync_events (event_id,device_id,event_type,occurred_at,payload,payload_hash,store_id)
+		VALUES ($1,$2,$3,now(),$4,$5,$6)`, eventID, deviceID, eventType, payload, hash[:], scope); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSharedProductTypeReservedAliasNewEventBlocked(t *testing.T) {
 	f := openScopeFixture(t)
 	store := storeUUID(func() *string { s := scopeStoreA; return &s }())
 	alias := canonicalDefaultProductTypeID(sharedProductTypeID, store)
+	// F16: a new derived identity is refused at ingestion with no durable row.
+	refused := uuid.NewString()
+	if status, err := f16Ingest(f, f.devA, f.credA, refused, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 1)); err == nil && status == "accepted" {
+		t.Fatal("derived identity accepted at ingestion")
+	}
+	// An event accepted before F16 still cannot occupy the reserved key.
 	eventID := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, eventID, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 1))
-	if result := projectCatalogTerminal(t, f, eventID, catalog.EventProductTypeSnapshotV1); result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrCatalogRevisionConflict {
-		t.Fatalf("new custom event occupied reserved key: %+v", result)
+	insertPreF16Event(t, f, f.devA, eventID, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 1), scopeStoreA)
+	if result := projectCatalogTerminal(t, f, eventID, catalog.EventProductTypeSnapshotV1); result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrValidation {
+		t.Fatalf("pre-F16 custom event occupied reserved key: %+v", result)
 	}
 	var count int
 	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM catalog_product_types`).Scan(&count); err != nil || count != 0 {
@@ -110,7 +144,8 @@ func TestSharedProductTypeUnscopedAliasCannotOverwriteSeed(t *testing.T) {
 	// A real authenticated, unbound legacy device has no ingress Store.
 	// Its chosen raw UUID must not become writable authority over a proven
 	// Store's internal seed projection, even at a higher revision.
-	f.ingest(t, f.devC, f.credC, legacyEvent, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 99))
+	// F16 refuses this at ingestion; model an event accepted before F16.
+	insertPreF16Event(t, f, f.devC, legacyEvent, catalog.EventProductTypeSnapshotV1, typePayload(alias, "custom", 99), "")
 	var nullScope bool
 	if err := f.pool.QueryRow(ctx, `SELECT store_id IS NULL FROM sync_events WHERE event_id=$1`, legacyEvent).Scan(&nullScope); err != nil || !nullScope {
 		t.Fatal("legacy fixture unexpectedly scoped", nullScope, err)
@@ -121,7 +156,7 @@ func TestSharedProductTypeUnscopedAliasCannotOverwriteSeed(t *testing.T) {
 	if err := f.pool.QueryRow(ctx, `SELECT code,type_revision,source_event_id::text,store_id::text FROM catalog_product_types WHERE type_id=$1`, alias).Scan(&code, &revision, &source, &owner); err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrCatalogRevisionConflict || code != "papyrus" || revision != 1 || source != seedEvent || owner != scopeStoreA {
+	if result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrValidation || code != "papyrus" || revision != 1 || source != seedEvent || owner != scopeStoreA {
 		t.Fatalf("unscoped raw alias changed seeded projection: result=%+v code=%q revision=%d source=%q owner=%q", result, code, revision, source, owner)
 	}
 	cid, pid, categoryEvent, productEvent := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -135,8 +170,8 @@ func TestSharedProductTypeUnscopedAliasCannotOverwriteSeed(t *testing.T) {
 	}
 	payload["product_id"], payload["top_category_id"], payload["product_type_id"] = pid, cid, alias
 	raw, _ := json.Marshal(payload)
-	f.ingest(t, f.devC, f.credC, productEvent, catalog.EventProductSnapshotV2, string(raw))
-	if result := projectCatalogTerminal(t, f, productEvent, catalog.EventProductSnapshotV2); result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrCatalogRevisionConflict {
+	insertPreF16Event(t, f, f.devC, productEvent, catalog.EventProductSnapshotV2, string(raw), "")
+	if result := projectCatalogTerminal(t, f, productEvent, catalog.EventProductSnapshotV2); result.Outcome != catalog.OutcomeBlocked || result.ErrorCode != ErrValidation {
 		t.Fatalf("raw internal alias accepted as a Product relationship: %+v", result)
 	}
 	var productCount int

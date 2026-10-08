@@ -1893,7 +1893,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		if err != nil {
 			_ = tx.Rollback(ctx)
 			if errors.Is(err, ErrProductTypeIdentityCollision) {
-				return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type storage identity collision")
+				return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, productTypeCollisionMessage(err))
 			}
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type identity lookup failed")
 		}
@@ -3887,7 +3887,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 	if err != nil {
 		_ = tx.Rollback(ctx)
 		if errors.Is(err, ErrProductTypeIdentityCollision) {
-			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type storage identity collision")
+			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, productTypeCollisionMessage(err))
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type identity lookup failed")
 	}

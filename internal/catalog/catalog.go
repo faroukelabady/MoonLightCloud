@@ -376,6 +376,9 @@ func ValidateProductSnapshotV2(p ProductSnapshot) (ProductSnapshot, error) {
 	if strings.TrimSpace(p.ProductTypeID) != "" && !isUUID(p.ProductTypeID) {
 		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSnapshotV2+": product_type_id must be a UUID")
 	}
+	if IsDerivedStorageIdentity(p.ProductTypeID) {
+		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSnapshotV2+": product_type_id must not be a derived storage identity")
+	}
 	return validateProductSnapshot(p, EventProductSnapshotV2, false)
 }
 

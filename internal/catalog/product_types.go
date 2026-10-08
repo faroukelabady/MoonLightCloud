@@ -49,6 +49,16 @@ func DecodeProductTypeSnapshot(raw json.RawMessage) (ProductTypeSnapshot, error)
 	return p, nil
 }
 
+// IsDerivedStorageIdentity reports whether id is an RFC 4122 version-5
+// UUID. Cloud stores shared installation seeds under deterministic
+// Store-scoped UUIDv5 keys; Retail mints every ProductType identity as a
+// random v4 UUID (the fixed seed is v4 as well). A v5 ProductType identity
+// in Retail intent can therefore only be an attempt to occupy another
+// Store's derived storage key, and is refused (Phase 17-R3 F16).
+func IsDerivedStorageIdentity(id string) bool {
+	return isUUID(id) && id[14] == '5'
+}
+
 // ValidateProductTypeSnapshot enforces Retail-guaranteed invariants:
 // UUID identity, stable code shape, bilingual names, non-negative
 // position, positive revision, bounded dimension/capability sets with
@@ -59,6 +69,9 @@ func ValidateProductTypeSnapshot(p ProductTypeSnapshot) (ProductTypeSnapshot, er
 	}
 	if !isUUID(p.ProductTypeID) {
 		return fail("product_type_id must be a UUID")
+	}
+	if IsDerivedStorageIdentity(p.ProductTypeID) {
+		return fail("product_type_id must not be a derived storage identity")
 	}
 	code := strings.TrimSpace(p.Code)
 	if code == "" || len(code) > 32 || strings.ToLower(code) != code {

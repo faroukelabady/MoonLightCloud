@@ -17,6 +17,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/google/uuid"
 )
 
@@ -248,6 +249,22 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 			return nil, fmt.Errorf("command entity mismatch")
 		}
 		decoded[EntityKeyOf(typ)] = outer.String()
+	}
+	// Phase 17-R3 F16: ProductType identities in operator intent are Retail
+	// source IDs (v4). A derived Store-scoped storage key is never intent.
+	if EntityKeyOf(typ) == "product_type_id" && catalog.IsDerivedStorageIdentity(strings.ToLower(strings.TrimSpace(entityID))) {
+		return nil, fmt.Errorf("invalid entity id: derived storage identity")
+	}
+	if typ == TypeProductTypeAssignV1 {
+		target, ok := decoded["product_type_id"].(string)
+		parsed, e := uuid.Parse(strings.TrimSpace(target))
+		if !ok || e != nil || parsed == uuid.Nil {
+			return nil, fmt.Errorf("invalid product_type_id: must be UUID")
+		}
+		if catalog.IsDerivedStorageIdentity(parsed.String()) {
+			return nil, fmt.Errorf("invalid product_type_id: derived storage identity")
+		}
+		decoded["product_type_id"] = parsed.String()
 	}
 	key := ExpectedRevisionKeyOf(typ)
 	if expectedRevision > 9007199254740991 {
@@ -591,6 +608,11 @@ func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int
 		// truthfully reports no identity, rather than adopting a collision.
 		if status == TargetApplied {
 			if e != nil || id == uuid.Nil || strings.TrimSpace(entity) == "" {
+				return fmt.Errorf("invalid outcome identity or revision")
+			}
+			// Retail mints v4 ProductType IDs; a derived storage key is
+			// never a created entity (Phase 17-R3 F16).
+			if catalog.IsDerivedStorageIdentity(id.String()) {
 				return fmt.Errorf("invalid outcome identity or revision")
 			}
 		} else if entity != "" || pre != 0 || post != 0 {
