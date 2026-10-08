@@ -4,6 +4,26 @@ Migrations are append-only (`db/migrations`, goose, embedded). Never edit
 applied history. Startup verifies the schema version and refuses to boot on
 mismatch (readiness fails).
 
+## Schema 40 development rollback and reapply
+
+Shipped migration `00040_create_command_identity.sql` is unchanged. Its Down
+restores the schema-39 entity-length check under `catalog_admin_commands_entity_check`,
+while its Up expects the original `catalog_admin_commands_entity_id_check` name.
+Before a schema-39 upgrade crosses 40, the migration runner verifies the exact
+validated, local, single-column `char_length(entity_id) BETWEEN 1 AND 64` check,
+the absence of schema-40 identity columns, and the current maximum Goose version.
+It renames only that equivalent rollback constraint inside a locked transaction.
+It does not drop or weaken the check or rewrite command data. Missing, ambiguous,
+unvalidated or altered checks fail with a bounded diagnostic and leave the schema
+unchanged; inspect those discrepancies rather than forcing an upgrade.
+An upgrade starting below 39 reaches the schema-39 boundary first, so a deeper
+development rollback followed by reapply receives the same guarded repair.
+
+The existing Down policy remains development/test only: create-kind commands
+and their targets are removed by the shipped Down, while entity commands and
+their targets survive down/reapply. This compatibility repair does not make
+production rollback safe or change its backup requirement.
+
 ## Downgrade policy
 
 Downgrades are guarded, not silent:

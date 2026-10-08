@@ -34,6 +34,9 @@ func Up(ctx context.Context, conn *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := normalizeMigration40Rollback(ctx, conn, p); err != nil {
+		return err
+	}
 	if _, err := p.Up(ctx); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
@@ -45,6 +48,11 @@ func UpTo(ctx context.Context, conn *sql.DB, version int64) error {
 	p, err := provider(conn)
 	if err != nil {
 		return err
+	}
+	if version >= 40 {
+		if err := normalizeMigration40Rollback(ctx, conn, p); err != nil {
+			return err
+		}
 	}
 	if _, err := p.UpTo(ctx, version); err != nil {
 		return fmt.Errorf("goose up-to: %w", err)
