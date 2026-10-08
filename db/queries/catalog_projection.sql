@@ -21,6 +21,23 @@ WHERE (e.event_type = $2
 ORDER BY e.received_at, e.event_id
 LIMIT $3;
 
+-- name: NextCatalogRetryAt :one
+-- Earliest future retry for one processor (same event-type matching as
+-- PendingCatalogEvents). Lets the in-process projector wake exactly when
+-- durable retry work falls due instead of waiting for the safety scan.
+-- A wake hint only: claiming and revision fencing stay authoritative.
+SELECT min(p.next_attempt_at)::timestamptz AS next_attempt_at
+FROM sync_event_processing p
+JOIN sync_events e ON e.event_id = p.event_id
+WHERE p.processor = $1
+  AND p.status = 'retry'
+  AND p.next_attempt_at > now()
+  AND (e.event_type = $2
+       OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
+           AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
+       OR ($2 IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
+           AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')));
+
 -- name: UpsertCatalogCategory :exec
 -- Phase 9B: store_id carries the event's own ingress Store context
 -- (NULL for legacy events). COALESCE preserves proven ownership: a

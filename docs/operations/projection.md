@@ -264,6 +264,23 @@ catalog_product_variant_projection.v1
 inventory_product_variant_projection.v1
 ```
 
+**Wake model.** Each catalog processor runs one in-process projector. It
+drains due work on startup, on ingestion, every 30s (durable safety scan),
+and on two wake hints:
+
+- **Scheduled retry.** After each pass the projector reads its earliest
+  future `next_attempt_at` and wakes exactly then, rather than at the next
+  safety scan.
+- **Dependency progress.** A pass that processed at least one event wakes
+  every other catalog projector, so children waiting on a parent stream
+  (Type/Category → Product → Variant → inventory) retry as soon as the
+  parent lands and their retry is due.
+
+Wakes are hints only: discovery still returns due rows exclusively, and
+claiming, Store fencing and revision gates are unchanged. A wake is floored
+at 500ms, so clock skew cannot cause a hot loop. Before this change, each
+dependency level added about 60s (backoff plus tick alignment).
+
 Phase 13 adds no processor: category policy/hierarchy and product
 classification commits enqueue durable rows in
 `commerce_product_reevaluations` inside the projection transaction, and

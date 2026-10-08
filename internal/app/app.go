@@ -162,6 +162,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.ProductVariantProjector = catalog.NewProductVariantProjector(store, clock.System{}, log)
 	a.ProductTypeProjector = catalog.NewProductTypeProjector(store, clock.System{}, log)
 	a.VariantInventoryProjector = catalog.NewProductVariantInventoryProjector(store, clock.System{}, log)
+	// Catalog streams depend on each other (Type/Category → Product →
+	// Variant → inventory). A projector that lands work wakes the others
+	// so dependency waits retry promptly instead of at the safety scan.
+	for _, p := range a.catalogProjectors() {
+		p.WakeOnProgress(a.notifyCatalogProjectors)
+	}
 	a.Catalog = catalog.NewService(store)
 	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -583,22 +589,29 @@ func (a *App) ProjectOne(ctx context.Context, eventID string) (sale.ProjectResul
 func (a *App) notifyProjectors() {
 	a.Projector.Notify()
 	a.ReturnProjector.Notify()
-	a.CategoryProjector.Notify()
-	a.TagProjector.Notify()
-	a.ProductProjector.Notify()
-	a.PolicyProjector.Notify()
-	a.InventoryProjector.Notify()
-	if a.ProductConfigurationProjector != nil {
-		a.ProductConfigurationProjector.Notify()
+	a.notifyCatalogProjectors()
+}
+
+// catalogProjectors lists the configured catalog stream projectors.
+func (a *App) catalogProjectors() []*catalog.Projector {
+	out := make([]*catalog.Projector, 0, 9)
+	for _, p := range []*catalog.Projector{
+		a.CategoryProjector, a.TagProjector, a.ProductProjector,
+		a.PolicyProjector, a.InventoryProjector, a.ProductConfigurationProjector,
+		a.ProductVariantProjector, a.VariantInventoryProjector, a.ProductTypeProjector,
+	} {
+		if p != nil {
+			out = append(out, p)
+		}
 	}
-	if a.ProductVariantProjector != nil {
-		a.ProductVariantProjector.Notify()
-	}
-	if a.VariantInventoryProjector != nil {
-		a.VariantInventoryProjector.Notify()
-	}
-	if a.ProductTypeProjector != nil {
-		a.ProductTypeProjector.Notify()
+	return out
+}
+
+// notifyCatalogProjectors wakes every catalog projector. Notify is
+// non-blocking and idempotent, so repeated wakes coalesce.
+func (a *App) notifyCatalogProjectors() {
+	for _, p := range a.catalogProjectors() {
+		p.Notify()
 	}
 }
 

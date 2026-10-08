@@ -50,6 +50,23 @@ func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType 
 	return out, nil
 }
 
+// NextCatalogRetry reports the earliest future durable retry time for one
+// processor; found=false when no retry is scheduled.
+func (d Devices) NextCatalogRetry(ctx context.Context, processor, eventType string) (time.Time, bool, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	next, err := sqlcgen.New(d.pool).NextCatalogRetryAt(ctx, sqlcgen.NextCatalogRetryAtParams{
+		Processor: processor, EventType: eventType,
+	})
+	if err != nil {
+		return time.Time{}, false, apperr.Wrap(apperr.Internal, "scan next catalog retry", redact(err))
+	}
+	if !next.Valid {
+		return time.Time{}, false, nil
+	}
+	return next.Time, true, nil
+}
+
 // LoadCatalogEvent loads the immutable inbox row for catalog projection.
 func (d Devices) LoadCatalogEvent(ctx context.Context, eventID string) (catalog.EventRecord, bool, error) {
 	ctx, cancel := d.ctx(ctx)

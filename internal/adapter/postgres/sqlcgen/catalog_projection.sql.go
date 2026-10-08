@@ -943,6 +943,36 @@ func (q *Queries) LockCatalogEntity(ctx context.Context, arg LockCatalogEntityPa
 	return err
 }
 
+const nextCatalogRetryAt = `-- name: NextCatalogRetryAt :one
+SELECT min(p.next_attempt_at)::timestamptz AS next_attempt_at
+FROM sync_event_processing p
+JOIN sync_events e ON e.event_id = p.event_id
+WHERE p.processor = $1
+  AND p.status = 'retry'
+  AND p.next_attempt_at > now()
+  AND (e.event_type = $2
+       OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
+           AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
+       OR ($2 IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')
+           AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')))
+`
+
+type NextCatalogRetryAtParams struct {
+	Processor string `json:"processor"`
+	EventType string `json:"event_type"`
+}
+
+// Earliest future retry for one processor (same event-type matching as
+// PendingCatalogEvents). Lets the in-process projector wake exactly when
+// durable retry work falls due instead of waiting for the safety scan.
+// A wake hint only: claiming and revision fencing stay authoritative.
+func (q *Queries) NextCatalogRetryAt(ctx context.Context, arg NextCatalogRetryAtParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nextCatalogRetryAt, arg.Processor, arg.EventType)
+	var next_attempt_at pgtype.Timestamptz
+	err := row.Scan(&next_attempt_at)
+	return next_attempt_at, err
+}
+
 const pendingCatalogEvents = `-- name: PendingCatalogEvents :many
 
 SELECT e.event_id
