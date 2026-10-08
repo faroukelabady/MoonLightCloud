@@ -1,6 +1,7 @@
 package catalogadmin
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,8 +21,27 @@ func TestF16DerivedStorageIdentityRefusedInAdminIntent(t *testing.T) {
 	if _, err := ValidateNewCommand(TypeProductTypeDetailsUpdateV1, storeID, retailType, 1, details(retailType)); err != nil {
 		t.Fatalf("Retail type identity must be accepted: %v", err)
 	}
-	if _, err := ValidateNewCommand(TypeProductTypeDetailsUpdateV1, storeID, derived, 1, details(derived)); err == nil {
-		t.Fatal("derived storage key accepted as type command entity")
+	// Every textual form uuid.Parse accepts normalizes to the same key, so
+	// each must be refused for every Type-scoped command (Phase 17 F18).
+	derivedForms := map[string]string{
+		"canonical": derived,
+		"upper":     strings.ToUpper(derived),
+		"braces":    "{" + derived + "}",
+		"urn":       "urn:uuid:" + derived,
+		"hex32":     strings.ReplaceAll(derived, "-", ""),
+	}
+	for _, typ := range []string{TypeProductTypeDetailsUpdateV1, TypeProductTypeDimensionsUpdateV1, TypeProductTypeCapabilitiesUpdateV1, TypeProductTypeStatusUpdateV1} {
+		for name, form := range derivedForms {
+			if _, err := ValidateNewCommand(typ, storeID, form, 1, details(form)); err == nil || !strings.Contains(err.Error(), "derived storage identity") {
+				t.Fatalf("%s: derived storage key accepted as type command entity (%s form)", typ, name)
+			}
+		}
+	}
+	for name, form := range map[string]string{"braces": "{" + retailType + "}", "urn": "urn:uuid:" + retailType, "hex32": strings.ReplaceAll(retailType, "-", "")} {
+		decoded, err := ValidateNewCommand(TypeProductTypeDetailsUpdateV1, storeID, form, 1, details(form))
+		if err != nil || decoded["product_type_id"] != retailType {
+			t.Fatalf("Retail type identity in %s form must be accepted and normalized: %v %v", name, decoded["product_type_id"], err)
+		}
 	}
 
 	assign := func(id string) []byte {

@@ -252,8 +252,12 @@ func ValidateNewCommand(typ, storeID, entityID string, expectedRevision int64, p
 	}
 	// Phase 17-R3 F16: ProductType identities in operator intent are Retail
 	// source IDs (v4). A derived Store-scoped storage key is never intent.
-	if EntityKeyOf(typ) == "product_type_id" && catalog.IsDerivedStorageIdentity(strings.ToLower(strings.TrimSpace(entityID))) {
-		return nil, fmt.Errorf("invalid entity id: derived storage identity")
+	// Check the parsed identity: uuid.Parse also accepts braces, URN and
+	// unhyphenated forms, which normalize to the same canonical key.
+	if EntityKeyOf(typ) == "product_type_id" {
+		if parsed, err := uuid.Parse(strings.TrimSpace(entityID)); err == nil && catalog.IsDerivedStorageIdentity(parsed.String()) {
+			return nil, fmt.Errorf("invalid entity id: derived storage identity")
+		}
 	}
 	if typ == TypeProductTypeAssignV1 {
 		target, ok := decoded["product_type_id"].(string)
