@@ -102,3 +102,17 @@ reviewed, Store-scoped change with backup and preservation proof.
 
 The equivalent Category/Tag derived-key exposure is an accepted, documented
 limitation (ADR-0050, Phase 17-R3 amendment) and is unchanged here.
+
+## Local catalog retry latency
+
+Catalog dependency waits and driver-classified PostgreSQL serialization
+(`40001`) or deadlock (`40P01`) aborts retain durable retry deadlines, with
+exponential delays capped at 30 seconds. All other failures keep the existing
+outage backoff. The original SQL error is used only for classification;
+persisted diagnostics remain bounded codes/messages. SERIALIZABLE isolation,
+revision fences and Store authorization are unchanged. The periodic scan
+remains the recovery path after restart; no process-local retry loop is added.
+
+Sale-v3 Type snapshot validation applies equally to lines with and without
+Variant snapshots. The optional legacy no-Variant shape remains supported;
+a present Type must be complete and obey the 32-character code bound.

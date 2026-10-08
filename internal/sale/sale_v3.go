@@ -140,6 +140,26 @@ func ValidateV3(p PayloadV3) (ValidatedV3, error) {
 	}
 	for i := range p.Lines {
 		line := &p.Lines[i]
+		hasType := line.ProductTypeID != nil || line.ProductTypeCode != nil ||
+			line.ProductTypeNameAR != nil || line.ProductTypeNameEN != nil
+		if hasType {
+			if line.ProductTypeID == nil || line.ProductTypeCode == nil ||
+				line.ProductTypeNameAR == nil || line.ProductTypeNameEN == nil {
+				return fail("lines[%d] product type snapshot must carry id, code and both labels", i)
+			}
+			if !isUUID(*line.ProductTypeID) {
+				return fail("lines[%d].product_type_id must be a UUID", i)
+			}
+			if !validSnapshotCode(*line.ProductTypeCode) || utf8.RuneCountInString(*line.ProductTypeCode) > maxProductTypeSnapshotCodeRunes {
+				return fail("lines[%d].product_type_code must be 1..32 chars without control whitespace", i)
+			}
+			if !validSnapshotLabel(*line.ProductTypeNameAR) {
+				return fail("lines[%d].product_type_name_ar must be 1..200 runes", i)
+			}
+			if !validSnapshotLabel(*line.ProductTypeNameEN) {
+				return fail("lines[%d].product_type_name_en must be 1..200 runes", i)
+			}
+		}
 		hasSKU := line.VariantSKU != ""
 		hasAttrs := line.VariantAttributes != nil
 		if line.VariantID == nil {
@@ -191,26 +211,6 @@ func ValidateV3(p PayloadV3) (ValidatedV3, error) {
 		}
 		if line.VariantPriceUSDCents != nil && *line.VariantPriceUSDCents < 0 {
 			return fail("lines[%d].variant_price_usd_cents must not be negative", i)
-		}
-		hasType := line.ProductTypeID != nil || line.ProductTypeCode != nil ||
-			line.ProductTypeNameAR != nil || line.ProductTypeNameEN != nil
-		if hasType {
-			if line.ProductTypeID == nil || line.ProductTypeCode == nil ||
-				line.ProductTypeNameAR == nil || line.ProductTypeNameEN == nil {
-				return fail("lines[%d] product type snapshot must carry id, code and both labels", i)
-			}
-			if !isUUID(*line.ProductTypeID) {
-				return fail("lines[%d].product_type_id must be a UUID", i)
-			}
-			if !validSnapshotCode(*line.ProductTypeCode) || utf8.RuneCountInString(*line.ProductTypeCode) > maxProductTypeSnapshotCodeRunes {
-				return fail("lines[%d].product_type_code must be 1..32 chars without control whitespace", i)
-			}
-			if !validSnapshotLabel(*line.ProductTypeNameAR) {
-				return fail("lines[%d].product_type_name_ar must be 1..200 runes", i)
-			}
-			if !validSnapshotLabel(*line.ProductTypeNameEN) {
-				return fail("lines[%d].product_type_name_en must be 1..200 runes", i)
-			}
 		}
 	}
 	return ValidatedV3{PayloadV3: p, Validated: valid.Validated}, nil

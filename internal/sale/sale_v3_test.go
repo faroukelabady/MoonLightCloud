@@ -87,6 +87,67 @@ func TestV3ProductTypeCodeBounds(t *testing.T) {
 	})
 }
 
+func TestV3ProductTypeSnapshotIndependentOfVariant(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		valid  bool
+	}{
+		{"complete", func(map[string]any) {}, true},
+		{"code_1", func(line map[string]any) { line["product_type_code"] = "a" }, true},
+		{"code_32", func(line map[string]any) { line["product_type_code"] = strings.Repeat("a", 32) }, true},
+		{"absent", func(line map[string]any) {
+			for _, field := range []string{"product_type_id", "product_type_code", "product_type_name_ar", "product_type_name_en"} {
+				delete(line, field)
+			}
+		}, true},
+		{"code_empty", func(line map[string]any) { line["product_type_code"] = "" }, false},
+		{"code_33", func(line map[string]any) { line["product_type_code"] = strings.Repeat("a", 33) }, false},
+		{"code_64", func(line map[string]any) { line["product_type_code"] = strings.Repeat("a", 64) }, false},
+		{"code_control", func(line map[string]any) { line["product_type_code"] = "book\n" }, false},
+		{"partial_id", func(line map[string]any) { delete(line, "product_type_id") }, false},
+		{"partial_code", func(line map[string]any) { delete(line, "product_type_code") }, false},
+		{"partial_ar", func(line map[string]any) { delete(line, "product_type_name_ar") }, false},
+		{"partial_en", func(line map[string]any) { delete(line, "product_type_name_en") }, false},
+		{"invalid_uuid", func(line map[string]any) { line["product_type_id"] = "not-a-uuid" }, false},
+		{"blank_ar", func(line map[string]any) { line["product_type_name_ar"] = " " }, false},
+		{"blank_en", func(line map[string]any) { line["product_type_name_en"] = "" }, false},
+		{"oversized_ar", func(line map[string]any) { line["product_type_name_ar"] = strings.Repeat("ع", 201) }, false},
+		{"oversized_en", func(line map[string]any) { line["product_type_name_en"] = strings.Repeat("a", 201) }, false},
+	}
+	for _, variant := range []bool{false, true} {
+		group := "without_variant"
+		if variant {
+			group = "with_variant"
+		}
+		t.Run(group, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					payload := loadV3Base(t)
+					line := payload["lines"].([]any)[0].(map[string]any)
+					if !variant {
+						for _, field := range []string{"variant_id", "variant_sku", "variant_attributes", "variant_price_egp_cents", "variant_price_usd_cents"} {
+							delete(line, field)
+						}
+					}
+					line["product_type_id"] = "10000000-0000-4000-8000-000000000001"
+					line["product_type_code"] = "book"
+					line["product_type_name_ar"] = "كتاب"
+					line["product_type_name_en"] = "Book"
+					tc.mutate(line)
+					_, err := validateV3Map(t, payload)
+					if tc.valid && err != nil {
+						t.Fatalf("valid optional ProductType snapshot rejected: %v", err)
+					}
+					if !tc.valid && err == nil {
+						t.Fatal("invalid ProductType snapshot accepted")
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestDecodeV3Valid(t *testing.T) {
 	valid, err := validateV3Map(t, loadV3Base(t))
 	if err != nil {

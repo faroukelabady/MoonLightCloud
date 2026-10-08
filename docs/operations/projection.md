@@ -35,6 +35,8 @@ on its next wake/scan (no cross-process wake channel).
 - `pending` — claimed or awaiting first attempt. Discoverable.
 - `retry` — transient failure; durable `attempt_count` + `next_attempt_at`
   with `5s × 2^attempt` backoff capped at 1h (overflow-safe, saturating).
+  Catalog dependency waits and PostgreSQL `40001`/`40P01` transaction
+  conflicts cap that delay at 30s; unknown/database-outage errors retain 1h.
   Discoverable only when `next_attempt_at <= now` (NULL counts as due).
   Never hot-looped: the projection transaction rolls back, then retry state
   commits in a separate durable transaction, so restarts preserve the

@@ -749,7 +749,7 @@ func (d Devices) markCatalogBlocked(ctx context.Context, processor string, euid 
 	attempt, done, hasDone, err := claimCatalogRow(ctx, q, tx, processor, euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, processor, euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, processor, euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeProcessed {
@@ -761,10 +761,26 @@ func (d Devices) markCatalogBlocked(ctx context.Context, processor string, euid 
 	return finishCatalogAttempt(ctx, q, tx, processor, euid, attempt, now, catalog.ProcBlocked, code, msg)
 }
 
+// catalogRetryDelay keeps dependency waits and proven transaction contention
+// responsive without treating arbitrary database failures as local contention.
+// The durable deadline prevents hot retry loops; all other failures retain the
+// frozen outage backoff. Original driver errors are used only for classification.
+func catalogRetryDelay(attempt int, code string, causes ...error) time.Duration {
+	delay := catalog.Backoff(attempt)
+	local := code == ErrCatalogDependencyWait
+	for _, cause := range causes {
+		local = local || isSerializationFailure(cause)
+	}
+	if local && delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
+}
+
 // persistCatalogRetry writes retry state in a SEPARATE durable transaction
 // after the projection transaction rolled back, mirroring the sale/return
 // discipline: the schedule commits even though the projection did not.
-func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (catalog.ProjectResult, error) {
+func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string, causes ...error) (catalog.ProjectResult, error) {
 	// The returned error keeps its frozen exact shape (the F12 retry
 	// classifier contracts on it); the branch detail is persisted in
 	// sync_event_processing.last_error_message for diagnostics.
@@ -790,7 +806,7 @@ func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid
 		}
 		return done, nil
 	}
-	next := now.Add(catalog.Backoff(int(attempt)))
+	next := now.Add(catalogRetryDelay(int(attempt), code, causes...))
 	if err := q.MarkProcessing(ctx2, sqlcgen.MarkProcessingParams{
 		EventID: euid, Processor: processor,
 		Status: catalog.ProcRetry, AttemptCount: attempt + 1,
@@ -1069,7 +1085,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -1087,9 +1103,9 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	if err := lockCatalogEntities(ctx, q, keys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 
 	// Revision gate against current projection (missing row = first write).
@@ -1103,9 +1119,9 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category lookup failed", err)
 	}
 	// Phase 9B ownership gate: a Store-scoped event resolves against the
 	// row for its own Store; a legacy event uses the raw seeded identity
@@ -1149,7 +1165,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			}
 			if err != nil {
 				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
 			}
 		}
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -1166,7 +1182,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision, arbitrationScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishNoop()
@@ -1174,7 +1190,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		currentSnapshot, exists, err := currentCategorySnapshot(ctx, q, cuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		// Phase 9-R2 F08: the pre-R2 projector stored raw seeded IDs for
 		// default categories. A Store-scoped default event must re-project
@@ -1197,7 +1213,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		catalog.ProcessorCategoryProjectionV1, "catalog_revision", valid.CatalogRevision, arbitrationScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishNoop()
@@ -1212,7 +1228,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	resolvedParents, parentOK, err := resolveCategoryParents(ctx, q, valid.ParentIDs, storeUUID(effStore))
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed", err)
 	}
 	if !parentOK {
 		_ = tx.Rollback(ctx)
@@ -1227,7 +1243,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "parent category not yet projected")
 			}
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent scope lookup failed", err)
 		}
 		if !scopeCompatible(effStore, storeString(prow.StoreID)) {
 			_ = tx.Rollback(ctx)
@@ -1243,7 +1259,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		childStores, err := q.CatalogCategoryChildStores(ctx, cuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "child scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "child scope lookup failed", err)
 		}
 		if !storeDependentsCompatible(writeStore, childStores) {
 			_ = tx.Rollback(ctx)
@@ -1252,7 +1268,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		productStores, err := q.CatalogCategoryProductStores(ctx, cuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "referencing product scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "referencing product scope lookup failed", err)
 		}
 		if !storeDependentsCompatible(writeStore, productStores) {
 			_ = tx.Rollback(ctx)
@@ -1265,7 +1281,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	edgeRows, err := q.AllCatalogCategoryEdges(ctx)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge lookup failed", err)
 	}
 	allEdges := make([]catalog.Edge, 0, len(edgeRows))
 	for _, edge := range edgeRows {
@@ -1300,7 +1316,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	parentsChanged, err := categoryParentsChanged(ctx, q, cuid, projectedParentIDs)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent comparison failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "parent comparison failed", err)
 	}
 	if parentsChanged {
 		affectedKeys := [][2]string{{"category", projectedID}}
@@ -1313,7 +1329,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			productIDs, err := q.CatalogProductsReferencingCategory(ctx, uid)
 			if err != nil {
 				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "affected product lookup failed")
+				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "affected product lookup failed", err)
 			}
 			for _, productID := range productIDs {
 				affectedKeys = append(affectedKeys, [2]string{"product", uuidString(productID)})
@@ -1322,9 +1338,9 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		if err := lockCatalogEntities(ctx, q, affectedKeys...); err != nil {
 			_ = tx.Rollback(ctx)
 			if isSerializationFailure(err) {
-				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 			}
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 		}
 		// Only a product that would ACTUALLY become structurally invalid
 		// under the proposed graph requires a repair. A removal that leaves
@@ -1334,7 +1350,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		repairable, err := categoryChangeRepairable(ctx, q, allEdges, projectedID, projectedParentIDs)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "repair check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "repair check failed", err)
 		}
 		if !repairable {
 			_ = tx.Rollback(ctx)
@@ -1345,7 +1361,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	if sharedNode {
 		if _, err := q.RetireRawDefaultCategory(ctx, sqlcgen.RetireRawDefaultCategoryParams{CategoryID: mustParseUUID(valid.CategoryID), StoreID: eventWriteStore}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
 		}
 	}
 	fingerprint := catalog.FingerprintCategory(valid)
@@ -1373,7 +1389,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	previous, prevFound, prevErr := currentCategorySnapshot(ctx, q, cuid)
 	if prevErr != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category state read failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category state read failed", prevErr)
 	}
 	if err := q.UpsertCatalogCategory(ctx, sqlcgen.UpsertCatalogCategoryParams{
 		CategoryID: cuid, Status: valid.Status, NameAr: nameAR, NameEn: nameEN,
@@ -1386,11 +1402,11 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		if isUniqueViolation(err) {
 			return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "category identity collision")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "category upsert failed", err)
 	}
 	if err := q.DeleteCatalogCategoryEdges(ctx, cuid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge replace failed", err)
 	}
 	for position, parent := range resolvedParents {
 		puid, _ := parseUUID(parent.projected)
@@ -1398,7 +1414,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			ParentID: puid, ChildID: cuid, Position: int32(position),
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "edge insert failed", err)
 		}
 	}
 	// Phase 13 §79/§82: durable commerce re-evaluation fan-out,
@@ -1420,7 +1436,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			Column3: writeStore,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error())
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error(), err)
 		}
 	}
 	// Re-evaluation trigger (R03 §39): waiting or graph-blocked product
@@ -1436,7 +1452,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	if commitErr != nil {
 		if isSerializationFailure(commitErr) {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", commitErr)
 		}
 		return committed, commitErr
 	}
@@ -1555,12 +1571,12 @@ func (d Devices) assertProductStructure(ctx context.Context, q *sqlcgen.Queries,
 		if errors.Is(err, pgx.ErrNoRows) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "top category not yet projected")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "top category lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "top category lookup failed", err)
 	}
 	verdict, err := d.checkProductStructure(ctx, q, valid)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "structure evaluation failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "structure evaluation failed", err)
 	}
 	switch verdict {
 	case structureValid:
@@ -1614,7 +1630,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -1630,9 +1646,9 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	if err := lockCatalogEntities(ctx, q, keys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 	storedRevision := int64(-1)
 	var existingStore pgtype.UUID
@@ -1642,9 +1658,9 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory. A Store-scoped default
 	// tag resolves against its own Store-scoped row; a legacy or
@@ -1673,7 +1689,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			}
 			if err != nil {
 				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+				return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
 			}
 		}
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -1688,7 +1704,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision, storeUUID(effectiveScope(writeStore, existingStore)))
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishNoop()
@@ -1696,7 +1712,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		currentSnapshot, exists, err := currentTagSnapshot(ctx, q, tuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		// Phase 9-R2 F08: pre-R2 rows used raw seeded IDs; a Store-scoped
 		// default event must re-project to write its canonical row.
@@ -1714,7 +1730,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		catalog.ProcessorTagProjectionV1, "catalog_revision", valid.CatalogRevision, storeUUID(effectiveScope(writeStore, existingStore)))
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishNoop()
@@ -1727,7 +1743,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		productStores, err := q.CatalogTagProductStores(ctx, tuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag product scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag product scope lookup failed", err)
 		}
 		if !storeDependentsCompatible(writeStore, productStores) {
 			_ = tx.Rollback(ctx)
@@ -1747,7 +1763,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	if sharedNode {
 		if _, err := q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
 		}
 	}
 	fingerprint := catalog.FingerprintTag(valid)
@@ -1766,7 +1782,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		if isUniqueViolation(err) {
 			return d.markCatalogBlocked(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "tag identity collision")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "tag upsert failed", err)
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
@@ -1818,7 +1834,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -1845,9 +1861,9 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	if err := lockCatalogEntities(ctx, q, lockKeys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 
 	storedRevision := int64(-1)
@@ -1858,9 +1874,9 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory. A scoped event for a
 	// product owned by another Store blocks here; a scoped event adopts a
@@ -1895,7 +1911,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			if errors.Is(err, ErrProductTypeIdentityCollision) {
 				return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, productTypeCollisionMessage(err))
 			}
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type identity lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type identity lookup failed", err)
 		}
 		projectedValid.ProductTypeID = resolvedType
 		typeUID, _ = parseUUID(resolvedType)
@@ -1912,7 +1928,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision, storeScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -1924,7 +1940,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		currentSnapshot, exists, err := currentProductSnapshot(ctx, q, puid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		normalizedCurrent := currentSnapshot
 		normalizedCurrent.SubcategoryIDs = append([]string{}, currentSnapshot.SubcategoryIDs...)
@@ -1953,7 +1969,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		catalog.ProcessorProductProjectionV1, "catalog_revision", valid.CatalogRevision, storeScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -1976,7 +1992,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			return wait("top category not yet projected")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "top category lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "top category lookup failed", err)
 	}
 	if !parentScopeCompatible(effStore, valid.TopCategoryID, storeString(topRow.StoreID)) {
 		_ = tx.Rollback(ctx)
@@ -1995,7 +2011,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 				return wait("subcategory not yet projected")
 			}
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory lookup failed", err)
 		}
 		if !parentScopeCompatible(effStore, sub, storeString(subRow.StoreID)) {
 			_ = tx.Rollback(ctx)
@@ -2015,7 +2031,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 				return wait("tag not yet projected")
 			}
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag lookup failed", err)
 		}
 		if !tagScopeCompatible(effStore, tagID, storeString(tagRow.StoreID)) {
 			_ = tx.Rollback(ctx)
@@ -2036,7 +2052,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 				return wait("product type not yet projected")
 			}
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product type lookup failed", err)
 		}
 		if !tagScopeCompatible(effStore, valid.ProductTypeID, storeString(typeRow.StoreID)) {
 			_ = tx.Rollback(ctx)
@@ -2052,7 +2068,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		dependentStores, err := q.CatalogProductDependentStores(ctx, puid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product dependency scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product dependency scope lookup failed", err)
 		}
 		if !storeDependentsCompatible(writeStore, dependentStores) {
 			_ = tx.Rollback(ctx)
@@ -2067,7 +2083,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	verdict, err := d.checkProductStructure(ctx, q, projectedValid)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "structure evaluation failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "structure evaluation failed", err)
 	}
 	switch verdict {
 	case structureWait:
@@ -2099,7 +2115,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 	preClassification, preFound, preErr := currentProductSnapshot(ctx, q, puid)
 	if preErr != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product state read failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product state read failed", preErr)
 	}
 	if err := q.UpsertCatalogProduct(ctx, sqlcgen.UpsertCatalogProductParams{
 		ProductID: puid, Name: valid.Name, Description: description,
@@ -2113,11 +2129,11 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		if isUniqueViolation(err) {
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product identity collision")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product upsert failed", err)
 	}
 	if err := q.DeleteCatalogProductPrices(ctx, puid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "price replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "price replace failed", err)
 	}
 	for _, price := range valid.Prices {
 		var cost pgtype.Int8
@@ -2129,12 +2145,12 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			PriceMinor: price.PriceCents, CostMinor: cost,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "price insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "price insert failed", err)
 		}
 	}
 	if err := q.DeleteCatalogProductTranslations(ctx, puid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation replace failed", err)
 	}
 	for _, translation := range valid.Translations {
 		var tdesc pgtype.Text
@@ -2145,12 +2161,12 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			ProductID: puid, Locale: translation.Locale, Name: translation.Name, Description: tdesc,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation insert failed", err)
 		}
 	}
 	if err := q.DeleteCatalogProductSubcategories(ctx, puid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory replace failed", err)
 	}
 	for position, sub := range resolvedSubs {
 		suid, _ := parseUUID(sub)
@@ -2158,12 +2174,12 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			ProductID: puid, CategoryID: suid, Position: int32(position),
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "subcategory insert failed", err)
 		}
 	}
 	if err := q.DeleteCatalogProductTags(ctx, puid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag replace failed", err)
 	}
 	for _, tagID := range resolvedTags {
 		guid, _ := parseUUID(tagID)
@@ -2171,7 +2187,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			ProductID: puid, TagID: guid,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "tag insert failed", err)
 		}
 	}
 	// Phase 13 §79: durable re-evaluation signal, atomic with the product
@@ -2181,7 +2197,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			ProductID: puid, StoreID: writeStore, Reason: "product_classification",
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed", err)
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2243,7 +2259,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -2255,9 +2271,9 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	if err := lockCatalogEntities(ctx, q, [2]string{"product", valid.ProductID}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 	storedRevision := int64(-1)
 	var existingStore pgtype.UUID
@@ -2267,9 +2283,9 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory.
 	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
@@ -2287,7 +2303,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 			catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision, storeUUID(event.StoreID))
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2295,7 +2311,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 		currentSnapshot, exists, err := currentProductSalesPolicySnapshot(ctx, q, puid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		if !exists || !reflect.DeepEqual(catalog.NormalizeProductSalesPolicySnapshot(valid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
@@ -2308,7 +2324,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 		catalog.ProcessorProductSalesPolicyProjectionV1, "sales_policy_revision", valid.SalesPolicyRevision, storeUUID(event.StoreID))
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2324,7 +2340,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed", err)
 	}
 	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
 		_ = tx.Rollback(ctx)
@@ -2344,7 +2360,7 @@ func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.Ev
 		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, now, ErrProjection, "policy upsert failed", err)
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductSalesPolicyProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
@@ -2400,7 +2416,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -2414,9 +2430,9 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	if err := lockCatalogEntities(ctx, q, [2]string{"product-inventory", valid.ProductID}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 	storedRevision := int64(-1)
 	var existingStore pgtype.UUID
@@ -2426,9 +2442,9 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory. A high revision
 	// from one Store never suppresses another Store's inventory: it
@@ -2448,7 +2464,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 			catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2456,7 +2472,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 		currentSnapshot, exists, err := currentProductInventorySnapshot(ctx, q, puid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		if !exists || !reflect.DeepEqual(catalog.NormalizeProductInventorySnapshot(valid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
@@ -2469,7 +2485,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 		catalog.ProcessorProductInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2485,7 +2501,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed", err)
 	}
 	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
 		_ = tx.Rollback(ctx)
@@ -2500,7 +2516,7 @@ func (d Devices) ProjectProductInventory(ctx context.Context, event catalog.Even
 		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, now, ErrProjection, "inventory upsert failed", err)
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
@@ -3000,7 +3016,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -3015,9 +3031,9 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 	if err := lockCatalogEntities(ctx, q, lockKeys...); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 	// The Product must already exist: configurations never invent
 	// Products (§7) and never carry their own identity.
@@ -3027,7 +3043,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		if errors.Is(err, pgx.ErrNoRows) {
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed", err)
 	}
 	// Phase 15-R1 F17: the TRUSTED ingress Store context recorded with
 	// the accepted event must authorize mutation of this Product's
@@ -3050,7 +3066,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		if err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {
 				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration ownership lookup failed")
+				return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration ownership lookup failed", err)
 			}
 			continue
 		}
@@ -3062,7 +3078,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 	storedRows, err := q.CatalogProductConfigurationsByProduct(ctx, puid)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration state read failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration state read failed", err)
 	}
 	storedRevision := productRow.ConfigurationRevision
 	if valid.ConfigurationRevision < storedRevision {
@@ -3078,7 +3094,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 	fingerprint := catalog.FingerprintProductConfigurations(valid)
 	if err := q.DeleteCatalogProductConfigurations(ctx, puid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration replace failed", err)
 	}
 	for _, entry := range valid.Configurations {
 		cuid, cerr := parseUUID(entry.ConfigurationID)
@@ -3112,7 +3128,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 			if isUniqueViolation(err) {
 				return d.markCatalogBlocked(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "configuration identity collision")
 			}
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration upsert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration upsert failed", err)
 		}
 		// The guarded ON CONFLICT clause never moves product_id (F17):
 		// zero affected rows means the ID belongs to another Product.
@@ -3125,7 +3141,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		ProductID: puid, ConfigurationRevision: valid.ConfigurationRevision,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration revision write failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "configuration revision write failed", err)
 	}
 	// Durable commerce re-evaluation (§147): coalesced per Product in the
 	// projection transaction. The worker reads CURRENT state at run time
@@ -3135,7 +3151,7 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 		ProductID: puid, Reason: "product_configuration",
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error())
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error(), err)
 	}
 	_ = productRow
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3349,7 +3365,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -3367,9 +3383,9 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 	); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 
 	storedRevision := int64(-1)
@@ -3380,9 +3396,9 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory. A scoped event for a
 	// variant owned by another Store blocks here; a scoped event adopts a
@@ -3403,7 +3419,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 			catalog.ProcessorProductVariantProjectionV1, "variant_revision", valid.VariantRevision, storeScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3411,7 +3427,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 		currentSnapshot, exists, err := currentProductVariantSnapshot(ctx, q, vuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		if !exists || !reflect.DeepEqual(catalog.NormalizeProductVariantSnapshot(valid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
@@ -3424,7 +3440,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 		catalog.ProcessorProductVariantProjectionV1, "variant_revision", valid.VariantRevision, storeScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3440,7 +3456,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "product not yet projected")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "product lookup failed", err)
 	}
 	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(productRow.StoreID)) {
 		_ = tx.Rollback(ctx)
@@ -3453,7 +3469,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 		dependentStores, err := q.CatalogProductVariantDependentStores(ctx, vuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant dependency scope lookup failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant dependency scope lookup failed", err)
 		}
 		if !storeDependentsCompatible(writeStore, dependentStores) {
 			_ = tx.Rollback(ctx)
@@ -3486,11 +3502,11 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 			// ownership can never collide here (NULLS DISTINCT).
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "variant identity collision")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant upsert failed", err)
 	}
 	if err := q.DeleteCatalogProductVariantAttributes(ctx, vuid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute replace failed", err)
 	}
 	for _, attr := range valid.Attributes {
 		var nameEN, defNameEN pgtype.Text
@@ -3507,7 +3523,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 			Position: int32(attr.Position),
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "attribute insert failed", err)
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3553,7 +3569,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -3567,9 +3583,9 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 	if err := lockCatalogEntities(ctx, q, [2]string{"product-variant-inventory", valid.VariantID}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 	storedRevision := int64(-1)
 	var existingStore pgtype.UUID
@@ -3579,9 +3595,9 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory lookup failed", err)
 	}
 	// Phase 9B ownership gate: see ProjectCategory.
 	writeStore, scopeOK := resolveProjectionScope(existingStore, event.StoreID)
@@ -3599,7 +3615,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 			catalog.ProcessorProductVariantInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3607,7 +3623,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 		currentSnapshot, exists, err := currentProductVariantInventorySnapshot(ctx, q, vuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		if !exists || !reflect.DeepEqual(catalog.NormalizeProductVariantInventorySnapshot(valid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
@@ -3620,7 +3636,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 		catalog.ProcessorProductVariantInventoryProjectionV1, "inventory_revision", valid.InventoryRevision, storeUUID(event.StoreID))
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3636,7 +3652,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrCatalogDependencyWait, "variant not yet projected")
 		}
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant lookup failed", err)
 	}
 	if !scopeCompatible(effectiveScope(writeStore, existingStore), storeString(variantRow.StoreID)) {
 		_ = tx.Rollback(ctx)
@@ -3659,7 +3675,7 @@ func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catal
 		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, now, ErrProjection, "variant inventory upsert failed", err)
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductVariantInventoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
@@ -3874,7 +3890,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 	count, done, hasDone, err := claimCatalogRow(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "claim failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "claim failed", err)
 	}
 	if hasDone {
 		if done.Outcome == catalog.OutcomeBlocked {
@@ -3889,7 +3905,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 		if errors.Is(err, ErrProductTypeIdentityCollision) {
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, productTypeCollisionMessage(err))
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type identity lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type identity lookup failed", err)
 	}
 	tuid, _ = parseUUID(projectedID)
 	projectedValid := valid
@@ -3900,9 +3916,9 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 	); err != nil {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "entity lock failed", err)
 	}
 
 	storedRevision := int64(-1)
@@ -3913,9 +3929,9 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		_ = tx.Rollback(ctx)
 		if isSerializationFailure(err) {
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "serialization conflict", err)
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type lookup failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type lookup failed", err)
 	}
 	// Phase 9B ownership gate: a scoped event for a type owned by another
 	// Store blocks here; a scoped event adopts a NULL legacy row by
@@ -3936,7 +3952,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 			catalog.ProcessorProductTypeProjectionV1, "type_revision", valid.TypeRevision, storeScope)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 		}
 		if supersededEqual {
 			return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3944,7 +3960,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 		currentSnapshot, exists, err := currentProductTypeSnapshot(ctx, q, tuid)
 		if err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "current state read failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "current state read failed", err)
 		}
 		if !exists || !reflect.DeepEqual(catalog.NormalizeProductTypeSnapshot(projectedValid), currentSnapshot) {
 			_ = tx.Rollback(ctx)
@@ -3957,7 +3973,7 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 		catalog.ProcessorProductTypeProjectionV1, "type_revision", valid.TypeRevision, storeScope)
 	if err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "supersede check failed", err)
 	}
 	if superseded {
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -3987,30 +4003,30 @@ func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventReco
 			// never collide here (NULLS DISTINCT).
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "product type identity collision")
 		}
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type upsert failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "type upsert failed", err)
 	}
 	if err := q.DeleteCatalogProductTypeDimensions(ctx, tuid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension replace failed", err)
 	}
 	for position, code := range valid.Dimensions {
 		if err := q.InsertCatalogProductTypeDimension(ctx, sqlcgen.InsertCatalogProductTypeDimensionParams{
 			TypeID: tuid, DefinitionCode: code, Position: int32(position),
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "dimension insert failed", err)
 		}
 	}
 	if err := q.DeleteCatalogProductTypeCapabilities(ctx, tuid); err != nil {
 		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability replace failed")
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability replace failed", err)
 	}
 	for _, code := range valid.Capabilities {
 		if err := q.InsertCatalogProductTypeCapability(ctx, sqlcgen.InsertCatalogProductTypeCapabilityParams{
 			TypeID: tuid, CapabilityCode: code,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability insert failed")
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, now, ErrProjection, "capability insert failed", err)
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductTypeProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
