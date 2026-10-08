@@ -34,11 +34,12 @@ const (
 // PendingCatalogEvents returns due candidate catalog event IDs for one
 // processor (durable lazy discovery: accepted events with no processing
 // row are discoverable, so pre-projector history backfills with no resend).
-func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int) ([]string, error) {
+func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int, asOf time.Time) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).PendingCatalogEvents(ctx, sqlcgen.PendingCatalogEventsParams{
 		Processor: processor, EventType: eventType, Limit: int32(limit),
+		AsOf: pgTime(asOf),
 	})
 	if err != nil {
 		return nil, apperr.Wrap(apperr.Internal, "scan pending catalog events", redact(err))
@@ -52,11 +53,12 @@ func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType 
 
 // NextCatalogRetry reports the earliest future durable retry time for one
 // processor; found=false when no retry is scheduled.
-func (d Devices) NextCatalogRetry(ctx context.Context, processor, eventType string) (time.Time, bool, error) {
+func (d Devices) NextCatalogRetry(ctx context.Context, processor, eventType string, asOf time.Time) (time.Time, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	next, err := sqlcgen.New(d.pool).NextCatalogRetryAt(ctx, sqlcgen.NextCatalogRetryAtParams{
 		Processor: processor, EventType: eventType,
+		AsOf: pgTime(asOf),
 	})
 	if err != nil {
 		return time.Time{}, false, apperr.Wrap(apperr.Internal, "scan next catalog retry", redact(err))

@@ -22,7 +22,7 @@ type wakeStore struct {
 	scans     int
 }
 
-func (s *wakeStore) PendingCatalogEvents(context.Context, string, string, int) ([]string, error) {
+func (s *wakeStore) PendingCatalogEvents(context.Context, string, string, int, time.Time) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scans++
@@ -32,7 +32,7 @@ func (s *wakeStore) PendingCatalogEvents(context.Context, string, string, int) (
 	return s.pending(s.scans), nil
 }
 
-func (s *wakeStore) NextCatalogRetry(context.Context, string, string) (time.Time, bool, error) {
+func (s *wakeStore) NextCatalogRetry(context.Context, string, string, time.Time) (time.Time, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.nextRetry == nil {
@@ -103,17 +103,90 @@ func TestProjectorDoesNotWakeDependentsWithoutProgress(t *testing.T) {
 		p := wakeTestProjector(s, time.Hour, func(EventRecord) Outcome { return outcome })
 		var wakes atomic.Int32
 		p.WakeOnProgress(func() { wakes.Add(1) })
-		runProjector(t, p)
-		deadline := time.Now().Add(2 * time.Second)
-		for s.scanCount() < 2 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
-		}
-		if s.scanCount() < 2 {
-			t.Fatalf("outcome %v: drain did not complete", outcome)
-		}
+		retry := time.NewTimer(time.Hour)
+		p.cycle(context.Background(), retry)
+		retry.Stop()
 		if n := wakes.Load(); n != 0 {
 			t.Fatalf("outcome %v woke dependents %d times without progress", outcome, n)
 		}
+	}
+}
+
+func TestProjectorYieldsRepeatedNonterminalBatch(t *testing.T) {
+	for _, outcome := range []Outcome{OutcomeNotDue, OutcomeRetryable} {
+		s := &wakeStore{pending: func(int) []string { return []string{"waiting"} }}
+		p := wakeTestProjector(s, time.Hour, func(EventRecord) Outcome { return outcome })
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		if p.drain(ctx) {
+			t.Fatalf("outcome %v reported dependency progress", outcome)
+		}
+		cancel()
+		if n := s.scanCount(); n != 2 {
+			t.Fatalf("outcome %v retried unchanged work within one drain: %d scans", outcome, n)
+		}
+	}
+}
+
+func TestProjectorDrainsHealthyWorkAfterScheduledRetryBatch(t *testing.T) {
+	s := &wakeStore{pending: func(scan int) []string {
+		switch scan {
+		case 1:
+			return []string{"scheduled-retry"}
+		case 2:
+			return []string{"healthy"}
+		default:
+			return nil
+		}
+	}}
+	var healthy int
+	p := wakeTestProjector(s, time.Hour, func(e EventRecord) Outcome {
+		if e.EventID == "scheduled-retry" {
+			return OutcomeRetryable
+		}
+		healthy++
+		return OutcomeProcessed
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !p.drain(ctx) || healthy != 1 || s.scanCount() != 3 {
+		t.Fatalf("healthy backlog was delayed: healthy=%d scans=%d", healthy, s.scanCount())
+	}
+}
+
+// Terminal-only batches must not make subsequent healthy work wait for
+// the safety scan, and a later stalled batch must not hide earlier progress.
+func TestProjectorDrainsTerminalBatchesBeforeYielding(t *testing.T) {
+	s := &wakeStore{pending: func(scan int) []string {
+		switch scan {
+		case 1:
+			return []string{"blocked", "already"}
+		case 2:
+			return []string{"processed", "not-due"}
+		default:
+			return []string{"not-due"}
+		}
+	}}
+	p := wakeTestProjector(s, time.Hour, func(e EventRecord) Outcome {
+		switch e.EventID {
+		case "blocked":
+			return OutcomeBlocked
+		case "already":
+			return OutcomeAlready
+		case "processed":
+			return OutcomeProcessed
+		default:
+			return OutcomeNotDue
+		}
+	})
+	var wakes int
+	p.WakeOnProgress(func() { wakes++ })
+	retry := time.NewTimer(time.Hour)
+	defer retry.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	p.cycle(ctx, retry)
+	if n := s.scanCount(); n != 3 || wakes != 1 {
+		t.Fatalf("lost terminal pagination/progress: scans=%d wakes=%d", n, wakes)
 	}
 }
 

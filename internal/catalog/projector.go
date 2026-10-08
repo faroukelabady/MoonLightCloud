@@ -82,10 +82,10 @@ type Stats = sale.Stats
 // Store is the durable projector boundary, implemented by the postgres
 // adapter. One Project* call is one atomic claim+project transaction.
 type Store interface {
-	PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int) ([]string, error)
+	PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int, asOf time.Time) ([]string, error)
 	// NextCatalogRetry reports the earliest future durable retry time for
 	// the processor (found=false when none). A wake hint only.
-	NextCatalogRetry(ctx context.Context, processor, eventType string) (time.Time, bool, error)
+	NextCatalogRetry(ctx context.Context, processor, eventType string, asOf time.Time) (time.Time, bool, error)
 	// RearmBlockedProducts flips graph-dependent blocked Product events
 	// back to pending when the relevant graph has advanced since the
 	// block decision (durable R2 fallback; no-op when nothing qualifies).
@@ -137,8 +137,8 @@ type Projector struct {
 // DefaultScanInterval is the durable safety-net period.
 const DefaultScanInterval = 30 * time.Second
 
-// minRetryWake bounds how soon a scheduled-retry wake may fire, so clock
-// skew between the application and PostgreSQL can never cause a hot loop.
+// minRetryWake bounds scheduled-retry wakes. The drain also yields when
+// discovery only repeats deferred work, including disagreement about due times.
 const minRetryWake = 500 * time.Millisecond
 
 // WakeOnProgress registers fn to run after any drain pass that processed
@@ -266,7 +266,7 @@ func (p *Projector) armRetry(ctx context.Context, retry *time.Timer) {
 	if ctx.Err() != nil {
 		return
 	}
-	next, ok, err := p.store.NextCatalogRetry(ctx, p.processor, p.eventType)
+	next, ok, err := p.store.NextCatalogRetry(ctx, p.processor, p.eventType, p.clock.Now())
 	if err != nil {
 		p.log.Error("catalog retry schedule scan failed", "processor", p.processor, "err", err.Error())
 		return
@@ -274,7 +274,7 @@ func (p *Projector) armRetry(ctx context.Context, retry *time.Timer) {
 	if !ok {
 		return
 	}
-	wait := time.Until(next)
+	wait := next.Sub(p.clock.Now())
 	if wait < minRetryWake {
 		wait = minRetryWake
 	}
@@ -287,6 +287,7 @@ func (p *Projector) armRetry(ctx context.Context, retry *time.Timer) {
 // drain projects every due event and reports whether any was processed.
 func (p *Projector) drain(ctx context.Context) bool {
 	progressed := false
+	deferred := make(map[string]struct{})
 	for {
 		if ctx.Err() != nil {
 			return progressed
@@ -300,7 +301,7 @@ func (p *Projector) drain(ctx context.Context) bool {
 				return progressed
 			}
 		}
-		ids, err := p.store.PendingCatalogEvents(ctx, p.processor, p.eventType, p.batchSize)
+		ids, err := p.store.PendingCatalogEvents(ctx, p.processor, p.eventType, p.batchSize, p.clock.Now())
 		if err != nil {
 			p.log.Error("catalog projection scan failed", "processor", p.processor, "err", err.Error())
 			return progressed
@@ -308,13 +309,34 @@ func (p *Projector) drain(ctx context.Context) bool {
 		if len(ids) == 0 {
 			return progressed
 		}
+		attempted := false
 		for _, id := range ids {
 			if ctx.Err() != nil {
 				return progressed
 			}
-			if p.projectOnce(ctx, id) == OutcomeProcessed {
-				progressed = true
+			if _, seen := deferred[id]; seen {
+				continue
 			}
+			attempted = true
+			switch p.projectOnce(ctx, id) {
+			case OutcomeProcessed:
+				progressed = true
+			case OutcomeAlready, OutcomeBlocked:
+				// Terminal rows leave discovery even without a newly
+				// projected dependency. Keep draining subsequent batches.
+			default:
+				// Retryable/not-due work gets at most one attempt in this
+				// drain. Keep discovering other work: a successfully
+				// scheduled retry may no longer occupy the next batch.
+				deferred[id] = struct{}{}
+			}
+		}
+		if !attempted {
+			// PostgreSQL discovery and application claiming can disagree
+			// about whether a retry is due. Retrying the same unchanged
+			// batch here would bypass every outer timer/backoff. Yield to
+			// the retry wake, notifications or durable safety scan instead.
+			return progressed
 		}
 	}
 }

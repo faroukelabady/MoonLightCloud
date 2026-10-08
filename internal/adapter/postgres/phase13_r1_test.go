@@ -270,8 +270,8 @@ type r1CatalogScan struct {
 	once  sync.Once
 }
 
-func (s *r1CatalogScan) PendingCatalogEvents(ctx context.Context, processor, typ string, limit int) ([]string, error) {
-	rows, err := s.Devices.PendingCatalogEvents(ctx, processor, typ, limit)
+func (s *r1CatalogScan) PendingCatalogEvents(ctx context.Context, processor, typ string, limit int, asOf time.Time) ([]string, error) {
+	rows, err := s.Devices.PendingCatalogEvents(ctx, processor, typ, limit, asOf)
 	if err == nil && len(rows) == 0 {
 		s.once.Do(func() { close(s.empty) })
 	}

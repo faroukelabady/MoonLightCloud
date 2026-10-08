@@ -277,9 +277,21 @@ and on two wake hints:
   parent lands and their retry is due.
 
 Wakes are hints only: discovery still returns due rows exclusively, and
-claiming, Store fencing and revision gates are unchanged. A wake is floored
-at 500ms, so clock skew cannot cause a hot loop. Before this change, each
-dependency level added about 60s (backoff plus tick alignment).
+claiming, Store fencing and revision gates are unchanged. Discovery, future
+retry selection, claiming and retry deadlines use the same Cloud clock;
+PostgreSQL compares deadlines to the explicitly bound application time,
+not its own `now()`. Timer delays use that clock too. Scheduled retry
+wakes are floored at 500ms. Within one drain, each retryable/not-due event
+is attempted at most once. Discovery continues for other work, but yields
+when a batch contains only those deferred events: PostgreSQL discovery and
+Cloud claiming can disagree about due times when their clocks differ, and
+the outer timer alone cannot bound an inner drain. No retry deadline or
+attempt count is reset by yielding; the next notification, retry wake or
+30s safety scan resumes durable work. Terminal processed/blocked/already
+batches and work behind scheduled retries continue draining, and successful
+projections still wake dependents.
+Before this change, each dependency level added about 60s (backoff plus tick
+alignment).
 
 Phase 13 adds no processor: category policy/hierarchy and product
 classification commits enqueue durable rows in

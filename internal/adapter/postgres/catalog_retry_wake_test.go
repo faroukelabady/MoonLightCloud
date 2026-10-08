@@ -25,7 +25,7 @@ func TestNextCatalogRetryScopesProcessorAndFuture(t *testing.T) {
 	}
 	next := func(processor, eventType string) (time.Time, bool) {
 		t.Helper()
-		at, ok, err := d.NextCatalogRetry(ctx, processor, eventType)
+		at, ok, err := d.NextCatalogRetry(ctx, processor, eventType, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

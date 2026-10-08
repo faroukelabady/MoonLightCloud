@@ -949,7 +949,7 @@ FROM sync_event_processing p
 JOIN sync_events e ON e.event_id = p.event_id
 WHERE p.processor = $1
   AND p.status = 'retry'
-  AND p.next_attempt_at > now()
+  AND p.next_attempt_at > $3::timestamptz
   AND (e.event_type = $2
        OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
            AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
@@ -958,8 +958,9 @@ WHERE p.processor = $1
 `
 
 type NextCatalogRetryAtParams struct {
-	Processor string `json:"processor"`
-	EventType string `json:"event_type"`
+	Processor string             `json:"processor"`
+	EventType string             `json:"event_type"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
 }
 
 // Earliest future retry for one processor (same event-type matching as
@@ -967,7 +968,7 @@ type NextCatalogRetryAtParams struct {
 // durable retry work falls due instead of waiting for the safety scan.
 // A wake hint only: claiming and revision fencing stay authoritative.
 func (q *Queries) NextCatalogRetryAt(ctx context.Context, arg NextCatalogRetryAtParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, nextCatalogRetryAt, arg.Processor, arg.EventType)
+	row := q.db.QueryRow(ctx, nextCatalogRetryAt, arg.Processor, arg.EventType, arg.AsOf)
 	var next_attempt_at pgtype.Timestamptz
 	err := row.Scan(&next_attempt_at)
 	return next_attempt_at, err
@@ -986,15 +987,16 @@ WHERE (e.event_type = $2
            AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')))
   AND (p.event_id IS NULL
        OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
+       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= $4::timestamptz)))
 ORDER BY e.received_at, e.event_id
 LIMIT $3
 `
 
 type PendingCatalogEventsParams struct {
-	Processor string `json:"processor"`
-	EventType string `json:"event_type"`
-	Limit     int32  `json:"limit"`
+	Processor string             `json:"processor"`
+	EventType string             `json:"event_type"`
+	Limit     int32              `json:"limit"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
 }
 
 // Phase 5A catalog projection queries (ADR-0028). Current-state replace
@@ -1003,8 +1005,14 @@ type PendingCatalogEventsParams struct {
 // Lazy backfill discovery shared by the three catalog processors: accepted
 // events with no processing row (missing), a pending row, or a due retry.
 // Blocked and processed rows never return; ordering is deterministic.
+// as_of comes from the same application clock used to claim/schedule retries.
 func (q *Queries) PendingCatalogEvents(ctx context.Context, arg PendingCatalogEventsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, pendingCatalogEvents, arg.Processor, arg.EventType, arg.Limit)
+	rows, err := q.db.Query(ctx, pendingCatalogEvents,
+		arg.Processor,
+		arg.EventType,
+		arg.Limit,
+		arg.AsOf,
+	)
 	if err != nil {
 		return nil, err
 	}

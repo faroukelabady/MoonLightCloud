@@ -209,7 +209,7 @@ func TestR2_RebuildDefaultCatalog(t *testing.T) {
 			{catalog.ProcessorTagProjectionV1, catalog.EventTagSnapshotV1},
 			{catalog.ProcessorProductProjectionV1, catalog.EventProductSnapshotV1},
 		} {
-			pending, err := store.PendingCatalogEvents(ctx, proc.processor, proc.eventType, 100)
+			pending, err := store.PendingCatalogEvents(ctx, proc.processor, proc.eventType, 100, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,15 +218,15 @@ func TestR2_RebuildDefaultCatalog(t *testing.T) {
 				f.projectCatalog(t, e, proc.eventType)
 			}
 		}
-		left, err := store.PendingCatalogEvents(ctx, catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV1, 100)
+		left, err := store.PendingCatalogEvents(ctx, catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV1, 100, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
-		leftTag, err := store.PendingCatalogEvents(ctx, catalog.ProcessorTagProjectionV1, catalog.EventTagSnapshotV1, 100)
+		leftTag, err := store.PendingCatalogEvents(ctx, catalog.ProcessorTagProjectionV1, catalog.EventTagSnapshotV1, 100, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
-		leftProd, err := store.PendingCatalogEvents(ctx, catalog.ProcessorProductProjectionV1, catalog.EventProductSnapshotV1, 100)
+		leftProd, err := store.PendingCatalogEvents(ctx, catalog.ProcessorProductProjectionV1, catalog.EventProductSnapshotV1, 100, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

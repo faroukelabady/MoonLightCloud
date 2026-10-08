@@ -6,6 +6,7 @@
 -- Lazy backfill discovery shared by the three catalog processors: accepted
 -- events with no processing row (missing), a pending row, or a due retry.
 -- Blocked and processed rows never return; ordering is deterministic.
+-- as_of comes from the same application clock used to claim/schedule retries.
 SELECT e.event_id
 FROM sync_events e
 LEFT JOIN sync_event_processing p
@@ -17,7 +18,7 @@ WHERE (e.event_type = $2
            AND e.event_type IN ('catalog.product.snapshot.v1','catalog.product.snapshot.v2')))
   AND (p.event_id IS NULL
        OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
+       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= sqlc.arg(as_of)::timestamptz)))
 ORDER BY e.received_at, e.event_id
 LIMIT $3;
 
@@ -31,7 +32,7 @@ FROM sync_event_processing p
 JOIN sync_events e ON e.event_id = p.event_id
 WHERE p.processor = $1
   AND p.status = 'retry'
-  AND p.next_attempt_at > now()
+  AND p.next_attempt_at > sqlc.arg(as_of)::timestamptz
   AND (e.event_type = $2
        OR ($2 IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2')
            AND e.event_type IN ('catalog.category.snapshot.v1','catalog.category.snapshot.v2'))
