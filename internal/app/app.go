@@ -376,9 +376,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		a.OperationsEngine = operations.NewEngine(opsDetector, opsAlerts, opsRecovery,
 			cfg.Operations.ScanInterval, cfg.Operations.ScanBatchSize, log)
 	}
+	// Phase 18 release registry + fleet rollout control (ADR-0051/0052).
+	updateHandlers := newUpdateHandlers(cfg, pool, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, cfg.DashboardAssetsDir)
+		dashAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

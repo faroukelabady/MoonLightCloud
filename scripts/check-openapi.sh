@@ -37,9 +37,12 @@ for route, methods in spec.get("paths", {}).items():
         if not isinstance(op, dict) or "responses" not in op:
             continue
         codes = set(op["responses"].keys())
-        for want in ("200", "401"):
-            if want not in codes:
-                raise SystemExit(f"FAIL: {method.upper()} {route} missing '{want}' response")
+        # A create-only route (e.g. POST rollouts) documents 201 truthfully
+        # instead of a 200 it can never return; a 2xx is still mandatory.
+        if not codes & {"200", "201"}:
+            raise SystemExit(f"FAIL: {method.upper()} {route} missing '200'/'201' response")
+        if "401" not in codes:
+            raise SystemExit(f"FAIL: {method.upper()} {route} missing '401' response")
 
 # Unknown keys inside Schema Objects are almost always truncated scalars
 # (e.g. an unquoted comma in a flow mapping turns the remainder into a

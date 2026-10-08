@@ -1,0 +1,12 @@
+{
+  "build_commit": "0123456789abcdef0123456789abcdef01234567",
+  "description": "Synthetic Phase 18 cross-repository release vector. The signing private key was ephemeral and discarded; this public key must never be trusted outside tests.",
+  "envelope": "{\"format\":\"moonlight-release-envelope-v1\",\"key_id\":\"4ce788bb4ea0950d\",\"manifest\":\"eyJtYW5pZmVzdF92ZXJzaW9uIjoxLCJwcm9kdWN0IjoibW9vbmxpZ2h0cmV0YWlsIiwicmVsZWFzZV9zZXF1ZW5jZSI6MTgsInZlcnNpb24iOiIxLjQuMCIsImJ1aWxkX2NvbW1pdCI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjciLCJtaW5faW5zdGFsbGVkX3NlcXVlbmNlIjowLCJrZXlfaWQiOiI0Y2U3ODhiYjRlYTA5NTBkIiwiYXJ0aWZhY3RzIjpbeyJvcyI6ImxpbnV4IiwiYXJjaCI6ImFtZDY0IiwicGFja2FnZSI6InRhci5neiIsImZpbGVfbmFtZSI6Ik1vb25MaWdodFJldGFpbC0xLjQuMC1saW51eC1hbWQ2NC50YXIuZ3oiLCJzaXplIjo0ODIxMywic2hhMjU2IjoiNWQ0MTQwMmFiYzRiMmE3NmI5NzE5ZDkxMTAxN2M1OTJhZTJmOGQxYzNhNWIwZTdmNmU3YzBiN2ExZTJmM2E0YiJ9LHsib3MiOiJ3aW5kb3dzIiwiYXJjaCI6ImFtZDY0IiwicGFja2FnZSI6Im5zaXMtZXhlIiwiZmlsZV9uYW1lIjoiTW9vbkxpZ2h0UmV0YWlsLVNldHVwLTEuNC4wLXdpbmRvd3MtYW1kNjQuZXhlIiwic2l6ZSI6MzE0NTcyODAwLCJzaGEyNTYiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn1dfQ==\",\"signature\":\"FP3wjXTbKZayKz9Sz5jqRGrwv0BuNWUop0hWlYcCzV5IIs4Viq5gQCbN8bmD+tkrqdGg+P2keHuCWmQsYClDDQ==\"}",
+  "key_id": "4ce788bb4ea0950d",
+  "linux_amd64_sha256": "5d41402abc4b2a76b9719d911017c592ae2f8d1c3a5b0e7f6e7c0b7a1e2f3a4b",
+  "manifest_bytes": "{\"manifest_version\":1,\"product\":\"moonlightretail\",\"release_sequence\":18,\"version\":\"1.4.0\",\"build_commit\":\"0123456789abcdef0123456789abcdef01234567\",\"min_installed_sequence\":0,\"key_id\":\"4ce788bb4ea0950d\",\"artifacts\":[{\"os\":\"linux\",\"arch\":\"amd64\",\"package\":\"tar.gz\",\"file_name\":\"MoonLightRetail-1.4.0-linux-amd64.tar.gz\",\"size\":48213,\"sha256\":\"5d41402abc4b2a76b9719d911017c592ae2f8d1c3a5b0e7f6e7c0b7a1e2f3a4b\"},{\"os\":\"windows\",\"arch\":\"amd64\",\"package\":\"nsis-exe\",\"file_name\":\"MoonLightRetail-Setup-1.4.0-windows-amd64.exe\",\"size\":314572800,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}",
+  "manifest_digest": "d609dab46f4c52da294755d73d4289438bdf2aec8b700b2266bf09869a69d213",
+  "public_key": "JxAJB54VfzV0DeP73zRegcMRRYjWsm4OqzlL+3exw2w=",
+  "release_sequence": 18,
+  "version": "1.4.0"
+}

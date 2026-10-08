@@ -11,6 +11,7 @@
 		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', ready: true, icon: 'cloud' },
 		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', ready: true, icon: 'gear' },
 		{ r: 'operations', ar: 'العمليات', en: 'Operations', ready: true, icon: 'clip' },
+		{ r: 'updates', ar: 'التحديثات', en: 'Updates', ready: true, icon: 'cloud' },
 		{ r: 'reports', ar: 'التقارير', en: 'Reports', ready: false, note: 'قريبًا', icon: 'report' },
 		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', ready: true, icon: 'cloud' },
 		{ r: 'settings', ar: 'الإعدادات', en: 'Settings', ready: false, note: 'قريبًا', icon: 'gear' },

@@ -576,6 +576,21 @@ type DeviceStoreBinding struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type DeviceUpdateStatus struct {
+	DeviceID          pgtype.UUID        `json:"device_id"`
+	Version           string             `json:"version"`
+	BuildCommit       string             `json:"build_commit"`
+	ReleaseSequence   int64              `json:"release_sequence"`
+	Os                string             `json:"os"`
+	Arch              string             `json:"arch"`
+	UpdaterProtocol   int32              `json:"updater_protocol"`
+	UpdaterCapable    bool               `json:"updater_capable"`
+	UnsupportedReason pgtype.Text        `json:"unsupported_reason"`
+	UpdateState       string             `json:"update_state"`
+	UpdateError       pgtype.Text        `json:"update_error"`
+	ReportedAt        pgtype.Timestamptz `json:"reported_at"`
+}
+
 type NotificationDeliveryStatusHistory struct {
 	NotificationID    pgtype.UUID        `json:"notification_id"`
 	ProviderKey       string             `json:"provider_key"`
@@ -690,6 +705,33 @@ type OperationalRecoveryAction struct {
 	LastErrorCode  pgtype.Text        `json:"last_error_code"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Release struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ManifestDigest       string             `json:"manifest_digest"`
+	ReleaseSequence      int64              `json:"release_sequence"`
+	Version              string             `json:"version"`
+	BuildCommit          string             `json:"build_commit"`
+	MinInstalledSequence int64              `json:"min_installed_sequence"`
+	KeyID                string             `json:"key_id"`
+	Envelope             string             `json:"envelope"`
+	Status               string             `json:"status"`
+	ImportedBy           string             `json:"imported_by"`
+	ImportedAt           pgtype.Timestamptz `json:"imported_at"`
+	StatusChangedBy      string             `json:"status_changed_by"`
+	StatusChangedAt      pgtype.Timestamptz `json:"status_changed_at"`
+}
+
+type ReleaseArtifact struct {
+	ReleaseID pgtype.UUID `json:"release_id"`
+	Os        string      `json:"os"`
+	Arch      string      `json:"arch"`
+	Package   string      `json:"package"`
+	FileName  string      `json:"file_name"`
+	Size      int64       `json:"size"`
+	Sha256    string      `json:"sha256"`
+	Url       string      `json:"url"`
 }
 
 type ReturnRefundLinesProjection struct {
@@ -894,4 +936,62 @@ type SyncEventProcessing struct {
 	LastErrorMessage pgtype.Text        `json:"last_error_message"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UpdateAuditEvent struct {
+	ID         int64              `json:"id"`
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	ActorKind  string             `json:"actor_kind"`
+	Actor      string             `json:"actor"`
+	Action     string             `json:"action"`
+	ReleaseID  pgtype.UUID        `json:"release_id"`
+	RolloutID  pgtype.UUID        `json:"rollout_id"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	DeviceID   pgtype.UUID        `json:"device_id"`
+	StoreID    pgtype.UUID        `json:"store_id"`
+	Details    []byte             `json:"details"`
+}
+
+type UpdateRollout struct {
+	ID          pgtype.UUID        `json:"id"`
+	ReleaseID   pgtype.UUID        `json:"release_id"`
+	Scope       string             `json:"scope"`
+	StoreID     pgtype.UUID        `json:"store_id"`
+	DeviceID    pgtype.UUID        `json:"device_id"`
+	Mode        string             `json:"mode"`
+	Percentage  int32              `json:"percentage"`
+	Status      string             `json:"status"`
+	NotBefore   pgtype.Timestamptz `json:"not_before"`
+	TargetCount int32              `json:"target_count"`
+	CreatedBy   string             `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UpdateRolloutTarget struct {
+	ID            pgtype.UUID        `json:"id"`
+	RolloutID     pgtype.UUID        `json:"rollout_id"`
+	DeviceID      pgtype.UUID        `json:"device_id"`
+	StoreID       pgtype.UUID        `json:"store_id"`
+	Bucket        int32              `json:"bucket"`
+	State         string             `json:"state"`
+	AttemptCount  int32              `json:"attempt_count"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	Retryable     bool               `json:"retryable"`
+	DeliveredAt   pgtype.Timestamptz `json:"delivered_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UpdateTargetEvent struct {
+	ID            int64              `json:"id"`
+	TargetID      pgtype.UUID        `json:"target_id"`
+	DeviceID      pgtype.UUID        `json:"device_id"`
+	ReportedState string             `json:"reported_state"`
+	TargetState   string             `json:"target_state"`
+	ErrorCode     pgtype.Text        `json:"error_code"`
+	Retryable     bool               `json:"retryable"`
+	RecordedAt    pgtype.Timestamptz `json:"recorded_at"`
 }

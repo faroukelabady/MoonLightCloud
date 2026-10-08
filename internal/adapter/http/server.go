@@ -28,7 +28,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -133,6 +133,32 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminCategories)))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags",
 			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminTags)))
+	}
+	// Phase 18 release registry, fleet rollout control and device update
+	// channel (ADR-0051/0052). Operator mutations are same-origin
+	// dashboard-session only; device routes take identity from the device
+	// credential only.
+	if updates != nil {
+		dash := func(h http.HandlerFunc) http.Handler { return dashAuth.RequireDashboardSession(h) }
+		dashMut := func(h http.HandlerFunc) http.Handler { return dashAuth.RequireDashboardSession(RequireSameOrigin(h)) }
+		mux.Handle("GET /api/v1/dashboard/releases", dash(updates.ListReleases))
+		mux.Handle("POST /api/v1/dashboard/releases", dashMut(updates.ImportRelease))
+		mux.Handle("GET /api/v1/dashboard/releases/{id}", dash(updates.GetRelease))
+		mux.Handle("POST /api/v1/dashboard/releases/{id}/status", dashMut(updates.SetReleaseStatus))
+		mux.Handle("GET /api/v1/dashboard/rollouts", dash(updates.ListRollouts))
+		mux.Handle("POST /api/v1/dashboard/rollouts", dashMut(updates.CreateRollout))
+		mux.Handle("GET /api/v1/dashboard/rollouts/{id}", dash(updates.GetRollout))
+		mux.Handle("GET /api/v1/dashboard/rollouts/{id}/targets", dash(updates.ListTargets))
+		mux.Handle("POST /api/v1/dashboard/rollouts/{id}/{action}", dashMut(updates.RolloutAction))
+		mux.Handle("GET /api/v1/dashboard/update-targets/{id}/history", dash(updates.TargetHistory))
+		mux.Handle("GET /api/v1/dashboard/fleet", dash(updates.Fleet))
+		mux.Handle("GET /api/v1/dashboard/update-audit", dash(updates.Audit))
+		mux.Handle("POST /api/v1/device-control/update/status",
+			DeviceAuth(devices)(http.HandlerFunc(updates.DeviceStatus)))
+		mux.Handle("GET /api/v1/device-control/update/command",
+			DeviceAuth(devices)(http.HandlerFunc(updates.DeviceCommand)))
+		mux.Handle("POST /api/v1/device-control/update/targets/{id}/report",
+			DeviceAuth(devices)(http.HandlerFunc(updates.DeviceReport)))
 	}
 	// Phase 7D operations incidents (dashboard session only; device
 	// credentials never valid here).

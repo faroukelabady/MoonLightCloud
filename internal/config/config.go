@@ -128,6 +128,11 @@ type Config struct {
 	DashboardPasswordHash string
 	// DashboardSessionTTL bounds dashboard sessions.
 	DashboardSessionTTL time.Duration
+	// ReleaseTrustedPublicKeys are comma-separated base64 Ed25519 public
+	// keys accepted for signed release import (Phase 18, ADR-0051). Empty
+	// disables import (fail closed). Cloud never holds private release keys,
+	// and Retail re-verifies every release against its own embedded keys.
+	ReleaseTrustedPublicKeys string
 	// TrustedProxyCIDRs are the only peers whose X-Forwarded-For chain is
 	// believed for login rate limiting. Empty (default) trusts none:
 	// forwarded headers from untrusted peers are ignored entirely.
@@ -181,19 +186,20 @@ type Config struct {
 // Load reads configuration from the environment.
 func Load() (Config, error) {
 	c := Config{
-		Environment:           envOr("ENVIRONMENT", EnvDevelopment),
-		HTTPAddr:              envOr("HTTP_ADDR", DefaultHTTPAddr),
-		DatabaseURL:           os.Getenv("DATABASE_URL"),
-		LogLevel:              strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
-		PepperRaw:             strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
-		PepperVersion:         CurrentPepperVersion,
-		StoreTimezone:         strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
-		ReportingToken:        strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
-		ShutdownAfter:         DefaultShutdownTimeout,
-		DashboardUsername:     strings.TrimSpace(os.Getenv("DASHBOARD_USERNAME")),
-		DashboardPasswordHash: strings.TrimSpace(os.Getenv("DASHBOARD_PASSWORD_HASH")),
-		DashboardAssetsDir:    envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
-		envExplicit:           strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
+		Environment:              envOr("ENVIRONMENT", EnvDevelopment),
+		HTTPAddr:                 envOr("HTTP_ADDR", DefaultHTTPAddr),
+		DatabaseURL:              os.Getenv("DATABASE_URL"),
+		LogLevel:                 strings.ToLower(envOr("LOG_LEVEL", DefaultLogLevel)),
+		PepperRaw:                strings.TrimSpace(os.Getenv("DEVICE_SECRET_PEPPER")),
+		PepperVersion:            CurrentPepperVersion,
+		StoreTimezone:            strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
+		ReportingToken:           strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
+		ShutdownAfter:            DefaultShutdownTimeout,
+		DashboardUsername:        strings.TrimSpace(os.Getenv("DASHBOARD_USERNAME")),
+		DashboardPasswordHash:    strings.TrimSpace(os.Getenv("DASHBOARD_PASSWORD_HASH")),
+		ReleaseTrustedPublicKeys: strings.TrimSpace(os.Getenv("RELEASE_TRUSTED_PUBLIC_KEYS")),
+		DashboardAssetsDir:       envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
+		envExplicit:              strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
 	}
 	allowOpen, err := parseBoolFlag("ALLOW_UNAUTHENTICATED_REPORTING")
 	if err != nil {

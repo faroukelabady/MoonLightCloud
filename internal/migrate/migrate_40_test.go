@@ -48,6 +48,11 @@ func TestMigration40RollbackReapplyPreservesEntityState(t *testing.T) {
 			}
 			seedMigration40Entity(t, conn, ctx)
 			before := migration40State(t, conn, ctx)
+			// Up goes to the latest schema (Phase 18 added 41); UpTo stops at 40.
+			want := int64(40)
+			if useUp {
+				want = migrate.TargetVersion
+			}
 			upgrade := func() error {
 				if useUp {
 					return migrate.Up(ctx, conn)
@@ -58,7 +63,7 @@ func TestMigration40RollbackReapplyPreservesEntityState(t *testing.T) {
 				if err := upgrade(); err != nil {
 					t.Fatal(err)
 				}
-				if version(t, conn, ctx) != 40 || migration40State(t, conn, ctx) != before {
+				if version(t, conn, ctx) != want || migration40State(t, conn, ctx) != before {
 					t.Fatal("upgrade changed entity command or target state")
 				}
 				if err := migrate.DownTo(ctx, conn, 39); err != nil {
@@ -82,7 +87,7 @@ func TestMigration40RollbackReapplyPreservesEntityState(t *testing.T) {
 			if _, err := conn.ExecContext(ctx, `INSERT INTO goose_db_version(version_id,is_applied) VALUES (34,true)`); err != nil {
 				t.Fatal(err)
 			}
-			if err := upgrade(); err != nil || version(t, conn, ctx) != 40 {
+			if err := upgrade(); err != nil || version(t, conn, ctx) != want {
 				t.Fatalf("out-of-order goose metadata: %v", err)
 			}
 		})
@@ -161,7 +166,11 @@ func TestMigration40DeeperRollbackReapplyPreservesEntityState(t *testing.T) {
 			} else {
 				err = migrate.UpTo(ctx, conn, 40)
 			}
-			if err != nil || version(t, conn, ctx) != 40 || migration40State(t, conn, ctx) != before {
+			want := int64(40)
+			if useUp {
+				want = migrate.TargetVersion
+			}
+			if err != nil || version(t, conn, ctx) != want || migration40State(t, conn, ctx) != before {
 				t.Fatalf("deep rollback reapply must preserve state: %v", err)
 			}
 		})

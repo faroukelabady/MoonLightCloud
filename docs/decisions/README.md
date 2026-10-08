@@ -52,6 +52,8 @@ Concise, irreversible-or-important choices only.
 - [0048](0048-cloud-admin-catalog-control.md) — Cloud admin catalog control plane (16)
 - [0049](0049-product-physical-variant-architecture.md) — product & physical variant architecture (17)
 - [0050](0050-product-type-projection-admin.md) — ProductType projection & admin control (17-R2)
+- [0051](0051-signed-release-registry.md) — signed release registry (18)
+- [0052](0052-fleet-rollout-device-update-control.md) — fleet rollout & device update control (18)
 
 ## Phase numbering gaps
 

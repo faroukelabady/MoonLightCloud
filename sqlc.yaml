@@ -43,6 +43,7 @@ sql:
       - "db/migrations/00038_sale_line_product_type_snapshot.sql"
       - "db/migrations/00039_admin_type_command_vocabulary.sql"
       - "db/migrations/00040_create_command_identity.sql"
+      - "db/migrations/00041_fleet_updates.sql"
     gen:
       go:
         package: "sqlcgen"

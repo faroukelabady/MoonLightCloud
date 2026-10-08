@@ -2228,6 +2228,570 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  # ---- Phase 18: signed release registry + fleet update control (ADR-0051/0052) ----
+  /api/v1/dashboard/releases:
+    get:
+      summary: List imported signed releases (newest sequence first)
+      operationId: dashboardListReleases
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: before_sequence
+          in: query
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: '#/components/parameters/UpdatePageLimit'
+      responses:
+        '200':
+          description: Release page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases]
+                properties:
+                  releases:
+                    type: array
+                    items: {$ref: '#/components/schemas/ReleaseView'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    post:
+      summary: Import a signed release envelope (Cloud verifies; never signs)
+      description: >-
+        The body carries the signed envelope exactly as produced by offline
+        release tooling plus one HTTPS location per signed artifact file name.
+        Version, commit, sequence, hashes and signature are never typed by an
+        operator. Verification uses RELEASE_TRUSTED_PUBLIC_KEYS only; Cloud
+        holds no private signing key. Same sequence with a different digest is
+        a conflict; re-importing identical bytes is idempotent (200).
+      operationId: dashboardImportRelease
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleaseImportRequest'}
+      responses:
+        '201':
+          description: Release verified and registered (immutable).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseView'}
+        '200':
+          description: Identical envelope already registered.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseView'}
+        '400':
+          description: >-
+            Invalid body, unknown fields, envelope verification failure
+            (message is the stable code, e.g. UPDATE_SIGNATURE_INVALID,
+            UPDATE_KEY_UNKNOWN, UPDATE_MANIFEST_INVALID) or a missing / non-HTTPS
+            artifact location.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Cross-origin mutation refused.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: RELEASE_SEQUENCE_CONFLICT or RELEASE_TRUST_NOT_CONFIGURED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/releases/{id}:
+    get:
+      summary: One release with its artifacts
+      operationId: dashboardGetRelease
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+      responses:
+        '200':
+          description: Release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseView'}
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/releases/{id}/status:
+    post:
+      summary: Revoke or reactivate a release
+      description: >-
+        Revocation stops new delivery and cancels non-started targets; a device
+        already past its safe boundary finishes or rolls back locally. The
+        signed release bytes never change.
+      operationId: dashboardSetReleaseStatus
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: {type: string, enum: [ACTIVE, REVOKED]}
+      responses:
+        '200':
+          description: Updated release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseView'}
+        '400':
+          description: Invalid id or status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Cross-origin mutation refused.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/rollouts:
+    get:
+      summary: Rollouts, newest first (keyset cursor bound to the Store filter)
+      operationId: dashboardListRollouts
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateStoreFilter'
+        - $ref: '#/components/parameters/UpdateCursor'
+        - $ref: '#/components/parameters/UpdatePageLimit'
+      responses:
+        '200':
+          description: Rollout page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rollouts, next_cursor]
+                properties:
+                  rollouts:
+                    type: array
+                    items: {$ref: '#/components/schemas/RolloutView'}
+                  next_cursor: {type: string, description: Empty when there are no more rows.}
+        '400':
+          description: Invalid Store id or a cursor issued for another scope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    post:
+      summary: Create a DRAFT rollout with an immutable target snapshot
+      description: >-
+        Targets are the active, Store-bound devices in scope at creation time.
+        Selection within the percentage is deterministic
+        (sha256(rollout_id:device_id) mod 100). Nothing is delivered until the
+        rollout is started.
+      operationId: dashboardCreateRollout
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RolloutCreateRequest'}
+      responses:
+        '201':
+          description: Draft rollout created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RolloutView'}
+        '400':
+          description: Invalid scope/mode/percentage, device not active and bound to the Store, or target limit exceeded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Cross-origin mutation refused.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: RELEASE_REVOKED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/rollouts/{id}:
+    get:
+      summary: One rollout with per-state target counts
+      operationId: dashboardGetRollout
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+      responses:
+        '200':
+          description: Rollout.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RolloutView'}
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown rollout.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/rollouts/{id}/targets:
+    get:
+      summary: Rollout targets (keyset cursor bound to rollout and Store filter)
+      operationId: dashboardListRolloutTargets
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+        - $ref: '#/components/parameters/UpdateStoreFilter'
+        - $ref: '#/components/parameters/UpdateCursor'
+        - $ref: '#/components/parameters/UpdatePageLimit'
+      responses:
+        '200':
+          description: Target page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets, next_cursor]
+                properties:
+                  targets:
+                    type: array
+                    items: {$ref: '#/components/schemas/UpdateTargetView'}
+                  next_cursor: {type: string}
+        '400':
+          description: Invalid filter or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/rollouts/{id}/{action}:
+    post:
+      summary: Rollout control (start, pause, resume, cancel, percentage)
+      description: >-
+        start: DRAFT→ACTIVE (a device is always offered its highest-sequence
+        deliverable target; an older one later reports SKIPPED_NEWER). pause/resume stop/allow new
+        delivery; devices past their safe boundary are never interrupted.
+        cancel: terminal; non-started targets are cancelled. percentage: widen
+        only (strictly increasing, ≤100) over the same snapshot; body
+        {"percentage": n}. Other actions take an empty JSON object.
+      operationId: dashboardRolloutAction
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [start, pause, resume, cancel, percentage]}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                percentage: {type: integer, minimum: 1, maximum: 100}
+      responses:
+        '200':
+          description: Updated rollout.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RolloutView'}
+        '400':
+          description: Invalid id, body or percentage.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Cross-origin mutation refused.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown rollout or action.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: ROLLOUT_STATE_CONFLICT (action not allowed from the current status) or ROLLOUT_PERCENTAGE_CONFLICT. A rollout of a revoked release may change status but never delivers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/update-targets/{id}/history:
+    get:
+      summary: Append-only report history of one target
+      operationId: dashboardUpdateTargetHistory
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+      responses:
+        '200':
+          description: History, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: {$ref: '#/components/schemas/UpdateTargetEvent'}
+        '400':
+          description: Malformed id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/fleet:
+    get:
+      summary: Devices with trusted version/updater report and current target
+      description: >-
+        Version fields come only from authenticated device status reports;
+        updater_reported=false means the device never reported (e.g. a Phase 17
+        Retail without the updater). States are exactly what Retail reported.
+      operationId: dashboardFleet
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateStoreFilter'
+        - $ref: '#/components/parameters/UpdateCursor'
+        - $ref: '#/components/parameters/UpdatePageLimit'
+      responses:
+        '200':
+          description: Fleet page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices, next_cursor]
+                properties:
+                  devices:
+                    type: array
+                    items: {$ref: '#/components/schemas/FleetDeviceRow'}
+                  next_cursor: {type: string}
+        '400':
+          description: Invalid Store id or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/update-audit:
+    get:
+      summary: Release/rollout/device update audit trail (newest first)
+      operationId: dashboardUpdateAudit
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateStoreFilter'
+        - name: before_id
+          in: query
+          schema: {type: integer, format: int64, minimum: 1}
+        - $ref: '#/components/parameters/UpdatePageLimit'
+      responses:
+        '200':
+          description: Audit page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: {$ref: '#/components/schemas/UpdateAuditEvent'}
+        '400':
+          description: Invalid Store id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/update/status:
+    post:
+      summary: Retail reports its trusted version and updater state
+      description: >-
+        Device identity comes only from the credential; the body never names a
+        device. Unknown fields are rejected.
+      operationId: deviceUpdateStatus
+      security:
+        - deviceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceUpdateStatus'}
+      responses:
+        '200':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_time]
+                properties:
+                  server_time: {type: string, format: date-time}
+        '400':
+          description: Invalid or unknown fields.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/update/command:
+    get:
+      summary: Retail polls for its current install intent
+      description: >-
+        Returns at most one retail.update.install.v1 command for the
+        authenticated device, or null. The command carries only the signed
+        envelope (exact bytes), its digest, mode, schedule and one artifact
+        location — never an executable command, script, path or argument.
+        Retail re-verifies the envelope against its embedded public keys.
+      operationId: deviceUpdateCommand
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Current command or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_time, command]
+                properties:
+                  server_time: {type: string, format: date-time}
+                  command:
+                    allOf:
+                      - $ref: '#/components/schemas/DeviceUpdateCommand'
+                    nullable: true
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/update/targets/{id}/report:
+    post:
+      summary: Retail reports progress/outcome for one of its targets
+      operationId: deviceUpdateTargetReport
+      security:
+        - deviceAuth: []
+      parameters:
+        - $ref: '#/components/parameters/UpdateResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceUpdateTargetReport'}
+      responses:
+        '200':
+          description: Recorded; returns Cloud's target and release status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [target_state, release_status]
+                properties:
+                  target_state: {type: string}
+                  release_status: {type: string, enum: [ACTIVE, REVOKED]}
+        '400':
+          description: Invalid body or a report not matching the target release.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown target or a target belonging to another device.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
 components:
   securitySchemes:
     deviceAuth:
@@ -2316,6 +2880,26 @@ components:
         A malformed UUID is a 400; an unknown Store yields empty results,
         never a silent fallback to global. Legacy NULL rows never match a
         specific Store.
+    UpdateResourceID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    UpdateStoreFilter:
+      name: store_id
+      in: query
+      description: Optional Store scope; omitted means all Stores.
+      schema: {type: string, format: uuid}
+    UpdateCursor:
+      name: cursor
+      in: query
+      description: Opaque keyset cursor from next_cursor; bound to the same scope and rejected for another.
+      schema: {type: string, maxLength: 512}
+    UpdatePageLimit:
+      name: limit
+      in: query
+      description: Page size 1..100; other values use the default (50).
+      schema: {type: integer, minimum: 1, maximum: 100}
   schemas:
     Status:
       type: object
@@ -4779,3 +5363,198 @@ components:
               cashier_id: {type: string, nullable: true}
               cashier_name: {type: string, nullable: true}
           description: Latest finalized sales. No order lifecycle exists; no statuses fabricated.
+    ReleaseArtifactView:
+      type: object
+      required: [os, arch, package, file_name, size, sha256, url]
+      properties:
+        os: {type: string, enum: [linux, windows]}
+        arch: {type: string, example: amd64}
+        package: {type: string, enum: [tar.gz]}
+        file_name: {type: string}
+        size: {type: integer, format: int64, minimum: 1}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        url: {type: string, format: uri, description: Operational HTTPS location; not part of the signed identity.}
+    ReleaseView:
+      type: object
+      required: [id, manifest_digest, release_sequence, version, build_commit, min_installed_sequence, key_id, status, imported_by, imported_at, status_changed_by, status_changed_at, artifacts]
+      properties:
+        id: {type: string, format: uuid}
+        manifest_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        release_sequence: {type: integer, format: int64, minimum: 1}
+        version: {type: string}
+        build_commit: {type: string}
+        min_installed_sequence: {type: integer, format: int64, minimum: 0}
+        key_id: {type: string, pattern: '^[0-9a-f]{16}$'}
+        status: {type: string, enum: [ACTIVE, REVOKED]}
+        imported_by: {type: string}
+        imported_at: {type: string, format: date-time}
+        status_changed_by: {type: string}
+        status_changed_at: {type: string, format: date-time}
+        artifacts:
+          type: array
+          items: {$ref: '#/components/schemas/ReleaseArtifactView'}
+    ReleaseImportRequest:
+      type: object
+      additionalProperties: false
+      required: [envelope, artifact_urls]
+      properties:
+        envelope:
+          description: >-
+            The signed moonlight-release-envelope-v1 document, as a JSON object
+            or as the file's literal text in a JSON string.
+          oneOf:
+            - type: object
+            - type: string
+        artifact_urls:
+          type: object
+          description: Signed artifact file name → HTTPS location; exactly one per signed artifact.
+          additionalProperties: {type: string, format: uri}
+    RolloutCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [release_id, scope, mode, percentage]
+      properties:
+        release_id: {type: string, format: uuid}
+        scope: {type: string, enum: [DEVICE, STORE, ALL]}
+        store_id: {type: string, format: uuid, description: Required for STORE scope.}
+        device_id: {type: string, format: uuid, description: Required for DEVICE scope.}
+        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        percentage: {type: integer, minimum: 1, maximum: 100}
+        not_before: {type: string, format: date-time, nullable: true}
+    RolloutView:
+      type: object
+      required: [id, release_id, release_version, release_sequence, scope, mode, percentage, status, target_count, created_by, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        release_version: {type: string}
+        release_sequence: {type: integer, format: int64}
+        scope: {type: string, enum: [DEVICE, STORE, ALL]}
+        store_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        percentage: {type: integer, minimum: 1, maximum: 100}
+        status: {type: string, enum: [DRAFT, ACTIVE, PAUSED, COMPLETED, CANCELLED]}
+        not_before: {type: string, format: date-time}
+        target_count: {type: integer}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        counts:
+          type: object
+          description: Target count per target state.
+          additionalProperties: {type: integer}
+    UpdateTargetState:
+      type: string
+      description: >-
+        Cloud's view of one device target, driven only by authenticated Retail
+        reports. SUCCEEDED is recorded only after Retail confirmed healthy
+        startup of the new release.
+      enum: [NOT_SELECTED, PENDING, DELIVERED, DOWNLOADING, VERIFIED, WAITING_SAFE_BOUNDARY, INSTALLING, AWAITING_HEALTH, SUCCEEDED, ALREADY_COMPLIANT, FAILED, ROLLED_BACK, MANUAL_ACTION_REQUIRED, SKIPPED_NEWER, UNSUPPORTED, CANCELLED]
+    UpdateTargetView:
+      type: object
+      required: [id, rollout_id, device_id, device_name, store_id, state, attempt_count, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        rollout_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        device_name: {type: string}
+        store_id: {type: string, format: uuid}
+        state: {$ref: '#/components/schemas/UpdateTargetState'}
+        attempt_count: {type: integer}
+        next_attempt_at: {type: string, format: date-time}
+        last_error: {type: string}
+        delivered_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    UpdateTargetEvent:
+      type: object
+      required: [reported_state, target_state, retryable, recorded_at]
+      properties:
+        reported_state: {type: string}
+        target_state: {type: string}
+        error_code: {type: string}
+        retryable: {type: boolean}
+        recorded_at: {type: string, format: date-time}
+    FleetDeviceRow:
+      type: object
+      required: [device_id, device_name, device_status, store_id, release_sequence, updater_protocol, updater_capable, updater_reported]
+      properties:
+        device_id: {type: string, format: uuid}
+        device_name: {type: string}
+        device_status: {type: string}
+        store_id: {type: string, format: uuid}
+        last_seen_at: {type: string, format: date-time}
+        version: {type: string}
+        build_commit: {type: string}
+        release_sequence: {type: integer, format: int64}
+        os: {type: string}
+        arch: {type: string}
+        updater_protocol: {type: integer}
+        updater_capable: {type: boolean}
+        updater_reported: {type: boolean, description: False when the device never sent an update status report.}
+        unsupported_reason: {type: string}
+        update_state: {type: string}
+        update_error: {type: string}
+        reported_at: {type: string, format: date-time}
+        target_id: {type: string, format: uuid}
+        target_state: {type: string}
+        target_error: {type: string}
+        target_version: {type: string}
+        target_sequence: {type: integer, format: int64}
+        rollout_id: {type: string, format: uuid}
+    UpdateAuditEvent:
+      type: object
+      required: [id, occurred_at, actor_kind, actor, action, details]
+      properties:
+        id: {type: integer, format: int64}
+        occurred_at: {type: string, format: date-time}
+        actor_kind: {type: string, enum: [operator, device, system]}
+        actor: {type: string}
+        action: {type: string, example: rollout.started}
+        release_id: {type: string, format: uuid}
+        rollout_id: {type: string, format: uuid}
+        target_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        store_id: {type: string, format: uuid}
+        details: {type: object, additionalProperties: true}
+    DeviceUpdateStatus:
+      type: object
+      additionalProperties: false
+      required: [version, build_commit, release_sequence, os, arch, updater_protocol, updater_capable, update_state]
+      properties:
+        version: {type: string}
+        build_commit: {type: string}
+        release_sequence: {type: integer, format: int64, minimum: 0}
+        os: {type: string}
+        arch: {type: string}
+        updater_protocol: {type: integer, minimum: 0}
+        updater_capable: {type: boolean}
+        unsupported_reason: {type: string, example: UPDATE_PLATFORM_UNSUPPORTED}
+        update_state: {type: string, description: 'Retail journal state (IDLE, DOWNLOADING, … SUCCEEDED, ROLLED_BACK, MANUAL_ACTION_REQUIRED).'}
+        update_error: {type: string}
+        target_id: {type: string, format: uuid}
+    DeviceUpdateCommand:
+      type: object
+      required: [target_id, type, version, release_id, manifest_digest, mode, not_before, envelope, artifact_url, release_status]
+      properties:
+        target_id: {type: string, format: uuid}
+        type: {type: string, enum: [retail.update.install.v1]}
+        version: {type: integer, enum: [1]}
+        release_id: {type: string, format: uuid}
+        manifest_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        not_before: {type: string, format: date-time, nullable: true}
+        envelope: {type: string, description: Exact signed envelope bytes as imported; Retail re-verifies them.}
+        artifact_url: {type: string, format: uri}
+        release_status: {type: string, enum: [ACTIVE, REVOKED]}
+    DeviceUpdateTargetReport:
+      type: object
+      additionalProperties: false
+      required: [state, retryable, release_sequence]
+      properties:
+        state: {type: string}
+        error_code: {type: string}
+        retryable: {type: boolean}
+        release_sequence: {type: integer, format: int64, minimum: 1}
+        manifest_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
