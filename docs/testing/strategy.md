@@ -6,7 +6,13 @@
 - **Integration** (real PostgreSQL 18): repository roundtrips, migration
   from empty DB, startup schema verification, readiness healthy/sick.
 - **Isolation**: `internal/testutil` creates `moonlight_test_<rand>`
-  databases per test, migrates, drops on cleanup. Guards refuse
+  databases per test and drops them on cleanup. Each is cloned
+  (`CREATE DATABASE … TEMPLATE`) from `moonlight_test_tpl_<hash>`, which is
+  migrated once per migration set. The hash covers every migration file and
+  `TargetVersion`, creation is serialized by an advisory lock, and the
+  template is renamed into place only after verification. Every clone still
+  verifies `TargetVersion`. Set `MOONLIGHT_TEST_NO_TEMPLATE=1` to migrate
+  each test database from empty instead. Guards refuse
   `ENVIRONMENT=production` and non-test names. Tests skip cleanly when
   `TEST_DATABASE_URL` is unset; `scripts/test.sh` provisions a throwaway
   container automatically.
