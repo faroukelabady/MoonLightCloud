@@ -32,8 +32,13 @@ func TestCatalogLocalRetryDelayClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, attempt := range []int{-1, 0, 1, 2, 3, 6, 20, 1 << 30} {
 				want := catalog.Backoff(attempt)
-				if tc.local && want > 30*time.Second {
-					want = 30 * time.Second
+				if tc.local {
+					want = 2 * time.Second
+					if attempt <= 0 {
+						want = 500 * time.Millisecond
+					} else if attempt == 1 {
+						want = time.Second
+					}
 				}
 				if got := catalogRetryDelay(attempt, tc.code, tc.cause); got != want {
 					t.Fatalf("attempt=%d delay=%v want=%v", attempt, got, want)
@@ -53,7 +58,7 @@ func catalogRetryDeadline(t *testing.T, env *saleEnv, event, processor string, n
 	if err := env.pool.QueryRow(context.Background(), `SELECT status, attempt_count, next_attempt_at FROM sync_event_processing WHERE event_id=$1 AND processor=$2`, event, processor).Scan(&status, &count, &next); err != nil {
 		t.Fatal(err)
 	}
-	limit := 30 * time.Second
+	limit := 2 * time.Second
 	if len(limits) > 0 {
 		limit = limits[0]
 	}
@@ -88,8 +93,8 @@ func TestCatalogDependencyRetriesUseDurableBoundedDeadlines(t *testing.T) {
 		}
 		now = next
 	}
-	if now.Sub(start) != 155*time.Second {
-		t.Fatalf("seven waits=%v, want155s rather than635s", now.Sub(start))
+	if now.Sub(start) != 11500*time.Millisecond {
+		t.Fatalf("seven local waits=%v, want11.5s rather than155s", now.Sub(start))
 	}
 	variantEvent := variantEventID(45012)
 	ingestCatalog(t, env, variantEvent, catalog.EventProductVariantSnapshotV1, "2026-09-20T10:01:00Z", variantPayload(variant, product, "ML-LOCAL-V", true, false, "color=blue", nil, 1))
@@ -208,8 +213,13 @@ func TestCatalogSQLAbortRetriesUseDurableBoundedDeadlines(t *testing.T) {
 					t.Fatalf("attempt=%d result=%+v err=%v", attempt, res, err)
 				}
 				want := catalog.Backoff(attempt - 1)
-				if (state == "40001" || state == "40P01") && want > 30*time.Second {
-					want = 30 * time.Second
+				if state == "40001" || state == "40P01" {
+					want = 2 * time.Second
+					if attempt == 1 {
+						want = 500 * time.Millisecond
+					} else if attempt == 2 {
+						want = time.Second
+					}
 				}
 				next := catalogRetryDeadline(t, env, event, catalog.ProcessorProductVariantInventoryProjectionV1, now, attempt, want)
 				if next.Sub(now) != want {

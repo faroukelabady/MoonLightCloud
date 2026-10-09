@@ -65,7 +65,8 @@ func TestCatalogProjectorClockSkewYieldsAndRecovers(t *testing.T) {
 				}
 				store.projects.Store(0)
 				p := catalog.NewProductVariantInventoryProjector(store, c, nilLogger())
-				ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				// Observe strictly before the first 500ms durable local deadline.
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 				p.Run(ctx)
 				cancel()
 				if scans, projects := store.scans.Load(), store.projects.Load(); scans > 2 || projects > 1 {

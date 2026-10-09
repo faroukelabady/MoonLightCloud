@@ -178,6 +178,37 @@ order by `(received_at, event_id)` on the sync inbox; only
 matching inbox per scan. Added `idx_sync_events_received(received_at,
 event_id)`. Additive only; migrations ≤00042 byte-identical.
 
+### 5.6 Local catalog retry latency (P19-F04)
+
+The independent committed-pair runtime found a 32-event mixed catalog
+bootstrap with 155.55 s maximum receipt-to-projection latency and 85
+additional attempts. Fast indexed discovery did not solve its dependency
+and SERIALIZABLE retry tail. Local retries formerly used the outage
+schedule (5/10/20/30-second waits); seven waits alone totalled 155 seconds.
+
+Only `CATALOG_DEPENDENCY_WAIT` and driver-proven SQLSTATE 40001/40P01
+now use 500 ms, 1 s, then a 2 s cap. These remain durable, application-clock
+deadlines: an early attempt is still NotDue, notifications cannot bypass
+them, and each drain attempts deferred work at most once. Other errors
+retain the original 5-second exponential outage backoff with its one-hour
+cap. Existing stored deadlines are not cleared or rewritten. Isolation,
+entity locks, Store ownership, revision gates and inbox bytes are unchanged.
+
+The new real PostgreSQL regression uses two instances of each involved
+production worker, 32 accepted Store-scoped events, shared Category/Tag/Type
+dependencies and repeated Product/Variant revisions. It waits for every
+event to process, verifies exact Variant inventory and enforces a 20-second
+complete-batch ceiling without forcing deadlines due. Three development
+race runs measured 11.61 / 9.62 / 8.14 s. Restoring the old production
+schedule through an external overlay is the negative control. A separate
+notification-flood test bounds attempts when the dependency stays absent.
+
+Retail's opt-in ProductType HTTP E2E also waits for all intended bootstrap
+events and checks receipt-to-terminal latency; Type/one-Product assertions
+alone are no longer accepted as complete convergence. These focused
+development results are not a substitute for the new committed-pair freeze
+review, full concurrency regressions or long-running stability evidence.
+
 ## 6. Bottlenecks not fixed
 
 | Item | Classification | Evidence / rationale |

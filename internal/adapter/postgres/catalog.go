@@ -780,20 +780,27 @@ func (d Devices) markCatalogBlocked(ctx context.Context, processor string, euid 
 	return finishCatalogAttempt(ctx, q, tx, processor, euid, attempt, now, catalog.ProcBlocked, code, msg)
 }
 
-// catalogRetryDelay keeps dependency waits and proven transaction contention
-// responsive without treating arbitrary database failures as local contention.
-// The durable deadline prevents hot retry loops; all other failures retain the
-// frozen outage backoff. Original driver errors are used only for classification.
+// catalogRetryDelay separates local dependency/transaction waits from outages.
+// A mixed bootstrap can cross several dependent streams; the outage schedule
+// accumulated minutes even after each dependency landed. Local retries wait
+// 500ms, 1s, then 2s, always through the durable deadline (never a hot loop).
+// All other failures retain the frozen outage backoff. Original driver errors
+// are used only for classification; isolation and revision fencing are unchanged.
 func catalogRetryDelay(attempt int, code string, causes ...error) time.Duration {
-	delay := catalog.Backoff(attempt)
 	local := code == ErrCatalogDependencyWait
 	for _, cause := range causes {
 		local = local || isSerializationFailure(cause)
 	}
-	if local && delay > 30*time.Second {
-		return 30 * time.Second
+	if local {
+		if attempt <= 0 {
+			return 500 * time.Millisecond
+		}
+		if attempt == 1 {
+			return time.Second
+		}
+		return 2 * time.Second
 	}
-	return delay
+	return catalog.Backoff(attempt)
 }
 
 // persistCatalogRetry writes retry state in a SEPARATE durable transaction
