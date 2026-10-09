@@ -17,6 +17,7 @@ func errFakeNotFoundValue() error {
 }
 
 type fakeStore struct {
+	devices   *fakeDevices
 	commands  map[string]CommandView
 	targets   map[string][]TargetView
 	owner     map[string]string
@@ -236,6 +237,7 @@ func testService() (*Service, *fakeStore, *fakeDevices, string, string) {
 		capable:  map[string]bool{},
 	}
 	devices := &fakeDevices{binding: map[string]string{}, active: map[string]bool{}}
+	store.devices = devices
 	return NewService(store, devices), store, devices, storeID, entityID
 }
 
@@ -557,5 +559,80 @@ func TestServiceCreateConvergesOnResultID(t *testing.T) {
 	}
 	if got.Aggregate != AggregateConverged || !got.Converged {
 		t.Fatalf("must converge on the result identity: %+v %v", got.Aggregate, got.Converged)
+	}
+}
+
+func (s *fakeStore) CatalogAdminDeviceStates(_ context.Context, deviceIDs []string) (map[string]DeviceState, error) {
+	out := map[string]DeviceState{}
+	for _, id := range deviceIDs {
+		state := DeviceState{DeviceID: id, Name: "dev", Capable: s.capable[id]}
+		if s.devices != nil {
+			state.Active = s.devices.active[id]
+			state.StoreID = s.devices.binding[id]
+		}
+		out[id] = state
+	}
+	return out, nil
+}
+
+// countingStore wraps the in-memory store with a statement counter so
+// Phase 19 can assert bounded query counts (§67 — stable on shared CI
+// runners where wall-clock thresholds are not).
+type countingStore struct {
+	*fakeStore
+	deviceStateCalls int
+	commandCalls     int
+	perDeviceCalls   int
+}
+
+func (c *countingStore) CatalogAdminDeviceStates(ctx context.Context, deviceIDs []string) (map[string]DeviceState, error) {
+	c.deviceStateCalls++
+	c.perDeviceCalls += len(deviceIDs)
+	return c.fakeStore.CatalogAdminDeviceStates(ctx, deviceIDs)
+}
+
+func (c *countingStore) GetCatalogAdminCommand(ctx context.Context, id string) (CommandView, error) {
+	c.commandCalls++
+	return c.fakeStore.GetCatalogAdminCommand(ctx, id)
+}
+
+// TestAnnotateCapabilitiesIsBatched pins the Phase 19 N+1 removal:
+// annotating many targets must not scale statements with target count.
+func TestAnnotateCapabilitiesIsBatched(t *testing.T) {
+	base, _, devices, storeID, entityID := testService()
+	counting := &countingStore{fakeStore: base.store.(*fakeStore)}
+	svc := NewService(counting, devices)
+	ctx := context.Background()
+	devices.binding["dev-shared"] = storeID
+	devices.active["dev-shared"] = true
+	counting.capable["dev-shared"] = true
+
+	// One command, many targets on the same device set.
+	for i := 0; i < 40; i++ {
+		targetID := uuid.NewString()
+		counting.targets["cmd-1"] = append(counting.targets["cmd-1"], TargetView{
+			ID: targetID, CommandID: "cmd-1", DeviceID: "dev-shared", Status: TargetPending,
+		})
+	}
+	counting.commands["cmd-1"] = CommandView{
+		ID: "cmd-1", StoreID: storeID, EntityID: entityID, Status: CommandPending,
+	}
+	targets := counting.targets["cmd-1"]
+	if err := svc.annotateCapabilities(ctx, targets); err != nil {
+		t.Fatal(err)
+	}
+	if counting.deviceStateCalls != 1 {
+		t.Fatalf("device state must be one batched read, got %d", counting.deviceStateCalls)
+	}
+	if counting.commandCalls != 1 {
+		t.Fatalf("one distinct command must cost one read, got %d", counting.commandCalls)
+	}
+	if counting.perDeviceCalls < 40 {
+		t.Fatalf("expected all 40 targets in the batch, got %d", counting.perDeviceCalls)
+	}
+	for _, target := range targets {
+		if target.Capable == nil || !*target.Capable {
+			t.Fatalf("capable device must be labelled capable: %+v", target)
+		}
 	}
 }

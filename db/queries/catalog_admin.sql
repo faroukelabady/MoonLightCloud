@@ -367,3 +367,15 @@ UPDATE catalog_admin_commands
 SET result_entity_id = @result_entity_id::text, updated_at = now()
 WHERE id IN (SELECT command_id FROM catalog_admin_command_targets WHERE id = @target_id::uuid)
   AND result_entity_id IS NULL;
+
+-- Phase 19: batched device state for command target annotation. Replaces
+-- per-target DeviceActive + BindingStore + Capability + Name lookups
+-- (N+1: up to 5 statements per target) with one set-based read.
+-- name: CatalogAdminDeviceStates :many
+SELECT d.id, d.name, d.status,
+       b.store_id,
+       COALESCE(cap.catalog_admin_commands_v1, FALSE) AS catalog_admin_commands_v1
+FROM devices d
+LEFT JOIN device_store_bindings b ON b.device_id = d.id
+LEFT JOIN catalog_admin_device_capabilities cap ON cap.device_id = d.id
+WHERE d.id = ANY(@device_ids::uuid[]);

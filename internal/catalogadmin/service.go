@@ -101,6 +101,16 @@ type BoundDevice struct {
 	Name     string
 }
 
+// DeviceState is the batched device read used when annotating command
+// targets (Phase 19): one row per device, no per-device queries.
+type DeviceState struct {
+	DeviceID string
+	Name     string
+	Active   bool
+	StoreID  string
+	Capable  bool
+}
+
 // AdminProductRow is one Store-scoped Product for the operator list.
 // Phase 17-R0 (ADR-0049): products carry NO sku/stock — they carry
 // variant_count and derived_stock (SUM of active, non-tombstoned variant
@@ -248,6 +258,8 @@ type Store interface {
 	// the stream convergence revision. found=false means unknown
 	// entity; storeID "" means legacy NULL (never mutable by Store).
 	CatalogAdminOwnership(ctx context.Context, commandType, entityID, requestedStoreID string) (storeID string, revision int64, found bool, err error)
+	// CatalogAdminDeviceStates is the Phase 19 batched device read.
+	CatalogAdminDeviceStates(ctx context.Context, deviceIDs []string) (map[string]DeviceState, error)
 	// Admin reads serve the operator UI from projections only.
 	AdminProductList(ctx context.Context, storeID, search, cursor string, limit int) ([]AdminProductRow, error)
 	AdminProductDetail(ctx context.Context, storeID, productID string) (AdminProductDetail, error)
@@ -634,25 +646,44 @@ func (s *Service) ReportCapabilities(ctx context.Context, deviceID string, capab
 
 // annotateCapabilities marks PENDING targets on incapable devices so
 // the dashboard can show update-required instead of silent waiting.
+//
+// Phase 19: this is batched — one device-state read for all targets
+// plus one command read per distinct command replaces the previous
+// per-target DeviceActive/BindingStore/Capability/DeviceName round
+// trips (up to 5 statements per target).
 func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView) error {
+	pending := make([]int, 0, len(targets))
+	deviceIDs := make([]string, 0, len(targets))
+	commandIDs := map[string]struct{}{}
 	for i := range targets {
 		if targets[i].Status != TargetPending && targets[i].Status != TargetDelivered {
 			continue
 		}
-		active, err := s.devices.DeviceActive(ctx, targets[i].DeviceID)
+		pending = append(pending, i)
+		deviceIDs = append(deviceIDs, targets[i].DeviceID)
+		commandIDs[targets[i].CommandID] = struct{}{}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	states, err := s.store.CatalogAdminDeviceStates(ctx, deviceIDs)
+	if err != nil {
+		return err
+	}
+	commandStores := make(map[string]string, len(commandIDs))
+	commandEntities := make(map[string]string, len(commandIDs))
+	for id := range commandIDs {
+		cmd, err := s.store.GetCatalogAdminCommand(ctx, id)
 		if err != nil {
 			return err
 		}
-		bound, err := s.devices.BindingStore(ctx, targets[i].DeviceID)
-		if err != nil {
-			return err
-		}
-		cmd, err := s.store.GetCatalogAdminCommand(ctx, targets[i].CommandID)
-		if err != nil {
-			return err
-		}
-		if !active || !strings.EqualFold(bound, cmd.StoreID) {
-			changed, err := s.store.FinishCatalogAdminTarget(ctx, targets[i].ID, targets[i].DeviceID, TargetSkippedRevoked, CodeStoreScopeConflict, cmd.EntityID, 0, 0)
+		commandStores[id] = cmd.StoreID
+		commandEntities[id] = cmd.EntityID
+	}
+	for _, i := range pending {
+		state, known := states[targets[i].DeviceID]
+		if !known || !state.Active || !strings.EqualFold(state.StoreID, commandStores[targets[i].CommandID]) {
+			changed, err := s.store.FinishCatalogAdminTarget(ctx, targets[i].ID, targets[i].DeviceID, TargetSkippedRevoked, CodeStoreScopeConflict, commandEntities[targets[i].CommandID], 0, 0)
 			if err != nil {
 				return err
 			}
@@ -662,17 +693,15 @@ func (s *Service) annotateCapabilities(ctx context.Context, targets []TargetView
 			}
 			continue
 		}
-		capable, err := s.store.GetCatalogAdminCapability(ctx, targets[i].DeviceID)
-		if err != nil || !capable {
+		if !state.Capable {
 			incapable := false
 			targets[i].Capable = &incapable
 			continue
 		}
 		ok := true
 		targets[i].Capable = &ok
-		name := s.devices.DeviceName(ctx, targets[i].DeviceID)
-		if name != "" {
-			targets[i].DeviceName = name
+		if state.Name != "" {
+			targets[i].DeviceName = state.Name
 		}
 	}
 	return nil

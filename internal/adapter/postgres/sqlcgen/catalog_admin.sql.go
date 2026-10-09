@@ -951,6 +951,53 @@ func (q *Queries) CancelPendingCatalogAdminTargets(ctx context.Context, commandI
 	return err
 }
 
+const catalogAdminDeviceStates = `-- name: CatalogAdminDeviceStates :many
+SELECT d.id, d.name, d.status,
+       b.store_id,
+       COALESCE(cap.catalog_admin_commands_v1, FALSE) AS catalog_admin_commands_v1
+FROM devices d
+LEFT JOIN device_store_bindings b ON b.device_id = d.id
+LEFT JOIN catalog_admin_device_capabilities cap ON cap.device_id = d.id
+WHERE d.id = ANY($1::uuid[])
+`
+
+type CatalogAdminDeviceStatesRow struct {
+	ID                     pgtype.UUID `json:"id"`
+	Name                   string      `json:"name"`
+	Status                 string      `json:"status"`
+	StoreID                pgtype.UUID `json:"store_id"`
+	CatalogAdminCommandsV1 bool        `json:"catalog_admin_commands_v1"`
+}
+
+// Phase 19: batched device state for command target annotation. Replaces
+// per-target DeviceActive + BindingStore + Capability + Name lookups
+// (N+1: up to 5 statements per target) with one set-based read.
+func (q *Queries) CatalogAdminDeviceStates(ctx context.Context, deviceIds []pgtype.UUID) ([]CatalogAdminDeviceStatesRow, error) {
+	rows, err := q.db.Query(ctx, catalogAdminDeviceStates, deviceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CatalogAdminDeviceStatesRow{}
+	for rows.Next() {
+		var i CatalogAdminDeviceStatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.StoreID,
+			&i.CatalogAdminCommandsV1,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createCatalogAdminCommand = `-- name: CreateCatalogAdminCommand :one
 
 INSERT INTO catalog_admin_commands

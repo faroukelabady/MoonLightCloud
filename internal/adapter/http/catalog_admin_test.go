@@ -21,6 +21,7 @@ import (
 // stubCatalogStore implements catalogadmin.Store in memory with strict
 // Store scoping.
 type stubCatalogStore struct {
+	devices  *stubCatalogDevices
 	commands map[string]catalogadmin.CommandView
 	targets  map[string][]catalogadmin.TargetView
 	due      map[string][]catalogadmin.DueTarget
@@ -210,6 +211,7 @@ func catalogAdminTestSetup() (*CatalogAdminHandlers, *stubCatalogStore, *stubCat
 		rev:      map[string]int64{entityID: 5},
 	}
 	devices := &stubCatalogDevices{binding: map[string]string{}, active: map[string]bool{}}
+	stub.devices = devices
 	svc := catalogadmin.NewService(stub, devices)
 	return &CatalogAdminHandlers{Svc: svc, Log: slog.Default()}, stub, devices, storeID, entityID
 }
@@ -453,4 +455,17 @@ func TestRemediationPollWire(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
+}
+
+func (s *stubCatalogStore) CatalogAdminDeviceStates(_ context.Context, deviceIDs []string) (map[string]catalogadmin.DeviceState, error) {
+	out := map[string]catalogadmin.DeviceState{}
+	for _, id := range deviceIDs {
+		state := catalogadmin.DeviceState{DeviceID: id, Name: "dev", Capable: s.capable[id]}
+		if s.devices != nil {
+			state.Active = s.devices.active[id]
+			state.StoreID = s.devices.binding[id]
+		}
+		out[id] = state
+	}
+	return out, nil
 }

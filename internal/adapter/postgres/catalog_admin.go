@@ -1233,3 +1233,31 @@ func (d Devices) SetCommandResultEntity(ctx context.Context, targetID, entityID 
 	})
 	return catalogAdminErr(err)
 }
+
+// CatalogAdminDeviceStates is the Phase 19 batched device read: one
+// set-based lookup for many target devices replaces the per-target
+// DeviceActive/BindingStore/Capability/DeviceName round-trips.
+func (d Devices) CatalogAdminDeviceStates(ctx context.Context, deviceIDs []string) (map[string]catalogadmin.DeviceState, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	ids := make([]pgtype.UUID, 0, len(deviceIDs))
+	for _, id := range deviceIDs {
+		uid, err := parseUUID(id)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, uid)
+	}
+	rows, err := sqlcgen.New(d.pool).CatalogAdminDeviceStates(ctx, ids)
+	if err != nil {
+		return nil, catalogAdminErr(err)
+	}
+	out := make(map[string]catalogadmin.DeviceState, len(rows))
+	for _, row := range rows {
+		out[uuidString(row.ID)] = catalogadmin.DeviceState{
+			DeviceID: uuidString(row.ID), Name: row.Name, Active: row.Status == "active",
+			StoreID: storeOrEmpty(row.StoreID), Capable: row.CatalogAdminCommandsV1,
+		}
+	}
+	return out, nil
+}

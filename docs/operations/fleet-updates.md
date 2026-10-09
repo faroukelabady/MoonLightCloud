@@ -28,7 +28,10 @@ bootstrap and manual recovery runbook is MoonLightRetail
   - `device_update_status`;
   - `update_target_events` (append-only);
   - `update_audit_events`.
-- `migrate.TargetVersion` is 41. The down migration drops only Phase 18
+- Migration 41 adds the fleet/update schema; the final Phase 18 schema is
+  42 because migration 42 adds human authentication (OWNER/ADMIN, MFA).
+  Phase 19 adds migration 43 (an additive projection-discovery index), so
+  `migrate.TargetVersion` is 43. The down migration drops only Phase 18
   objects.
 
 ## Operator workflow

@@ -725,3 +725,26 @@ func TestV31ToLatest(t *testing.T) {
 		}
 	}
 }
+
+// TestV42ToLatest proves the Phase 19 upgrade: migration 43 adds only
+// the projection-discovery index. Phase 18 state (devices, catalog,
+// fleet, admin auth) is untouched and migrations ≤42 stay byte-identical.
+func TestV42ToLatest(t *testing.T) {
+	conn, ctx := openRaw(t)
+	if err := migrate.UpTo(ctx, conn, 42); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != 42 {
+		t.Fatalf("want 42, got %d", v)
+	}
+	if err := migrate.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if v := version(t, conn, ctx); v != migrate.TargetVersion {
+		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
+	}
+	var exists bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='idx_sync_events_received')`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("projection discovery index missing (%v)", err)
+	}
+}
