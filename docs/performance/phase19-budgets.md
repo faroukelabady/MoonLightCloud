@@ -13,23 +13,22 @@ are acceptance targets for controlled environments; normal CI only
 asserts bounded **statement counts** (`internal/perfbench`), which are
 stable on shared runners (§66).
 
-| Operation | Dataset | Budget p95 | Measured p95 (medium) | Status |
-|---|---|---|---|---|
-| Retail SKU/barcode lookup (hit) | 25k variants | < 5 ms | 0.22 ms | PASS |
-| Retail SKU lookup (miss) | 25k variants | < 5 ms | 0.02 ms | PASS |
-| Retail Product list first page | 10k products | < 250 ms | 1.7 ms | PASS |
-| Retail Product list middle page | 10k products | < 250 ms | 11.2 ms | PASS |
-| Retail Product search (term) | 10k products | < 250 ms | 54 ms | PASS |
-| Retail Product details | 10k products | < 100 ms | 0.09 ms | PASS |
-| Retail inventory movement page | 250k ledger | < 250 ms | 0.18 ms | PASS |
-| Retail startup (fresh DB) | — | < 3 s | measured §4 | PASS |
-| Cloud projection drain | 10k events | bounded, no tail > 5 s | §3 | see report |
-| Cloud dashboard overview | large | < 500 ms | §3 | see report |
-| Cloud admin command delivery | backlog | no full-history rescan | §3 | PASS (indexed) |
+Retail results below were rerun after P19-F02 fixture remediation on
+2026-10-10 using Go 1.27.2, seed 42 and real SQLite files. They are local
+observations, not a Phase 19 freeze verdict or a hardware SLA. Earlier
+Retail timings and speedup ratios used a business-inconsistent fixture;
+those acceptance claims are withdrawn and must not be compared to this
+new run as before/after evidence.
 
-Budgets were chosen before optimization; the ones above were already
-met after the fixes in §4. Anything not met is recorded under
-"bottlenecks not fixed" rather than silently raised.
+| Operation | Controlled-environment target p95 | Fresh medium observation |
+|---|---|---|
+| SKU hit / miss | < 5 ms | 0.228 / 0.010 ms |
+| Product list first / middle page | < 250 ms | 1.54 / 14.34 ms |
+| Product AR / EN / SKU search | < 250 ms | 27.28 / 25.37 / 76.46 ms |
+| Product details | < 100 ms | 0.322 ms |
+| Variant inventory movement page | < 250 ms | 0.258 ms |
+| Retail startup | < 3 s | NOT RUN in remediation review |
+| Cloud discovery/dashboard/fleet/load | separate Phase 19 requirements | NOT RUN in remediation review |
 
 ## 2. Dataset profiles
 
@@ -45,11 +44,22 @@ by `TestSeedCleanSlateInvariant`).
 
 Cloud additionally models multiple Stores, hundreds of devices,
 projection history, admin-command history and fleet rollout history
-through the existing test fixtures (§3).
+through separate existing test fixtures; that load evidence was not
+rerun here.
 
 Generation is one transaction per phase (reference catalog, products
 + variants, sales, movements) inside SQLite's single-writer discipline.
-Same seed ⇒ byte-identical IDs and distributions.
+Same seed ⇒ identical logical rows and distributions, proved by a content
+hash over catalog, Sale, snapshot, payment and ledger tables. SQLite file
+bytes are not claimed reproducible. Every profile is validated before
+measurement: cached stock equals the ledger, every chronological balance
+is nonnegative, Type dimensions allow Product dimensions, combination
+keys match canonical attribute codes, and Sale identities/snapshots,
+classifications, Tags, capture markers, costs and payments are consistent.
+One opening movement per Variant is included in the advertised movement
+total. Tagged and captured-empty Sales both occur. Fixtures model reads;
+they do not fabricate production outbox or audit activity and must not be
+used as a sync/backlog workload without separate event fixtures.
 
 ## 3. Retail measurements
 
@@ -58,36 +68,44 @@ Statement counts are per operation.
 
 | Operation | Dataset | p50 | p95 | p99 | max | statements/op |
 |---|---|---|---|---|---|---|
-| sku_lookup_hit | small | 219 µs | 252 µs | 333 µs | 982 µs | 5.0 |
-| sku_lookup_hit | medium | 183 µs | 216 µs | 346 µs | 1.2 ms | 5.0 |
-| sku_lookup_miss | small | 9 µs | 10 µs | 13 µs | 16 µs | 1.0 |
-| sku_lookup_miss | medium | 14 µs | 16 µs | 19 µs | 21 µs | 1.0 |
-| product_list_first | small | 2.5 ms | 3.3 ms | 5.3 ms | 6.5 ms | 2.0 |
-| product_list_first | medium | 1.4 ms | 1.7 ms | 2.9 ms | 3.0 ms | 2.0 |
-| product_list_middle | small | 7.1 ms | 7.2 ms | 7.3 ms | 7.3 ms | 2.0 |
-| product_list_middle | medium | 11.0 ms | 11.2 ms | 11.3 ms | 11.6 ms | 2.0 |
-| product_search_ar | small | 3.8 ms | 5.1 ms | 7.2 ms | 8.3 ms | 2.0 |
-| product_search_ar | medium | 20.8 ms | 24.6 ms | 26.7 ms | 26.9 ms | 2.0 |
-| product_search_en | small | 3.2 ms | 3.2 ms | 3.2 ms | 3.2 ms | 2.0 |
-| product_search_en | medium | 52.6 ms | 54.1 ms | 55.2 ms | 57.4 ms | 2.0 |
-| product_search_sku | small | 3.3 ms | 3.4 ms | 3.4 ms | 4.0 ms | 2.0 |
-| product_search_sku | medium | 53.8 ms | 54.4 ms | 54.6 ms | 55.0 ms | 2.0 |
-| product_details | small | 78 µs | 102 µs | 160 µs | 659 µs | 10.0 |
-| product_details | medium | 77 µs | 92 µs | 146 µs | 179 µs | 10.0 |
-| inventory_movements_page | small | 6.3 ms | 6.4 ms | 6.7 ms | 6.9 ms | 2.0 |
-| inventory_movements_page | medium | 83 µs | 177 µs | 282 µs | 356 µs | 2.0 |
+| sku_lookup_hit | small | 206.839µs | 238.249µs | 269.7µs | 592.428µs | 5.0 |
+| sku_lookup_miss | small | 8.788µs | 10.239µs | 11.621µs | 13.127µs | 1.0 |
+| product_list_first | small | 631.438µs | 743.033µs | 1.058208ms | 1.226751ms | 2.0 |
+| product_search_ar | small | 2.177277ms | 2.390832ms | 2.562495ms | 2.937445ms | 2.0 |
+| product_search_en | small | 2.523279ms | 3.50452ms | 5.953666ms | 7.057988ms | 2.0 |
+| product_search_sku | small | 3.955623ms | 4.928452ms | 5.171758ms | 5.179774ms | 2.0 |
+| product_list_middle | small | 1.742625ms | 1.855246ms | 1.921253ms | 2.188618ms | 2.0 |
+| product_details | small | 96.265µs | 107.676µs | 142.651µs | 168.3µs | 9.0 |
+| inventory_movements_page | small | 139.96µs | 233.351µs | 310.903µs | 530.652µs | 2.0 |
+| sku_lookup_hit | medium | 194.327µs | 227.688µs | 360.394µs | 515.66µs | 5.0 |
+| sku_lookup_miss | medium | 8.848µs | 10.46µs | 16.767µs | 17.64µs | 1.0 |
+| product_list_first | medium | 917.657µs | 1.535477ms | 2.362789ms | 3.49743ms | 2.0 |
+| product_search_ar | medium | 25.937015ms | 27.280654ms | 27.970169ms | 29.18815ms | 2.0 |
+| product_search_en | medium | 24.764835ms | 25.373111ms | 32.534492ms | 35.059659ms | 2.0 |
+| product_search_sku | medium | 65.547697ms | 76.464331ms | 76.870743ms | 76.934244ms | 2.0 |
+| product_list_middle | medium | 13.701698ms | 14.336023ms | 15.054939ms | 19.052184ms | 2.0 |
+| product_details | medium | 137.431µs | 322.256µs | 394.244µs | 543.553µs | 9.0 |
+| inventory_movements_page | medium | 159.93µs | 257.504µs | 289.498µs | 373.623µs | 2.0 |
 
-Statement counts are the stable regression gate (§67): SKU lookup ≤ 6,
-list/search ≤ 6, details ≤ 20, movements ≤ 8.
+The run used `go test -count=1 -run '^TestRetailReadPaths$' -v
+./internal/perfbench` after the full race run and large-fixture probe had
+finished. Query counts cover public service calls. Product IDs are sampled
+before the timing window; the fixture's ownership lookup is not counted as
+application work. Inventory reads use populated first pages, rather than
+mostly empty offsets beyond a Variant's history.
 
-### Before / after for the two fixed paths
+`TestReadQueryBudgets` separately uses a tiny valid fixture and enforces
+per-call limits in both normal and race builds: SKU ≤ 6, list ≤ 6, details
+≤ 20 and movements ≤ 8. It also guards indexed SKU equality and combined
+Product/Variant ownership predicates. Large timing windows remain excluded
+under `-race`; the permanent correctness/count guard is never skipped.
 
-| Operation (medium) | Before | After | Change |
-|---|---|---|---|
-| product_list_first | 22.8 ms | 1.4 ms | **16x faster** |
-| product_list_middle | 91.9 ms | 11.0 ms | **8.4x faster** |
-| product_search_ar | 49.7 ms | 20.8 ms | **2.4x faster** |
-| inventory_movements_page | 194 ms | 0.083 ms | **2300x faster** |
+Small and medium read timings are exercised. Large generation was also
+independently validated: 25,000 Products, 60,000 Variants, 250,000 Sales,
+1,000,000 movements, 120 Categories and 40 Tags. Generation took about
+90 seconds in a concurrent local test run; this is not an application
+latency benchmark. Large read timings and concentrated deep-Variant
+ledger histories were NOT RUN in this remediation review.
 
 ## 4. SQLite query plans / indexes
 
@@ -101,8 +119,8 @@ Captured by `internal/perfbench/plans_test.go` (`EXPLAIN QUERY PLAN`).
 | inventory movement page | `SCAN movement ...` (generic `narg` filter) | `SEARCH movement USING COVERING INDEX idx_inventory_movements_variant (variant_id=?)` | sargable query split (below) |
 | movement running balance | `MULTI-INDEX OR` (2 probes/row) | `SEARCH prior USING INDEX idx_inventory_movements_variant (variant_id=? AND created_at<?)` | residual rewrite, provably identical |
 
-Write/storage cost: two additive indexes (`idx_products_catalog_order`
-on products, and the existing variant ledger index reused). Product
+Retail write/storage cost: one additive catalog-order index
+(`idx_products_catalog_order`); the existing Variant ledger index is reused. Product
 writes are infrequent catalog edits; the ledger index was already
 present. No frozen migration (≤000022) was modified.
 
@@ -122,12 +140,16 @@ search page. Additive only.
 
 `ListInventoryMovements` used the generic `narg` filter shape
 (`? IS NULL OR col = ?`), which the planner cannot turn into an index
-seek — it scanned the whole ledger per page (194 ms at 250k rows).
+seek — the recorded plan scanned the ledger rather than seeking the scope.
+The earlier timing for that scan is withdrawn with the invalid fixture.
 Added `ListInventoryMovementsByVariant` / `ByProduct` (and matching
 count twins) with plain equality predicates; the repository dispatches
 on the scope it already has. The UI is always variant- or product-
-scoped, so both paths are now index-backed. **Semantics are identical:**
-same columns, same filters, same ordering, same running-balance result.
+scoped, so both paths are now index-backed. P19-F01 exposed a missing Product conjunct when both scopes were supplied.
+Both Variant list/count queries now preserve that optional Product filter
+while retaining the Variant equality seek. Permanent tests challenge
+matching/mismatched scopes through the repository and public service, plus
+same-timestamp balance ties, pagination and reason filtering.
 
 ### 5.3 Running-balance residual rewrite (Retail)
 
@@ -160,15 +182,16 @@ event_id)`. Additive only; migrations ≤00042 byte-identical.
 
 | Item | Classification | Evidence / rationale |
 |---|---|---|
-| Product search `LIKE '%term%'` over names + translations (54 ms p95 at 10k products) | accepted production-scale limitation | Non-sargable contains-search. The sort cost is gone (index), remaining cost is the scan + translation joins. A proper fix is SQLite FTS5, which adds schema surface and segmentation rules that §12 forbids assuming for Arabic. Management search, not POS; within the 250 ms budget. |
-| Offset pagination at very large page depth (product list middle 11 ms at 50% depth on 10k) | future growth concern | Bounded and budget-compliant today. Keyset pagination would change the API contract (§13) — deliberately deferred rather than risk a contract break in a performance phase. |
-| Movement `resulting_stock` is computed per returned row | accepted production-scale limitation | Provably correct and now index-range-backed (0.18 ms p95). A precomputed running-total column would be a schema change and a correctness risk to the ledger. |
+| Product search `LIKE '%term%'` over names + translations (up to 76.5 ms p95 in the current medium search run) | accepted production-scale limitation | Non-sargable contains-search. The sort cost is gone (index), remaining cost is the scan + translation joins. A proper fix is SQLite FTS5, which adds schema surface and segmentation rules that §12 forbids assuming for Arabic. Management search, not POS; within the 250 ms budget. |
+| Offset pagination at very large page depth (product list middle 14.3 ms p95 at 50% depth on 10k) | future growth concern | Bounded and budget-compliant today. Keyset pagination would change the API contract (§13) — deliberately deferred rather than risk a contract break in a performance phase. |
+| Movement `resulting_stock` is computed per returned row | accepted production-scale limitation | Provably correct and now index-range-backed (0.258 ms p95 in sampled medium first pages). A precomputed running-total column would be a schema change and a correctness risk to the ledger. |
 | Large-profile seeding time | Note | `perfdata` Large (1M movements) is a dev tool; generation cost is not an application cost. |
 
 ## 7. Runtime budgets not separately measured here
 
-Retail startup breakdown, sale/return finalization, Cloud dashboard
-overview, fleet page and soak runs are reported in the Phase 19
-implementation report with their harness and duration. Where a
-multi-hour soak was not feasible in this environment, the report says
-`NOT RUN` with the exact reason rather than implying a pass.
+Retail startup breakdown, transaction latency under load, Cloud discovery
+at 1k/10k/100k events, SERIALIZABLE projector contention, offline recovery,
+500/1,000-device fleet behavior and long-running soak are NOT RUN in this
+remediation review. A fresh committed-pair freeze review must evaluate
+those original Phase 19 requirements. Functional backend/race results do
+not substitute for these performance/load evidence classes.
