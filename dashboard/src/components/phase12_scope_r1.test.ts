@@ -6,6 +6,8 @@ import {dashboardApi,ApiError} from '../lib/api.js';
 vi.mock('../lib/chartAction.js',()=>({chart:()=>({destroy(){}})}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+// An all-Stores OWNER with a FULL (MFA-complete) session (ADR-0053).
+const ME={authenticated:true,stage:'FULL' as const,csrf_token:'t',user:{id:'u',login:'review@test',display_name:'review',role:'OWNER' as const,mfa_enabled:true},permissions:['reports.read','catalog.read'],all_stores:true,store_ids:[],session:{expires_at:'',idle_timeout_seconds:1800}};
 const bucket={currency:'EGP',line_sales_minor:'100',line_refund_minor:'0',net_minor:'100'};
 function tags(name:string){return {generated_at:'',timezone:'Africa/Cairo',store_id:null,overlap_note:'Tag totals overlap and must not be summed',rows:[{tag_id:A,tag_slug:'gold',name_ar:name,name_en:name,units:1,units_returned:0,currencies:[bucket]}]};}
 it('R1 regression: valid renamed historical Tag rows collide in the actual component',()=>{
@@ -15,7 +17,7 @@ it('R1 regression: valid renamed historical Tag rows collide in the actual compo
 it('R1 regression: Store B selected while loaded Store A Tags remain visible',async()=>{
  window.history.replaceState({},'',`/dashboard/categories?store_id=${A}`);
  for(const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi,k as any).mockImplementation(async()=>({}) as any);
- vi.mocked(dashboardApi.me).mockResolvedValue({authenticated:true,username:'review'});
+ vi.mocked(dashboardApi.me).mockResolvedValue(ME);
  vi.mocked(dashboardApi.stores).mockResolvedValue({stores:[A,B].map(id=>({store_id:id,display_name:id===A?'Store A':'Store B',timezone:'Africa/Cairo',status:'active',device_count:1,created_at:'',updated_at:''}))});
  vi.mocked(dashboardApi.overview).mockResolvedValue({period:{start_local:'2026-10-03',end_local_exclusive:'2026-10-04'},summary:{transaction_count:0,return_transaction_count:0,currency_totals:[]},normalized:{},averages:{},fx:{}} as any);
  vi.mocked(dashboardApi.daily).mockResolvedValue({days:[],display_currency:'EGP',normalized:false} as any);
@@ -36,7 +38,7 @@ it('R1 regression: Store B selected while loaded Store A Tags remain visible',as
 it('R1 regression: Store B selected while loaded Store A health remains visible',async()=>{
  window.history.replaceState({},'',`/dashboard/sync?store_id=${A}`);
  for(const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi,k as any).mockImplementation(async()=>({}) as any);
- vi.mocked(dashboardApi.me).mockResolvedValue({authenticated:true,username:'review'});
+ vi.mocked(dashboardApi.me).mockResolvedValue(ME);
  vi.mocked(dashboardApi.stores).mockResolvedValue({stores:[A,B].map(id=>({store_id:id,display_name:id===A?'Store A':'Store B',timezone:'Africa/Cairo',status:'active',device_count:1,created_at:'',updated_at:''}))});
  vi.mocked(dashboardApi.overview).mockResolvedValue({period:{start_local:'2026-10-03',end_local_exclusive:'2026-10-04'},summary:{transaction_count:0,return_transaction_count:0,currency_totals:[]},normalized:{},averages:{},fx:{}} as any);
  vi.mocked(dashboardApi.daily).mockResolvedValue({days:[],display_currency:'EGP',normalized:false} as any);
@@ -57,7 +59,7 @@ it('R1 regression: Store B selected while loaded Store A health remains visible'
 it('R1 regression: new Store B Retail totals appear beside old Store A online totals',async()=>{
  window.history.replaceState({},'',`/dashboard/sales?store_id=${A}`);
  for(const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi,k as any).mockImplementation(async()=>({}) as any);
- vi.mocked(dashboardApi.me).mockResolvedValue({authenticated:true,username:'review'});
+ vi.mocked(dashboardApi.me).mockResolvedValue(ME);
  vi.mocked(dashboardApi.stores).mockResolvedValue({stores:[A,B].map(id=>({store_id:id,display_name:id===A?'Store A':'Store B',timezone:'Africa/Cairo',status:'active',device_count:1,created_at:'',updated_at:''}))});
  vi.mocked(dashboardApi.overview).mockImplementation(async(_p,s)=>({period:{start_local:'2026-10-03',end_local_exclusive:'2026-10-04'},summary:{transaction_count:0,return_transaction_count:0,currency_totals:[{currency:'EGP',net_sales_minor:s===A?'1100':'2200'}]},normalized:{},averages:{},fx:{}} as any));
  vi.mocked(dashboardApi.daily).mockResolvedValue({days:[],display_currency:'EGP',normalized:false} as any);
@@ -83,7 +85,7 @@ function deferred<T>() {let resolve!:(v:T)=>void;let reject!:(e:Error)=>void;con
 function setupScopes(){
  window.history.replaceState({},'',`/dashboard/sales?store_id=${A}`);
  for(const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi,k as any).mockImplementation(async()=>({}) as any);
- vi.mocked(dashboardApi.me).mockResolvedValue({authenticated:true,username:'review'});
+ vi.mocked(dashboardApi.me).mockResolvedValue(ME);
  vi.mocked(dashboardApi.stores).mockResolvedValue({stores:[A,B].map(id=>({store_id:id,display_name:id===A?'Store A':'Store B',timezone:'Africa/Cairo',status:'active',device_count:1,created_at:'',updated_at:''}))});
  vi.mocked(dashboardApi.daily).mockResolvedValue({days:[],display_currency:'EGP',normalized:false} as any);
  for(const k of ['products','categories','branches'] as const)vi.mocked(dashboardApi[k]).mockResolvedValue({rows:[]} as any);

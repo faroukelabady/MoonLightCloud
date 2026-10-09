@@ -1,11 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
+import { uiLogin } from './auth';
 
 // Targeted Phase 6C browser suite: authenticated orders page loads,
 // list renders, detail renders, exact money, unmapped warning, and no
 // console/page errors. API responses are mocked; the suite proves the
 // shipped UI contract, not backend state.
-const USER = process.env.E2E_DASHBOARD_USER ?? 'operator';
-const PASS = process.env.E2E_DASHBOARD_PASSWORD ?? 'moonlight-dev-operator';
+// Explicit dev-stack credentials + TOTP (no default account): see auth.ts.
 
 const ORDERS = {
 	orders: [
@@ -52,11 +52,7 @@ async function mockOrders(page: Page) {
 }
 
 async function login(page: Page) {
-	await page.goto('login');
-	await page.getByLabel(/اسم المستخدم/).fill(USER);
-	await page.getByLabel(/كلمة المرور/).fill(PASS);
-	await page.getByRole('button', { name: /دخول/ }).click();
-	await expect(page.getByText('لوحة متابعة المبيعات')).toBeVisible({ timeout: 15000 });
+	await uiLogin(page);
 }
 
 test('online orders page loads, renders list, detail, exact money, and warning', async ({ page }) => {

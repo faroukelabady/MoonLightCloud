@@ -2,12 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
-	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
+
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 )
 
@@ -26,8 +27,8 @@ func testConfig(t *testing.T, url string) config.Config {
 	t.Setenv("STORE_TIMEZONE", "Africa/Cairo")
 	// Explicit dev-open reporting (mirrors the dev compose default).
 	t.Setenv("ALLOW_UNAUTHENTICATED_REPORTING", "true")
-	t.Setenv("DASHBOARD_USERNAME", "op")
-	t.Setenv("DASHBOARD_PASSWORD_HASH", testPasswordHash())
+	// Synthetic test-only MFA key (never a production value).
+	t.Setenv("AUTH_MFA_ENCRYPTION_KEY", testMFAKey)
 	c, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -42,13 +43,8 @@ func testConfig(t *testing.T, url string) config.Config {
 	return c
 }
 
-func testPasswordHash() string {
-	h, err := dashboard.HashPassword("op-test-password")
-	if err != nil {
-		panic(err)
-	}
-	return h
-}
+// testMFAKey is a synthetic, test-only AUTH_MFA_ENCRYPTION_KEY.
+var testMFAKey = base64.StdEncoding.EncodeToString([]byte("test-only-mfa-key-not-production"))
 
 func TestNewHealthyAndReady(t *testing.T) {
 	url := testutil.Isolated(t)

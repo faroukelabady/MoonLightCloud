@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -29,6 +28,7 @@ type updateHTTP struct {
 	srv    *httptest.Server
 	client *http.Client
 	priv   ed25519.PrivateKey
+	owner  *human
 }
 
 func newUpdateHTTP(t *testing.T) *updateHTTP {
@@ -45,10 +45,12 @@ func newUpdateHTTP(t *testing.T) *updateHTTP {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
+	clk := humanKit(t, a)
 	srv := httptest.NewServer(a.Handler)
 	t.Cleanup(srv.Close)
-	jar, _ := cookiejar.New(nil)
-	return &updateHTTP{t: t, a: a, srv: srv, client: &http.Client{Jar: jar}, priv: priv}
+	// An explicit, MFA-enrolled OWNER fixture (no default account exists).
+	owner := fullOwner(t, a, srv, clk, "owner.test")
+	return &updateHTTP{t: t, a: a, srv: srv, client: owner.client, priv: priv, owner: owner}
 }
 
 func (h *updateHTTP) do(method, path string, body any, header map[string]string, client *http.Client) (int, string) {
@@ -60,6 +62,9 @@ func (h *updateHTTP) do(method, path string, body any, header map[string]string,
 	}
 	req, _ := http.NewRequest(method, h.srv.URL+path, reader)
 	req.Header.Set("Content-Type", "application/json")
+	if client == h.client {
+		req.Header.Set("X-CSRF-Token", h.owner.csrf)
+	}
 	for k, v := range header {
 		req.Header.Set(k, v)
 	}
@@ -75,12 +80,8 @@ func (h *updateHTTP) do(method, path string, body any, header map[string]string,
 	return res.StatusCode, string(out)
 }
 
-func (h *updateHTTP) login() {
-	h.t.Helper()
-	if code, body := h.do("POST", "/api/v1/dashboard/auth/login", map[string]string{"username": "op", "password": "op-test-password"}, nil, h.client); code != 200 {
-		h.t.Fatalf("login %d %s", code, body)
-	}
-}
+// login is a no-op: the OWNER fixture already holds a FULL MFA session.
+func (h *updateHTTP) login() { h.t.Helper() }
 
 func (h *updateHTTP) bound(name, storeID string) auth.Provisioned {
 	h.t.Helper()

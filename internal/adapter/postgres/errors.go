@@ -49,3 +49,18 @@ func uuidString(u pgtype.UUID) string {
 	copy(arr[:], u.Bytes[:])
 	return arr.String()
 }
+
+// pgCode returns the SQLSTATE of a PostgreSQL error ("" otherwise).
+func pgCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}
+
+// validUUID reports a parseable UUID string.
+func validUUID(s string) bool {
+	_, err := uuid.Parse(s)
+	return err == nil
+}

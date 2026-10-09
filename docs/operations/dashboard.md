@@ -9,21 +9,23 @@ binary, distroless runtime serves both. No Node at runtime; final user is
 
 ## Required environment (production)
 
-- `DASHBOARD_USERNAME` — explicit (no default outside development).
-- `DASHBOARD_PASSWORD_HASH` — Argon2id PHC from `dashboard hash-password`;
-  the dev placeholder is rejected outside development.
-- `DASHBOARD_SESSION_TTL` — optional, 15m–168h (default 12h).
+- `AUTH_MFA_ENCRYPTION_KEY` — base64 32-byte key sealing TOTP secrets
+  (required; startup fails without it). Store it in the secret manager,
+  never in the database or image.
+- `AUTH_SESSION_IDLE_TIMEOUT` / `AUTH_SESSION_ABSOLUTE_TIMEOUT` — optional
+  (30m / 12h defaults; bounded).
+- The removed `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD_HASH` /
+  `DASHBOARD_SESSION_TTL` variables make startup fail.
 - `STORE_TIMEZONE`, `DATABASE_URL`, `DEVICE_SECRET_PEPPER` — as before.
-- Cookies are `Secure` in production (HTTP-only behind TLS-terminating
-  ingress; the app sets the flag by environment).
+- Session cookies are `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`
+  outside development (no override). Production must be served over HTTPS.
 
-## Sessions
+## Accounts and sessions
 
-Stateless HMAC cookies (key derived from the device pepper via HKDF):
-no server-side session store, no Redis. Logout clears the cookie; theft
-window is bounded by the short expiry. Rate limiting is process-local
-(10 failures / 5 min / IP → 429); multi-instance deployments share no
-limiter state (documented limitation, acceptable at this scale).
+Human accounts (OWNER/ADMIN), Store memberships, TOTP MFA, opaque
+server-side sessions, CSRF and throttling are described in
+`docs/operations/auth.md` and ADR-0053. First deployment: run
+`moonlight-cloud auth bootstrap-owner` against the production database.
 
 ## Manual sync control
 
@@ -126,9 +128,9 @@ E2E_VIEWPORT=1366x768 | 1440x900 | 1536x1024 | 1920x1080
 E2E_BASE_URL=http://127.0.0.1:8080/dashboard/ npx playwright test
 ```
 
-Credentials default to the dev operator
-(`operator` / `moonlight-dev-operator`, overridable via
-`E2E_DASHBOARD_USER` / `E2E_DASHBOARD_PASSWORD`).
+Credentials are explicit (no default account): `E2E_DASHBOARD_USER`,
+`E2E_DASHBOARD_PASSWORD` and `E2E_DASHBOARD_TOTP_SECRET` (the base32 key
+shown at MFA enrollment of a dev-stack account); see `e2e/auth.ts`.
 
 The suite is self-contained: all dashboard APIs are route-mocked with
 Phase 4B contract-valid fixtures (net-primary overview, gross/refund/net

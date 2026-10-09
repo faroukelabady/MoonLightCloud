@@ -40,19 +40,18 @@ No — dev serves Go from source; build `dashboard/dist` once with
 serves it at `/dashboard`). For hot frontend iteration use Vite dev
 (`:5173`, API proxied to Go on `:8080`).
 
-## Dashboard operator credentials (development)
+## Dashboard accounts (development)
 
-Dev defaults: username `operator`, password `moonlight-dev-operator`
-(documented dev-only constants, rejected outside development). Provision
-production values via environment:
+There is no default account (ADR-0053). Create the first OWNER once per
+database, then sign in and enroll TOTP MFA in the browser:
 
 ```bash
-printf 'strong-password' | go run ./cmd/moonlight-cloud dashboard hash-password
-# DASHBOARD_USERNAME=boss
-# DASHBOARD_PASSWORD_HASH=<printed PHC string>
+go run ./cmd/moonlight-cloud auth bootstrap-owner --login dev@example.test --display-name "Dev Owner"
 ```
 
-Never commit hashes of real passwords. Never log passwords.
+The password is read from the terminal without echo (or `--password-stdin`).
+Local scripts generate `AUTH_MFA_ENCRYPTION_KEY` into `.env.local`. Never
+commit passwords, TOTP secrets or recovery codes; never log them.
 
 ## E2E
 

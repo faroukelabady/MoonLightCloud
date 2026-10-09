@@ -3,9 +3,11 @@ package http
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
@@ -28,7 +30,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, dashAuth DashboardHandlers, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, humanAuth *HumanAuth, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -57,50 +59,33 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		ReportAuth(reportingToken)(http.HandlerFunc(reports.SalesDaily)))
 	mux.Handle("GET /api/v1/reports/sales/breakdown",
 		ReportAuth(reportingToken)(http.HandlerFunc(reports.SalesBreakdown)))
-	// Dashboard operator BFF (session cookie; never the reporting token).
-	mux.HandleFunc("POST /api/v1/dashboard/auth/login", dashAuth.Login)
-	mux.Handle("POST /api/v1/dashboard/auth/logout",
-		dashAuth.RequireDashboardSession(RequireSameOrigin(http.HandlerFunc(dashAuth.Logout))))
-	mux.Handle("GET /api/v1/dashboard/auth/me",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashAuth.Me)))
-	mux.Handle("GET /api/v1/dashboard/overview",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Overview)))
-	mux.Handle("GET /api/v1/dashboard/daily",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Daily)))
-	mux.Handle("GET /api/v1/dashboard/tags",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Tags)))
-	mux.Handle("GET /api/v1/dashboard/orders/summary",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.OrderAnalytics)))
-	mux.Handle("GET /api/v1/dashboard/catalog-health",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.CatalogHealth)))
-	mux.Handle("GET /api/v1/dashboard/products",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Products)))
-	mux.Handle("GET /api/v1/dashboard/categories",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Categories)))
-	mux.Handle("GET /api/v1/dashboard/branches",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Branches)))
-	mux.Handle("GET /api/v1/dashboard/sync-health",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.SyncHealth)))
-	mux.Handle("GET /api/v1/dashboard/activity",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.Activity)))
-	mux.Handle("GET /api/v1/dashboard/sales/latest",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashData.LatestSales)))
-	mux.Handle("GET /api/v1/dashboard/orders",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashOrders.Orders)))
-	mux.Handle("GET /api/v1/dashboard/orders/{provider_key}/{external_order_id}",
-		dashAuth.RequireDashboardSession(http.HandlerFunc(dashOrders.OrderDetail)))
+	// Dashboard (ADR-0053): human authentication + named permission +
+	// server-side Store scope on EVERY route; CSRF (same-origin + per-session
+	// token) on every mutation. Device credentials are never valid here.
+	humanAuth.AuthRoutes(mux)
+	g := humanAuth.Guard
+	mux.Handle("GET /api/v1/dashboard/overview", g(humanauth.PermReportsRead, ScopeQuery, dashData.Overview))
+	mux.Handle("GET /api/v1/dashboard/daily", g(humanauth.PermReportsRead, ScopeQuery, dashData.Daily))
+	mux.Handle("GET /api/v1/dashboard/tags", g(humanauth.PermReportsRead, ScopeQuery, dashData.Tags))
+	mux.Handle("GET /api/v1/dashboard/orders/summary", g(humanauth.PermReportsRead, ScopeQuery, dashData.OrderAnalytics))
+	mux.Handle("GET /api/v1/dashboard/catalog-health", g(humanauth.PermCatalogRead, ScopeQuery, dashData.CatalogHealth))
+	mux.Handle("GET /api/v1/dashboard/products", g(humanauth.PermReportsRead, ScopeQuery, dashData.Products))
+	mux.Handle("GET /api/v1/dashboard/categories", g(humanauth.PermReportsRead, ScopeQuery, dashData.Categories))
+	mux.Handle("GET /api/v1/dashboard/branches", g(humanauth.PermReportsRead, ScopeQuery, dashData.Branches))
+	mux.Handle("GET /api/v1/dashboard/sync-health", g(humanauth.PermReportsRead, ScopeQuery, dashData.SyncHealth))
+	mux.Handle("GET /api/v1/dashboard/activity", g(humanauth.PermReportsRead, ScopeQuery, dashData.Activity))
+	mux.Handle("GET /api/v1/dashboard/sales/latest", g(humanauth.PermReportsRead, ScopeQuery, dashData.LatestSales))
+	mux.Handle("GET /api/v1/dashboard/orders", g(humanauth.PermReportsRead, ScopeQuery, dashOrders.Orders))
+	mux.Handle("GET /api/v1/dashboard/orders/{provider_key}/{external_order_id}", g(humanauth.PermReportsRead, ScopeQuery, dashOrders.OrderDetail))
 	if dashDevices != nil {
-		mux.Handle("GET /api/v1/dashboard/devices",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.Devices)))
+		mux.Handle("GET /api/v1/dashboard/devices", g(humanauth.PermDevicesRead, ScopeHandler, dashDevices.Devices))
 		if dashDevices.Stores != nil {
-			mux.Handle("GET /api/v1/dashboard/stores",
-				dashAuth.RequireDashboardSession(http.HandlerFunc((&StoreHandlers{Stores: dashDevices.Stores}).ListStores)))
+			mux.Handle("GET /api/v1/dashboard/stores", g(humanauth.PermDevicesRead, ScopeHandler, (&StoreHandlers{Stores: dashDevices.Stores}).ListStores))
 		}
-		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(dashDevices.CreateSyncRequest)))
+		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests", g(humanauth.PermDevicesManage, ScopeHandler, dashDevices.CreateSyncRequest))
 	}
 	// Phase 16 catalog admin: Retail pulls targets over its outbound
-	// device channel; operator creates over the dashboard session.
+	// device channel; operators act through the guarded dashboard.
 	// Registered only when the admin service is wired; otherwise 404.
 	if catalogAdmin != nil {
 		mux.Handle("GET /api/v1/device-control/catalog-commands",
@@ -109,50 +94,37 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.ReportCatalogResult)))
 		mux.Handle("POST /api/v1/device-control/capabilities",
 			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.ReportCapabilities)))
-		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.CreateCommand)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.ListCommands)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands/{id}",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.GetCommand)))
-		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands/{id}/cancel",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.CancelCommand)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/products",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProducts)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductDetail)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/configurations",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminConfigurations)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/variants",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductVariants)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/product-types",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductTypes)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/product-types/{id}",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminProductTypeDetail)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/categories",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminCategories)))
-		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(catalogAdmin.AdminTags)))
+		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands", g(humanauth.PermCatalogManage, ScopeHandler, catalogAdmin.CreateCommand))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.ListCommands))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands/{id}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.GetCommand))
+		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands/{id}/cancel", g(humanauth.PermCatalogManage, ScopeQuery, catalogAdmin.CancelCommand))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProducts))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProductDetail))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/configurations", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminConfigurations))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/products/{id}/variants", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProductVariants))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/product-types", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProductTypes))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/product-types/{id}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProductTypeDetail))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/categories", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminCategories))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminTags))
 	}
 	// Phase 18 release registry, fleet rollout control and device update
-	// channel (ADR-0051/0052). Operator mutations are same-origin
-	// dashboard-session only; device routes take identity from the device
-	// credential only.
+	// channel (ADR-0051/0052). Releases are global infrastructure: reading
+	// needs releases.read, importing/revoking (affects every Store) needs
+	// releases.manage on an all-Stores account. Device routes take identity
+	// from the device credential only.
 	if updates != nil {
-		dash := func(h http.HandlerFunc) http.Handler { return dashAuth.RequireDashboardSession(h) }
-		dashMut := func(h http.HandlerFunc) http.Handler { return dashAuth.RequireDashboardSession(RequireSameOrigin(h)) }
-		mux.Handle("GET /api/v1/dashboard/releases", dash(updates.ListReleases))
-		mux.Handle("POST /api/v1/dashboard/releases", dashMut(updates.ImportRelease))
-		mux.Handle("GET /api/v1/dashboard/releases/{id}", dash(updates.GetRelease))
-		mux.Handle("POST /api/v1/dashboard/releases/{id}/status", dashMut(updates.SetReleaseStatus))
-		mux.Handle("GET /api/v1/dashboard/rollouts", dash(updates.ListRollouts))
-		mux.Handle("POST /api/v1/dashboard/rollouts", dashMut(updates.CreateRollout))
-		mux.Handle("GET /api/v1/dashboard/rollouts/{id}", dash(updates.GetRollout))
-		mux.Handle("GET /api/v1/dashboard/rollouts/{id}/targets", dash(updates.ListTargets))
-		mux.Handle("POST /api/v1/dashboard/rollouts/{id}/{action}", dashMut(updates.RolloutAction))
-		mux.Handle("GET /api/v1/dashboard/update-targets/{id}/history", dash(updates.TargetHistory))
-		mux.Handle("GET /api/v1/dashboard/fleet", dash(updates.Fleet))
-		mux.Handle("GET /api/v1/dashboard/update-audit", dash(updates.Audit))
+		mux.Handle("GET /api/v1/dashboard/releases", g(humanauth.PermReleasesRead, ScopeNone, updates.ListReleases))
+		mux.Handle("POST /api/v1/dashboard/releases", g(humanauth.PermReleasesManage, ScopeAllStores, updates.ImportRelease))
+		mux.Handle("GET /api/v1/dashboard/releases/{id}", g(humanauth.PermReleasesRead, ScopeNone, updates.GetRelease))
+		mux.Handle("POST /api/v1/dashboard/releases/{id}/status", g(humanauth.PermReleasesManage, ScopeAllStores, updates.SetReleaseStatus))
+		mux.Handle("GET /api/v1/dashboard/rollouts", g(humanauth.PermRolloutsRead, ScopeQuery, updates.ListRollouts))
+		mux.Handle("POST /api/v1/dashboard/rollouts", g(humanauth.PermRolloutsManage, ScopeHandler, updates.CreateRollout))
+		mux.Handle("GET /api/v1/dashboard/rollouts/{id}", g(humanauth.PermRolloutsRead, ScopeHandler, updates.GetRollout))
+		mux.Handle("GET /api/v1/dashboard/rollouts/{id}/targets", g(humanauth.PermRolloutsRead, ScopeQuery, updates.ListTargets))
+		mux.Handle("POST /api/v1/dashboard/rollouts/{id}/{action}", g(humanauth.PermRolloutsManage, ScopeHandler, updates.RolloutAction))
+		mux.Handle("GET /api/v1/dashboard/update-targets/{id}/history", g(humanauth.PermRolloutsRead, ScopeAllStores, updates.TargetHistory))
+		mux.Handle("GET /api/v1/dashboard/fleet", g(humanauth.PermDevicesRead, ScopeQuery, updates.Fleet))
+		mux.Handle("GET /api/v1/dashboard/update-audit", g(humanauth.PermRolloutsRead, ScopeQuery, updates.Audit))
 		mux.Handle("POST /api/v1/device-control/update/status",
 			DeviceAuth(devices)(http.HandlerFunc(updates.DeviceStatus)))
 		mux.Handle("GET /api/v1/device-control/update/command",
@@ -160,21 +132,15 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		mux.Handle("POST /api/v1/device-control/update/targets/{id}/report",
 			DeviceAuth(devices)(http.HandlerFunc(updates.DeviceReport)))
 	}
-	// Phase 7D operations incidents (dashboard session only; device
-	// credentials never valid here).
+	// Phase 7D operations incidents span every Store: all-Stores humans
+	// only (device credentials never valid here).
 	if ops != nil {
-		mux.Handle("GET /api/v1/dashboard/operations/incidents",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Incidents)))
-		mux.Handle("GET /api/v1/dashboard/operations/incidents/{id}",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.IncidentDetail)))
-		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/acknowledge",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Acknowledge)))
-		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/resolve",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Resolve)))
-		mux.Handle("GET /api/v1/dashboard/operations/summary",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.Summary)))
-		mux.Handle("GET /api/v1/dashboard/operations/devices/summary",
-			dashAuth.RequireDashboardSession(http.HandlerFunc(ops.DeviceSummary)))
+		mux.Handle("GET /api/v1/dashboard/operations/incidents", g(humanauth.PermOperationsRead, ScopeAllStores, ops.Incidents))
+		mux.Handle("GET /api/v1/dashboard/operations/incidents/{id}", g(humanauth.PermOperationsRead, ScopeAllStores, ops.IncidentDetail))
+		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/acknowledge", g(humanauth.PermOperationsAct, ScopeAllStores, ops.Acknowledge))
+		mux.Handle("POST /api/v1/dashboard/operations/incidents/{id}/resolve", g(humanauth.PermOperationsAct, ScopeAllStores, ops.Resolve))
+		mux.Handle("GET /api/v1/dashboard/operations/summary", g(humanauth.PermOperationsRead, ScopeAllStores, ops.Summary))
+		mux.Handle("GET /api/v1/dashboard/operations/devices/summary", g(humanauth.PermOperationsRead, ScopeAllStores, ops.DeviceSummary))
 	}
 	// Provider webhook ingestion is public-but-signed: HMAC authority
 	// only, never dashboard session or device tokens. Both commerce
@@ -202,6 +168,7 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	mux.HandleFunc("/", NotFound)
 
 	var h http.Handler = mux
+	h = apiSecurityHeaders(h)
 	h = limitBody(defaultMaxBodyBytes)(h)
 	h = AccessLog(log, h)
 	h = RequestIDMiddleware(h)
@@ -252,4 +219,20 @@ func limitBody(max int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// apiSecurityHeaders (ADR-0053): API responses are never sniffed, and
+// dashboard (human) API responses are never cached, so Back navigation
+// after logout cannot replay protected data from the browser cache.
+func apiSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			if strings.HasPrefix(r.URL.Path, "/api/v1/dashboard/") {
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Referrer-Policy", "same-origin")
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }

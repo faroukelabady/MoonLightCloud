@@ -49,16 +49,19 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 | Provision device (dev) | `./scripts/dev-provision-device.sh [name]` | — |
 | Device admin | `device list / rotate <id> / revoke <id>` via `go run ./cmd/moonlight-cloud` | — |
 | Projection ops | `projection status` / `projection retry <event-id>` (safe, auditable) | — |
-| Dashboard password hash | `dashboard hash-password` reads password from stdin, prints Argon2id PHC | — |
+| First OWNER (once) | `auth bootstrap-owner --login L --display-name N` (password via TTY / `--password-stdin`) | — |
+| Account recovery | `auth reset-password --login L [--reset-mfa]` (server access required) | — |
 
 ## Dashboard (Phase 3B)
 
 Arabic-first RTL operator UI at `http://localhost:8080/dashboard`
-(login: dev defaults `operator` / `moonlight-dev-operator`, dev only).
+(no default account: bootstrap an OWNER with `auth bootstrap-owner`, then
+sign in and enroll TOTP MFA).
 Frontend lives in `dashboard/` (Svelte 5 + TypeScript + Vite + ECharts);
 see `docs/architecture/dashboard.md` (development) and
-`docs/operations/dashboard.md` (deployment). The browser uses a session
-cookie only — `REPORTING_API_TOKEN` never reaches it.
+`docs/operations/dashboard.md` (deployment) and `docs/operations/auth.md`
+(accounts, MFA, recovery). The browser holds only an HttpOnly session
+cookie and an in-memory CSRF token — `REPORTING_API_TOKEN` never reaches it.
 
 ## Layout
 
@@ -77,9 +80,10 @@ See `.env.example` (placeholders only, never commit secrets):
   reports need ALL of `ENVIRONMENT=development`,
   `ALLOW_UNAUTHENTICATED_REPORTING=true`, and no token — anything else
   (including a missing `ENVIRONMENT`) fails startup.
-- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD_HASH`: operator login (dev
-  defaults only with explicit `ENVIRONMENT=development`; omitted
-  environments fail closed).
+- `AUTH_MFA_ENCRYPTION_KEY`: required everywhere (base64 32 bytes) — seals
+  TOTP secrets; `AUTH_SESSION_IDLE_TIMEOUT` / `AUTH_SESSION_ABSOLUTE_TIMEOUT`
+  bound sessions. Humans live in PostgreSQL (OWNER/ADMIN, Store
+  memberships, MFA); there is no configured or default login (ADR-0053).
 - `TRUSTED_PROXY_CIDRS`: peers whose `X-Forwarded-For` is trusted for login
   rate limiting (empty trusts none).
 

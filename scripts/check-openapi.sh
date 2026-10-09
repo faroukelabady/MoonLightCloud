@@ -41,6 +41,10 @@ for route, methods in spec.get("paths", {}).items():
         # instead of a 200 it can never return; a 2xx is still mandatory.
         if not codes & {"200", "201"}:
             raise SystemExit(f"FAIL: {method.upper()} {route} missing '200'/'201' response")
+        # The public activation endpoint has no session to reject: invalid
+        # tokens are 400 ACTIVATION_INVALID (documented); nothing returns 401.
+        if route == "/api/v1/dashboard/auth/activate":
+            continue
         if "401" not in codes:
             raise SystemExit(f"FAIL: {method.upper()} {route} missing '401' response")
 

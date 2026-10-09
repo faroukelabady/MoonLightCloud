@@ -40,6 +40,25 @@ ensure_dev_reporting_env() {
     export ALLOW_UNAUTHENTICATED_REPORTING=true
   fi
 }
+# ensure_dev_auth_env provides AUTH_MFA_ENCRYPTION_KEY for LOCAL development
+# scripts only (ADR-0053: the key is required in every environment). The
+# first run generates a random 32-byte key into the gitignored .env.local
+# (mode 0600) so MFA enrolled in the dev database keeps working across runs.
+# An explicit value is never overridden; non-development environments must
+# configure their own key (the application fails closed without one).
+ensure_dev_auth_env() {
+  if [[ -n "${AUTH_MFA_ENCRYPTION_KEY:-}" || "${ENVIRONMENT:-development}" != "development" ]]; then
+    return 0
+  fi
+  local key
+  key="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+  umask 077
+  printf 'AUTH_MFA_ENCRYPTION_KEY=%s\n' "$key" >>"$REPO_ROOT/.env.local"
+  chmod 600 "$REPO_ROOT/.env.local"
+  export AUTH_MFA_ENCRYPTION_KEY="$key"
+  echo "generated a local development AUTH_MFA_ENCRYPTION_KEY in .env.local" >&2
+}
+
 require_dev() {
   local env="${ENVIRONMENT:-development}"
   if [[ "$env" != "development" ]]; then

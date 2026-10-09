@@ -27,12 +27,7 @@ type CatalogAdminHandlers struct {
 	}
 }
 
-func (h *CatalogAdminHandlers) actorOf(r *http.Request) string {
-	if user, ok := r.Context().Value(dashboardUserKey).(string); ok && user != "" {
-		return user
-	}
-	return "dashboard-operator"
-}
+func (h *CatalogAdminHandlers) actorOf(r *http.Request) string { return operatorOf(r) }
 
 // CreateCommand serves POST /api/v1/dashboard/catalog-admin/commands.
 // Typed server-side request models only: no arbitrary type/payload
@@ -58,6 +53,10 @@ func (h *CatalogAdminHandlers) CreateCommand(w http.ResponseWriter, r *http.Requ
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
 		WriteError(w, r, apperr.New(apperr.InvalidInput, "invalid command request"))
+		return
+	}
+	// ADR-0053: the command's Store must be one the human administers.
+	if !RequireStore(w, r, req.StoreID) {
 		return
 	}
 	payload, err := json.Marshal(req.Payload)

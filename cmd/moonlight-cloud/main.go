@@ -45,7 +45,6 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
-	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
@@ -94,8 +93,8 @@ func run(args []string) error {
 		return businessReportsCmd(args, os.Stdout, os.Stderr)
 	case "operations":
 		return operationsCmd(args, os.Stdout, os.Stderr)
-	case "dashboard":
-		return dashboardCmd(args)
+	case "auth":
+		return authCmd(args)
 	case "probe":
 		return probe(args)
 	case "dbprobe":
@@ -104,7 +103,7 @@ func run(args []string) error {
 		fmt.Printf("moonlight-cloud version=%s commit=%s build_time=%s\n", version, commit, buildTime)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q: want serve|migrate|device|projection|commerce|notifications|business-reports|operations|dashboard|probe|version", cmd)
+		return fmt.Errorf("unknown command %q: want serve|migrate|device|auth|projection|commerce|notifications|business-reports|operations|probe|version", cmd)
 	}
 }
 
@@ -260,36 +259,6 @@ func migrateCmd(args []string) error {
 	default:
 		return fmt.Errorf("unknown migrate subcommand %q", args[0])
 	}
-}
-
-// dashboardCmd hosts operator helpers. hash-password reads a password from
-// stdin (never argv, never logs) and prints the Argon2id PHC string for
-// DASHBOARD_PASSWORD_HASH provisioning.
-func dashboardCmd(args []string) error {
-	if len(args) == 0 || args[0] != "hash-password" {
-		return fmt.Errorf("usage: moonlight-cloud dashboard hash-password < /dev/stdin")
-	}
-	var pw strings.Builder
-	buf := make([]byte, 4096)
-	for {
-		n, err := os.Stdin.Read(buf)
-		if n > 0 {
-			pw.Write(buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-	password := strings.TrimSpace(pw.String())
-	if password == "" {
-		return fmt.Errorf("empty password on stdin")
-	}
-	hash, err := dashboard.HashPassword(password)
-	if err != nil {
-		return err
-	}
-	fmt.Println(hash)
-	return nil
 }
 
 // allProjectionProcessors is the single canonical registry of every

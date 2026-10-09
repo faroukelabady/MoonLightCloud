@@ -54,6 +54,7 @@ Concise, irreversible-or-important choices only.
 - [0050](0050-product-type-projection-admin.md) — ProductType projection & admin control (17-R2)
 - [0051](0051-signed-release-registry.md) — signed release registry (18)
 - [0052](0052-fleet-rollout-device-update-control.md) — fleet rollout & device update control (18)
+- [0053](0053-human-authentication-authorization.md) — human authentication & authorization: OWNER/ADMIN, MFA, Store memberships (18 R1)
 
 ## Phase numbering gaps
 

@@ -216,7 +216,7 @@ func catalogAdminTestSetup() (*CatalogAdminHandlers, *stubCatalogStore, *stubCat
 
 func postCommand(t *testing.T, handlers *CatalogAdminHandlers, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/catalog-admin/commands", strings.NewReader(body))
+	req := ownerRequest(http.MethodPost, "/api/v1/dashboard/catalog-admin/commands", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	handlers.CreateCommand(rec, req)
 	return rec
@@ -286,7 +286,7 @@ func TestCatalogAdminIDOR(t *testing.T) {
 	}
 
 	get := func(store, id string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/catalog-admin/commands/"+id+"?store_id="+store, nil)
+		req := ownerRequest(http.MethodGet, "/api/v1/dashboard/catalog-admin/commands/"+id+"?store_id="+store, nil)
 		req.SetPathValue("id", id)
 		rec := httptest.NewRecorder()
 		handlers.GetCommand(rec, req)
@@ -300,7 +300,7 @@ func TestCatalogAdminIDOR(t *testing.T) {
 	}
 
 	cancel := func(store, id string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboard/catalog-admin/commands/"+id+"/cancel?store_id="+store, nil)
+		req := ownerRequest(http.MethodPost, "/api/v1/dashboard/catalog-admin/commands/"+id+"/cancel?store_id="+store, nil)
 		req.SetPathValue("id", id)
 		rec := httptest.NewRecorder()
 		handlers.CancelCommand(rec, req)
@@ -374,27 +374,27 @@ func TestCatalogAdminMethodGating(t *testing.T) {
 	}{
 		{"create via GET", func() *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
-			handlers.CreateCommand(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+			handlers.CreateCommand(rec, ownerRequest(http.MethodGet, "/x", nil))
 			return rec
 		}},
 		{"list via POST", func() *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
-			handlers.ListCommands(rec, httptest.NewRequest(http.MethodPost, "/x", nil))
+			handlers.ListCommands(rec, ownerRequest(http.MethodPost, "/x", nil))
 			return rec
 		}},
 		{"cancel via GET", func() *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
-			handlers.CancelCommand(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+			handlers.CancelCommand(rec, ownerRequest(http.MethodGet, "/x", nil))
 			return rec
 		}},
 		{"device poll via POST", func() *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
-			handlers.PollCatalogCommands(rec, httptest.NewRequest(http.MethodPost, "/x", nil))
+			handlers.PollCatalogCommands(rec, ownerRequest(http.MethodPost, "/x", nil))
 			return rec
 		}},
 		{"device result via GET", func() *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
-			handlers.ReportCatalogResult(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+			handlers.ReportCatalogResult(rec, ownerRequest(http.MethodGet, "/x", nil))
 			return rec
 		}},
 	}
@@ -435,7 +435,7 @@ func TestRemediationPollWire(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		st.due[did] = append(st.due[did], catalogadmin.DueTarget{TargetID: uuid.NewString(), CommandID: uuid.NewString(), DeviceID: did, Type: catalogadmin.TypeProductDetailsUpdateV1, Version: 1, StoreID: sid, EntityID: pid, Payload: payload, PayloadHash: hash})
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/device-control/catalog-commands?limit=10", nil)
+	req := ownerRequest(http.MethodGet, "/api/v1/device-control/catalog-commands?limit=10", nil)
 	req = req.WithContext(context.WithValue(req.Context(), deviceKey, auth.Device{ID: did, Status: auth.StatusActive}))
 	rec := httptest.NewRecorder()
 	h.PollCatalogCommands(rec, req)

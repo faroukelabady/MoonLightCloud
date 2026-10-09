@@ -35,8 +35,12 @@ func (h *StoreHandlers) ListStores(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	principal, _ := PrincipalOf(r)
 	rows := make([]storeRow, 0, len(summaries))
 	for _, summary := range summaries {
+		if !principal.CanAccessStore(summary.ID) {
+			continue // ADR-0053: only Stores the human may administer
+		}
 		rows = append(rows, storeRow{
 			StoreID: summary.ID, DisplayName: summary.DisplayName,
 			Timezone: summary.Timezone, Status: summary.Status,

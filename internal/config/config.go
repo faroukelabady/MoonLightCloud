@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
 )
 
 // Environment values.
@@ -68,25 +70,20 @@ const (
 	MinReportingTokenLen = 16
 )
 
-// Dashboard operator credential rules. Human login uses a configured
-// username plus an Argon2id PHC hash — never a plaintext password, never
-// in source control. Development falls back to documented constants when
-// unset; staging/production require explicit values and reject the dev
-// placeholder hash.
+// Human authentication (Phase 18 R1, ADR-0053). There is no configured or
+// default dashboard account: humans are provisioned with the server-side
+// `auth bootstrap-owner` CLI and stored hashed in PostgreSQL.
 const (
-	// DefaultDashboardUsername is the development-only username.
-	DefaultDashboardUsername = "operator"
-	// DevDashboardPassword is the documented development-only password.
-	// The matching hash below is rejected outside development.
-	DevDashboardPassword = "moonlight-dev-operator"
-	// DevDashboardPasswordHash is Argon2id(DevDashboardPassword).
-	DevDashboardPasswordHash = "$argon2id$v=19$m=65536,t=3,p=2$bEVIeBswLFNCwT4AKrDjOg$3v4UQUa5CkzWw3Iy/i35r2bG3xXH7Rvp5tLT0MBJKy0"
-	// DefaultSessionTTL bounds operator sessions.
-	DefaultSessionTTL = 12 * time.Hour
-	// SessionTTL bounds for DASHBOARD_SESSION_TTL validation.
-	MinSessionTTL = 15 * time.Minute
-	MaxSessionTTL = 7 * 24 * time.Hour
+	// DefaultSessionIdleTimeout / DefaultSessionAbsoluteTimeout bound
+	// dashboard sessions (overridable within humanauth bounds).
+	DefaultSessionIdleTimeout     = 30 * time.Minute
+	DefaultSessionAbsoluteTimeout = 12 * time.Hour
 )
+
+// legacyDashboardEnv are the removed single-operator variables. Setting
+// any of them is a startup error, so nobody believes they still grant a
+// login.
+var legacyDashboardEnv = []string{"DASHBOARD_USERNAME", "DASHBOARD_PASSWORD_HASH", "DASHBOARD_SESSION_TTL"}
 
 var devDBMarkers = []string{
 	"moonlight:moonlight@",
@@ -122,12 +119,15 @@ type Config struct {
 	// ENVIRONMENT=development and no reporting token; true anywhere else
 	// (or with a token configured) is a startup failure.
 	AllowUnauthenticatedReporting bool
-	// DashboardUsername is the operator login name.
-	DashboardUsername string
-	// DashboardPasswordHash is the Argon2id PHC verifier for login.
-	DashboardPasswordHash string
-	// DashboardSessionTTL bounds dashboard sessions.
-	DashboardSessionTTL time.Duration
+	// AuthMFAEncryptionKey is the base64 32-byte AES-256-GCM key sealing
+	// TOTP secrets (never stored in the database, never logged). Required
+	// in every environment: OWNER/ADMIN accounts always use MFA.
+	AuthMFAEncryptionKey string
+	// AuthSessionIdleTimeout / AuthSessionAbsoluteTimeout bound sessions.
+	AuthSessionIdleTimeout     time.Duration
+	AuthSessionAbsoluteTimeout time.Duration
+	// legacyDashboardSet names a removed DASHBOARD_* variable found set.
+	legacyDashboardSet string
 	// ReleaseTrustedPublicKeys are comma-separated base64 Ed25519 public
 	// keys accepted for signed release import (Phase 18, ADR-0051). Empty
 	// disables import (fail closed). Cloud never holds private release keys,
@@ -195,8 +195,7 @@ func Load() (Config, error) {
 		StoreTimezone:            strings.TrimSpace(os.Getenv("STORE_TIMEZONE")),
 		ReportingToken:           strings.TrimSpace(os.Getenv("REPORTING_API_TOKEN")),
 		ShutdownAfter:            DefaultShutdownTimeout,
-		DashboardUsername:        strings.TrimSpace(os.Getenv("DASHBOARD_USERNAME")),
-		DashboardPasswordHash:    strings.TrimSpace(os.Getenv("DASHBOARD_PASSWORD_HASH")),
+		AuthMFAEncryptionKey:     strings.TrimSpace(os.Getenv("AUTH_MFA_ENCRYPTION_KEY")),
 		ReleaseTrustedPublicKeys: strings.TrimSpace(os.Getenv("RELEASE_TRUSTED_PUBLIC_KEYS")),
 		DashboardAssetsDir:       envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
 		envExplicit:              strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
@@ -275,14 +274,27 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.Operations = ops
-	if v := strings.TrimSpace(os.Getenv("DASHBOARD_SESSION_TTL")); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("invalid DASHBOARD_SESSION_TTL %q: %w", v, err)
+	for _, name := range legacyDashboardEnv {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			c.legacyDashboardSet = name
 		}
-		c.DashboardSessionTTL = d
-	} else {
-		c.DashboardSessionTTL = DefaultSessionTTL
+	}
+	for _, d := range []struct {
+		env string
+		dst *time.Duration
+		def time.Duration
+	}{
+		{"AUTH_SESSION_IDLE_TIMEOUT", &c.AuthSessionIdleTimeout, DefaultSessionIdleTimeout},
+		{"AUTH_SESSION_ABSOLUTE_TIMEOUT", &c.AuthSessionAbsoluteTimeout, DefaultSessionAbsoluteTimeout},
+	} {
+		*d.dst = d.def
+		if v := strings.TrimSpace(os.Getenv(d.env)); v != "" {
+			parsed, err := time.ParseDuration(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("invalid %s %q: %w", d.env, v, err)
+			}
+			*d.dst = parsed
+		}
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
@@ -385,38 +397,30 @@ func (c *Config) resolveTrustedProxies() error {
 	return nil
 }
 
-// resolveDashboardAuth validates the operator credential. Dashboard
-// authentication requires an explicitly configured ENVIRONMENT: dev
-// defaults activate only with explicit ENVIRONMENT=development, and even
-// explicit production-quality credentials fail closed when the environment
-// is omitted (an operator must declare which environment serves login).
+// resolveDashboardAuth validates human-auth configuration and fails closed
+// (ADR-0053): explicit ENVIRONMENT, a valid MFA encryption key, bounded
+// session timeouts, and no removed single-operator credential variables.
 func (c *Config) resolveDashboardAuth() error {
 	if !c.envExplicit {
 		return fmt.Errorf("ENVIRONMENT must be explicitly set for dashboard authentication")
 	}
-	devExplicit := c.Environment == EnvDevelopment
-	if c.DashboardUsername == "" {
-		if devExplicit {
-			c.DashboardUsername = DefaultDashboardUsername
-		} else {
-			return fmt.Errorf("DASHBOARD_USERNAME is required outside development")
-		}
+	if c.legacyDashboardSet != "" {
+		return fmt.Errorf("%s is no longer supported: dashboard humans are provisioned with `moonlight-cloud auth bootstrap-owner`", c.legacyDashboardSet)
 	}
-	if c.DashboardPasswordHash == "" {
-		if devExplicit {
-			c.DashboardPasswordHash = DevDashboardPasswordHash
-		} else {
-			return fmt.Errorf("DASHBOARD_PASSWORD_HASH is required outside development")
-		}
+	if _, err := humanauth.NewSecretBox(c.AuthMFAEncryptionKey); err != nil {
+		return fmt.Errorf("AUTH_MFA_ENCRYPTION_KEY is required (32 bytes, base64): %w", err)
 	}
-	if !devExplicit && c.DashboardPasswordHash == DevDashboardPasswordHash {
-		return fmt.Errorf("DASHBOARD_PASSWORD_HASH must not be the development placeholder outside development")
+	if c.AuthMFAEncryptionKey == base64.StdEncoding.EncodeToString(c.Pepper) {
+		return fmt.Errorf("AUTH_MFA_ENCRYPTION_KEY must differ from DEVICE_CREDENTIAL_PEPPER")
 	}
-	if c.DashboardSessionTTL < MinSessionTTL || c.DashboardSessionTTL > MaxSessionTTL {
-		return fmt.Errorf("DASHBOARD_SESSION_TTL must be within [15m, 168h]")
-	}
-	return nil
+	policy := humanauth.DefaultPolicy()
+	policy.IdleTimeout, policy.AbsoluteTimeout = c.AuthSessionIdleTimeout, c.AuthSessionAbsoluteTimeout
+	return policy.Validate()
 }
+
+// SecureCookies reports whether session cookies carry Secure (and the
+// __Host- prefix): always outside development; there is no override.
+func (c Config) SecureCookies() bool { return c.Environment != EnvDevelopment }
 
 // resolvePepper decodes and validates the server-side HMAC pepper.
 // Development falls back to the documented DevPepper when unset; every

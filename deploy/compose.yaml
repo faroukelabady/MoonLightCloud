@@ -38,6 +38,10 @@ services:
       # Local development only: explicit opt-in for unauthenticated reports.
       # Never set this outside development (startup refuses it elsewhere).
       ALLOW_UNAUTHENTICATED_REPORTING: "true"
+      # Human auth (ADR-0053): required; scripts/dev-up.sh generates a local
+      # development key into .env.local on first run. No default account
+      # exists: bootstrap one with `moonlight-cloud auth bootstrap-owner`.
+      AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:?run scripts/dev-up.sh (generates a local key) or export AUTH_MFA_ENCRYPTION_KEY}
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:

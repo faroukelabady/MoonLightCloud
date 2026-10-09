@@ -76,8 +76,8 @@ func serveDashboardFile(w http.ResponseWriter, r *http.Request, full string, log
 // the Vite build emits separate asset files.
 func setDashboardSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+		"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
-	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Set("X-Frame-Options", "DENY")
 }

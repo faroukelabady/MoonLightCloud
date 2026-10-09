@@ -44,6 +44,7 @@ sql:
       - "db/migrations/00039_admin_type_command_vocabulary.sql"
       - "db/migrations/00040_create_command_identity.sql"
       - "db/migrations/00041_fleet_updates.sql"
+      - "db/migrations/00042_admin_auth.sql"
     gen:
       go:
         package: "sqlcgen"

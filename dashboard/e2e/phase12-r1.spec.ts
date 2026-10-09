@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { apiLogin } from './auth';
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const period={start_local:'2026-09-20',end_local_exclusive:'2026-10-01'};
 function overview(n:string){return {period,summary:{transaction_count:1,units_sold:1,return_transaction_count:0,units_returned:0,currency_totals:[{currency:'EGP',subtotal_minor:n,discount_minor:'0',tax_minor:'0',sales_total_minor:n,line_cost_minor:'0',refund_total_minor:'0',net_sales_minor:n,returned_units:0,returned_cost_minor:'0',net_cost_minor:'0'}]},normalized:{normalized_total_minor:n,normalized_refund_minor:'0',normalized_net_minor:n,transactions:1,units:1,return_transactions:0,units_returned:0,usd_sale_count:0},averages:{all:{transactions:1,units:1,average_minor:n},egp:{transactions:1,units:1,average_minor:n},usd:{transactions:0,units:0,average_minor:'0'}},fx:{has_usd:false,latest_rate:null,multiple_rates_used:false}};}
@@ -6,7 +7,8 @@ function online(name:string){return {currency_totals:[{currency:'EGP',orders:1,v
 function tags(name:string){return {rows:[{tag_id:A,tag_slug:'gold',name_ar:name,name_en:name,units:1,units_returned:0,currencies:[{currency:'EGP',line_sales_minor:'100',line_refund_minor:'0',net_minor:'100'}]}],overlap_note:''};}
 function health(name:string){return {providers:['alpha','zeta'],counts:[{reason_code:'CATALOG_MISSING_SKU',products:1}],detail:[{reason_code:'CATALOG_MISSING_SKU',product_id:A,provider_key:'',name,sku:name}],detail_limit:50,detail_truncated:false};}
 function gate(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
-async function auth(page:Page){const response=await page.request.post('/api/v1/dashboard/auth/login',{data:{username:process.env.E2E_DASHBOARD_USER??'operator',password:process.env.E2E_DASHBOARD_PASSWORD??'moonlight-dev-operator'}});expect(response.status()).toBe(200);}
+// Explicit dev-stack account + TOTP (no default account): see auth.ts.
+async function auth(page:Page){await apiLogin(page);}
 async function defaults(page:Page){await page.route('**/api/v1/dashboard/**',async route=>{
  const u=new URL(route.request().url()), path=u.pathname;
  if(path.includes('/auth/'))return route.continue();

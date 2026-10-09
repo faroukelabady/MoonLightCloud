@@ -8,6 +8,97 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AdminActivationToken struct {
+	TokenHash []byte             `json:"token_hash"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	CreatedBy pgtype.UUID        `json:"created_by"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
+
+type AdminBootstrapState struct {
+	Singleton      bool               `json:"singleton"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	BootstrappedAt pgtype.Timestamptz `json:"bootstrapped_at"`
+}
+
+type AdminLoginThrottle struct {
+	KeyKind         string             `json:"key_kind"`
+	Key             string             `json:"key"`
+	Failures        int32              `json:"failures"`
+	WindowStartedAt pgtype.Timestamptz `json:"window_started_at"`
+	LockedUntil     pgtype.Timestamptz `json:"locked_until"`
+	LockCount       int32              `json:"lock_count"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AdminMfaCredential struct {
+	UserID           pgtype.UUID        `json:"user_id"`
+	SecretCiphertext []byte             `json:"secret_ciphertext"`
+	KeyVersion       int32              `json:"key_version"`
+	EnabledAt        pgtype.Timestamptz `json:"enabled_at"`
+	LastUsedStep     int64              `json:"last_used_step"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type AdminRecoveryCode struct {
+	ID        int64              `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	CodeHash  []byte             `json:"code_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
+
+type AdminSession struct {
+	ID                pgtype.UUID        `json:"id"`
+	TokenHash         []byte             `json:"token_hash"`
+	CsrfHash          []byte             `json:"csrf_hash"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	Stage             string             `json:"stage"`
+	SecurityVersion   int64              `json:"security_version"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	LastSeenAt        pgtype.Timestamptz `json:"last_seen_at"`
+	AbsoluteExpiresAt pgtype.Timestamptz `json:"absolute_expires_at"`
+	AuthTime          pgtype.Timestamptz `json:"auth_time"`
+	MfaVerifiedAt     pgtype.Timestamptz `json:"mfa_verified_at"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+	RevokeReason      pgtype.Text        `json:"revoke_reason"`
+}
+
+type AdminUser struct {
+	ID                pgtype.UUID        `json:"id"`
+	Login             string             `json:"login"`
+	DisplayName       string             `json:"display_name"`
+	Role              string             `json:"role"`
+	Status            string             `json:"status"`
+	AllStores         bool               `json:"all_stores"`
+	PasswordHash      pgtype.Text        `json:"password_hash"`
+	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
+	SecurityVersion   int64              `json:"security_version"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AdminUserStoreMembership struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	StoreID   pgtype.UUID        `json:"store_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AuthAuditEvent struct {
+	ID           int64              `json:"id"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
+	TargetUserID pgtype.UUID        `json:"target_user_id"`
+	Action       string             `json:"action"`
+	Outcome      string             `json:"outcome"`
+	Reason       pgtype.Text        `json:"reason"`
+	ClientIp     pgtype.Text        `json:"client_ip"`
+	Details      []byte             `json:"details"`
+}
+
 type BusinessReportDelivery struct {
 	ID                         pgtype.UUID        `json:"id"`
 	RunID                      pgtype.UUID        `json:"run_id"`

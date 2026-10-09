@@ -152,6 +152,12 @@
 	}
 
 	async function createRollout() {
+		if (
+			form.mode === 'MANDATORY' &&
+			form.scope === 'ALL' &&
+			!confirm('Create a MANDATORY update rollout for ALL eligible devices in every Store? Devices install it automatically at their next safe point.')
+		)
+			return;
 		busy = true;
 		try {
 			const r = await updatesApi.createRollout({
@@ -172,6 +178,7 @@
 	}
 
 	async function act(r: RolloutView, action: 'start' | 'pause' | 'resume' | 'cancel') {
+		if (action === 'start' && r.mode === 'MANDATORY' && !confirm(`Start MANDATORY rollout of ${r.release_version} to ${r.target_count} device(s)?`)) return;
 		if (action === 'cancel' && !confirm('Cancel this rollout? Devices already installing will finish or roll back safely.')) return;
 		busy = true;
 		try {

@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 load_env
 ensure_dev_reporting_env
+ensure_dev_auth_env
 
 if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   cname="moonlight-test-pg-$$"

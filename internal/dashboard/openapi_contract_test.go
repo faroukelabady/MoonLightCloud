@@ -24,7 +24,11 @@ func TestOpenAPIDashboardContract(t *testing.T) {
 		"last_error_label_ar",
 		"display_currency:",
 		"operationId: dashboardDaily",
-		"operationId: dashboardLogin",
+		"operationId: authLogin",
+		"operationId: authMFAVerify",
+		"operationId: authMe",
+		"operationId: authLogout",
+		"operationId: usersCreate",
 	} {
 		if !strings.Contains(spec, want) {
 			t.Fatalf("openapi must contain %q", want)

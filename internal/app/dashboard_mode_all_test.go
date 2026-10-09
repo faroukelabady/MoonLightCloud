@@ -5,12 +5,9 @@ package app
 // previously failed with postgres 42883 and the handler returned 500).
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -59,24 +56,12 @@ func TestDashboardModeAllHTTPReturns200(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	clk := humanKit(t, a)
 	srv := httptest.NewServer(a.Handler)
 	defer srv.Close()
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &http.Client{Jar: jar}
-
-	loginBody, _ := json.Marshal(map[string]string{"username": "op", "password": "op-test-password"})
-	res, err := client.Post(srv.URL+"/api/v1/dashboard/auth/login", "application/json", bytes.NewReader(loginBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.Copy(io.Discard, res.Body)
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("login status %d", res.StatusCode)
-	}
+	// Explicit MFA-enrolled OWNER fixture (ADR-0053: no default account).
+	owner := fullOwner(t, a, srv, clk, "owner@mode-all.test")
+	client := owner.client
 
 	req, _ := http.NewRequest("GET",
 		srv.URL+"/api/v1/dashboard/products?period=custom&from_date=2026-09-20&to_date=2026-09-20&mode=all", nil)

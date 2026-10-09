@@ -1,5 +1,12 @@
 <script lang="ts">
-	let { route, navigate }: { route: string; navigate: (r: string) => void } = $props();
+	// Navigation mirrors the server-side permission map (ADR-0053). Hiding an
+	// entry is UX only: every API re-checks permission and Store scope.
+	let {
+		route,
+		navigate,
+		permissions = [],
+		allStores = false
+	}: { route: string; navigate: (r: string) => void; permissions?: string[]; allStores?: boolean } = $props();
 
 	const entries = [
 		{ r: 'overview', ar: 'نظرة عامة', en: 'Overview', ready: true, icon: 'home' },
@@ -8,10 +15,11 @@
 		{ r: 'products', ar: 'المنتجات', en: 'Products', ready: true, icon: 'box' },
 		{ r: 'categories', ar: 'الفئات', en: 'Categories', ready: true, icon: 'layers' },
 		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', ready: true, icon: 'clip' },
-		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', ready: true, icon: 'cloud' },
-		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', ready: true, icon: 'gear' },
-		{ r: 'operations', ar: 'العمليات', en: 'Operations', ready: true, icon: 'clip' },
-		{ r: 'updates', ar: 'التحديثات', en: 'Updates', ready: true, icon: 'cloud' },
+		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', ready: true, icon: 'cloud', perm: 'devices.read' },
+		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', ready: true, icon: 'gear', perm: 'catalog.read' },
+		{ r: 'operations', ar: 'العمليات', en: 'Operations', ready: true, icon: 'clip', perm: 'operations.read', all: true },
+		{ r: 'updates', ar: 'التحديثات', en: 'Updates', ready: true, icon: 'cloud', perm: 'releases.read' },
+		{ r: 'users', ar: 'المستخدمون والأمان', en: 'Users & Security', ready: true, icon: 'gear', perm: 'users.read' },
 		{ r: 'reports', ar: 'التقارير', en: 'Reports', ready: false, note: 'قريبًا', icon: 'report' },
 		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', ready: true, icon: 'cloud' },
 		{ r: 'settings', ar: 'الإعدادات', en: 'Settings', ready: false, note: 'قريبًا', icon: 'gear' },
@@ -43,7 +51,7 @@
 		</div>
 	</div>
 	<ul>
-		{#each entries as e}
+		{#each entries.filter((e) => (!e.perm || permissions.includes(e.perm)) && (!e.all || allStores)) as e}
 			<li>
 				{#if e.ready}
 					<button

@@ -1,12 +1,12 @@
 import { test, expect, type Page } from '@playwright/test';
+import { uiLogin } from './auth';
 
 // Phase 9-R1 independent browser regression suite for Store scope
 // transitions (F03) and authenticated Store-registry initialization (F05).
 // Auth is real against the running Cloud dev server; dashboard data routes
 // are mocked so the shipped UI contract is exercised deterministically.
 
-const USER = process.env.E2E_DASHBOARD_USER ?? 'operator';
-const PASS = process.env.E2E_DASHBOARD_PASSWORD ?? 'moonlight-dev-operator';
+// Explicit dev-stack credentials + TOTP (no default account): see auth.ts.
 
 const STORE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const STORE_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -156,11 +156,7 @@ async function mockStoreScope(page: Page, opts: MockOptions = {}) {
 }
 
 async function login(page: Page, url = 'login') {
-	await page.goto(url);
-	await page.getByLabel(/اسم المستخدم/).fill(USER);
-	await page.getByLabel(/كلمة المرور/).fill(PASS);
-	await page.getByRole('button', { name: /دخول/ }).click();
-	await expect(page.getByText('لوحة متابعة المبيعات')).toBeVisible({ timeout: 15000 });
+	await uiLogin(page, url);
 }
 
 async function openFirstDetail(page: Page) {

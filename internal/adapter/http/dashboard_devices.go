@@ -87,11 +87,17 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+	principal, _ := PrincipalOf(r)
 	rows := make([]deviceRow, 0, len(devices))
 	for _, d := range devices {
 		row := deviceRow{DeviceID: d.ID, Name: d.Name, Lifecycle: string(d.Status)}
 		if info, ok := stores[d.ID]; ok {
 			row.StoreID, row.StoreName = info.StoreID, info.DisplayName
+		}
+		// ADR-0053: a Store-restricted human sees only devices bound to
+		// its Stores (unbound devices are cross-Store infrastructure).
+		if !principal.AllStores && !principal.CanAccessStore(row.StoreID) {
+			continue
 		}
 		ov := overviews[d.ID]
 		if ov.Presence != nil {
@@ -121,6 +127,26 @@ func (h *DashboardDeviceHandlers) CreateSyncRequest(w http.ResponseWriter, r *ht
 	if deviceID == "" {
 		WriteError(w, r, apperr.New(apperr.NotFound, "DEVICE_COMMAND_NOT_FOUND"))
 		return
+	}
+	// ADR-0053: a restricted human may only command devices bound to one
+	// of its Stores (current binding, read server-side).
+	if principal, _ := PrincipalOf(r); !principal.AllStores {
+		storeID := ""
+		if h.Stores != nil {
+			infos, err := h.Stores.BindingsWithStores(r.Context())
+			if err != nil {
+				WriteError(w, r, err)
+				return
+			}
+			for _, info := range infos {
+				if info.DeviceID == deviceID {
+					storeID = info.StoreID
+				}
+			}
+		}
+		if !RequireStore(w, r, storeID) {
+			return
+		}
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if err := devicecontrol.ValidateIdempotencyKey(key); err != nil {

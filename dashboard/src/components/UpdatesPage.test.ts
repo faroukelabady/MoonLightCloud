@@ -114,8 +114,15 @@ describe('UpdatesPage', () => {
 		expect(api.createRollout).toHaveBeenCalledWith(expect.objectContaining({ release_id: 'r1', scope: 'STORE', store_id: STORE, device_id: undefined }));
 		const row = await screen.findByTestId('rollout-row');
 		expect(row.textContent).toContain('Pending: 1');
+		// Starting a MANDATORY rollout requires an explicit confirmation.
+		const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		await fireEvent.click(await screen.findByText('بدء / Start'));
+		expect(confirmSpy).toHaveBeenCalledOnce();
+		expect(api.rolloutAction).not.toHaveBeenCalled();
+		confirmSpy.mockReturnValue(true);
 		await fireEvent.click(await screen.findByText('بدء / Start'));
 		expect(api.rolloutAction).toHaveBeenCalledWith('ro1', 'start');
+		confirmSpy.mockRestore();
 	});
 
 	it('requires a Store before a Store-scoped rollout can be created', async () => {

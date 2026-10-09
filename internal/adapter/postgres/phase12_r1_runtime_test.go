@@ -1,11 +1,18 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"encoding/base32"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"net"
 	"net/http"
@@ -56,7 +63,7 @@ func TestPhase12R1Runtime(t *testing.T) {
 	defer fake.Close()
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { contacts.Add(1); w.WriteHeader(502) }))
 	defer proxy.Close()
-	args := []string{"run", "--detach", "--name", name, "--network=host", "--env", "DATABASE_URL=" + f.pool.Config().ConnString(), "--env", "ENVIRONMENT=development", "--env", "ALLOW_UNAUTHENTICATED_REPORTING=true", "--env", "HTTP_ADDR=" + addr, "--env", "COMMERCE_WOO_ENABLED=true", "--env", "COMMERCE_WOO_PROVIDER_KEY=woo-local", "--env", "COMMERCE_WOO_BASE_URL=" + fake.URL, "--env", "COMMERCE_WOO_CONSUMER_KEY=ck_local_fixture", "--env", "COMMERCE_WOO_CONSUMER_SECRET=sk_local_fixture", "--env", "COMMERCE_WOO_CURRENCY=EGP", "--env", "COMMERCE_WOO_DIMENSION_UNIT=cm", "--env", "COMMERCE_SHOPIFY_ENABLED=true", "--env", "COMMERCE_SHOPIFY_PROVIDER_KEY=shopify-local", "--env", "COMMERCE_SHOPIFY_SHOP_DOMAIN=test.myshopify.com", "--env", "COMMERCE_SHOPIFY_API_VERSION=2026-10", "--env", "COMMERCE_SHOPIFY_ACCESS_TOKEN=local_runtime_token", "--env", "COMMERCE_SHOPIFY_CURRENCY=EGP", "--env", "COMMERCE_SHOPIFY_LOCATION_ID=gid://shopify/Location/10", "--env", "COMMERCE_SHOPIFY_PUBLICATION_ID=gid://shopify/Publication/11", "--env", "HTTPS_PROXY=" + proxy.URL, "--env", "NO_PROXY=127.0.0.1,localhost", image, "serve"}
+	args := []string{"run", "--detach", "--name", name, "--network=host", "--env", "DATABASE_URL=" + f.pool.Config().ConnString(), "--env", "ENVIRONMENT=development", "--env", "ALLOW_UNAUTHENTICATED_REPORTING=true", "--env", "AUTH_MFA_ENCRYPTION_KEY=" + runtimeMFAKey, "--env", "HTTP_ADDR=" + addr, "--env", "COMMERCE_WOO_ENABLED=true", "--env", "COMMERCE_WOO_PROVIDER_KEY=woo-local", "--env", "COMMERCE_WOO_BASE_URL=" + fake.URL, "--env", "COMMERCE_WOO_CONSUMER_KEY=ck_local_fixture", "--env", "COMMERCE_WOO_CONSUMER_SECRET=sk_local_fixture", "--env", "COMMERCE_WOO_CURRENCY=EGP", "--env", "COMMERCE_WOO_DIMENSION_UNIT=cm", "--env", "COMMERCE_SHOPIFY_ENABLED=true", "--env", "COMMERCE_SHOPIFY_PROVIDER_KEY=shopify-local", "--env", "COMMERCE_SHOPIFY_SHOP_DOMAIN=test.myshopify.com", "--env", "COMMERCE_SHOPIFY_API_VERSION=2026-10", "--env", "COMMERCE_SHOPIFY_ACCESS_TOKEN=local_runtime_token", "--env", "COMMERCE_SHOPIFY_CURRENCY=EGP", "--env", "COMMERCE_SHOPIFY_LOCATION_ID=gid://shopify/Location/10", "--env", "COMMERCE_SHOPIFY_PUBLICATION_ID=gid://shopify/Publication/11", "--env", "HTTPS_PROXY=" + proxy.URL, "--env", "NO_PROXY=127.0.0.1,localhost", image, "serve"}
 	if b, e := exec.Command("podman", args...).CombinedOutput(); e != nil {
 		t.Fatalf("start %v %s", e, b)
 	}
@@ -81,14 +88,9 @@ func TestPhase12R1Runtime(t *testing.T) {
 			t.Fatalf("auth %s=%d", path, st)
 		}
 	}
-	res, e := cl.Post(base+"/api/v1/dashboard/auth/login", "application/json", strings.NewReader(`{"username":"operator","password":"moonlight-dev-operator"}`))
-	if e != nil {
-		t.Fatal(e)
-	}
-	res.Body.Close()
-	if res.StatusCode != 200 {
-		t.Fatalf("login %d", res.StatusCode)
-	}
+	// ADR-0053: no default account; bootstrap an explicit OWNER and sign in
+	// through password + TOTP enrollment against the actual image.
+	signInRuntimeOwner(t, f.pool, cl, base)
 	for _, path := range []string{"/dashboard/", "/api/v1/dashboard/tags", "/api/v1/dashboard/orders/summary", "/api/v1/dashboard/catalog-health"} {
 		query := params
 		if path == "/dashboard/" {
@@ -160,4 +162,50 @@ func TestPhase12R1Runtime(t *testing.T) {
 	t.Log("exact image nonroot, schema 27, authenticated analytics, dashboard, restart and bounded graceful shutdown PASS")
 	_ = ctx
 	_ = d
+}
+
+// runtimeMFAKey is a synthetic, test-only AUTH_MFA_ENCRYPTION_KEY.
+var runtimeMFAKey = base64.StdEncoding.EncodeToString([]byte("runtime-test-only-mfa-key-000000"))
+
+func signInRuntimeOwner(t *testing.T, pool *pgxpool.Pool, cl *http.Client, base string) {
+	t.Helper()
+	box, err := humanauth.NewSecretBox(runtimeMFAKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := humanauth.NewService(NewHumanAuth(pool, 5*time.Second), box, []byte("unused-in-test"), clock.System{}, ids.System{}, humanauth.DefaultPolicy(), nil)
+	const login, password = "runtime-owner@test.example", "runtime-test-only-password"
+	if _, err := svc.BootstrapOwner(context.Background(), login, "Runtime Owner", password, nil); err != nil {
+		t.Fatal(err)
+	}
+	csrf := ""
+	post := func(path string, body any) map[string]any {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", base+path, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", base)
+		req.Header.Set("X-CSRF-Token", csrf)
+		res, err := cl.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		out := map[string]any{}
+		_ = json.NewDecoder(res.Body).Decode(&out)
+		if res.StatusCode != 200 {
+			t.Fatalf("%s %d %v", path, res.StatusCode, out)
+		}
+		if c, ok := out["csrf_token"].(string); ok {
+			csrf = c
+		}
+		return out
+	}
+	post("/api/v1/dashboard/auth/login", map[string]string{"login": login, "password": password})
+	start := post("/api/v1/dashboard/auth/mfa/enroll/start", map[string]any{})
+	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(start["secret"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	post("/api/v1/dashboard/auth/mfa/enroll/confirm", map[string]string{"code": humanauth.HOTP(secret, humanauth.TOTPStep(time.Now()))})
 }

@@ -1,11 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
+import { uiLogin } from './auth';
 
 // Targeted R2 pagination suite: 25 mocked orders traverse 20 + 5 via
 // Load more, with no duplicates, exact money intact, control gone at
 // the end, and no console/page errors. API responses are mocked; the
 // suite proves the shipped UI continuation contract.
-const USER = process.env.E2E_DASHBOARD_USER ?? 'operator';
-const PASS = process.env.E2E_DASHBOARD_PASSWORD ?? 'moonlight-dev-operator';
+// Explicit dev-stack credentials + TOTP (no default account): see auth.ts.
 
 function row(i: number) {
 	const id = `07${String(i).padStart(3, '0')}`;
@@ -42,11 +42,7 @@ async function mockPages(page: Page) {
 }
 
 async function login(page: Page) {
-	await page.goto('login');
-	await page.getByLabel(/اسم المستخدم/).fill(USER);
-	await page.getByLabel(/كلمة المرور/).fill(PASS);
-	await page.getByRole('button', { name: /دخول/ }).click();
-	await expect(page.getByText('لوحة متابعة المبيعات')).toBeVisible({ timeout: 15000 });
+	await uiLogin(page);
 }
 
 test('orders paginate 20 + 5 via Load more with no duplicates', async ({ page }) => {

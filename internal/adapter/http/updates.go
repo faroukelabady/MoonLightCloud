@@ -30,11 +30,13 @@ func (h *UpdateHandlers) now() time.Time {
 	return time.Now().UTC()
 }
 
+// operatorOf is the authenticated human's login, recorded as the actor of
+// operator actions. Every caller is behind HumanAuth.Guard.
 func operatorOf(r *http.Request) string {
-	if user, ok := r.Context().Value(dashboardUserKey).(string); ok && user != "" {
-		return user
+	if p, ok := PrincipalOf(r); ok && p.Login != "" {
+		return p.Login
 	}
-	return "dashboard-operator"
+	return "unknown-operator"
 }
 
 func decodeStrictBody(r *http.Request, limit int64, out any) error {
@@ -141,6 +143,16 @@ func (h *UpdateHandlers) CreateRollout(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// ADR-0053: ALL-scope rollouts need an all-Stores human; Store and
+	// device rollouts need membership in the named Store (the service
+	// also proves the device is bound to it).
+	if req.Scope == fleetupdate.ScopeAll {
+		if !RequireAllStores(w, r) {
+			return
+		}
+	} else if !RequireStore(w, r, req.StoreID) {
+		return
+	}
 	view, err := h.Svc.CreateRollout(r.Context(), operatorOf(r), fleetupdate.RolloutRequest{ReleaseID: req.ReleaseID,
 		Scope: req.Scope, StoreID: req.StoreID, DeviceID: req.DeviceID, Mode: req.Mode, Percentage: req.Percentage, NotBefore: req.NotBefore})
 	if err != nil {
@@ -153,6 +165,9 @@ func (h *UpdateHandlers) CreateRollout(w http.ResponseWriter, r *http.Request) {
 // RolloutAction serves POST /api/v1/dashboard/rollouts/{id}/{action}.
 func (h *UpdateHandlers) RolloutAction(w http.ResponseWriter, r *http.Request) {
 	id, actor := r.PathValue("id"), operatorOf(r)
+	if !h.canSeeRollout(w, r, id) {
+		return
+	}
 	var (
 		view fleetupdate.RolloutView
 		err  error
@@ -200,6 +215,9 @@ func (h *UpdateHandlers) ListRollouts(w http.ResponseWriter, r *http.Request) {
 
 // GetRollout serves GET /api/v1/dashboard/rollouts/{id}.
 func (h *UpdateHandlers) GetRollout(w http.ResponseWriter, r *http.Request) {
+	if !h.canSeeRollout(w, r, r.PathValue("id")) {
+		return
+	}
 	view, err := h.Svc.GetRollout(r.Context(), r.PathValue("id"))
 	if err != nil {
 		WriteError(w, r, err)
@@ -210,6 +228,9 @@ func (h *UpdateHandlers) GetRollout(w http.ResponseWriter, r *http.Request) {
 
 // ListTargets serves GET /api/v1/dashboard/rollouts/{id}/targets.
 func (h *UpdateHandlers) ListTargets(w http.ResponseWriter, r *http.Request) {
+	if !h.canSeeRollout(w, r, r.PathValue("id")) {
+		return
+	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	rows, next, err := h.Svc.ListTargets(r.Context(), r.PathValue("id"), q.Get("store_id"), q.Get("cursor"), limit)
@@ -307,4 +328,25 @@ func (h *UpdateHandlers) DeviceReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ack)
+}
+
+// canSeeRollout (ADR-0053) resolves a rollout's owning Store: all-Stores
+// humans see every rollout; a Store-restricted human sees only Store/device
+// rollouts of its own Stores (an ALL-scope rollout spans other Stores).
+// Unknown rollouts answer 404 for everyone (no enumeration).
+func (h *UpdateHandlers) canSeeRollout(w http.ResponseWriter, r *http.Request, id string) bool {
+	p, _ := PrincipalOf(r)
+	if p.AllStores {
+		return true
+	}
+	view, err := h.Svc.GetRollout(r.Context(), id)
+	if err != nil {
+		WriteError(w, r, err)
+		return false
+	}
+	if view.Scope == fleetupdate.ScopeAll || !p.CanAccessStore(view.StoreID) {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return false
+	}
+	return true
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/telegram"
@@ -54,9 +55,11 @@ var (
 
 // App is the composed application.
 type App struct {
-	Cfg                           config.Config
-	Log                           *slog.Logger
-	Pool                          *pgxpool.Pool
+	Cfg  config.Config
+	Log  *slog.Logger
+	Pool *pgxpool.Pool
+	// HumanAuth is the Phase 18 R1 human identity service (ADR-0053).
+	HumanAuth                     *humanauth.Service
 	Devices                       auth.Service
 	Sync                          sync.Service
 	Reports                       report.Service
@@ -176,15 +179,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
 	a.Dashboard = dashboard.NewService(a.Reports, store, store, clock.System{})
-	sessionKey, err := dashboard.SessionKey(cfg.Pepper)
+	humanAuthSvc, err := NewHumanAuthService(cfg, pool, log)
 	if err != nil {
 		pool.Close()
 		return nil, err
 	}
-	secureCookies := cfg.Environment == config.EnvProduction
-	dashAuth := adapterhttp.NewDashboardHandlers(
-		dashboard.Credentials{Username: cfg.DashboardUsername, PasswordHash: cfg.DashboardPasswordHash},
-		sessionKey, cfg.DashboardSessionTTL, secureCookies, cfg.TrustedProxyCIDRs, log)
+	a.HumanAuth = humanAuthSvc
+	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(store, log)
 	a.CommerceRegistry = commerce.NewRegistry()
@@ -380,7 +381,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	updateHandlers := newUpdateHandlers(cfg, pool, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		dashAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

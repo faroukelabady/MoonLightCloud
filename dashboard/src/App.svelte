@@ -22,15 +22,20 @@
 	import OperationsPage from './components/OperationsPage.svelte';
 	import CatalogAdminPage from './components/CatalogAdminPage.svelte';
 	import UpdatesPage from './components/UpdatesPage.svelte';
+	import UsersPage from './components/UsersPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { dashboardApi, ApiError, isStoreID } from './lib/api.js';
-	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow } from './lib/api.js';
+	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
 	let authed: boolean | null = $state(null);
+	// Current human (ADR-0053): stage, permissions and Store access from
+	// /auth/me, held in memory only. UX gating; the server re-checks all.
+	let me: Me | null = $state(null);
+	let pendingStage: AuthStage | null = $state(null);
 	let operatorName = $state('');
 	let route = $state('overview');
 	let params: PeriodParams = $state({ period: 'last_10_completed_days' });
@@ -64,6 +69,7 @@
 			orders: 'orders',
 			devices: 'devices',
 			operations: 'operations',
+			users: 'users',
 			updates: 'updates',
 			sales: 'sales',
 			daily: 'daily',
@@ -140,17 +146,28 @@
 
 	async function checkSession() {
 		try {
-			const me = await dashboardApi.me();
-			operatorName = me.username ?? '';
-			authed = true;
+			const current = await dashboardApi.me();
+			me = current;
+			operatorName = current.user.display_name;
+			pendingStage = current.stage === 'FULL' ? null : current.stage;
+			authed = current.stage === 'FULL';
 		} catch {
+			me = null;
+			pendingStage = null;
 			authed = false;
 		}
+	}
+
+	async function onAuthenticated() {
+		await checkSession();
+		if (authed) await initAuthenticated();
 	}
 
 	function requireAuth(err: unknown): boolean {
 		if (err instanceof ApiError && err.status === 401) {
 			authed = false;
+			me = null;
+			pendingStage = null;
 			return true;
 		}
 		return false;
@@ -185,6 +202,12 @@
 		resetScopeState();
 		storesEpoch += 1; // invalidate any prior in-flight registry load
 		await loadStores();
+		// A Store-restricted human has no "all Stores" view: default to its
+		// first Store (the server refuses aggregate reads anyway).
+		if (me && !me.all_stores && (!store || !me.store_ids.includes(store))) {
+			store = me.store_ids[0] ?? '';
+			window.history.replaceState({}, '', urlFor());
+		}
 		await reloadAll();
 	}
 
@@ -491,6 +514,9 @@
 	async function logout() {
 		await dashboardApi.logout();
 		authed = false;
+		me = null;
+		pendingStage = null;
+		operatorName = '';
 		// Do not leak one session's Store registry or scoped rows into the
 		// next login; re-authentication re-reads the URL and reloads. The
 		// epoch bump also drops a registry response still in flight.
@@ -558,16 +584,16 @@
 {#if authed === null}
 	<div class="muted pad">جارٍ التحميل… / Loading…</div>
 {:else if !authed}
-	<LoginPage onlogin={() => ((authed = true), void initAuthenticated())} />
+	<LoginPage stage={pendingStage} onauthenticated={() => void onAuthenticated()} />
 {:else}
 	<div class="shell">
-		<div class="sidewrap"><Sidebar {route} {navigate} /></div>
+		<div class="sidewrap"><Sidebar {route} {navigate} permissions={me?.permissions ?? []} allStores={me?.all_stores ?? false} /></div>
 		<main class="main">
 			<header class="topbar">
 				<div class="brandblock">
 					<div class="brandname">MoonLightCloud</div>
 					<h1 class="dash-title">لوحة متابعة المبيعات</h1>
-					<div class="muted brandsub">Your papyrus business insights in one place</div>
+					<div class="muted brandsub">Your business insights in one place</div>
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} />
@@ -706,6 +732,11 @@
 				{#if route === 'updates'}
 					<div class="cell a-orders">
 						<UpdatesPage {store} />
+					</div>
+				{/if}
+				{#if route === 'users' && me}
+					<div class="cell a-orders">
+						<UsersPage {me} {stores} onsessionchange={() => void checkSession()} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}

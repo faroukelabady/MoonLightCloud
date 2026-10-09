@@ -1,9 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
+import { uiLogin } from './auth';
 
-// Operator credentials for the DEV stack only (dev defaults:
-// operator / moonlight-dev-operator). Never production secrets.
-const USER = process.env.E2E_DASHBOARD_USER ?? 'operator';
-const PASS = process.env.E2E_DASHBOARD_PASSWORD ?? 'moonlight-dev-operator';
+// Explicit dev-stack credentials + TOTP (no default account): see auth.ts.
 
 // Self-contained dashboard mocks (Phase 4B contract): the suite never
 // depends on undocumented developer-database rows. Every payload satisfies
@@ -96,11 +94,7 @@ async function mockDashboard(page: Page, healthOver: Record<string, unknown> = {
 }
 
 async function login(page: Page) {
-	await page.goto('login');
-	await page.getByLabel(/اسم المستخدم/).fill(USER);
-	await page.getByLabel(/كلمة المرور/).fill(PASS);
-	await page.getByRole('button', { name: /دخول/ }).click();
-	await expect(page.getByText('لوحة متابعة المبيعات')).toBeVisible({ timeout: 15000 });
+	await uiLogin(page);
 }
 
 // CSP + page-error gate: normal dashboard use must produce zero content-

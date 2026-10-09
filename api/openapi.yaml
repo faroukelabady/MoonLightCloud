@@ -205,6 +205,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/operations/incidents/{id}:
     get:
       summary: Incident detail with masked deliveries and recovery state
@@ -227,6 +233,12 @@ paths:
                 $ref: '#/components/schemas/OperationsIncidentDetail'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -263,6 +275,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown incident.
           content:
@@ -291,6 +309,12 @@ paths:
                 $ref: '#/components/schemas/OperationsIncidentResponse'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -326,6 +350,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/operations/devices/summary:
     get:
       summary: Per-device active incident counts in one batched read
@@ -345,6 +375,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/devices:
     get:
       summary: Operator device connectivity + latest sync command
@@ -360,6 +396,12 @@ paths:
                 $ref: '#/components/schemas/DashboardDeviceList'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -418,6 +460,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     post:
       summary: Create a typed Store-scoped catalog command (durable intent only)
       operationId: catalogAdminCreateCommand
@@ -448,6 +496,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/commands/{id}:
     get:
       summary: One catalog command with targets and aggregate state
@@ -471,6 +525,12 @@ paths:
                 $ref: '#/components/schemas/CatalogAdminCommand'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -504,6 +564,12 @@ paths:
                 $ref: '#/components/schemas/CatalogAdminCommand'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -564,6 +630,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/products/{id}:
     get:
       summary: Store-scoped admin Product detail snapshot
@@ -587,6 +659,12 @@ paths:
                 $ref: '#/components/schemas/CatalogAdminProductDetail'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -624,6 +702,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown Product or wrong Store scope.
           content:
@@ -657,6 +741,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown Product or wrong Store scope.
           content:
@@ -684,6 +774,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/tags:
     get:
       summary: Store-scoped Tag rows
@@ -705,6 +801,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/product-types:
     get:
       summary: Store-scoped ProductType rows with dimensions and capabilities
@@ -722,6 +824,12 @@ paths:
                 $ref: '#/components/schemas/CatalogAdminProductTypeList'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -749,6 +857,12 @@ paths:
                 $ref: '#/components/schemas/CatalogAdminProductTypeDetail'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -875,6 +989,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/devices/{device_id}/sync-requests:
     post:
       summary: Queue sync_now.v1 (Idempotency-Key required, one active per device)
@@ -918,6 +1038,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1087,77 +1213,486 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  # ---- Human authentication (Phase 18 R1, ADR-0053) ----
+  # There is no registration endpoint and no default account. The first
+  # OWNER is created by the server-side CLI (`moonlight-cloud auth
+  # bootstrap-owner`), never over HTTP. Mutations need a same-origin
+  # Origin/Referer AND the session's X-CSRF-Token.
   /api/v1/dashboard/auth/login:
     post:
-      summary: Operator login (dashboard session)
-      operationId: dashboardLogin
+      summary: Primary (password) authentication; starts an MFA stage
+      description: >-
+        Same-origin only. Never yields a FULL session directly: the response
+        stage is MFA_PENDING (verify a TOTP or recovery code) or MFA_SETUP
+        (enroll TOTP first). Every failure (unknown account, wrong password,
+        disabled account) is the same 401; account and network throttling
+        answer 429 for a bounded time.
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthLoginRequest'}
+      responses:
+        '200':
+          description: Password accepted; challenge session cookie set (HttpOnly, SameSite=Strict, Secure + __Host- prefix outside development).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSessionResult'}
+        '400':
+          description: Malformed or oversized body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: INVALID_CREDENTIALS (generic, identical for every cause).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED (missing or foreign Origin).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '429':
+          description: RATE_LIMITED (temporary account or network throttle); Retry-After set.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/activate:
+    post:
+      summary: Consume a one-time activation token and set the first password
+      description: >-
+        Single-use, short-lived (24 h) token created by an OWNER. Returns an
+        MFA_SETUP session; the account becomes ACTIVE only after TOTP
+        enrollment.
+      operationId: authActivate
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [username, password]
+              additionalProperties: false
+              required: [token, password]
               properties:
-                username: {type: string}
-                password: {type: string}
+                token: {type: string, maxLength: 128}
+                password: {type: string, description: '12 to 256 characters; never truncated.'}
       responses:
         '200':
-          description: Authenticated; session cookie set (HttpOnly, Secure in production, SameSite=Lax).
+          description: Activated; MFA_SETUP session cookie set.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/DashboardSession'
+              schema: {$ref: '#/components/schemas/AuthSessionResult'}
+        '400':
+          description: ACTIVATION_INVALID (unknown, used or expired) or WEAK_PASSWORD.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/me:
+    get:
+      summary: Current human, stage, permissions and Store access
+      description: Works in every session stage. Returns no credential material other than the session CSRF token.
+      operationId: authMe
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Current session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthMe'}
         '401':
-          description: Invalid operator credentials (generic, rate-limited).
+          description: AUTH_REQUIRED (no, unknown, expired, revoked or superseded session).
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '429':
-          description: Too many login attempts; Retry-After set.
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/auth/logout:
     post:
-      summary: Operator logout (clears session cookie)
-      operationId: dashboardLogout
+      summary: Revoke the server-side session and clear the cookie
+      operationId: authLogout
       security:
         - dashboardSession: []
       responses:
         '200':
-          description: Logged out.
+          description: Session revoked; replaying the old cookie is rejected.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardSession'
+                type: object
+                properties:
+                  authenticated: {type: boolean}
         '401':
-          description: No valid session.
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/mfa/verify:
+    post:
+      summary: Complete an MFA_PENDING session with a TOTP or one-time recovery code
+      description: >-
+        RFC 6238 TOTP (30 s, 6 digits, one adjacent step tolerated); a step is
+        accepted once (replay rejected). Recovery codes are single-use. On
+        success the session is rotated to FULL (old cookie revoked).
+      operationId: authMFAVerify
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code: {type: string, pattern: '^[0-9 ]{6,7}$'}
+                recovery_code: {type: string, maxLength: 32}
+      responses:
+        '200':
+          description: FULL session; rotated cookie set.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSessionResult'}
+        '401':
+          description: INVALID_MFA_CODE or AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED or the session is not MFA_PENDING.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '429':
+          description: RATE_LIMITED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/mfa/enroll/start:
+    post:
+      summary: Generate the TOTP secret for an MFA_SETUP session (shown once)
+      description: The secret is stored only AES-256-GCM encrypted under AUTH_MFA_ENCRYPTION_KEY.
+      operationId: authMFAEnrollStart
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Provisioning material.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-  /api/v1/dashboard/auth/me:
+                type: object
+                required: [secret, otpauth_uri]
+                properties:
+                  secret: {type: string, description: 'Base32 secret for manual authenticator entry.'}
+                  otpauth_uri: {type: string}
+        '401':
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED or the session is not MFA_SETUP.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/mfa/enroll/confirm:
+    post:
+      summary: Verify the first TOTP code, enable MFA and receive recovery codes once
+      operationId: authMFAEnrollConfirm
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: {type: string}
+      responses:
+        '200':
+          description: MFA enabled; FULL session; ten one-time recovery codes (stored only as digests).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSessionResult'}
+        '401':
+          description: INVALID_MFA_CODE or AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED or the session is not MFA_SETUP.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/mfa/recovery-codes:
+    post:
+      summary: Regenerate recovery codes (previous codes stop working)
+      operationId: authRecoveryCodes
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: New codes, shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recovery_codes: {type: array, items: {type: string}}
+        '401':
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED or MFA not completed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth/password:
+    post:
+      summary: Change own password (other sessions revoked, current rotated)
+      operationId: authChangePassword
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [current_password, new_password]
+              properties:
+                current_password: {type: string}
+                new_password: {type: string}
+      responses:
+        '200':
+          description: Changed; rotated session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthSessionResult'}
+        '400':
+          description: WEAK_PASSWORD.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: INVALID_CREDENTIALS (current password) or AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: CSRF_REJECTED or MFA not completed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/users:
     get:
-      summary: Dashboard session state
-      operationId: dashboardMe
+      summary: List human accounts (users.read; OWNER)
+      operationId: usersList
       security:
         - dashboardSession: []
+      parameters:
+        - name: after
+          in: query
+          schema: {type: string, maxLength: 254}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100}
       responses:
         '200':
-          description: Session state.
+          description: Page of accounts visible to the caller (no credential material).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardSession'
+                type: object
+                required: [users, next_cursor]
+                properties:
+                  users: {type: array, items: {$ref: '#/components/schemas/HumanUser'}}
+                  next_cursor: {type: string}
         '401':
-          description: No valid session.
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (no users.read) or MFA not completed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    post:
+      summary: Create an account in PENDING_SETUP and return a one-time activation token (users.manage)
+      description: >-
+        OWNER only. A Store-restricted OWNER can only grant its own Stores
+        and never all-Stores access; only an all-Stores OWNER may create
+        another OWNER.
+      operationId: usersCreate
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [login, display_name, role]
+              properties:
+                login: {type: string}
+                display_name: {type: string, maxLength: 100}
+                role: {type: string, enum: [OWNER, ADMIN]}
+                all_stores: {type: boolean}
+                store_ids: {type: array, items: {type: string, format: uuid}}
+      responses:
+        '201':
+          description: Created; the activation token is returned exactly once.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                type: object
+                required: [user, activation_token]
+                properties:
+                  user: {$ref: '#/components/schemas/HumanUser'}
+                  activation_token: {type: string}
+        '400':
+          description: INVALID_INPUT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN or CSRF_REJECTED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: LOGIN_TAKEN.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/users/{id}/{action}:
+    post:
+      summary: Account administration (users.manage; mfa-reset needs security.manage)
+      description: >-
+        action: activation (new one-time token, PENDING_SETUP only) | role
+        {role} | status {status: ACTIVE|DISABLED} | memberships {all_stores,
+        store_ids} | mfa-reset | sessions-revoke. Role/status/MFA changes
+        invalidate the target's sessions. The last active OWNER can never be
+        disabled or demoted (409 LAST_OWNER), enforced transactionally.
+      operationId: usersAction
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [activation, role, status, memberships, mfa-reset, sessions-revoke]}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                role: {type: string, enum: [OWNER, ADMIN]}
+                status: {type: string, enum: [ACTIVE, DISABLED]}
+                all_stores: {type: boolean}
+                store_ids: {type: array, items: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Updated account, activation token, or revocation result.
+          content:
+            application/json:
+              schema: {type: object}
+        '400':
+          description: INVALID_INPUT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (permission, Store reach) or CSRF_REJECTED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Unknown account or action.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: LAST_OWNER or STATE_CONFLICT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/auth-audit:
+    get:
+      summary: Append-only security audit, newest first (users.read on an all-Stores account)
+      operationId: authAudit
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: before
+          in: query
+          schema: {type: integer, format: int64}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100}
+      responses:
+        '200':
+          description: Audit page (never contains passwords, TOTP secrets, recovery codes or tokens).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, next_before]
+                properties:
+                  events: {type: array, items: {$ref: '#/components/schemas/AuthAuditEvent'}}
+                  next_before: {type: integer, format: int64}
+        '401':
+          description: AUTH_REQUIRED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   /api/v1/dashboard/overview:
     get:
       summary: Dashboard overview (frozen summary + normalized EGP total + FX info)
@@ -1184,6 +1719,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1233,6 +1774,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1293,6 +1840,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -1349,6 +1902,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1432,6 +1991,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -1471,6 +2036,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1527,6 +2098,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -1570,6 +2147,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -1597,6 +2180,12 @@ paths:
                 $ref: '#/components/schemas/DashboardSyncHealth'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -1647,6 +2236,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -1689,6 +2284,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -2007,6 +2608,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           description: Unexpected internal failure. Generic envelope, no internals.
           content:
@@ -2052,6 +2659,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
               schema:
@@ -2257,6 +2870,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     post:
       summary: Import a signed release envelope (Cloud verifies; never signs)
       description: >-
@@ -2333,6 +2952,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown release.
           content:
@@ -2419,6 +3044,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     post:
       summary: Create a DRAFT rollout with an immutable target snapshot
       description: >-
@@ -2489,6 +3120,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: Unknown rollout.
           content:
@@ -2528,6 +3165,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/rollouts/{id}/{action}:
     post:
       summary: Rollout control (start, pause, resume, cancel, percentage)
@@ -2617,6 +3260,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/fleet:
     get:
       summary: Devices with trusted version/updater report and current target
@@ -2654,6 +3303,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/update-audit:
     get:
       summary: Release/rollout/device update audit trail (newest first)
@@ -2688,6 +3343,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device-control/update/status:
     post:
       summary: Retail reports its trusted version and updater state
@@ -2814,12 +3475,16 @@ components:
     dashboardSession:
       type: apiKey
       in: cookie
-      name: mlc_dash_session
+      name: __Host-mlc_session
       description: >-
-        Operator session cookie (HttpOnly, Secure in production, SameSite=Lax).
-        Minted by POST /api/v1/dashboard/auth/login after Argon2id credential
-        verification. REPORTING_API_TOKEN is never valid here and never
-        reaches the browser.
+        Opaque server-side human session (ADR-0053): 256-bit random token,
+        stored only as a digest. Cookie __Host-mlc_session (HttpOnly, Secure,
+        SameSite=Strict, Path=/) outside development; mlc_session over plain
+        HTTP in development. Every dashboard route also requires the FULL
+        (MFA-complete) stage, a named permission and server-side Store
+        membership; mutations additionally require a same-origin Origin/Referer
+        and the X-CSRF-Token header. Device credentials and
+        REPORTING_API_TOKEN are never valid here.
   parameters:
     TopNLimit:
       name: limit
@@ -4783,12 +5448,6 @@ components:
           items: {$ref: '#/components/schemas/BreakdownRow'}
           description: Units descending, deterministic identity tie-break.
         freshness: {$ref: '#/components/schemas/Freshness'}
-    DashboardSession:
-      type: object
-      required: [authenticated]
-      properties:
-        authenticated: {type: boolean}
-        username: {type: string}
     DashboardNormalized:
       type: object
       required: [normalized_total_minor, normalized_refund_minor, normalized_net_minor, transactions, units, return_transactions, units_returned, usd_sale_count]
@@ -5558,3 +6217,67 @@ components:
         retryable: {type: boolean}
         release_sequence: {type: integer, format: int64, minimum: 1}
         manifest_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+    AuthLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [login, password]
+      properties:
+        login: {type: string, maxLength: 254, description: 'Email or username; trimmed and lower-cased.'}
+        password: {type: string}
+    AuthSessionResult:
+      type: object
+      required: [stage, csrf_token]
+      properties:
+        stage: {type: string, enum: [MFA_PENDING, MFA_SETUP, FULL]}
+        csrf_token: {type: string, description: 'Send as X-CSRF-Token on every mutation; keep in memory only.'}
+        recovery_codes: {type: array, items: {type: string}, description: 'Present once, after MFA enrollment.'}
+    AuthMe:
+      type: object
+      required: [authenticated, stage, csrf_token, user, permissions, all_stores, store_ids]
+      properties:
+        authenticated: {type: boolean}
+        stage: {type: string, enum: [MFA_PENDING, MFA_SETUP, FULL]}
+        csrf_token: {type: string}
+        user:
+          type: object
+          properties:
+            id: {type: string, format: uuid}
+            login: {type: string}
+            display_name: {type: string}
+            role: {type: string, enum: [OWNER, ADMIN]}
+            mfa_enabled: {type: boolean}
+        permissions: {type: array, items: {type: string}, description: 'Empty until the session is FULL.'}
+        all_stores: {type: boolean}
+        store_ids: {type: array, items: {type: string, format: uuid}}
+        session:
+          type: object
+          properties:
+            expires_at: {type: string, format: date-time}
+            idle_timeout_seconds: {type: integer}
+    HumanUser:
+      type: object
+      required: [id, login, display_name, role, status, all_stores, store_ids, mfa_enabled]
+      properties:
+        id: {type: string, format: uuid}
+        login: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [OWNER, ADMIN]}
+        status: {type: string, enum: [PENDING_SETUP, ACTIVE, DISABLED]}
+        all_stores: {type: boolean}
+        store_ids: {type: array, items: {type: string, format: uuid}}
+        mfa_enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AuthAuditEvent:
+      type: object
+      required: [id, occurred_at, action, outcome, details]
+      properties:
+        id: {type: integer, format: int64}
+        occurred_at: {type: string, format: date-time}
+        actor_user_id: {type: string, format: uuid}
+        target_user_id: {type: string, format: uuid}
+        action: {type: string}
+        outcome: {type: string, enum: [success, failure, denied]}
+        reason: {type: string}
+        client_ip: {type: string}
+        details: {type: object, additionalProperties: true}

@@ -48,7 +48,7 @@ func TestDashboardDevicesConnectivity(t *testing.T) {
 	if _, _, err := h.Svc.Poll(ctx, "dev-A"); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	req := ownerRequest("GET", "/api/v1/dashboard/devices", nil)
 	rec := httptest.NewRecorder()
 	h.Devices(rec, req)
 	if rec.Code != 200 {
@@ -79,7 +79,7 @@ func TestDashboardDevicesConnectivity(t *testing.T) {
 func TestDashboardSyncRequestIdempotent(t *testing.T) {
 	h := dashSetup([]auth.Device{{ID: "dev-A", Status: "active"}})
 	mk := func(key string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+		req := ownerRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
 		req.Header.Set("Idempotency-Key", key)
 		rec := httptest.NewRecorder()
 		h.CreateSyncRequest(rec, req)
@@ -123,7 +123,7 @@ func TestDashboardSyncRequestIdempotent(t *testing.T) {
 
 func TestDashboardSyncRequestOfflineQueued(t *testing.T) {
 	h := dashSetup([]auth.Device{{ID: "dev-A", Status: "active"}})
-	req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+	req := ownerRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
 	req.Header.Set("Idempotency-Key", "offline-1")
 	rec := httptest.NewRecorder()
 	h.CreateSyncRequest(rec, req)
@@ -131,7 +131,7 @@ func TestDashboardSyncRequestOfflineQueued(t *testing.T) {
 		t.Fatalf("offline device still queues: %d", rec.Code)
 	}
 	// No poll happened: device stays NEVER_SEEN while command is pending.
-	req2 := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	req2 := ownerRequest("GET", "/api/v1/dashboard/devices", nil)
 	rec2 := httptest.NewRecorder()
 	h.Devices(rec2, req2)
 	var body struct {
@@ -158,7 +158,7 @@ func TestDashboardContractShapes(t *testing.T) {
 	if _, _, err := h.Svc.Poll(ctx, "dev-A"); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	req := ownerRequest("GET", "/api/v1/dashboard/devices", nil)
 	rec := httptest.NewRecorder()
 	h.Devices(rec, req)
 	var list struct {
@@ -182,7 +182,7 @@ func TestDashboardContractShapes(t *testing.T) {
 		t.Fatalf("device list shape: %s", rec.Body.String())
 	}
 	// Missing Idempotency-Key is rejected, not defaulted.
-	bad := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+	bad := ownerRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
 	brec := httptest.NewRecorder()
 	h.CreateSyncRequest(brec, bad)
 	if brec.Code != 400 {
@@ -214,7 +214,7 @@ func TestDashboardIdempotencyKeyMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+			req := ownerRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
 			if tc.setKey {
 				req.Header.Set("Idempotency-Key", tc.key)
 			}
@@ -246,7 +246,7 @@ func TestDashboardUnknownAndRevokedDevice(t *testing.T) {
 		return "k-cmd"
 	}, time.Minute, time.Now)
 	h := &DashboardDeviceHandlers{Svc: unknown, Auth: stubLister{}, OnlineWindow: time.Minute}
-	req := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-ghost/sync-requests", nil)
+	req := ownerRequest("POST", "/api/v1/dashboard/devices/dev-ghost/sync-requests", nil)
 	req.Header.Set("Idempotency-Key", "k1")
 	rec := httptest.NewRecorder()
 	h.CreateSyncRequest(rec, req)
@@ -260,7 +260,7 @@ func TestDashboardUnknownAndRevokedDevice(t *testing.T) {
 	}
 
 	revoked := dashSetup([]auth.Device{{ID: "dev-R", Status: "revoked"}})
-	rreq := httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-R/sync-requests", nil)
+	rreq := ownerRequest("POST", "/api/v1/dashboard/devices/dev-R/sync-requests", nil)
 	rreq.Header.Set("Idempotency-Key", "k1")
 	rrec := httptest.NewRecorder()
 	revoked.CreateSyncRequest(rrec, rreq)
@@ -287,7 +287,7 @@ func TestDashboardNoCredentialExposure(t *testing.T) {
 	if _, _, err := h.Svc.Poll(ctx, "dev-A"); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	req := ownerRequest("GET", "/api/v1/dashboard/devices", nil)
 	rec := httptest.NewRecorder()
 	h.Devices(rec, req)
 	body := rec.Body.String()
@@ -325,7 +325,7 @@ func TestDashboardSyncRequestErrorContract(t *testing.T) {
 	svc := devicecontrol.NewService(store, lifecycleStub{active: map[string]bool{"dev-A": true}}, ids.System{}.New, time.Minute, time.Now)
 	h := &DashboardDeviceHandlers{Svc: svc, Auth: stubLister{}, OnlineWindow: time.Minute}
 	post := func(path, key string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest("POST", path, nil)
+		req := ownerRequest("POST", path, nil)
 		if key != "" {
 			req.Header.Set("Idempotency-Key", key)
 		}
@@ -416,7 +416,7 @@ func TestDashboardDevicesShowStoreContext(t *testing.T) {
 	h.Stores = stubStores{bindings: []postgres.DeviceStoreInfo{
 		{DeviceID: "dev-A", StoreID: "store-1", DisplayName: "Cairo Gallery", Status: "active"},
 	}}
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/devices", nil)
+	req := ownerRequest("GET", "/api/v1/dashboard/devices", nil)
 	rec := httptest.NewRecorder()
 	h.Devices(rec, req)
 	if rec.Code != 200 {
@@ -452,7 +452,7 @@ func TestDashboardStoresList(t *testing.T) {
 	h := &StoreHandlers{Stores: stubStores{summaries: []storeSummaryWire{
 		{ID: "store-1", DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo", Status: "active", DeviceCount: 2},
 	}}}
-	req := httptest.NewRequest("GET", "/api/v1/dashboard/stores", nil)
+	req := ownerRequest("GET", "/api/v1/dashboard/stores", nil)
 	rec := httptest.NewRecorder()
 	h.ListStores(rec, req)
 	if rec.Code != 200 {
