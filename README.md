@@ -10,7 +10,7 @@ monolith, OCI-portable.
 
 ## Prerequisites
 
-- Go 1.27.x (pinned in `go.mod`)
+- Go 1.27.2 (pinned in `go.mod`)
 - Podman + podman-compose (canonical); `docker compose` compatible
 - `sqlc` v1.31.1, `go` (for `go run`-based migrations; no global goose needed)
 - PostgreSQL 18.1 container image (pinned in `deploy/compose.yaml`)

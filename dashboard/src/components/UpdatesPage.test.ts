@@ -79,6 +79,23 @@ describe('UpdatesPage', () => {
 		expect(rows[1].textContent).toContain('Not reported');
 	});
 
+	it('drops the previous Store fleet as soon as the Store changes', async () => {
+		const OTHER = '22222222-2222-4222-8222-222222222222';
+		const row = (store: string, name: string) => ({ device_id: name, device_name: name, device_status: 'active', store_id: store,
+			release_sequence: 1, updater_protocol: 1, updater_capable: true, updater_reported: true });
+		let releaseB!: (v: unknown) => void;
+		api.fleet.mockImplementation((s: string) =>
+			s === STORE ? Promise.resolve({ devices: [row(STORE, 'A-TILL')], next_cursor: '' }) : new Promise((r) => (releaseB = r))
+		);
+		const { rerender } = render(UpdatesPage, { store: STORE });
+		expect((await screen.findByTestId('fleet-row')).textContent).toContain('A-TILL');
+		await rerender({ store: OTHER });
+		expect(screen.queryByText('A-TILL')).toBeNull(); // B still pending
+		releaseB({ devices: [row(OTHER, 'B-TILL')], next_cursor: '' });
+		expect((await screen.findByTestId('fleet-row')).textContent).toContain('B-TILL');
+		expect(screen.queryByText('A-TILL')).toBeNull();
+	});
+
 	it('imports a signed envelope with a URL per signed artifact and surfaces server rejection', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
 		api.releases.mockResolvedValue({ releases: [] });

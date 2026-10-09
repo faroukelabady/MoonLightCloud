@@ -120,3 +120,8 @@ s = socket.create_connection((u.hostname or 'localhost', u.port or 5432), timeou
 s.close()
 EOF
 }
+
+# GOVULNCHECK_VERSION is the only govulncheck the gates run (via `go run
+# module@version`, verified by the Go checksum database). Keep in step with CI
+# (.github/workflows/ci.yml) and docs/operations/toolchain.md.
+GOVULNCHECK_VERSION="v1.8.0"

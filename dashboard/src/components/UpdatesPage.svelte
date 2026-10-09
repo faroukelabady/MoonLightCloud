@@ -206,11 +206,13 @@
 	}
 
 	async function showTargets(r: RolloutView) {
+		const my = epoch;
 		try {
 			const v = await updatesApi.targets(r.id, store);
+			if (my !== epoch) return; // scope changed while loading
 			openTargets = { id: r.id, rows: v.targets };
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل التحميل / Load failed') };
+			if (my === epoch) notice = { kind: 'err', text: errText(e, 'فشل التحميل / Load failed') };
 		}
 	}
 
@@ -224,11 +226,24 @@
 		}
 	}
 
+	// A Store change drops every Store-scoped list before reloading, so the
+	// previous Store's devices/rollouts are never shown under the new scope
+	// while its request is pending or after it fails. Releases are global.
+	let scopedStore = untrack(() => store);
 	$effect(() => {
 		void store;
 		void tab;
 		untrack(() => {
 			openTargets = null;
+			if (store !== scopedStore) {
+				scopedStore = store;
+				fleet = [];
+				fleetCursor = '';
+				fleetState = 'idle';
+				rollouts = [];
+				rolloutsCursor = '';
+				rolloutsState = 'idle';
+			}
 			reloadTab();
 		});
 	});

@@ -56,13 +56,13 @@ commit passwords, TOTP secrets or recovery codes; never log them.
 ## E2E
 
 ```bash
-./scripts/dev-up.sh
-npm --prefix dashboard run build
-E2E_BASE_URL=http://127.0.0.1:8080/dashboard npm --prefix dashboard run test:e2e
+npx --prefix dashboard playwright install chromium
+./scripts/e2e-dashboard.sh
 ```
 
-E2E uses dev defaults only. Playwright browsers install via
-`npx --prefix dashboard playwright install chromium`.
+E2E runs against a throwaway production-mode Cloud behind local HTTPS with
+explicit OWNER/ADMIN accounts and test-owned data; see
+`docs/operations/dashboard.md` (Browser E2E test environment).
 
 ## Conventions
 

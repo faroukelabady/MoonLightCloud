@@ -58,13 +58,18 @@
 	let activation = $state<{ login: string; link: string } | null>(null);
 	let form = $state({ login: '', display_name: '', role: 'ADMIN' as 'OWNER' | 'ADMIN', all_stores: false, store_ids: [] as string[] });
 
-	async function loadUsers(reset: boolean) {
+	async function fetchUsers(reset: boolean) {
 		if (!canRead) return;
-		await act(async () => {
-			const v = await usersApi.list(reset ? '' : cursor);
-			users = reset ? v.users : [...users, ...v.users];
-			cursor = v.next_cursor;
-		});
+		const v = await usersApi.list(reset ? '' : cursor);
+		users = reset ? v.users : [...users, ...v.users];
+		cursor = v.next_cursor;
+	}
+
+	// loadUsers is the standalone (busy-guarded) load; mutations already run
+	// inside act() and refresh with fetchUsers directly — calling loadUsers
+	// there would be swallowed by act()'s busy guard and leave a stale list.
+	async function loadUsers(reset: boolean) {
+		await act(() => fetchUsers(reset));
 	}
 
 	function activationLink(token: string): string {
@@ -78,7 +83,7 @@
 			const r = await usersApi.create({ ...form, store_ids: form.all_stores ? [] : form.store_ids });
 			activation = { login: r.user.login, link: activationLink(r.activation_token) };
 			form = { login: '', display_name: '', role: 'ADMIN', all_stores: false, store_ids: [] };
-			await loadUsers(true);
+			await fetchUsers(true);
 		});
 	}
 
@@ -87,7 +92,7 @@
 		if (!confirm(`${verb} ${u.login}? ${status === 'DISABLED' ? 'All of their sessions end immediately.' : ''}`)) return;
 		void act(async () => {
 			await usersApi.action(u.id, 'status', { status });
-			await loadUsers(true);
+			await fetchUsers(true);
 		});
 	}
 
@@ -95,7 +100,7 @@
 		if (!confirm(`Change ${u.login} to ${role}? Their sessions end and they must sign in again.`)) return;
 		void act(async () => {
 			await usersApi.action(u.id, 'role', { role });
-			await loadUsers(true);
+			await fetchUsers(true);
 			if (u.id === me.user.id) onsessionchange();
 		});
 	}

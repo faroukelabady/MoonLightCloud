@@ -117,30 +117,60 @@ errors and fire zero API calls.
 
 ## Browser E2E test environment
 
-`dashboard/e2e/dashboard.spec.ts` runs against the local dev stack
-(`./scripts/dev-up.sh`, Go API on `:8080` serving the built dashboard):
+The canonical command runs every spec in `dashboard/e2e/` against a
+throwaway **production-mode** Cloud (image built from this tree, fresh
+postgres:18.1, random secrets, no default account, clean-slate catalog):
 
 ```bash
-cd dashboard
-npx playwright test                                   # default viewport
-E2E_VIEWPORT=1536x1024 npx playwright test            # responsive matrix:
-E2E_VIEWPORT=1366x768 | 1440x900 | 1536x1024 | 1920x1080
-E2E_BASE_URL=http://127.0.0.1:8080/dashboard/ npx playwright test
+npx --prefix dashboard playwright install chromium   # once
+./scripts/e2e-dashboard.sh                           # whole suite
+./scripts/e2e-dashboard.sh e2e/updates.spec.ts       # any Playwright args
+E2E_IMAGE=moonlight-cloud:check ./scripts/e2e-dashboard.sh   # reuse an image
+E2E_VIEWPORT=1536x1024 ./scripts/e2e-dashboard.sh    # responsive matrix:
+                                                     # 1366x768 | 1440x900 | 1536x1024 | 1920x1080
 ```
 
-Credentials are explicit (no default account): `E2E_DASHBOARD_USER`,
-`E2E_DASHBOARD_PASSWORD` and `E2E_DASHBOARD_TOTP_SECRET` (the base32 key
-shown at MFA enrollment of a dev-stack account); see `e2e/auth.ts`.
+Requires podman, node/npx, openssl and curl. What the runner guarantees:
 
-The suite is self-contained: all dashboard APIs are route-mocked with
-Phase 4B contract-valid fixtures (net-primary overview, gross/refund/net
-daily, net-ranked products/categories, branch rows with refund fields,
-sync-health with both error channels). No test depends on developer
-database rows, fixed calendar dates, or yesterday/today data — period and
-custom-range flows assert URL/report/input agreement against the mocks,
-deterministic in `Africa/Cairo` at any wall-clock time. Tests that need
-failure states (503, unsafe >2^53 money, blocked returns) install their
-own one-shot routes on top of the base mocks.
+- **Production auth, real HTTPS.** Cloud is served through a test-only
+  local TLS terminator (`e2e/support/tls-proxy.mjs`) with a per-run CA and
+  leaf certificate, so the real `__Host-mlc_session` cookie (`Secure`,
+  `HttpOnly`, `SameSite=Strict`) and the CSRF/Origin checks are exercised
+  exactly as in production. Trust is pinned, not disabled: Chromium trusts
+  only that leaf's SPKI (`E2E_TLS_SPKI`), Node's request context only the
+  run CA (`NODE_EXTRA_CA_CERTS`).
+- **Explicit accounts.** The OWNER is bootstrapped through the CLI; the
+  Playwright global setup (`e2e/support/global-setup.ts`, active only with
+  `E2E_PROVISION=1`) enrolls its MFA and creates + activates + enrolls a
+  Store-A-only ADMIN through the real API. Secrets exist only in the run's
+  process environment.
+- **Single-use TOTP is respected.** The server accepts each TOTP step once
+  per account (replay protection). `e2e/auth.ts` (`freshTotp`) records the
+  last consumed step per secret and waits — at most one 30 s step — for an
+  unused one, so logout/re-login and back-to-back tests never replay a
+  code. Expect the full suite to take ~20 minutes for that reason.
+- **Test-owned data.** Stores A and B are registered through the device
+  API by two provisioned devices. Most specs route-mock dashboard data
+  APIs (auth is never mocked). Specs that assert on real report rows ingest
+  exactly those sales themselves through the device sync API
+  (`e2e/support/device.ts`; e.g. the historical Gold/Golden tag rows in
+  `phase12-r1.spec.ts`), with deterministic IDs. Nothing is seeded globally:
+  never add demo catalog or sales to migrations or startup to satisfy a test.
+
+Against an already-running stack (e.g. `./scripts/dev-up.sh`), set
+`E2E_BASE_URL`, `E2E_DASHBOARD_USER`, `E2E_DASHBOARD_PASSWORD`,
+`E2E_DASHBOARD_TOTP_SECRET` (an enrolled account), optionally
+`E2E_ADMIN_USER`/`_PASSWORD`/`_TOTP_SECRET`, and
+`E2E_DEVICE_CREDENTIAL_A` (a device registered to Store
+`aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`) and run `npx playwright test` in
+`dashboard/`. A development-mode server uses the non-Secure
+`mlc_session` cookie over HTTP; such a run is a functional run, **not**
+proof of production cookie behavior.
+
+Mocked-data specs remain deterministic: fixtures are contract-valid,
+period/custom-range flows assert URL/report/input agreement in
+`Africa/Cairo` at any wall-clock time, and failure states (503, unsafe
+>2^53 money, blocked returns) install their own one-shot routes.
 
 ## Phase 12 — Analytics, Top-N, Online comparison & Catalog Health
 

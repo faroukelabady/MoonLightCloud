@@ -11,7 +11,7 @@ git status --porcelain   # must be empty
 ./scripts/check.sh
 go test -race ./...
 ./scripts/readiness-check.sh
-govulncheck ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...   # pinned; never a PATH binary
 git status --porcelain   # must still be empty
 ```
 

@@ -49,11 +49,10 @@ echo "== go vet =="
 go vet ./...
 
 echo "== govulncheck =="
-if command -v govulncheck >/dev/null 2>&1; then
-  govulncheck ./...
-else
-  go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-fi
+# Always the pinned scanner (GOVULNCHECK_VERSION, lib.sh), never a govulncheck
+# found on PATH: a stale global binary or shim must not change this gate.
+# Offline/unavailable fails the script; there is no skip and no ID filter.
+go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 
 echo "== frontend (typecheck, unit tests, build) =="
 if ! command -v npm >/dev/null 2>&1; then

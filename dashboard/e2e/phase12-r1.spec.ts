@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { apiLogin } from './auth';
+import { ingestSales, type SaleEvent } from './support/device';
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const period={start_local:'2026-09-20',end_local_exclusive:'2026-10-01'};
 function overview(n:string){return {period,summary:{transaction_count:1,units_sold:1,return_transaction_count:0,units_returned:0,currency_totals:[{currency:'EGP',subtotal_minor:n,discount_minor:'0',tax_minor:'0',sales_total_minor:n,line_cost_minor:'0',refund_total_minor:'0',net_sales_minor:n,returned_units:0,returned_cost_minor:'0',net_cost_minor:'0'}]},normalized:{normalized_total_minor:n,normalized_refund_minor:'0',normalized_net_minor:n,transactions:1,units:1,return_transactions:0,units_returned:0,usd_sale_count:0},averages:{all:{transactions:1,units:1,average_minor:n},egp:{transactions:1,units:1,average_minor:n},usd:{transactions:0,units:0,average_minor:'0'}},fx:{has_usd:false,latest_rate:null,multiple_rates_used:false}};}
@@ -7,8 +8,27 @@ function online(name:string){return {currency_totals:[{currency:'EGP',orders:1,v
 function tags(name:string){return {rows:[{tag_id:A,tag_slug:'gold',name_ar:name,name_en:name,units:1,units_returned:0,currencies:[{currency:'EGP',line_sales_minor:'100',line_refund_minor:'0',net_minor:'100'}]}],overlap_note:''};}
 function health(name:string){return {providers:['alpha','zeta'],counts:[{reason_code:'CATALOG_MISSING_SKU',products:1}],detail:[{reason_code:'CATALOG_MISSING_SKU',product_id:A,provider_key:'',name,sku:name}],detail_limit:50,detail_truncated:false};}
 function gate(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return {promise,resolve};}
-// Explicit dev-stack account + TOTP (no default account): see auth.ts.
+// Explicit E2E accounts + fresh TOTP per login (no default account): see auth.ts.
 async function auth(page:Page){await apiLogin(page);}
+// Test-owned fixture for the "actual historical rows" test: two Store A
+// sales whose line carries the SAME tag captured under two historical names
+// (Gold, later renamed Golden). Ingested through the real device API by the
+// Store A device and projected by the running server; nothing is seeded
+// globally (fresh shops stay clean-slate). Deterministic IDs: idempotent.
+const HIST_TAG='e2e12000-0000-4000-8000-0000000000aa';
+function historicalSale(n:number,day:string,nameEn:string):SaleEvent{
+ const id=(p:string)=>`e2e12${p}-0000-4000-8000-00000000000${n}`;const at=`2026-09-${day}T10:00:00Z`;
+ const money=(m:number)=>({amount_minor:m,currency:'EGP'});
+ return {event_id:id('e00'),occurred_at:at,payload:{sale_id:id('500'),sale_number:`E2E-${day}-${n}`,channel:'STORE',occurred_at:at,paid_at:at,
+  shop:{name_ar:'متجر الاختبار',name_en:'E2E Test Shop',address_ar:'القاهرة',address_en:'Cairo',phone:'+201000000000',receipt_footer_ar:'شكرا',receipt_footer_en:'Thanks'},
+  actor:{cashier_id:'e2e-cashier',cashier_name:'E2E'},currency:'EGP',
+  totals:{subtotal:money(10000),discount:money(0),tax:money(0),total:money(10000)},
+  lines:[{sale_item_id:id('100'),product_id:'e2e12000-0000-4000-8000-0000000000bb',sku:'E2E-RING',product_name:'E2E Ring',quantity:1,unit_price:money(10000),line_total:money(10000),
+   classifications:{roots:[{category_id:'e2e12000-0000-4000-8000-0000000000cc',name_ar:'مجوهرات',name_en:'Jewelry'}],subcategories:[]},
+   tags:[{tag_id:HIST_TAG,slug:'gold',name_ar:'ذهبي',name_en:nameEn}]}],
+  payments:[{method:'cash',amount:money(10000),change_given:money(0),transaction_ref:'e2e'}]}};
+}
+
 async function defaults(page:Page){await page.route('**/api/v1/dashboard/**',async route=>{
  const u=new URL(route.request().url()), path=u.pathname;
  if(path.includes('/auth/'))return route.continue();
@@ -25,9 +45,12 @@ async function defaults(page:Page){await page.route('**/api/v1/dashboard/**',asy
 });}
 
 test('actual historical Gold/Golden API rows render in production assets without duplicate keys',async({page})=>{
+ await ingestSales('E2E_DEVICE_CREDENTIAL_A',[historicalSale(1,'20','Gold'),historicalSale(2,'22','Golden')]);
  await auth(page);const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  const query=`?period=custom&from_date=2026-09-20&to_date=2026-09-30&store_id=${A}`;
- const response=await page.request.get(`/api/v1/dashboard/tags${query}`);expect(response.status()).toBe(200);const data=await response.json();expect(data.rows).toHaveLength(2);
+ // Projection is asynchronous: wait until the running projector has both rows.
+ let data:{rows:unknown[]}={rows:[]};
+ await expect.poll(async()=>{const response=await page.request.get(`/api/v1/dashboard/tags${query}`);expect(response.status()).toBe(200);data=await response.json();return data.rows.length;},{timeout:30000}).toBe(2);
  await page.goto(`/dashboard/categories${query}`);const rows=page.locator('table').filter({has:page.locator('th').filter({hasText:'Tag'})}).locator('tbody tr');await expect(rows).toHaveCount(2);await expect(rows.filter({hasText:'Gold'})).toHaveCount(2);
  await page.route('**/api/v1/dashboard/tags?**',r=>r.fulfill({json:{...data,rows:[...data.rows].reverse()}}));await page.getByRole('button',{name:'عرض / Show',exact:true}).click();await expect(rows).toHaveCount(2);expect(errors.filter(e=>e.includes('duplicate'))).toEqual([]);
 });
