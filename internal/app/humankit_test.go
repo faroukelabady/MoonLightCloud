@@ -47,10 +47,12 @@ func (c *stepClock) Advance(d time.Duration) {
 }
 
 // humanKit prepares an App for human-auth tests: cheap hashing and a
-// controllable clock starting at a TOTP step boundary.
+// controllable clock starting at a current TOTP step boundary. The real
+// cookie jar uses wall time, so a historical fixed date would discard fresh
+// MFA_SETUP cookies before requests reach the server's expiry assertions.
 func humanKit(t *testing.T, a *App) *stepClock {
 	t.Helper()
-	clk := &stepClock{t: time.Date(2026, 10, 9, 10, 0, 0, 0, time.UTC)}
+	clk := &stepClock{t: time.Now().UTC().Truncate(humanauth.TOTPPeriod)}
 	a.HumanAuth.WithArgon2(cheapArgon).WithClock(clk)
 	return clk
 }

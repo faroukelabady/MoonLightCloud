@@ -117,6 +117,13 @@ in every environment, startup fails closed). A step is accepted once
 once, stored as SHA-256 digests, single-use under concurrency, and
 regenerable (old codes invalidated, audited).
 
+Enrollment activation compares the exact pending ciphertext and key version
+whose code was verified. A concurrent enrollment replacement or activation
+makes stale confirmation conflict before any credential, recovery-code or
+security-version writes; it cannot issue a FULL session. Successful activation
+and recovery-code persistence remain one transaction, with one winner under
+concurrent confirmation.
+
 ### Throttling
 
 PostgreSQL-backed, on the application clock: per account (5 failures /

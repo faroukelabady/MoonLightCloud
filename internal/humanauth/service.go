@@ -403,7 +403,7 @@ func (s *Service) ConfirmEnrollment(ctx context.Context, a Authenticated, code, 
 	if err != nil {
 		return IssuedSession{}, nil, err
 	}
-	version, err := s.store.EnableMFA(ctx, userID, step, hashes, now)
+	version, err := s.store.EnableMFA(ctx, userID, mfa.Ciphertext, mfa.KeyVersion, step, hashes, now)
 	if err != nil {
 		return IssuedSession{}, nil, err
 	}

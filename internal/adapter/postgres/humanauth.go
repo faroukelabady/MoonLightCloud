@@ -498,17 +498,20 @@ func (h HumanAuth) PutPendingMFA(ctx context.Context, userID string, ciphertext 
 }
 
 // EnableMFA enables the pending credential, replaces recovery codes,
-// activates a PENDING_SETUP account and bumps the security version.
-func (h HumanAuth) EnableMFA(ctx context.Context, userID string, step uint64, codeHashes [][]byte, now time.Time) (int64, error) {
+// activates a PENDING_SETUP account and bumps the security version. The
+// credential comparison fences activation to the secret actually verified,
+// including replacement while confirmation was in progress.
+func (h HumanAuth) EnableMFA(ctx context.Context, userID string, expectedCiphertext []byte, expectedKeyVersion int, step uint64, codeHashes [][]byte, now time.Time) (int64, error) {
 	var version int64
 	err := h.inTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE admin_mfa_credentials SET enabled_at = $2, last_used_step = $3
-			WHERE user_id = $1 AND enabled_at IS NULL`, userID, now, int64(step))
+			WHERE user_id = $1 AND enabled_at IS NULL
+			  AND secret_ciphertext = $4 AND key_version = $5`, userID, now, int64(step), expectedCiphertext, expectedKeyVersion)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() != 1 {
-			return humanauth.ErrMFAAlreadyEnabled
+			return humanauth.ErrConflict
 		}
 		if err := replaceCodes(ctx, tx, userID, codeHashes, now); err != nil {
 			return err

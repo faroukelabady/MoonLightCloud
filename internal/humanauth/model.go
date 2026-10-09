@@ -235,7 +235,9 @@ type Store interface {
 
 	GetMFA(ctx context.Context, userID string) (MFARecord, error)
 	PutPendingMFA(ctx context.Context, userID string, ciphertext []byte, keyVersion int, now time.Time) error
-	EnableMFA(ctx context.Context, userID string, step uint64, codeHashes [][]byte, now time.Time) (int64, error)
+	// EnableMFA activates only the pending credential whose code was verified.
+	// A replaced or already-enabled credential returns ErrConflict without writes.
+	EnableMFA(ctx context.Context, userID string, expectedCiphertext []byte, expectedKeyVersion int, step uint64, codeHashes [][]byte, now time.Time) (int64, error)
 	ConsumeTOTPStep(ctx context.Context, userID string, step uint64) (bool, error)
 	ConsumeRecoveryCode(ctx context.Context, userID string, codeHash []byte, now time.Time) (bool, error)
 	ReplaceRecoveryCodes(ctx context.Context, userID string, codeHashes [][]byte, now time.Time) error
