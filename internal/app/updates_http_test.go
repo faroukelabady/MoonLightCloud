@@ -214,3 +214,73 @@ func TestUpdateRoutesAuthorizationBoundary(t *testing.T) {
 		t.Fatalf("revoked device report: %d", code)
 	}
 }
+
+// P18-F04: the dashboard must send both the selected Store and Device ID.
+// Exercise that payload through real MFA/CSRF authorization and PostgreSQL;
+// including a Store must not relax membership or device-binding checks.
+func TestDeviceRolloutSelectedStoreAuthorization(t *testing.T) {
+	h := newUpdateHTTP(t)
+	storeA, storeB := uuid.NewString(), uuid.NewString()
+	devA := h.bound("device-rollout-a", storeA)
+	devB := h.bound("device-rollout-b", storeB)
+	admin := h.owner.createUser(h.srv, "rollout-admin.test", "ADMIN", false, storeA)
+	m := release.Manifest{ReleaseSequence: 11, Version: "1.1.0", BuildCommit: strings.Repeat("b", 40),
+		Artifacts: []release.Artifact{{OS: "linux", Arch: "amd64", Package: "tar.gz", FileName: "r.tar.gz", Size: 10, SHA256: strings.Repeat("c", 64)}}}
+	env, _, err := release.Sign(m, h.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := h.owner.do("POST", "/api/v1/dashboard/releases", map[string]any{
+		"envelope": json.RawMessage(env), "artifact_urls": map[string]string{"r.tar.gz": "https://artifacts.example.test/r.tar.gz"},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("import: %d", code)
+	}
+	releaseID := body["id"].(string)
+	request := func(store, device string) map[string]any {
+		return map[string]any{"release_id": releaseID, "scope": "DEVICE", "store_id": store,
+			"device_id": device, "mode": "OPTIONAL", "percentage": 100}
+	}
+	code, body = admin.do("POST", "/api/v1/dashboard/rollouts", request(storeA, devA.Device.ID))
+	if code != http.StatusCreated {
+		t.Fatalf("selected Store Device rollout: %d", code)
+	}
+	rolloutID := body["id"].(string)
+	var targetStore, targetDevice string
+	if err := h.a.Pool.QueryRow(context.Background(), `SELECT store_id::text, device_id::text
+		FROM update_rollout_targets WHERE rollout_id = $1`, rolloutID).Scan(&targetStore, &targetDevice); err != nil {
+		t.Fatal(err)
+	}
+	if targetStore != storeA || targetDevice != devA.Device.ID {
+		t.Fatal("Device rollout did not retain the authorized Store/device binding")
+	}
+	for _, tc := range []struct {
+		name   string
+		store  string
+		device string
+		want   int
+	}{
+		{"missing Store", "", devA.Device.ID, http.StatusForbidden},
+		{"foreign Store", storeB, devB.Device.ID, http.StatusForbidden},
+		{"foreign device under authorized Store", storeA, devB.Device.ID, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _ := admin.do("POST", "/api/v1/dashboard/rollouts", request(tc.store, tc.device))
+			if code != tc.want {
+				t.Fatalf("status = %d, want %d", code, tc.want)
+			}
+		})
+	}
+	// Even an all-Stores OWNER cannot attach Store B's device to Store A.
+	if code, _ := h.owner.do("POST", "/api/v1/dashboard/rollouts", request(storeA, devB.Device.ID)); code != http.StatusBadRequest {
+		t.Fatalf("OWNER foreign device binding: %d", code)
+	}
+	var rollouts, targets int
+	if err := h.a.Pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM update_rollouts),
+		(SELECT count(*) FROM update_rollout_targets)`).Scan(&rollouts, &targets); err != nil {
+		t.Fatal(err)
+	}
+	if rollouts != 1 || targets != 1 {
+		t.Fatalf("rejected requests left durable state: rollouts=%d targets=%d", rollouts, targets)
+	}
+}

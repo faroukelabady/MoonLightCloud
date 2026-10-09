@@ -152,4 +152,69 @@ describe('UpdatesPage', () => {
 		await fireEvent.change(select, { target: { value: 'r1' } });
 		expect(((await screen.findByTestId('create-rollout')) as HTMLButtonElement).disabled).toBe(true);
 	});
+
+	it('binds a Device rollout to the selected Store', async () => {
+		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
+		api.createRollout.mockResolvedValue({ target_count: 1 });
+		render(UpdatesPage, { store: STORE });
+		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.change(await screen.findByTestId('rollout-release'), { target: { value: 'r1' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: '  device-a  ' } });
+		await fireEvent.click(screen.getByTestId('create-rollout'));
+		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
+			release_id: 'r1', scope: 'DEVICE', store_id: STORE, device_id: 'device-a', mode: 'OPTIONAL', percentage: 10
+		});
+	});
+
+	it('requires a Store for a Device rollout even when a Device ID is entered', async () => {
+		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
+		render(UpdatesPage, { store: '' });
+		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
+		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByText('اختر متجرًا أولاً / Choose a Store first.')).toBeTruthy();
+		await fireEvent.click(screen.getByTestId('create-rollout'));
+		expect(api.createRollout).not.toHaveBeenCalled();
+	});
+
+	it('drops a previously entered Device ID when the selected Store changes', async () => {
+		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
+		const { rerender } = render(UpdatesPage, { store: STORE });
+		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
+		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(false);
+		await rerender({ store: '22222222-2222-4222-8222-222222222222' });
+		expect((screen.getByLabelText('Device ID') as HTMLInputElement).value).toBe('');
+		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(true);
+		await fireEvent.click(screen.getByTestId('create-rollout'));
+		expect(api.createRollout).not.toHaveBeenCalled();
+	});
+
+	it('keeps ALL rollouts independent of the selected Store and any prior Device ID', async () => {
+		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
+		api.createRollout.mockResolvedValue({ target_count: 2 });
+		render(UpdatesPage, { store: STORE });
+		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'ALL' } });
+		await fireEvent.click(screen.getByTestId('create-rollout'));
+		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
+			release_id: 'r1', scope: 'ALL', store_id: undefined, device_id: undefined, mode: 'OPTIONAL', percentage: 10
+		});
+	});
 });

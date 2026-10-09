@@ -152,6 +152,7 @@
 	}
 
 	async function createRollout() {
+		if (busy || !form.release_id || (form.scope !== 'ALL' && !store) || (form.scope === 'DEVICE' && !form.device_id.trim())) return;
 		if (
 			form.mode === 'MANDATORY' &&
 			form.scope === 'ALL' &&
@@ -163,7 +164,7 @@
 			const r = await updatesApi.createRollout({
 				release_id: form.release_id,
 				scope: form.scope,
-				store_id: form.scope === 'STORE' ? store : undefined,
+				store_id: form.scope !== 'ALL' ? store : undefined,
 				device_id: form.scope === 'DEVICE' ? form.device_id.trim() : undefined,
 				mode: form.mode,
 				percentage: Number(form.percentage)
@@ -237,6 +238,7 @@
 			openTargets = null;
 			if (store !== scopedStore) {
 				scopedStore = store;
+				form.device_id = '';
 				fleet = [];
 				fleetCursor = '';
 				fleetState = 'idle';
@@ -373,12 +375,12 @@
 				</select>
 			</label>
 			<label>% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
-			{#if form.scope === 'STORE' && !store}
+			{#if form.scope !== 'ALL' && !store}
 				<p class="muted">اختر متجرًا أولاً / Choose a Store first.</p>
 			{/if}
 			<button
 				onclick={createRollout}
-				disabled={busy || !form.release_id || (form.scope === 'STORE' && !store) || (form.scope === 'DEVICE' && !form.device_id.trim())}
+				disabled={busy || !form.release_id || (form.scope !== 'ALL' && !store) || (form.scope === 'DEVICE' && !form.device_id.trim())}
 				data-testid="create-rollout">إنشاء مسودة / Create draft</button
 			>
 		</fieldset>
