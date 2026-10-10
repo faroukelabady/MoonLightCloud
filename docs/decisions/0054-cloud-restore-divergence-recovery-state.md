@@ -66,6 +66,7 @@ sync_recovery_state
   verify_events          bigint
   verify_complete        bool
   verify_declared_total  bigint
+  verify_missing         bigint   -- 00045 (Phase 20 R6), server-recorded
 ```
 
 Per-device, not per-Store: one Store with several devices cannot be
@@ -145,19 +146,24 @@ Retail must hash the **same** canonical bytes. Hashing the raw stored
 Cloud owns the completeness proof. The coverage ledger records, per
 verification generation:
 
-- the page cursor `verify_last_event_id` — a page must **advance** it, so
-  a skipped or replayed page is refused (`UPDATE … WHERE
-  verify_last_event_id < $2` affecting zero rows);
+- the page cursor `verify_last_event_id` — identities in a page must be
+  strictly ascending by `event_id` in **byte order** and the page must start
+  above the cursor, so a replayed, repeated or out-of-order page is refused
+  (`UPDATE … WHERE verify_last_event_id COLLATE "C" < first_event_id`
+  affecting zero rows);
 - `verify_pages` / `verify_events` — cumulative coverage;
 - `verify_complete` — set **only** by a page submitted as
   `end_of_history`;
 - `verify_declared_total` — the retained-history size the device commits
-  to walking, supplied when the pass opens.
+  to walking, supplied when the pass opens;
+- `verify_missing` — identities the server did not hold (or held with a
+  different hash) in this generation, recorded by the server itself.
 
 `Complete` refuses unless **all** of:
 
 ```text
-last_missing == 0                       (no identities still missing)
+verify_missing == 0                     (server-recorded; the client's
+                                         last_missing must also be 0)
 progress exists and pages > 0           (never a zero-work shortcut)
 verify_complete == true                 (history walked to the end)
 verify_declared_total != 0              (a total was declared)
@@ -165,7 +171,8 @@ verify_events >= verify_declared_total  (coverage reached the total)
 ```
 
 **Proven:** a client cannot clear recovery by claiming `missing=0`
-without a coverage walk; cannot verify one page of many and complete; a
+without a coverage walk, nor after a walk in which the server recorded a
+missing identity, nor by padding a page with repeated identities; cannot verify one page of many and complete; a
 skipped page is refused; a replayed page is refused; a restart resumes
 and completes only after a full walk.
 
@@ -187,12 +194,17 @@ remains open.
 ### 8. Multiple-device recovery requirements
 
 - recovery state is per-device;
-- `devices_unresolved` counts devices of the Store still marked required;
+- `devices_unresolved` counts **active** devices bound to the requesting
+  device's Store that are still marked required (Phase 20 R6: never another
+  Store's devices; a revoked device is excluded);
 - a Store is **never** reported reconciled while `devices_unresolved > 0`.
 
 Consequently a device completing its own verification does not mark the
-Store reconciled. An offline, revoked, or lost device keeps the Store
-unreconciled until an operator resolves it.
+Store reconciled. An offline or lost (still active) device keeps the Store
+unreconciled. Revoking the device identity (`moonlight-cloud device revoke`)
+is the explicit operator resolution for a retired or replaced workstation:
+its retained history travels with the restored Retail database and is
+verified by the replacement device.
 
 **Not proven:** behaviour when a device identity existed before the
 backup but is absent from the restored snapshot (the identity is lost with
@@ -205,8 +217,11 @@ claimed.
 
 Receiving and acknowledging an event is **not** the same as projecting it.
 Event processors record their own state in `sync_event_processing`
-(`processed`, `retry`, `blocked`). `projections_pending` counts rows still
-`retry` or `blocked`.
+(`pending`, `processed`, `retry`, `blocked`). `projections_pending` counts
+rows still `pending`, `retry` or `blocked` for events of the requesting
+device's Store (Phase 20 R6). An event no processor has claimed yet has no
+row at all and is not counted; Retail therefore re-reads the status after
+replay and the operator re-checks after a short wait.
 
 Recovery verification therefore proves **event history**, not business
 projection convergence. The two are reported separately:
@@ -232,10 +247,9 @@ Only when no device is outstanding **and** no projection is pending.
 Never inferred from event-history verification alone, never from
 `/health/ready`, never from a non-zero delivered count.
 
-**Limitation:** `projections_pending` is currently computed globally, not
-per-Store. In a multi-Store deployment a pending projection for one Store
-will suppress `store_reconciled` for all Stores. This is conservative
-(never falsely positive) but imprecise.
+**Phase 20 R6:** both counts are scoped to the requesting device's Store;
+another Store's devices or projections never block (or leak into) this
+Store's report.
 
 ### 11. Replay idempotency and Store/device authorization
 
@@ -372,15 +386,36 @@ throughout.
    `BeginVerifyPass` floor check). Residual: a compromised device can
    still under-declare down to the Cloud-known bound for events Cloud has
    never seen — documented in the proven-vs-assumed table above.
-2. `projections_pending` should be scoped per-Store for multi-Store
-   deployments. Still open: currently global (conservative, never falsely
-   positive).
+2. ~~`projections_pending` should be scoped per-Store.~~ **Fixed in Phase
+   20 R6** together with `devices_unresolved` (active devices only).
 3. ~~The instructions string references a `sync reconcile` CLI that does
    not exist, and Retail has no reconciliation entry point.~~ **Fixed in
    Phase 20 R5:** `Instructions` names the real
    `Settings → Cloud Sync → Cloud recovery` operator path, and
    MoonLightRetail exposes `GetCloudRecoveryStatus` / `ReconcileCloud`
    bindings (admin-only).
+
+## Phase 20 R6 amendments (independent review findings)
+
+- **Keyset order is byte order.** Pages must be strictly ascending by
+  `event_id` in byte order and start above the recorded cursor
+  (`COLLATE "C"` in SQL, plain string comparison in Go, SQLite `BINARY` in
+  Retail). The earlier cursor compared `event_id` while Retail paged by
+  `(created_at, event_id)`, so any history longer than one page was
+  refused (P20-F01). Duplicates within a page are refused, so coverage can
+  no longer be padded.
+- **Server-owned missing ledger** (`verify_missing`, migration 00045).
+  `Complete` refuses unless the pass recorded zero missing identities; the
+  client's `last_missing` is checked but never sufficient.
+- **Marking starts a fresh generation.** `UpsertSyncRecoveryState` and the
+  `pg-restore.sh` marking statement reset the ledger, so a completed ledger
+  restored from a backup can never be reused.
+- **Store-scoped counts** (see §8–§10).
+- **Pre-schema-45 backups.** `pg-restore.sh` reads the archive's schema
+  version before any destructive step and refuses (exit 10) unless
+  `--cloud-binary` is supplied, in which case it migrates the restored
+  database and then marks every device.
+- **Verification is one query per page** (`SyncEventHashes`).
 
 ## Related documentation
 

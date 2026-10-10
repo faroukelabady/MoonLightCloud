@@ -47,6 +47,7 @@ sql:
       - "db/migrations/00042_admin_auth.sql"
       - "db/migrations/00043_projection_discovery_index.sql"
       - "db/migrations/00044_sync_recovery_state.sql"
+      - "db/migrations/00045_sync_recovery_missing_ledger.sql"
     gen:
       go:
         package: "sqlcgen"

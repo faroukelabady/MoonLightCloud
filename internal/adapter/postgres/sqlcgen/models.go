@@ -1043,6 +1043,7 @@ type SyncRecoveryState struct {
 	VerifyEvents        int64              `json:"verify_events"`
 	VerifyComplete      bool               `json:"verify_complete"`
 	VerifyDeclaredTotal int64              `json:"verify_declared_total"`
+	VerifyMissing       int64              `json:"verify_missing"`
 }
 
 type UpdateAuditEvent struct {

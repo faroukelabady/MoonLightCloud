@@ -66,12 +66,9 @@ type EnvironmentSummary struct {
 
 // diagnosticsCmd writes the sanitized bundle to stdout or --out.
 func diagnosticsCmd(args []string) error {
-	out := ""
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--out" && i+1 < len(args) {
-			out = args[i+1]
-			i++
-		}
+	out, err := parseDiagnosticsArgs(args)
+	if err != nil {
+		return err
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -152,4 +149,20 @@ func writeBundle(out string, bundle SupportBundle) error {
 		return err
 	}
 	return os.WriteFile(out, append(raw, '\n'), 0o600)
+}
+
+// parseDiagnosticsArgs accepts only `--out <file>` (or nothing). Unknown
+// or incomplete arguments are an error, never silently ignored.
+func parseDiagnosticsArgs(args []string) (string, error) {
+	out := ""
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--out" && i+1 < len(args) && args[i+1] != "":
+			out = args[i+1]
+			i++
+		default:
+			return "", fmt.Errorf("usage: moonlight-cloud diagnostics [--out <file>]")
+		}
+	}
+	return out, nil
 }

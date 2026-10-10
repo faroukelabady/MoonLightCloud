@@ -59,3 +59,22 @@ alone is not coverage.
 | Device credential revocation | Cloud operator |
 | Release signing key | Release owner (offline, air-gapped) |
 | Incident diagnosis | Named incident owner (Phase 21 prerequisite) |
+
+## Phase 20 R6 changes to the recovery threat surface
+
+- **Completeness proof no longer client-asserted.** Cloud records missing
+  identities per verification pass (`verify_missing`); `complete` refuses a
+  pass in which the server saw a missing identity, whatever `last_missing`
+  the device claims. Pages must be strictly ascending (byte order) and start
+  above the cursor, so repeated identities cannot pad coverage.
+- **Re-marking resets the ledger**, so a completed ledger restored from a
+  backup cannot clear a new recovery requirement without a new walk.
+- **Store-scoped reports.** `devices_unresolved` and `projections_pending`
+  only count the requesting device's Store; a device no longer learns
+  aggregate counts about other Stores. Revoked devices are excluded.
+- **Residual (unchanged):** an authenticated, compromised device can still
+  under-declare its retained history down to the number of events Cloud
+  already holds and omit identities Cloud never saw (ADR-0054).
+- **Residual:** a marked device can learn whether an exact
+  `(event_id, payload_hash)` pair exists in Cloud; it must already know the
+  event ID and payload hash, so this reveals nothing new in practice.

@@ -125,7 +125,10 @@ $CLOUD/scripts/pg-backup.sh --url "$DATABASE_URL" --out /secure/backups
 ```
 
 Produces `moonlight-cloud-<timestamp>.dump` (pg_dump custom format),
-a schema-only companion, and a manifest with SHA-256 and duration.
+a schema-only companion, and a manifest with SHA-256, duration and the
+schema version read from the archive itself. A reused `--label` is
+refused (an existing backup is never overwritten), files are created
+owner-only, and an interrupted run leaves no partial artifact.
 Verification is `pg_restore --list` on the produced artifact — a
 backup that cannot be read is deleted and reported as failed.
 
@@ -195,13 +198,17 @@ The protocol is explicit and durable:
             projections are complete.
 
 3. VERIFY   Retail walks its RETAINED canonical outbox history in
-            bounded keyset pages and POSTs (event_id, payload_hash)
+            bounded keyset pages ordered by event_id (byte order;
+            pages strictly ascending and contiguous) and POSTs
+            (event_id, payload_hash)
             identities to /recovery/verify. Cloud replies with the
             subset it is MISSING. Identity comparison only - never
             counts, never a fabricated ordering.
 
-4. REPLAY   Retail re-queues the missing rows (bounded, oldest-first)
-            and the normal sync worker resends them. Cloud ingest is
+4. REPLAY   Retail re-queues EXACTLY the delivered rows Cloud reported
+            missing (bounded batches) and the normal sync worker
+            resends them. Rows Cloud permanently rejected (blocked)
+            were never acknowledged and are not part of the walk. Cloud ingest is
             idempotent: duplicates ACK already_accepted; missing
             events ingest and reproject.
 
@@ -215,11 +222,18 @@ never fabricates events, never replaces inventory and never reissues a
 business mutation. The canonical event bytes are simply re-sent.
 
 **Multi-device rule:** a Store is never labeled reconciled while any
-device is still unresolved. Each device clears its own flag.
+active device of that Store is still unresolved. Each device clears its
+own flag. Counts are per Store: another Store's devices and projections
+never block (or appear in) this Store's report. A retired or replaced
+workstation is resolved by revoking its device identity
+(`moonlight-cloud device revoke <device-id>`); its retained history is
+verified by the replacement device from the restored Retail database.
 
 **Projection convergence:** completing verification proves *event
 history*, not business projection. `projections_pending` counts Cloud
-event processors still in `retry`/`blocked` (`sync_event_processing`).
+event processors of this Store still `pending`/`retry`/`blocked`
+(`sync_event_processing`). An event no processor has claimed yet has no
+row; re-check the status after a short wait before reporting.
 A Store is reconciled only when
 `devices_unresolved == 0 && projections_pending == 0`. Never infer
 reconciliation from `/health/ready`, from `required=false` alone, or from
@@ -296,10 +310,15 @@ must not be told "fully recovered" when canonical events are missing.
 
 **Retail restored older than Cloud (§7 scenario C):** a restored Retail
 backup may lack Sales that Cloud already projected. Those Sales are
-**data loss from Retail's side** and are exposed explicitly — the
-system does NOT import Cloud projection rows back as new Retail Sales
-or inventory movements. The operator must be told plainly that the
-transactions are absent from the backup.
+**data loss from Retail's side**. The system does NOT import Cloud
+projection rows back as new Retail Sales or inventory movements, and it
+does **not** detect this case automatically: Retail and Cloud both report
+healthy. The operator must compare the Cloud Sales list for the period
+after the backup with the restored Retail records and record the absent
+transactions manually. Cloud keeps showing the higher inventory revision
+until Retail's own revision for that Variant passes it again (subsequent
+stock changes); until then the Cloud stock projection is stale and must
+not drive online allocation.
 
 ### 5.2 Detection limitation (do not assume automatic detection)
 
@@ -316,7 +335,9 @@ Recovery marking happens **only** in the supported restore workflow
 Such a restore is indistinguishable from a healthy Cloud to this
 mechanism: `/health/ready` is 200, projections are internally consistent,
 and yet acknowledged events may be absent. If you restore Cloud by any
-other means, mark the devices yourself and run reconciliation:
+other means, first run `moonlight-cloud migrate up` (schema 45 or later),
+then mark the devices yourself (the statement also starts a fresh
+verification generation) and run reconciliation:
 
 ```bash
 psql "$URL" -Atqc "SELECT id FROM devices" | while read -r dev; do
@@ -325,9 +346,28 @@ psql "$URL" -Atqc "SELECT id FROM devices" | while read -r dev; do
     (device_id, required, reason, started_at, updated_at)
     VALUES ('$dev', TRUE, 'cloud database restored from backup', now(), now())
     ON CONFLICT (device_id) DO UPDATE SET required = TRUE,
-      reason = EXCLUDED.reason, cleared_at = NULL, updated_at = now()"
+      reason = EXCLUDED.reason, cleared_at = NULL, updated_at = now(),
+      verify_generation = sync_recovery_state.verify_generation + 1,
+      verify_last_event_id = '', verify_pages = 0, verify_events = 0,
+      verify_complete = FALSE, verify_declared_total = 0, verify_missing = 0"
 done
 ```
+
+**Backups taken before Phase 20 (schema < 45).** Every backup taken before
+the Phase 20 release is schema 43 or 44 and has no (or an older) recovery
+ledger. `pg-restore.sh` reads the archive's schema version **before** any
+destructive step and refuses with exit 10 unless you pass
+`--cloud-binary <moonlight-cloud binary of the release you will run>`. With
+it, the script restores, runs `migrate up` with that binary (run the script
+with the release's production environment), validates, and then marks
+every device. A migration failure after restore exits 12 and reports
+`DATABASE_CONTENT_RESTORED = yes`, `RECOVERY_MARKING_COMPLETE = NO`.
+
+**Partial failures are reported, never hidden.** A `pg_restore` error exits
+11 with `DATABASE_CONTENT_RESTORED = PARTIAL / UNKNOWN`; a failed
+post-restore validation exits 7 and states that the content is already
+restored and devices are not flagged; a target that cannot be inspected is
+refused (exit 3) before anything is changed.
 
 ### 5.3 Verification constraints and trust boundary
 
@@ -336,17 +376,21 @@ Cloud owns the completeness proof. A verification pass is recorded in the
 refused unless **all** of the following hold:
 
 ```text
-last_missing == 0                      no identities still missing
+verify_missing == 0                    the server recorded no missing identity
+                                       (the client's last_missing must also be 0)
 pages > 0                              never a zero-work shortcut
 verify_complete == true                a page was submitted end_of_history
 verify_declared_total != 0             a retained-history total was declared
 verify_events >= verify_declared_total coverage reached that total
 ```
 
-Each verification page must **advance** the page cursor, so a skipped or
-replayed page is refused outright.
+Each verification page must be strictly ascending by `event_id` in byte
+order and start above the recorded cursor, so a replayed, repeated or
+out-of-order page is refused outright. Marking a device (again) starts a
+fresh generation: an earlier completed ledger can never be reused.
 
-**Proven:** `missing=0` alone cannot clear recovery; a partial walk cannot
+**Proven:** a client claim of `missing=0` cannot clear recovery (the
+server's own `verify_missing` decides); a partial walk cannot
 complete; skipped/replayed pages are refused; an interrupted pass resumes
 and completes only after a full walk.
 
@@ -520,7 +564,10 @@ passwords, tokens, private keys, MFA secrets, recovery codes, provider
 credentials or customer records.
 
 Cloud diagnosis: `moonlight-cloud projection status`, `/health/ready`,
-`/api/v1/dashboard/sync-health`, `/api/v1/dashboard/update-audit`.
+`/api/v1/dashboard/sync-health`, `/api/v1/dashboard/update-audit`, and the
+allowlisted support bundle `moonlight-cloud diagnostics [--out <file>]`
+(versions, schema, projector counts and error codes, feature booleans; no
+secrets, DSNs or business records).
 
 ---
 

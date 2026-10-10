@@ -1,11 +1,17 @@
 
 -- name: UpsertSyncRecoveryState :exec
+-- Marking (or re-marking) a device starts a fresh verification generation:
+-- a ledger left over from an earlier, completed recovery must never let a
+-- re-marked device complete without walking its history again.
 INSERT INTO sync_recovery_state (device_id, required, reason, started_at, updated_at)
 VALUES ($1, TRUE, $2, now(), now())
 ON CONFLICT (device_id) DO UPDATE
 SET required = TRUE, reason = EXCLUDED.reason,
     started_at = COALESCE(sync_recovery_state.started_at, now()),
-    cleared_at = NULL, updated_at = now();
+    cleared_at = NULL, updated_at = now(),
+    verify_generation = sync_recovery_state.verify_generation + 1,
+    verify_last_event_id = '', verify_pages = 0, verify_events = 0,
+    verify_complete = FALSE, verify_declared_total = 0, verify_missing = 0;
 
 -- name: ClearSyncRecoveryState :exec
 UPDATE sync_recovery_state
@@ -23,30 +29,41 @@ FROM sync_recovery_state
 WHERE required = TRUE
 ORDER BY started_at, device_id;
 
--- name: CountSyncRecoveryRequired :one
-SELECT count(*) FROM sync_recovery_state WHERE required = TRUE;
+-- name: CountStoreSyncRecoveryRequired :one
+-- Phase 20 R6: unresolved devices of the REQUESTING device's Store only
+-- (never another Store's), counting active devices. A revoked device can
+-- never reconcile; revocation is the operator's explicit resolution for a
+-- retired or replaced workstation (its retained history travels with the
+-- restored Retail database to the replacement device).
+SELECT count(*)
+FROM sync_recovery_state r
+JOIN devices d ON d.id = r.device_id AND d.status = 'active'
+WHERE r.required
+  AND (r.device_id = sqlc.arg(device_id)::uuid
+       OR r.device_id IN (
+           SELECT b.device_id FROM device_store_bindings b
+           WHERE b.store_id = (SELECT s.store_id FROM device_store_bindings s
+                               WHERE s.device_id = sqlc.arg(device_id)::uuid)));
 
--- Continuity verification: which of the reported event identities does
--- Cloud already hold? Identity is (event_id, payload_hash) - never a
--- fabricated sequence, and never count-only equality.
--- name: MissingSyncEvents :many
-SELECT e.event_id
-FROM unnest($1::uuid[]) AS q(event_id)
-LEFT JOIN sync_events e ON e.event_id = q.event_id
-WHERE e.event_id IS NULL;
+-- Continuity verification: the stored identity of each reported event.
+-- Identity is (event_id, payload_hash); an absent row or a different hash
+-- is reported missing. One bounded query per page (no N+1).
+-- name: SyncEventHashes :many
+SELECT e.event_id, e.payload_hash
+FROM sync_events e
+WHERE e.event_id = ANY($1::uuid[]);
 
 -- name: CountSyncEventsForDevice :one
 SELECT count(*) FROM sync_events WHERE device_id = $1;
 
--- name: SyncEventPayloadHash :one
-SELECT payload_hash FROM sync_events WHERE event_id = $1;
-
--- Phase 20 R3: verification coverage ledger. Pages must ADVANCE the
--- keyset cursor; skipping a page or revisiting one is rejected, so an
--- incomplete walk can never look complete.
+-- Phase 20 R3/R6: verification coverage ledger. Pages must ADVANCE the
+-- keyset cursor in BYTE order (COLLATE "C"), the same order Retail's
+-- SQLite BINARY collation and Go string comparison use, so the cursor can
+-- never disagree with the client's keyset because of a database locale.
 
 -- name: SyncRecoveryVerifyProgress :one
-SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, verify_complete, verify_declared_total
+SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, verify_complete,
+       verify_declared_total, verify_missing
 FROM sync_recovery_state WHERE device_id = $1;
 
 -- name: SyncRecoveryBeginVerify :exec
@@ -54,30 +71,33 @@ UPDATE sync_recovery_state
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = $2,
+    verify_declared_total = $2, verify_missing = 0,
     updated_at = now()
 WHERE device_id = $1;
 
 -- name: SyncRecoveryRecordVerifyPage :execrows
 UPDATE sync_recovery_state
-SET verify_last_event_id = $2,
+SET verify_last_event_id = sqlc.arg(last_event_id)::text,
     verify_pages = verify_pages + 1,
-    verify_events = verify_events + $3,
-    verify_complete = (verify_complete OR $4::bool),
+    verify_events = verify_events + sqlc.arg(events)::bigint,
+    verify_missing = verify_missing + sqlc.arg(missing)::bigint,
+    verify_complete = (verify_complete OR sqlc.arg(end_of_history)::bool),
     updated_at = now()
-WHERE device_id = $1 AND verify_last_event_id < $2;
+WHERE device_id = sqlc.arg(device_id)::uuid
+  AND verify_last_event_id COLLATE "C" < sqlc.arg(first_event_id)::text COLLATE "C"
+  AND sqlc.arg(first_event_id)::text COLLATE "C" <= sqlc.arg(last_event_id)::text COLLATE "C";
 
--- name: SyncRecoveryResetVerify :exec
-UPDATE sync_recovery_state
-SET verify_last_event_id = '', verify_pages = 0, verify_events = 0,
-    verify_complete = FALSE, updated_at = now()
-WHERE device_id = $1;
-
--- name: CountPendingProjections :one
--- §5: ingest is not projection. This counts processor rows still
--- retrying or blocked, so recovery completion can be qualified rather
--- than implying business projections have converged.
-SELECT count(*) FROM sync_event_processing WHERE status IN ('retry', 'blocked');
+-- name: CountStorePendingProjections :one
+-- §5: ingest is not projection. Processor rows not yet terminal
+-- (pending, retry or blocked) for events of the requesting device's
+-- Store, never another Store's.
+SELECT count(*)
+FROM sync_event_processing p
+JOIN sync_events e ON e.event_id = p.event_id
+WHERE p.status IN ('pending', 'retry', 'blocked')
+  AND (e.device_id = sqlc.arg(device_id)::uuid
+       OR e.store_id = (SELECT s.store_id FROM device_store_bindings s
+                        WHERE s.device_id = sqlc.arg(device_id)::uuid));
 
 -- name: CountDeviceSyncEvents :one
 -- Phase 20 R5: independent lower bound on a device's retained history.

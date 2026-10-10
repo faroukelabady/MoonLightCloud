@@ -3414,6 +3414,134 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/recovery/status:
+    get:
+      summary: Retail reads its Cloud-restore recovery requirement
+      description: >-
+        Phase 20 (ADR-0054). Device identity comes only from the credential.
+        devices_unresolved and projections_pending are scoped to the
+        requesting device's Store (active devices only); store_reconciled is
+        true only when both are zero.
+      operationId: deviceRecoveryStatus
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Recovery report.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [required, devices_unresolved, projections_pending, store_reconciled]
+                properties:
+                  required: {type: boolean}
+                  reason: {type: string, maxLength: 200}
+                  devices_unresolved: {type: integer, minimum: 0}
+                  instructions: {type: string}
+                  projections_pending: {type: integer, minimum: 0}
+                  store_reconciled: {type: boolean}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/recovery/verify:
+    post:
+      summary: Retail verifies one page of its retained event history
+      description: >-
+        One bounded page (1-200 identities) of retained (event_id,
+        payload_hash) identities, strictly ascending by event_id in byte
+        order and starting above the server's recorded cursor. A positive
+        declared_total opens a new verification pass (it may not be below the
+        number of events Cloud already holds for the device). The server
+        records coverage and how many identities it does not hold.
+      operationId: deviceRecoveryVerify
+      security:
+        - deviceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [event_id, payload_hash]
+                    properties:
+                      event_id: {type: string, format: uuid}
+                      payload_hash: {type: string, description: lowercase hex SHA-256 of the canonical payload}
+                end_of_history: {type: boolean}
+                declared_total: {type: integer, minimum: 0, format: int64}
+      responses:
+        '200':
+          description: Identities Cloud does not hold (or holds with a different hash).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [missing]
+                properties:
+                  missing:
+                    type: array
+                    items: {type: string, format: uuid}
+                  cloud_event_count: {type: integer, description: informational only}
+        '400':
+          description: >-
+            Invalid page (empty, oversized, not strictly ascending, not
+            advancing the cursor, under-declared total, or recovery not active).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/recovery/complete:
+    post:
+      summary: Retail clears its recovery requirement after an exhaustive pass
+      description: >-
+        Succeeds only when the server's own ledger shows a complete walk
+        (end_of_history), coverage reaching the declared total, and zero
+        missing identities recorded in the pass. last_missing must be 0 but
+        is never sufficient on its own.
+      operationId: deviceRecoveryComplete
+      security:
+        - deviceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                last_missing: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: Requirement cleared for this device.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [required]
+                properties:
+                  required: {type: boolean}
+        '400':
+          description: Ledger does not prove an exhaustive, zero-missing pass.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   /api/v1/device-control/update/targets/{id}/report:
     post:
       summary: Retail reports progress/outcome for one of its targets

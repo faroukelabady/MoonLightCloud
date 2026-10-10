@@ -14,11 +14,18 @@ type fakeStore struct {
 	present            map[string]string // event_id -> payload hash
 	ledger             map[string]VerifyProgress
 	pendingProjections int64
-	cloudKnown         map[string]int64 // device -> events Cloud holds
+	cloudKnown         map[string]int64  // device -> events Cloud holds
+	storeOf            map[string]string // device -> Store (default: one shared Store)
+	// defaultHash, when set, is the stored hash of any identity not listed
+	// in present (most tests model a Cloud that already holds history).
+	defaultHash string
+	revoked     map[string]bool
 }
 
 func (f *fakeStore) UpsertRecoveryState(_ context.Context, deviceID, reason string) error {
 	f.state[deviceID] = State{DeviceID: deviceID, Required: true, Reason: reason}
+	p := f.ledger[deviceID]
+	f.ledger[deviceID] = VerifyProgress{Generation: p.Generation + 1}
 	return nil
 }
 
@@ -35,68 +42,63 @@ func (f *fakeStore) GetRecoveryState(_ context.Context, deviceID string) (State,
 	return s, ok, nil
 }
 
-func (f *fakeStore) CountRecoveryRequired(_ context.Context) (int, error) {
+func (f *fakeStore) CountRecoveryRequired(_ context.Context, deviceID string) (int, error) {
 	n := 0
-	for _, s := range f.state {
-		if s.Required {
+	for id, s := range f.state {
+		if s.Required && !f.revoked[id] && f.storeOf[id] == f.storeOf[deviceID] {
 			n++
 		}
 	}
 	return n, nil
 }
 
-func (f *fakeStore) MissingSyncEvents(_ context.Context, eventIDs []string) ([]string, error) {
-	var missing []string
+func (f *fakeStore) SyncEventHashes(_ context.Context, eventIDs []string) (map[string]string, error) {
+	out := map[string]string{}
 	for _, id := range eventIDs {
-		if _, ok := f.present[id]; !ok {
-			missing = append(missing, id)
+		if h, ok := f.present[id]; ok {
+			out[id] = h
+		} else if f.defaultHash != "" {
+			out[id] = f.defaultHash
 		}
 	}
-	return missing, nil
-}
-
-func (f *fakeStore) SyncEventPayloadHash(_ context.Context, eventID string) (string, bool, error) {
-	h, ok := f.present[eventID]
-	return h, ok, nil
+	return out, nil
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{state: map[string]State{}, present: map[string]string{}, ledger: map[string]VerifyProgress{}, cloudKnown: map[string]int64{}}
+	return &fakeStore{state: map[string]State{}, present: map[string]string{}, ledger: map[string]VerifyProgress{},
+		cloudKnown: map[string]int64{}, storeOf: map[string]string{}, revoked: map[string]bool{}, defaultHash: "a"}
 }
 
 func (f *fakeStore) CountDeviceSyncEvents(_ context.Context, deviceID string) (int64, error) {
 	return f.cloudKnown[deviceID], nil
 }
 
-func (f *fakeStore) CountPendingProjections(_ context.Context) (int64, error) {
+func (f *fakeStore) CountPendingProjections(_ context.Context, _ string) (int64, error) {
 	return f.pendingProjections, nil
 }
 
 func (f *fakeStore) VerifyProgress(_ context.Context, deviceID string) (VerifyProgress, bool, error) {
-	p, ok := f.ledger[deviceID]
-	return p, ok, nil
+	if _, marked := f.state[deviceID]; !marked {
+		return VerifyProgress{}, false, nil
+	}
+	return f.ledger[deviceID], true, nil
 }
 
 func (f *fakeStore) BeginVerifyPass(_ context.Context, deviceID string, declaredTotal int64) error {
 	p := f.ledger[deviceID]
-	p.Generation++
-	p.LastEventID = ""
-	p.Pages = 0
-	p.Events = 0
-	p.Complete = false
-	p.DeclaredTotal = declaredTotal
-	f.ledger[deviceID] = p
+	f.ledger[deviceID] = VerifyProgress{Generation: p.Generation + 1, DeclaredTotal: declaredTotal}
 	return nil
 }
 
-func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID, lastEventID string, events int64, endOfHistory bool) (bool, error) {
+func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
 	p := f.ledger[deviceID]
-	if lastEventID <= p.LastEventID {
+	if firstEventID <= p.LastEventID || lastEventID < firstEventID {
 		return false, nil // does not advance
 	}
 	p.LastEventID = lastEventID
 	p.Pages++
 	p.Events += events
+	p.Missing += missing
 	if endOfHistory {
 		p.Complete = true
 	}
@@ -137,12 +139,16 @@ func TestMarkRestoreRequiredIsDurable(t *testing.T) {
 // never by count.
 func TestVerifyDetectsMissingIdentities(t *testing.T) {
 	store := newStore()
+	store.defaultHash = ""
 	svc := NewService(store)
 	device := uuid.NewString()
 
-	present := uuid.NewString()
-	absent := uuid.NewString()
+	present := "00000000-0000-4000-8000-000000000001"
+	absent := "00000000-0000-4000-8000-000000000002"
 	store.present[present] = "aaaa"
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
 		Events: []EventIdentity{
@@ -166,7 +172,11 @@ func TestVerifyIdentityMismatchIsMissing(t *testing.T) {
 	id := uuid.NewString()
 	store.present[id] = "aaaa"
 
-	resp, err := svc.Verify(context.Background(), uuid.NewString(), VerifyRequest{
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
 		Events: []EventIdentity{{EventID: id, PayloadHash: "cccc"}},
 	})
 	if err != nil {
@@ -615,15 +625,13 @@ func TestDeclaredTotalAboveSuppliedEventsCannotComplete(t *testing.T) {
 }
 
 // TestDuplicateIDsInPageDoNotInflateCoverage proves re-submitting the
-// same identity cannot be counted twice.
+// same identity is refused outright (Phase 20 R6): a page must be
+// strictly ascending, so duplicates can never pad coverage.
 func TestDuplicateIDsInPageDoNotInflateCoverage(t *testing.T) {
 	store := newStore()
 	svc := NewService(store)
 	device := uuid.NewString()
 	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.BeginVerifyPass(context.Background(), device, 4); err != nil {
 		t.Fatal(err)
 	}
 	id := fmt.Sprintf("%032d", 1)
@@ -634,19 +642,109 @@ func TestDuplicateIDsInPageDoNotInflateCoverage(t *testing.T) {
 			{EventID: fmt.Sprintf("%032d", 2), PayloadHash: "a"},
 			{EventID: fmt.Sprintf("%032d", 3), PayloadHash: "a"},
 		},
-		EndOfHistory: true,
+		EndOfHistory:  true,
+		DeclaredTotal: 4,
 	})
-	if err != nil {
+	if err == nil {
+		t.Fatal("a page repeating an identity must be refused")
+	}
+	if err := svc.Complete(context.Background(), device, 0); err == nil {
+		t.Fatal("a refused duplicate-padded page must not allow completion")
+	}
+}
+
+// TestDescendingIdentitiesWithinPageAreRefused proves a page must be a
+// contiguous ascending keyset slice.
+func TestDescendingIdentitiesWithinPageAreRefused(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
 		t.Fatal(err)
 	}
-	// Ledger counts submitted rows (4) so it reaches the declared 4, but
-	// the distinct-identity requirement is what a production client
-	// enforces; the server at minimum must not silently drop coverage.
-	progress, _, err := svc.VerifyProgress(context.Background(), device)
-	if err != nil {
+	_, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events: []EventIdentity{
+			{EventID: fmt.Sprintf("%032d", 2), PayloadHash: "a"},
+			{EventID: fmt.Sprintf("%032d", 1), PayloadHash: "a"},
+		},
+		DeclaredTotal: 2,
+	})
+	if err == nil {
+		t.Fatal("descending identities must be refused")
+	}
+}
+
+// TestCompleteRefusesWhenServerRecordedMissing proves Complete no longer
+// trusts the client's last_missing: the server's own ledger decides.
+func TestCompleteRefusesWhenServerRecordedMissing(t *testing.T) {
+	store := newStore()
+	store.defaultHash = ""
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("duplicate-supplied coverage: events=%d pages=%d", progress.Events, progress.Pages)
+	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events:        []EventIdentity{{EventID: fmt.Sprintf("%032d", 1), PayloadHash: "a"}},
+		EndOfHistory:  true,
+		DeclaredTotal: 1,
+	})
+	if err != nil || len(resp.Missing) != 1 {
+		t.Fatalf("expected one missing identity: %+v %v", resp, err)
+	}
+	if err := svc.Complete(context.Background(), device, 0); err == nil {
+		t.Fatal("client claim last_missing=0 must not override the server-recorded missing identity")
+	}
+	report, _ := svc.Status(context.Background(), device)
+	if !report.Required {
+		t.Fatal("device must stay required")
+	}
+}
+
+// TestReMarkingResetsLedger proves a completed ledger from an earlier
+// recovery cannot be reused after the device is marked again.
+func TestReMarkingResetsLedger(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	completeDevice(t, svc, device)
+	if err := svc.Complete(context.Background(), device, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored again"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Complete(context.Background(), device, 0); err == nil {
+		t.Fatal("re-marked device must walk its history again before completing")
+	}
+}
+
+// TestUnresolvedCountIsStoreScopedAndExcludesRevoked proves another
+// Store's (or a revoked) device never blocks this Store's reconciliation.
+func TestUnresolvedCountIsStoreScopedAndExcludesRevoked(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	a, b, other := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	store.storeOf[a], store.storeOf[b], store.storeOf[other] = "store-1", "store-1", "store-2"
+	if err := svc.MarkRestoreRequired(context.Background(), []string{a, b, other}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	completeDevice(t, svc, a)
+	if err := svc.Complete(context.Background(), a, 0); err != nil {
+		t.Fatal(err)
+	}
+	report, _ := svc.Status(context.Background(), a)
+	if report.DevicesUnresolved != 1 || report.StoreReconciled {
+		t.Fatalf("store-1 device b outstanding (store-2 must not count): %+v", report)
+	}
+	store.revoked[b] = true
+	report, _ = svc.Status(context.Background(), a)
+	if report.DevicesUnresolved != 0 || !report.StoreReconciled {
+		t.Fatalf("revoked device b no longer blocks store-1; store-2 never did: %+v", report)
+	}
 }
 
 // TestSameIDWrongHashIsMissing re-confirms content conflicts never match.

@@ -81,3 +81,29 @@ func TestSupportBundleEnvRecordsBooleansOnly(t *testing.T) {
 	}
 	_ = text
 }
+
+// TestDiagnosticsArgumentContract pins the CLI contract: `diagnostics`
+// and `diagnostics --out <file>` are accepted, anything else is refused
+// (Phase 20 R6: the command was double-sliced, so --out was ignored and
+// the bare command panicked).
+func TestDiagnosticsArgumentContract(t *testing.T) {
+	if out, err := parseDiagnosticsArgs(nil); err != nil || out != "" {
+		t.Fatalf("bare command: %q %v", out, err)
+	}
+	if out, err := parseDiagnosticsArgs([]string{"--out", "bundle.json"}); err != nil || out != "bundle.json" {
+		t.Fatalf("--out: %q %v", out, err)
+	}
+	for _, bad := range [][]string{{"--out"}, {"bundle.json"}, {"--verbose"}, {"--out", ""}} {
+		if _, err := parseDiagnosticsArgs(bad); err == nil {
+			t.Fatalf("%v must be refused", bad)
+		}
+	}
+}
+
+// TestRunDispatchesDiagnosticsWithoutPanic runs the real dispatcher with
+// a bad flag: it must return a usage error, never panic.
+func TestRunDispatchesDiagnosticsWithoutPanic(t *testing.T) {
+	if err := run([]string{"diagnostics", "--bogus"}); err == nil {
+		t.Fatal("unknown diagnostics flag must be an error")
+	}
+}

@@ -43,15 +43,45 @@ func (q *Queries) CountDeviceSyncEvents(ctx context.Context, deviceID pgtype.UUI
 	return count, err
 }
 
-const countPendingProjections = `-- name: CountPendingProjections :one
-SELECT count(*) FROM sync_event_processing WHERE status IN ('retry', 'blocked')
+const countStorePendingProjections = `-- name: CountStorePendingProjections :one
+SELECT count(*)
+FROM sync_event_processing p
+JOIN sync_events e ON e.event_id = p.event_id
+WHERE p.status IN ('pending', 'retry', 'blocked')
+  AND (e.device_id = $1::uuid
+       OR e.store_id = (SELECT s.store_id FROM device_store_bindings s
+                        WHERE s.device_id = $1::uuid))
 `
 
-// §5: ingest is not projection. This counts processor rows still
-// retrying or blocked, so recovery completion can be qualified rather
-// than implying business projections have converged.
-func (q *Queries) CountPendingProjections(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countPendingProjections)
+// §5: ingest is not projection. Processor rows not yet terminal
+// (pending, retry or blocked) for events of the requesting device's
+// Store, never another Store's.
+func (q *Queries) CountStorePendingProjections(ctx context.Context, deviceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countStorePendingProjections, deviceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countStoreSyncRecoveryRequired = `-- name: CountStoreSyncRecoveryRequired :one
+SELECT count(*)
+FROM sync_recovery_state r
+JOIN devices d ON d.id = r.device_id AND d.status = 'active'
+WHERE r.required
+  AND (r.device_id = $1::uuid
+       OR r.device_id IN (
+           SELECT b.device_id FROM device_store_bindings b
+           WHERE b.store_id = (SELECT s.store_id FROM device_store_bindings s
+                               WHERE s.device_id = $1::uuid)))
+`
+
+// Phase 20 R6: unresolved devices of the REQUESTING device's Store only
+// (never another Store's), counting active devices. A revoked device can
+// never reconcile; revocation is the operator's explicit resolution for a
+// retired or replaced workstation (its retained history travels with the
+// restored Retail database to the replacement device).
+func (q *Queries) CountStoreSyncRecoveryRequired(ctx context.Context, deviceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countStoreSyncRecoveryRequired, deviceID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -63,17 +93,6 @@ SELECT count(*) FROM sync_events WHERE device_id = $1
 
 func (q *Queries) CountSyncEventsForDevice(ctx context.Context, deviceID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countSyncEventsForDevice, deviceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countSyncRecoveryRequired = `-- name: CountSyncRecoveryRequired :one
-SELECT count(*) FROM sync_recovery_state WHERE required = TRUE
-`
-
-func (q *Queries) CountSyncRecoveryRequired(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countSyncRecoveryRequired)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -149,29 +168,33 @@ func (q *Queries) ListSyncRecoveryRequired(ctx context.Context) ([]ListSyncRecov
 	return items, nil
 }
 
-const missingSyncEvents = `-- name: MissingSyncEvents :many
-SELECT e.event_id
-FROM unnest($1::uuid[]) AS q(event_id)
-LEFT JOIN sync_events e ON e.event_id = q.event_id
-WHERE e.event_id IS NULL
+const syncEventHashes = `-- name: SyncEventHashes :many
+SELECT e.event_id, e.payload_hash
+FROM sync_events e
+WHERE e.event_id = ANY($1::uuid[])
 `
 
-// Continuity verification: which of the reported event identities does
-// Cloud already hold? Identity is (event_id, payload_hash) - never a
-// fabricated sequence, and never count-only equality.
-func (q *Queries) MissingSyncEvents(ctx context.Context, dollar_1 []pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, missingSyncEvents, dollar_1)
+type SyncEventHashesRow struct {
+	EventID     pgtype.UUID `json:"event_id"`
+	PayloadHash []byte      `json:"payload_hash"`
+}
+
+// Continuity verification: the stored identity of each reported event.
+// Identity is (event_id, payload_hash); an absent row or a different hash
+// is reported missing. One bounded query per page (no N+1).
+func (q *Queries) SyncEventHashes(ctx context.Context, dollar_1 []pgtype.UUID) ([]SyncEventHashesRow, error) {
+	rows, err := q.db.Query(ctx, syncEventHashes, dollar_1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []SyncEventHashesRow{}
 	for rows.Next() {
-		var event_id pgtype.UUID
-		if err := rows.Scan(&event_id); err != nil {
+		var i SyncEventHashesRow
+		if err := rows.Scan(&i.EventID, &i.PayloadHash); err != nil {
 			return nil, err
 		}
-		items = append(items, event_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -179,23 +202,12 @@ func (q *Queries) MissingSyncEvents(ctx context.Context, dollar_1 []pgtype.UUID)
 	return items, nil
 }
 
-const syncEventPayloadHash = `-- name: SyncEventPayloadHash :one
-SELECT payload_hash FROM sync_events WHERE event_id = $1
-`
-
-func (q *Queries) SyncEventPayloadHash(ctx context.Context, eventID pgtype.UUID) ([]byte, error) {
-	row := q.db.QueryRow(ctx, syncEventPayloadHash, eventID)
-	var payload_hash []byte
-	err := row.Scan(&payload_hash)
-	return payload_hash, err
-}
-
 const syncRecoveryBeginVerify = `-- name: SyncRecoveryBeginVerify :exec
 UPDATE sync_recovery_state
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = $2,
+    verify_declared_total = $2, verify_missing = 0,
     updated_at = now()
 WHERE device_id = $1
 `
@@ -212,27 +224,34 @@ func (q *Queries) SyncRecoveryBeginVerify(ctx context.Context, arg SyncRecoveryB
 
 const syncRecoveryRecordVerifyPage = `-- name: SyncRecoveryRecordVerifyPage :execrows
 UPDATE sync_recovery_state
-SET verify_last_event_id = $2,
+SET verify_last_event_id = $1::text,
     verify_pages = verify_pages + 1,
-    verify_events = verify_events + $3,
+    verify_events = verify_events + $2::bigint,
+    verify_missing = verify_missing + $3::bigint,
     verify_complete = (verify_complete OR $4::bool),
     updated_at = now()
-WHERE device_id = $1 AND verify_last_event_id < $2
+WHERE device_id = $5::uuid
+  AND verify_last_event_id COLLATE "C" < $6::text COLLATE "C"
+  AND $6::text COLLATE "C" <= $1::text COLLATE "C"
 `
 
 type SyncRecoveryRecordVerifyPageParams struct {
-	DeviceID          pgtype.UUID `json:"device_id"`
-	VerifyLastEventID string      `json:"verify_last_event_id"`
-	VerifyEvents      int64       `json:"verify_events"`
-	Column4           bool        `json:"column_4"`
+	LastEventID  string      `json:"last_event_id"`
+	Events       int64       `json:"events"`
+	Missing      int64       `json:"missing"`
+	EndOfHistory bool        `json:"end_of_history"`
+	DeviceID     pgtype.UUID `json:"device_id"`
+	FirstEventID string      `json:"first_event_id"`
 }
 
 func (q *Queries) SyncRecoveryRecordVerifyPage(ctx context.Context, arg SyncRecoveryRecordVerifyPageParams) (int64, error) {
 	result, err := q.db.Exec(ctx, syncRecoveryRecordVerifyPage,
+		arg.LastEventID,
+		arg.Events,
+		arg.Missing,
+		arg.EndOfHistory,
 		arg.DeviceID,
-		arg.VerifyLastEventID,
-		arg.VerifyEvents,
-		arg.Column4,
+		arg.FirstEventID,
 	)
 	if err != nil {
 		return 0, err
@@ -240,21 +259,10 @@ func (q *Queries) SyncRecoveryRecordVerifyPage(ctx context.Context, arg SyncReco
 	return result.RowsAffected(), nil
 }
 
-const syncRecoveryResetVerify = `-- name: SyncRecoveryResetVerify :exec
-UPDATE sync_recovery_state
-SET verify_last_event_id = '', verify_pages = 0, verify_events = 0,
-    verify_complete = FALSE, updated_at = now()
-WHERE device_id = $1
-`
-
-func (q *Queries) SyncRecoveryResetVerify(ctx context.Context, deviceID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, syncRecoveryResetVerify, deviceID)
-	return err
-}
-
 const syncRecoveryVerifyProgress = `-- name: SyncRecoveryVerifyProgress :one
 
-SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, verify_complete, verify_declared_total
+SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, verify_complete,
+       verify_declared_total, verify_missing
 FROM sync_recovery_state WHERE device_id = $1
 `
 
@@ -265,11 +273,13 @@ type SyncRecoveryVerifyProgressRow struct {
 	VerifyEvents        int64  `json:"verify_events"`
 	VerifyComplete      bool   `json:"verify_complete"`
 	VerifyDeclaredTotal int64  `json:"verify_declared_total"`
+	VerifyMissing       int64  `json:"verify_missing"`
 }
 
-// Phase 20 R3: verification coverage ledger. Pages must ADVANCE the
-// keyset cursor; skipping a page or revisiting one is rejected, so an
-// incomplete walk can never look complete.
+// Phase 20 R3/R6: verification coverage ledger. Pages must ADVANCE the
+// keyset cursor in BYTE order (COLLATE "C"), the same order Retail's
+// SQLite BINARY collation and Go string comparison use, so the cursor can
+// never disagree with the client's keyset because of a database locale.
 func (q *Queries) SyncRecoveryVerifyProgress(ctx context.Context, deviceID pgtype.UUID) (SyncRecoveryVerifyProgressRow, error) {
 	row := q.db.QueryRow(ctx, syncRecoveryVerifyProgress, deviceID)
 	var i SyncRecoveryVerifyProgressRow
@@ -280,6 +290,7 @@ func (q *Queries) SyncRecoveryVerifyProgress(ctx context.Context, deviceID pgtyp
 		&i.VerifyEvents,
 		&i.VerifyComplete,
 		&i.VerifyDeclaredTotal,
+		&i.VerifyMissing,
 	)
 	return i, err
 }
@@ -290,7 +301,10 @@ VALUES ($1, TRUE, $2, now(), now())
 ON CONFLICT (device_id) DO UPDATE
 SET required = TRUE, reason = EXCLUDED.reason,
     started_at = COALESCE(sync_recovery_state.started_at, now()),
-    cleared_at = NULL, updated_at = now()
+    cleared_at = NULL, updated_at = now(),
+    verify_generation = sync_recovery_state.verify_generation + 1,
+    verify_last_event_id = '', verify_pages = 0, verify_events = 0,
+    verify_complete = FALSE, verify_declared_total = 0, verify_missing = 0
 `
 
 type UpsertSyncRecoveryStateParams struct {
@@ -298,6 +312,9 @@ type UpsertSyncRecoveryStateParams struct {
 	Reason   string      `json:"reason"`
 }
 
+// Marking (or re-marking) a device starts a fresh verification generation:
+// a ledger left over from an earlier, completed recovery must never let a
+// re-marked device complete without walking its history again.
 func (q *Queries) UpsertSyncRecoveryState(ctx context.Context, arg UpsertSyncRecoveryStateParams) error {
 	_, err := q.db.Exec(ctx, upsertSyncRecoveryState, arg.DeviceID, arg.Reason)
 	return err

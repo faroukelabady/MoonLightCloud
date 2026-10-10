@@ -16,7 +16,8 @@ import (
 // and sync_events identity — never business projections.
 
 // UpsertRecoveryState durably marks one device as needing
-// reconciliation after a Cloud restore.
+// reconciliation after a Cloud restore and starts a fresh verification
+// generation, so a ledger from an earlier recovery can never be reused.
 func (d Devices) UpsertRecoveryState(ctx context.Context, deviceID, reason string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -76,22 +77,27 @@ func (d Devices) GetRecoveryState(ctx context.Context, deviceID string) (syncrec
 	return state, true, nil
 }
 
-// CountRecoveryRequired reports how many devices still need
-// reconciliation. A Store is never "recovered" while this is nonzero.
-func (d Devices) CountRecoveryRequired(ctx context.Context) (int, error) {
+// CountRecoveryRequired reports how many active devices of the
+// requesting device's Store still need reconciliation. Another Store's
+// devices never count. A Store is never "recovered" while this is nonzero.
+func (d Devices) CountRecoveryRequired(ctx context.Context, deviceID string) (int, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
-	n, err := sqlcgen.New(d.pool).CountSyncRecoveryRequired(ctx)
+	duid, err := parseUUID(deviceID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := sqlcgen.New(d.pool).CountStoreSyncRecoveryRequired(ctx, duid)
 	if err != nil {
 		return 0, catalogAdminErr(err)
 	}
 	return int(n), nil
 }
 
-// MissingSyncEvents returns which reported event IDs Cloud does not
-// hold. The comparison is by identity only — counts never prove
-// equality and are deliberately not consulted here.
-func (d Devices) MissingSyncEvents(ctx context.Context, eventIDs []string) ([]string, error) {
+// SyncEventHashes returns the stored payload hash of every reported event
+// Cloud holds, keyed by canonical (lowercase) event ID, in one bounded
+// query. Comparison is by identity only — counts never prove equality.
+func (d Devices) SyncEventHashes(ctx context.Context, eventIDs []string) (map[string]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	ids := make([]pgtype.UUID, 0, len(eventIDs))
@@ -102,33 +108,15 @@ func (d Devices) MissingSyncEvents(ctx context.Context, eventIDs []string) ([]st
 		}
 		ids = append(ids, uid)
 	}
-	rows, err := sqlcgen.New(d.pool).MissingSyncEvents(ctx, ids)
+	rows, err := sqlcgen.New(d.pool).SyncEventHashes(ctx, ids)
 	if err != nil {
 		return nil, catalogAdminErr(err)
 	}
-	out := make([]string, 0, len(rows))
-	for _, id := range rows {
-		out = append(out, uuidString(id))
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		out[strings.ToLower(uuidString(row.EventID))] = strings.ToLower(hex.EncodeToString(row.PayloadHash))
 	}
 	return out, nil
-}
-
-// SyncEventPayloadHash returns the stored identity hash of one event.
-func (d Devices) SyncEventPayloadHash(ctx context.Context, eventID string) (string, bool, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	uid, err := parseUUID(eventID)
-	if err != nil {
-		return "", false, err
-	}
-	hash, err := sqlcgen.New(d.pool).SyncEventPayloadHash(ctx, uid)
-	if err != nil {
-		if isNotFoundErr(err) {
-			return "", false, nil
-		}
-		return "", false, catalogAdminErr(err)
-	}
-	return strings.ToLower(hex.EncodeToString(hash)), true, nil
 }
 
 // VerifyProgress reads the server-side verification coverage ledger.
@@ -153,6 +141,7 @@ func (d Devices) VerifyProgress(ctx context.Context, deviceID string) (syncrecov
 		Events:        row.VerifyEvents,
 		Complete:      row.VerifyComplete,
 		DeclaredTotal: row.VerifyDeclaredTotal,
+		Missing:       row.VerifyMissing,
 	}, true, nil
 }
 
@@ -170,10 +159,11 @@ func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredT
 	}))
 }
 
-// RecordVerifyPage advances the coverage cursor. The UPDATE applies
-// only when the page's keyset position moves forward, so a skipped or
-// replayed page affects zero rows and is reported as refused.
-func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, lastEventID string, events int64, endOfHistory bool) (bool, error) {
+// RecordVerifyPage advances the coverage cursor and the missing ledger.
+// The UPDATE applies only when the page starts above the recorded cursor
+// in byte order (COLLATE "C"), so a skipped-back, replayed or
+// out-of-order page affects zero rows and is reported as refused.
+func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -181,8 +171,8 @@ func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, lastEventID str
 		return false, err
 	}
 	affected, err := sqlcgen.New(d.pool).SyncRecoveryRecordVerifyPage(ctx, sqlcgen.SyncRecoveryRecordVerifyPageParams{
-		DeviceID: duid, VerifyLastEventID: lastEventID,
-		VerifyEvents: events, Column4: endOfHistory,
+		DeviceID: duid, FirstEventID: firstEventID, LastEventID: lastEventID,
+		Events: events, Missing: missing, EndOfHistory: endOfHistory,
 	})
 	if err != nil {
 		return false, catalogAdminErr(err)
@@ -190,13 +180,18 @@ func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, lastEventID str
 	return affected == 1, nil
 }
 
-// CountPendingProjections reports event processors still retrying or
-// blocked. §5: ingest is not projection; a non-zero count means
-// business projections have not converged.
-func (d Devices) CountPendingProjections(ctx context.Context) (int64, error) {
+// CountPendingProjections reports non-terminal processor rows (pending,
+// retry, blocked) for events of the requesting device's Store. §5:
+// ingest is not projection; a non-zero count means business projections
+// have not converged.
+func (d Devices) CountPendingProjections(ctx context.Context, deviceID string) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
-	return sqlcgen.New(d.pool).CountPendingProjections(ctx)
+	duid, err := parseUUID(deviceID)
+	if err != nil {
+		return 0, err
+	}
+	return sqlcgen.New(d.pool).CountStorePendingProjections(ctx, duid)
 }
 
 // CountDeviceSyncEvents reports how many events Cloud already accepted

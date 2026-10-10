@@ -163,3 +163,14 @@ startup refuses to boot on mismatch. The Down migrations drop the additive
 tables/columns; because order-line variant snapshots and tombstones are
 immutable history, a downgrade after variant data exists is lossy for that
 history — take a backup first.
+
+## Phase 20: recovery state (00044, 00045)
+
+`00044_sync_recovery_state` adds the durable per-device Cloud-restore
+recovery table and its verification ledger (ADR-0054).
+`00045_sync_recovery_missing_ledger` (Phase 20 R6) adds
+`verify_missing`, the server-recorded count of identities a verification
+pass found missing. Both are additive; the Down migrations drop only these
+objects. `TargetVersion` is 45. `scripts/pg-restore.sh` requires schema 45
+to mark devices after a restore and migrates older archives first when
+given `--cloud-binary` (runbook `disaster-recovery.md` §5.2).

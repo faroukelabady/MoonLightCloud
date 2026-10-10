@@ -41,3 +41,20 @@ the reviewer can confirm they were considered:
   restore after business use is forbidden; deliberate restore warns.
 - Credentials in support bundle — bundle contains no secrets; negative
   tests guard the allowlist.
+
+## Phase 20 R6 updates (independent review remediation)
+
+- Reconciliation of histories longer than one page — **closed**: keyset
+  pages by `event_id` in byte order on both sides (was refused at page 2+).
+- Replay of the wrong rows / starvation — **closed**: Retail re-queues
+  exactly the delivered rows Cloud reported missing.
+- Permanently rejected (blocked) rows blocking completion — **closed**: they
+  were never acknowledged and are excluded from the walk.
+- One revoked device blocking every Store — **closed**: counts are
+  per-Store and exclude revoked devices.
+- Restoring a pre-Phase-20 (schema < 45) backup leaving devices unmarked —
+  **closed**: `pg-restore.sh` refuses before any destructive step unless
+  `--cloud-binary` lets it migrate and then mark.
+- Retail restored older than Cloud — **open, operational**: not detected
+  automatically; Cloud keeps the lost Sales and a stale inventory
+  projection until Retail's revision passes it again (runbook §5).

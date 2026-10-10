@@ -14,6 +14,9 @@
 # the produced artifact: a successful write is not evidence of a valid
 # backup.
 set -euo pipefail
+# Backups contain credential hashes and business data: files are created
+# owner-only from the start, not chmod-ed after the fact.
+umask 077
 
 usage() {
   cat >&2 <<'USAGE'
@@ -60,6 +63,23 @@ chmod 700 "$OUT" 2>/dev/null || true
 DUMP="$OUT/moonlight-cloud-$LABEL.dump"
 MANIFEST="$OUT/moonlight-cloud-$LABEL.manifest.json"
 SCHEMA_ONLY="$OUT/moonlight-cloud-$LABEL.schema.sql"
+# Never overwrite an existing backup: a reused label is an error, so a
+# failed or repeated run can never replace a known-good artifact.
+for existing in "$DUMP" "$MANIFEST" "$SCHEMA_ONLY"; do
+  if [[ -e "$existing" ]]; then
+    echo "pg-backup: REFUSED - $existing already exists; choose a new --label" >&2
+    exit 5
+  fi
+done
+# A run that does not finish leaves nothing behind: a partial dump must
+# never sit next to good backups or count toward retention.
+COMPLETED=0
+cleanup_partial() {
+  if [[ "$COMPLETED" != "1" ]]; then
+    rm -f "$DUMP" "$SCHEMA_ONLY" "$MANIFEST" "$OUT/.verify-$LABEL.err"
+  fi
+}
+trap cleanup_partial EXIT
 STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STARTED_S=$(date +%s)
 
@@ -90,7 +110,13 @@ DIGEST=$(sha256sum "$DUMP" | cut -d' ' -f1)
 ENDED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ELAPSED=$(( $(date +%s) - STARTED_S ))
 
-SCHEMA_VERSION="$(pg_restore --schema-only --file - "$DUMP" 2>/dev/null | grep -oE "INSERT INTO schema_migrations[^;]*" | head -1 || true)"
+# Schema version is read from the produced archive itself (goose_db_version
+# data), so the manifest records exactly what a restore will contain.
+SCHEMA_VERSION=$(pg_restore --data-only --table=goose_db_version --file - "$DUMP" 2>/dev/null | awk -F'\t' '
+  /^COPY .*goose_db_version/ { inblock = 1; next }
+  inblock && /^\\\.$/ { inblock = 0; next }
+  inblock && $3 == "t" && $2 + 0 > max { max = $2 + 0 }
+  END { print max + 0 }')
 
 cat >"$MANIFEST" <<MANIFEST
 {
@@ -105,11 +131,13 @@ cat >"$MANIFEST" <<MANIFEST
   "sha256": "$DIGEST",
   "schema_only": "$(basename "$SCHEMA_ONLY")",
   "verified": "pg_restore --list",
+  "schema_version": $SCHEMA_VERSION,
   "point_in_time_recovery": false,
   "note": "Logical dump: restores to the dump moment only. PITR requires provider WAL archiving."
 }
 MANIFEST
 chmod 600 "$MANIFEST"
+COMPLETED=1
 
 # Bounded retention: oldest backups removed first. Only files this
 # script created are considered, so nothing else in --out is touched.

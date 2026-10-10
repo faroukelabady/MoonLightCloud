@@ -37,6 +37,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // State is one device's durable recovery requirement.
@@ -102,6 +104,10 @@ type VerifyProgress struct {
 	// when the pass began. Complete requires Events to reach it, so
 	// skipped pages cannot look exhaustive.
 	DeclaredTotal int64 `json:"declared_total"`
+	// Missing is how many submitted identities Cloud did not hold (or
+	// held with a different payload hash) in this generation. It is
+	// recorded by the server, never taken from the client (Phase 20 R6).
+	Missing int64 `json:"missing"`
 }
 
 // EventIdentity is the immutable identity of one canonical event:
@@ -125,10 +131,13 @@ type Store interface {
 	UpsertRecoveryState(ctx context.Context, deviceID, reason string) error
 	ClearRecoveryState(ctx context.Context, deviceID string, verifiedEvents int64) error
 	GetRecoveryState(ctx context.Context, deviceID string) (State, bool, error)
-	CountRecoveryRequired(ctx context.Context) (int, error)
-	// MissingSyncEvents returns which of the reported event IDs Cloud
-	// does not hold. Payload hashes are matched by the caller.
-	MissingSyncEvents(ctx context.Context, eventIDs []string) ([]string, error)
+	// CountRecoveryRequired counts unresolved, active devices of the
+	// requesting device's Store (never another Store's).
+	CountRecoveryRequired(ctx context.Context, deviceID string) (int, error)
+	// SyncEventHashes returns the stored payload hash (lowercase hex) of
+	// every reported event Cloud holds, keyed by canonical event ID.
+	// Absent events are omitted. One bounded query per page.
+	SyncEventHashes(ctx context.Context, eventIDs []string) (map[string]string, error)
 	// VerifyProgress reads the server-side coverage ledger.
 	VerifyProgress(ctx context.Context, deviceID string) (VerifyProgress, bool, error)
 	// BeginVerifyPass starts a fresh verification generation and
@@ -138,14 +147,13 @@ type Store interface {
 	// for this device - an independent lower bound on the device's
 	// retained history (Phase 20 R5).
 	CountDeviceSyncEvents(ctx context.Context, deviceID string) (int64, error)
-	// RecordVerifyPage advances the coverage cursor. Returns false when
-	// the page does not advance it (skipped or replayed page).
-	RecordVerifyPage(ctx context.Context, deviceID, lastEventID string, events int64, endOfHistory bool) (bool, error)
-	// CountPendingProjections reports processors still retrying or
-	// blocked (§5).
-	CountPendingProjections(ctx context.Context) (int64, error)
-	// SyncEventPayloadHash returns the stored hash for one event.
-	SyncEventPayloadHash(ctx context.Context, eventID string) (string, bool, error)
+	// RecordVerifyPage advances the coverage cursor and the missing
+	// ledger. It returns false when the page does not advance the cursor
+	// in byte order (a skipped, replayed or out-of-order page).
+	RecordVerifyPage(ctx context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error)
+	// CountPendingProjections reports non-terminal processor rows
+	// (pending, retry, blocked) for the requesting device's Store (§5).
+	CountPendingProjections(ctx context.Context, deviceID string) (int64, error)
 }
 
 // Service drives the protocol. It holds no network state and never
@@ -167,7 +175,8 @@ const MaxVerifyPage = 200
 
 // MarkRestoreRequired is called by the supported Cloud restore
 // workflow. It durably marks every provided device as needing
-// reconciliation. The state survives restarts because it is a table.
+// reconciliation and starts a fresh verification generation for each.
+// The state survives restarts because it is a table.
 func (s *Service) MarkRestoreRequired(ctx context.Context, deviceIDs []string, reason string) error {
 	if len(deviceIDs) == 0 {
 		return fmt.Errorf("no devices to mark")
@@ -186,20 +195,19 @@ func (s *Service) MarkRestoreRequired(ctx context.Context, deviceIDs []string, r
 	return nil
 }
 
-// Status reports the device's recovery requirement. A device that is
-// not marked is NOT required — but a Store with any other device still
-// outstanding reports DevicesUnresolved so the operator cannot mistake
-// partial progress for full recovery.
+// Status reports the device's recovery requirement. Counts are scoped
+// to the requesting device's Store: another Store's devices or
+// projections never block (or leak into) this Store's report.
 func (s *Service) Status(ctx context.Context, deviceID string) (Report, error) {
 	state, found, err := s.store.GetRecoveryState(ctx, deviceID)
 	if err != nil {
 		return Report{}, err
 	}
-	unresolved, err := s.store.CountRecoveryRequired(ctx)
+	unresolved, err := s.store.CountRecoveryRequired(ctx, deviceID)
 	if err != nil {
 		return Report{}, err
 	}
-	pending, err := s.store.CountPendingProjections(ctx)
+	pending, err := s.store.CountPendingProjections(ctx, deviceID)
 	if err != nil {
 		return Report{}, err
 	}
@@ -221,16 +229,17 @@ func (s *Service) Status(ctx context.Context, deviceID string) (Report, error) {
 // Verify checks one bounded page of retained Retail history against
 // what Cloud actually holds, and records server-side coverage progress.
 //
-// Phase 20 R3 (§3) closes a material defect: R2's Complete trusted a
-// client-supplied "verified count", so a client could verify one page
-// of twelve and still clear the flag. The server now owns the proof:
+// The server owns the proof (Phase 20 R3/R6):
 //
-//   - pages MUST advance the keyset cursor (verify_last_event_id);
-//     skipping a page or revisiting one is rejected;
-//   - each page is recorded (verify_pages / verify_events);
+//   - identities within a page must be strictly ascending in byte order
+//     (no duplicates), and the page must start above the recorded cursor,
+//     so pages are contiguous keyset slices of one ordering;
+//   - each page is recorded (verify_pages / verify_events) together with
+//     how many identities Cloud did not hold (verify_missing);
 //   - a page may declare end_of_history, which is the ONLY way
 //     verify_complete becomes true;
-//   - Complete refuses unless verify_complete is true.
+//   - Complete refuses unless the walk is complete, reached the declared
+//     total and recorded zero missing identities.
 //
 // Identity is (event_id, payload_hash): an event ID present with a
 // different hash is reported missing — a content conflict, never
@@ -242,6 +251,17 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 	if len(req.Events) > MaxVerifyPage {
 		return VerifyResponse{}, fmt.Errorf("verification page exceeds %d events", MaxVerifyPage)
 	}
+	ids := make([]string, 0, len(req.Events))
+	for i, e := range req.Events {
+		if _, err := uuid.Parse(e.EventID); err != nil || strings.TrimSpace(e.EventID) != e.EventID {
+			return VerifyResponse{}, fmt.Errorf("invalid event id in verification page")
+		}
+		if i > 0 && e.EventID <= req.Events[i-1].EventID {
+			return VerifyResponse{}, fmt.Errorf(
+				"verification page is not strictly ascending by event id: identities must be unique and submitted in byte order")
+		}
+		ids = append(ids, e.EventID)
+	}
 	// A page carrying a declared total opens a fresh verification
 	// generation. This is the only way the server learns how much
 	// retained history the device commits to walking; without it the
@@ -250,63 +270,52 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 		if err := s.BeginVerifyPass(ctx, deviceID, req.DeclaredTotal); err != nil {
 			return VerifyResponse{}, err
 		}
+	} else if req.DeclaredTotal < 0 {
+		return VerifyResponse{}, fmt.Errorf("declared total must not be negative")
 	}
-	ids := make([]string, 0, len(req.Events))
-	for _, e := range req.Events {
-		if strings.TrimSpace(e.EventID) == "" {
-			return VerifyResponse{}, fmt.Errorf("empty event id")
-		}
-		ids = append(ids, e.EventID)
+	if _, found, err := s.store.VerifyProgress(ctx, deviceID); err != nil {
+		return VerifyResponse{}, err
+	} else if !found {
+		return VerifyResponse{}, fmt.Errorf("recovery verification is not active for this device")
 	}
-	missingIDs, err := s.store.MissingSyncEvents(ctx, ids)
+	held, err := s.store.SyncEventHashes(ctx, ids)
 	if err != nil {
 		return VerifyResponse{}, err
 	}
-	missing := map[string]bool{}
-	for _, id := range missingIDs {
-		missing[id] = true
-	}
-	out := make([]string, 0, len(missingIDs))
+	out := make([]string, 0)
 	for _, e := range req.Events {
-		if missing[e.EventID] {
-			out = append(out, e.EventID)
-			continue
-		}
-		stored, found, err := s.store.SyncEventPayloadHash(ctx, e.EventID)
-		if err != nil {
-			return VerifyResponse{}, err
-		}
-		if !found || !strings.EqualFold(stored, strings.TrimSpace(e.PayloadHash)) {
+		stored, ok := held[strings.ToLower(e.EventID)]
+		if !ok || !strings.EqualFold(stored, strings.TrimSpace(e.PayloadHash)) {
 			out = append(out, e.EventID)
 		}
 	}
 
-	// Record coverage. The cursor must ADVANCE: the page's highest
-	// event ID is the new keyset position, and the row update only
-	// applies when it moves forward. A skipped or replayed page is
-	// refused by the UPDATE affecting zero rows.
-	lastID := req.Events[len(req.Events)-1].EventID
-	recorded, err := s.store.RecordVerifyPage(ctx, deviceID, lastID, int64(len(req.Events)), req.EndOfHistory)
+	// Record coverage. The cursor must ADVANCE: the page must start above
+	// the recorded keyset position, so a skipped-back, replayed or
+	// out-of-order page affects zero rows and is refused.
+	recorded, err := s.store.RecordVerifyPage(ctx, deviceID, ids[0], ids[len(ids)-1],
+		int64(len(ids)), int64(len(out)), req.EndOfHistory)
 	if err != nil {
 		return VerifyResponse{}, err
 	}
 	if !recorded {
 		return VerifyResponse{}, fmt.Errorf(
-			"verification page does not advance the recorded cursor: pages must be submitted in retained-history order with none skipped")
+			"verification page does not advance the recorded cursor: pages must be submitted in ascending event-id order with none repeated")
 	}
 	return VerifyResponse{Missing: out, CloudEventCount: 0}, nil
 }
 
 // Complete clears the device's recovery requirement.
 //
-// Phase 20 R3: the flag is cleared ONLY when the server's own coverage
-// ledger proves an exhaustive walk. A client-claimed "verified count"
-// is never trusted. The preconditions are:
+// The flag is cleared ONLY when the server's own coverage ledger proves
+// an exhaustive walk with nothing missing. The client's last_missing is
+// checked as well, but it is never sufficient on its own. The
+// preconditions are:
 //
-//   - verify_complete is TRUE, which requires a page submitted as
-//     end_of_history (an incomplete walk cannot set it);
 //   - at least one page was recorded (never a zero-work shortcut);
-//   - the last verification pass reported zero missing events.
+//   - verify_complete is TRUE, which requires an end_of_history page;
+//   - a retained-history total was declared and coverage reached it;
+//   - the server recorded zero missing identities in this generation.
 //
 // If any precondition fails the flag stays set and the device remains
 // RECOVERY_RECONCILIATION_REQUIRED.
@@ -340,6 +349,11 @@ func (s *Service) Complete(ctx context.Context, deviceID string, lastMissing int
 			"recovery cannot complete: verified %d of %d declared retained events. "+
 				"Every retained-history page must be submitted; skipped pages leave the device unreconciled",
 			progress.Events, progress.DeclaredTotal)
+	}
+	if progress.Missing != 0 {
+		return fmt.Errorf(
+			"recovery cannot complete: this verification pass found %d missing or conflicting event(s). "+
+				"Replay them, then run a new verification pass", progress.Missing)
 	}
 	return s.store.ClearRecoveryState(ctx, deviceID, progress.Events)
 }
