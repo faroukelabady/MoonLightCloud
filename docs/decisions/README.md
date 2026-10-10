@@ -55,6 +55,7 @@ Concise, irreversible-or-important choices only.
 - [0051](0051-signed-release-registry.md) — signed release registry (18)
 - [0052](0052-fleet-rollout-device-update-control.md) — fleet rollout & device update control (18)
 - [0053](0053-human-authentication-authorization.md) — human authentication & authorization: OWNER/ADMIN, MFA, Store memberships (18 R1)
+- [0054](0054-cloud-restore-divergence-recovery-state.md) — Cloud restore divergence, durable recovery state & reconciliation protocol (20)
 
 ## Phase numbering gaps
 
