@@ -198,3 +198,17 @@ func (d Devices) CountPendingProjections(ctx context.Context) (int64, error) {
 	defer cancel()
 	return sqlcgen.New(d.pool).CountPendingProjections(ctx)
 }
+
+// CountDeviceSyncEvents reports how many events Cloud already accepted
+// from this device. It is an independent lower bound on the device's
+// retained history: those events came out of the device's durable outbox,
+// so the device cannot legitimately claim to retain fewer (Phase 20 R5).
+func (d Devices) CountDeviceSyncEvents(ctx context.Context, deviceID string) (int64, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	uid, err := parseUUID(deviceID)
+	if err != nil {
+		return 0, err
+	}
+	return sqlcgen.New(d.pool).CountDeviceSyncEvents(ctx, uid)
+}

@@ -134,6 +134,10 @@ type Store interface {
 	// BeginVerifyPass starts a fresh verification generation and
 	// records the retained-history size the device will walk.
 	BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) error
+	// CountDeviceSyncEvents reports how many events Cloud already holds
+	// for this device - an independent lower bound on the device's
+	// retained history (Phase 20 R5).
+	CountDeviceSyncEvents(ctx context.Context, deviceID string) (int64, error)
 	// RecordVerifyPage advances the coverage cursor. Returns false when
 	// the page does not advance it (skipped or replayed page).
 	RecordVerifyPage(ctx context.Context, deviceID, lastEventID string, events int64, endOfHistory bool) (bool, error)
@@ -208,8 +212,8 @@ func (s *Service) Status(ctx context.Context, deviceID string) (Report, error) {
 	if report.Required {
 		report.Reason = state.Reason
 		report.Instructions = "Cloud was restored from a backup and may be missing events this device already delivered. " +
-			"Run the reconciliation resend (syncservice ReconcileCloud / CLI `sync reconcile`) so retained delivered events " +
-			"are replayed, then verify until no events are missing. Do not treat this Store as synchronized before then."
+			"Open Settings -> Cloud Sync -> Cloud recovery and run the Reconcile action so retained delivered events " +
+			"are replayed through reconciliation, then verify until no events are missing. Do not treat this Store as synchronized before then."
 	}
 	return report, nil
 }
@@ -353,6 +357,27 @@ func (s *Service) VerifyProgress(ctx context.Context, deviceID string) (VerifyPr
 func (s *Service) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) error {
 	if declaredTotal < 0 {
 		return fmt.Errorf("declared total must not be negative")
+	}
+	// Phase 20 R5: refuse an implausibly small declaration. Every event
+	// Cloud accepted from this device came from that device's retained
+	// outbox, so its retained history cannot be smaller than what Cloud
+	// already holds. This turns deliberate under-declaration into a
+	// refused pass instead of a false completion.
+	//
+	// It is a LOWER BOUND, not a proof of honest disclosure: after a
+	// restore Cloud may hold fewer events than the device retains, so a
+	// device that under-declares to the bound can still omit history
+	// Cloud has never seen. The device remains the authority for its own
+	// retained history (see ADR-0054).
+	known, err := s.store.CountDeviceSyncEvents(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	if declaredTotal < known {
+		return fmt.Errorf(
+			"refusing verification pass: declared %d retained events but Cloud already holds %d for this device. "+
+				"A device cannot retain fewer events than it delivered; under-declaration is refused",
+			declaredTotal, known)
 	}
 	return s.store.BeginVerifyPass(ctx, deviceID, declaredTotal)
 }

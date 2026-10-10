@@ -27,6 +27,22 @@ func (q *Queries) ClearSyncRecoveryState(ctx context.Context, arg ClearSyncRecov
 	return err
 }
 
+const countDeviceSyncEvents = `-- name: CountDeviceSyncEvents :one
+SELECT count(*) FROM sync_events WHERE device_id = $1
+`
+
+// Phase 20 R5: independent lower bound on a device's retained history.
+// Every event Cloud accepted from this device necessarily came from that
+// device's durable outbox, so this count is a lower bound for the number
+// of retained rows the device must be able to enumerate. A verification
+// pass that declares fewer retained events than this is refused.
+func (q *Queries) CountDeviceSyncEvents(ctx context.Context, deviceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDeviceSyncEvents, deviceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPendingProjections = `-- name: CountPendingProjections :one
 SELECT count(*) FROM sync_event_processing WHERE status IN ('retry', 'blocked')
 `

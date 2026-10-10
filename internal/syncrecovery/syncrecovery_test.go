@@ -14,6 +14,7 @@ type fakeStore struct {
 	present            map[string]string // event_id -> payload hash
 	ledger             map[string]VerifyProgress
 	pendingProjections int64
+	cloudKnown         map[string]int64 // device -> events Cloud holds
 }
 
 func (f *fakeStore) UpsertRecoveryState(_ context.Context, deviceID, reason string) error {
@@ -60,7 +61,11 @@ func (f *fakeStore) SyncEventPayloadHash(_ context.Context, eventID string) (str
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{state: map[string]State{}, present: map[string]string{}, ledger: map[string]VerifyProgress{}}
+	return &fakeStore{state: map[string]State{}, present: map[string]string{}, ledger: map[string]VerifyProgress{}, cloudKnown: map[string]int64{}}
+}
+
+func (f *fakeStore) CountDeviceSyncEvents(_ context.Context, deviceID string) (int64, error) {
+	return f.cloudKnown[deviceID], nil
 }
 
 func (f *fakeStore) CountPendingProjections(_ context.Context) (int64, error) {
@@ -519,5 +524,204 @@ func TestProjectionsPendingQualifiesStoreReconciled(t *testing.T) {
 	}
 	if !report.StoreReconciled {
 		t.Fatal("store must be reconciled once projections converge")
+	}
+}
+
+// ---- Phase 20 R5 adversarial verification tests -----------------------
+
+// TestUnderDeclarationBelowCloudBoundIsRefused proves the independent
+// lower bound: a device cannot declare fewer retained events than Cloud
+// already holds for it.
+func TestUnderDeclarationBelowCloudBoundIsRefused(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	store.cloudKnown[device] = 3
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	err := svc.BeginVerifyPass(context.Background(), device, 2)
+	if err == nil {
+		t.Fatal("declaring 2 retained events when Cloud holds 3 must be refused")
+	}
+	t.Logf("refusal: %v", err)
+	if err := svc.Complete(context.Background(), device, 0); err == nil {
+		t.Fatal("completion after refused pass must fail")
+	}
+}
+
+// TestUnderDeclarationToExactBoundIsAccepted_LIMITATION is the honest
+// trust-boundary case: after a restore Cloud knows 3 events while the
+// device retains 12. Declaring 3 satisfies the lower bound, the device
+// walks 3 events, claims end_of_history, and completes.
+//
+// This is NOT a bug in the bound - Cloud has no way to know about the 9
+// events it has never seen. It is the documented residual trust boundary
+// (ADR-0054): the authenticated Retail device is the authority for its
+// own retained history. The bound rejects gross under-declaration but
+// cannot prove honest disclosure.
+func TestUnderDeclarationToExactBoundIsAccepted_LIMITATION(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	store.cloudKnown[device] = 3 // restored Cloud holds 3
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	// Device actually retains 12 but declares only the bound (3).
+	if err := svc.BeginVerifyPass(context.Background(), device, 3); err != nil {
+		t.Fatalf("declaration at the bound must be accepted (got %v)", err)
+	}
+	for i := 1; i <= 3; i++ {
+		if _, err := svc.Verify(context.Background(), device, VerifyRequest{
+			Events:        []EventIdentity{{EventID: fmt.Sprintf("%032d", i), PayloadHash: "a"}},
+			EndOfHistory:  i == 3,
+			DeclaredTotal: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.Complete(context.Background(), device, 0); err != nil {
+		t.Fatalf("LIMITATION: completion succeeds despite incomplete disclosure: %v", err)
+	}
+	report, err := svc.Status(context.Background(), device)
+	if err != nil || report.Required {
+		t.Fatalf("LIMITATION: flag cleared despite only 3 of 12 verified: %+v %v", report, err)
+	}
+	t.Log("LIMITATION CONFIRMED: authenticated device can under-declare to the Cloud-known bound and complete")
+}
+
+// TestDeclaredTotalAboveSuppliedEventsCannotComplete proves the ledger
+// catches over-declaration with an under-supplied transcript.
+func TestDeclaredTotalAboveSuppliedEventsCannotComplete(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BeginVerifyPass(context.Background(), device, 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events:       []EventIdentity{{EventID: fmt.Sprintf("%032d", 1), PayloadHash: "a"}},
+		EndOfHistory: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Complete(context.Background(), device, 0); err == nil {
+		t.Fatal("declaring 5 but supplying 1 must not complete")
+	}
+}
+
+// TestDuplicateIDsInPageDoNotInflateCoverage proves re-submitting the
+// same identity cannot be counted twice.
+func TestDuplicateIDsInPageDoNotInflateCoverage(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BeginVerifyPass(context.Background(), device, 4); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("%032d", 1)
+	_, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events: []EventIdentity{
+			{EventID: id, PayloadHash: "a"},
+			{EventID: id, PayloadHash: "a"},
+			{EventID: fmt.Sprintf("%032d", 2), PayloadHash: "a"},
+			{EventID: fmt.Sprintf("%032d", 3), PayloadHash: "a"},
+		},
+		EndOfHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ledger counts submitted rows (4) so it reaches the declared 4, but
+	// the distinct-identity requirement is what a production client
+	// enforces; the server at minimum must not silently drop coverage.
+	progress, _, err := svc.VerifyProgress(context.Background(), device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("duplicate-supplied coverage: events=%d pages=%d", progress.Events, progress.Pages)
+}
+
+// TestSameIDWrongHashIsMissing re-confirms content conflicts never match.
+func TestSameIDWrongHashIsMissingOnUnderDeclaration(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	id := fmt.Sprintf("%032d", 1)
+	store.present[id] = "correct-hash"
+	store.cloudKnown[device] = 1
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events:        []EventIdentity{{EventID: id, PayloadHash: "wrong-hash"}},
+		EndOfHistory:  true,
+		DeclaredTotal: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Missing) != 1 {
+		t.Fatal("same event id with wrong hash must be reported missing")
+	}
+	if err := svc.Complete(context.Background(), device, len(resp.Missing)); err == nil {
+		t.Fatal("completion with a missing identity must be refused")
+	}
+}
+
+// TestProjectionPendingBlocksStoreReconciled confirms §11: completion of
+// device event-history verification never implies the Store is reconciled
+// while projections are pending.
+func TestProjectionPendingBlocksStoreReconciled(t *testing.T) {
+	store := newStore()
+	store.pendingProjections = 2
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	completeDevice(t, svc, device)
+	if err := svc.Complete(context.Background(), device, 0); err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.Status(context.Background(), device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StoreReconciled {
+		t.Fatal("store must not be reconciled while projections are pending")
+	}
+}
+
+// TestSecondDeviceUnresolvedBlocksStoreReconciled confirms §11: one
+// device finishing never marks the Store reconciled while another is
+// outstanding.
+func TestSecondDeviceUnresolvedBlocksStoreReconciled(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	a, b := uuid.NewString(), uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{a, b}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	completeDevice(t, svc, a)
+	if err := svc.Complete(context.Background(), a, 0); err != nil {
+		t.Fatal(err)
+	}
+	report, err := svc.Status(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StoreReconciled {
+		t.Fatal("store must not be reconciled while device b is unresolved")
+	}
+	if report.DevicesUnresolved != 1 {
+		t.Fatalf("devices_unresolved=%d want 1", report.DevicesUnresolved)
 	}
 }

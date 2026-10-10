@@ -365,20 +365,22 @@ throughout.
 
 ## Open remediation (source change required)
 
-Recorded, not fixed in this documentation pass:
-
-1. `verify_declared_total` is client-supplied. Smallest fail-closed
+1. ~~`verify_declared_total` is client-supplied. Smallest fail-closed
    hardening: reject a pass whose `verify_declared_total` is lower than
-   the number of `sync_events` Cloud already holds for that device (a
-   valid lower bound for the device's retained count). This turns
-   deliberate under-declaration into a refused pass without requiring
-   Cloud to know the true total.
+   the number of `sync_events` Cloud already holds for that device.~~
+   **Fixed in Phase 20 R5** (`CountDeviceSyncEvents` +
+   `BeginVerifyPass` floor check). Residual: a compromised device can
+   still under-declare down to the Cloud-known bound for events Cloud has
+   never seen — documented in the proven-vs-assumed table above.
 2. `projections_pending` should be scoped per-Store for multi-Store
-   deployments.
-3. The instructions string emitted in `Report.Instructions` references
-   `CLI \`sync reconcile\``, which does not exist in MoonLightRetail. The
-   Retail-side reconciliation entry point is also not yet wired to any
-   binding or CLI (see MoonLightRetail `ADR-043`).
+   deployments. Still open: currently global (conservative, never falsely
+   positive).
+3. ~~The instructions string references a `sync reconcile` CLI that does
+   not exist, and Retail has no reconciliation entry point.~~ **Fixed in
+   Phase 20 R5:** `Instructions` names the real
+   `Settings → Cloud Sync → Cloud recovery` operator path, and
+   MoonLightRetail exposes `GetCloudRecoveryStatus` / `ReconcileCloud`
+   bindings (admin-only).
 
 ## Related documentation
 

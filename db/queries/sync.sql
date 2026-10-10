@@ -78,3 +78,11 @@ WHERE device_id = $1;
 -- retrying or blocked, so recovery completion can be qualified rather
 -- than implying business projections have converged.
 SELECT count(*) FROM sync_event_processing WHERE status IN ('retry', 'blocked');
+
+-- name: CountDeviceSyncEvents :one
+-- Phase 20 R5: independent lower bound on a device's retained history.
+-- Every event Cloud accepted from this device necessarily came from that
+-- device's durable outbox, so this count is a lower bound for the number
+-- of retained rows the device must be able to enumerate. A verification
+-- pass that declares fewer retained events than this is refused.
+SELECT count(*) FROM sync_events WHERE device_id = $1;

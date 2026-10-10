@@ -14,7 +14,9 @@ die() { echo "pg-restore: FAIL: $*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: pg-restore.sh --url <target-postgres-url> --dump <file> [--force] [--verify-only]
+Usage: pg-restore.sh --url <target-postgres-url> --dump <file>
+                     [--force] [--verify-only]
+                     [--allow-unmarked-restore --confirm-unmarked-restore]
 
   --url          Target connection string. The database named here is
                  the one restored into.
@@ -22,7 +24,19 @@ Usage: pg-restore.sh --url <target-postgres-url> --dump <file> [--force] [--veri
   --force        Required when the target already contains data.
   --verify-only  Verify the artifact and exit without restoring.
 
+  --allow-unmarked-restore
+                 BREAK-GLASS. Skip recovery marking. Requires
+                 --confirm-unmarked-restore. Never use in production:
+                 without marking, a restored Cloud reports healthy while
+                 acknowledged business events may be missing.
+  --confirm-unmarked-restore
+                 Second, explicit confirmation for the break-glass path.
+
 Post-restore validation runs automatically and reports the result.
+
+Recovery marking is ENABLED by default and cannot be disabled through an
+environment variable. PG_RESTORE_MARK_RECOVERY is accepted only when
+unset or exactly 1; every other value is a configuration error.
 USAGE
   exit 2
 }
@@ -31,12 +45,16 @@ URL=""
 DUMP=""
 FORCE=0
 VERIFY_ONLY=0
+ALLOW_UNMARKED=0
+CONFIRM_UNMARKED=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --url) URL="$2"; shift 2 ;;
-    --dump) DUMP="$2"; shift 2 ;;
+    --url) URL="${2:-}"; shift 2 ;;
+    --dump) DUMP="${2:-}"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --verify-only) VERIFY_ONLY=1; shift ;;
+    --allow-unmarked-restore) ALLOW_UNMARKED=1; shift ;;
+    --confirm-unmarked-restore) CONFIRM_UNMARKED=1; shift ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -47,6 +65,57 @@ done
 [[ -f "$DUMP" ]] || { echo "dump not found: $DUMP" >&2; exit 3; }
 command -v pg_restore >/dev/null || { echo "pg_restore not found" >&2; exit 3; }
 command -v psql >/dev/null || { echo "psql not found" >&2; exit 3; }
+
+# --- Recovery marking policy: FAIL CLOSED (Phase 20 R5) ---------------
+# Marking is a security-critical disaster-recovery control. It is enabled
+# by default and is NOT configurable through an inherited environment
+# variable, so an accidental or hostile variable can never silently turn
+# it off.
+#
+# Accepted contract for PG_RESTORE_MARK_RECOVERY:
+#   unset      -> marking enabled (default)
+#   1          -> marking enabled (explicit)
+#   anything else (0, true, false, yes, no, garbage, empty) -> ERROR
+MARKING=1
+if [[ -n "${PG_RESTORE_MARK_RECOVERY+x}" ]]; then
+  case "${PG_RESTORE_MARK_RECOVERY}" in
+    1) MARKING=1 ;;
+    *)
+      echo "pg-restore: FAIL - invalid PG_RESTORE_MARK_RECOVERY='${PG_RESTORE_MARK_RECOVERY}'" >&2
+      echo "  Recovery marking is a fail-closed security control." >&2
+      echo "  Accepted values: unset, or exactly 1 (enabled)." >&2
+      echo "  To skip recovery marking deliberately, use the break-glass" >&2
+      echo "  flags --allow-unmarked-restore --confirm-unmarked-restore." >&2
+      exit 8
+      ;;
+  esac
+fi
+
+# Break-glass: skipping recovery marking requires TWO explicit CLI
+# flags. Neither is read from the environment, so an inherited variable
+# can never enable it by accident.
+if [[ "$ALLOW_UNMARKED" == "1" ]]; then
+  if [[ "$CONFIRM_UNMARKED" != "1" ]]; then
+    echo "pg-restore: FAIL - --allow-unmarked-restore requires --confirm-unmarked-restore" >&2
+    echo "  Skipping recovery marking leaves a restored Cloud able to report" >&2
+    echo "  healthy synchronization while acknowledged business events are" >&2
+    echo "  missing. This is never a routine operation." >&2
+    exit 8
+  fi
+  MARKING=0
+fi
+
+if [[ "$MARKING" == "0" ]]; then
+  echo "pg-restore: ==========================================================" >&2
+  echo "pg-restore: SECURITY: RECOVERY MARKING DISABLED (break-glass)" >&2
+  echo "pg-restore: The restored Cloud will NOT flag devices for" >&2
+  echo "pg-restore: reconciliation. Acknowledged business events may be" >&2
+  echo "pg-restore: missing and NOTHING will signal it." >&2
+  echo "pg-restore: This is only defensible for a disposable test/lab" >&2
+  echo "pg-restore: restore that you will verify by other means." >&2
+  echo "pg-restore: requested flags: --allow-unmarked-restore --confirm-unmarked-restore" >&2
+  echo "pg-restore: ==========================================================" >&2
+fi
 
 # 1. Integrity: the artifact must open and enumerate. No restore is
 # attempted on a dump that cannot be read.
@@ -98,20 +167,35 @@ check() {
   local label="$1" sql="$2" expect="$3"
   local got
   got=$(psql "$URL" -Atqc "$sql" 2>/dev/null || echo "ERR")
-  if [[ "$got" == "$expect" ]]; then
-    echo "  OK   $label = $got"
-  else
-    echo "  FAIL $label = $got (expected $expect)" >&2
-    fail=1
-  fi
+  case "$expect" in
+    ">="*)
+      local floor="${expect#>=}"
+      if [[ "$got" =~ ^[0-9]+$ ]] && [[ "$got" -ge "$floor" ]]; then
+        echo "  OK   $label = $got"
+      else
+        echo "  FAIL $label = $got (expected >= $floor)" >&2
+        fail=1
+      fi
+      ;;
+    *)
+      if [[ "$got" == "$expect" ]]; then
+        echo "  OK   $label = $got"
+      else
+        echo "  FAIL $label = $got (expected $expect)" >&2
+        fail=1
+      fi
+      ;;
+  esac
 }
 
-check "schema_migrations present" "SELECT count(*) FROM information_schema.tables WHERE table_name='schema_migrations'" "1"
+check "goose_db_version present" "SELECT count(*) FROM information_schema.tables WHERE table_name='goose_db_version'" "1"
+check "schema version recorded" "SELECT count(*) FROM goose_db_version" ">=1"
 check "devices table" "SELECT count(*) FROM information_schema.tables WHERE table_name='devices'" "1"
 check "stores table" "SELECT count(*) FROM information_schema.tables WHERE table_name='stores'" "1"
 check "sync_events table" "SELECT count(*) FROM information_schema.tables WHERE table_name='sync_events'" "1"
 check "catalog_products table" "SELECT count(*) FROM information_schema.tables WHERE table_name='catalog_products'" "1"
 check "sales_projection table" "SELECT count(*) FROM information_schema.tables WHERE table_name='sales_projection'" "1"
+check "sync_recovery_state table" "SELECT count(*) FROM information_schema.tables WHERE table_name='sync_recovery_state'" "1"
 check "admin_users table" "SELECT count(*) FROM information_schema.tables WHERE table_name='admin_users'" "1"
 check "releases table" "SELECT count(*) FROM information_schema.tables WHERE table_name='releases'" "1"
 check "update_rollouts table" "SELECT count(*) FROM information_schema.tables WHERE table_name='update_rollouts'" "1"
@@ -129,42 +213,94 @@ if [[ "$fail" != "0" ]]; then
   exit 7
 fi
 
-echo "pg-restore: OK - restore complete and validated"
+echo "pg-restore: OK - post-restore validation passed"
 
-# Phase 20 R2: DATABASE_RESTORED is NOT STORE_RECONCILED. A restored
-# database is infrastructurally healthy while its projections may be
-# historically incomplete. Mark every device as needing reconciliation
-# so Retail refuses to report full synchronization until continuity is
-# verified. The state is durable and survives Cloud restarts.
-MARK="${PG_RESTORE_MARK_RECOVERY:-1}"
-if [[ "$MARK" == "1" ]]; then
-  echo "pg-restore: marking devices RECOVERY_RECONCILIATION_REQUIRED"
-  # The device key column is id (not device_id): a wrong column name
-  # makes this SELECT fail silently and leave every device unmarked,
-  # after which the script would still announce success. Read the list
-  # first and fail loudly if marking does not take effect.
-  DEVICES=$(psql "$URL" -Atqc "SELECT id FROM devices") || die "cannot read devices for recovery marking"
-  MARKED=0
-  for dev in $DEVICES; do
+# --- Phase 20 R2/R5: DATABASE_RESTORED is NOT STORE_RECONCILED --------
+# A restored database is infrastructurally healthy while its projections
+# may be historically incomplete. Mark every device as needing
+# reconciliation so Retail refuses to report full synchronization until
+# continuity is verified. The state is a table: it survives restarts.
+#
+# Three distinct outcomes are reported separately and are NOT equivalent:
+#   DATABASE_CONTENT_RESTORED    pg_restore + schema/structural checks
+#   RECOVERY_MARKING_COMPLETE    every device flagged for reconciliation
+#   STORE_RECONCILED             reconciliation + projections converged
+#
+# This script can reach the first two. It can NEVER reach the third:
+# STORE_RECONCILED requires the Retail-side reconciliation protocol.
+mark_devices() {
+  # "Applicable existing devices" are rows in devices. The FK on
+  # sync_recovery_state.device_id is ON DELETE CASCADE, so an anti-join
+  # is an exact, race-free proof that every device is flagged.
+  local unmarked
+  unmarked=$(psql "$URL" -Atqc "SELECT count(*) FROM devices d
+    LEFT JOIN sync_recovery_state r ON r.device_id = d.id AND r.required
+    WHERE r.device_id IS NULL" 2>/dev/null) || return 1
+  if [[ "$unmarked" == "0" ]]; then
+    return 0
+  fi
+
+  local devices dev
+  devices=$(psql "$URL" -Atqc "SELECT id FROM devices") || return 1
+  for dev in $devices; do
     [ -z "$dev" ] && continue
-    psql "$URL" -q -c "INSERT INTO sync_recovery_state (device_id, required, reason, started_at, updated_at)
+    psql "$URL" -q -c "INSERT INTO sync_recovery_state
+        (device_id, required, reason, started_at, updated_at)
       VALUES ('$dev', TRUE, 'cloud database restored from backup', now(), now())
       ON CONFLICT (device_id) DO UPDATE SET required = TRUE,
         reason = EXCLUDED.reason, cleared_at = NULL, updated_at = now()" >/dev/null \
-      || die "recovery marking failed for device $dev"
-    MARKED=$((MARKED + 1))
+      || return 1
   done
-  COUNT=$(psql "$URL" -Atqc "SELECT count(*) FROM sync_recovery_state WHERE required" 2>/dev/null || echo 0)
-  if [[ "$COUNT" -lt "$MARKED" ]]; then
-    die "recovery marking incomplete: $MARKED device(s) processed but only $COUNT marked required"
+
+  # Re-verify: the write must actually have taken effect.
+  unmarked=$(psql "$URL" -Atqc "SELECT count(*) FROM devices d
+    LEFT JOIN sync_recovery_state r ON r.device_id = d.id AND r.required
+    WHERE r.device_id IS NULL" 2>/dev/null) || return 1
+  [[ "$unmarked" == "0" ]] || return 1
+  return 0
+}
+
+if [[ "$MARKING" == "1" ]]; then
+  DEVICE_COUNT=$(psql "$URL" -Atqc "SELECT count(*) FROM devices" 2>/dev/null || echo -1)
+  echo "pg-restore: marking devices RECOVERY_RECONCILIATION_REQUIRED ($DEVICE_COUNT device(s))"
+  if ! mark_devices; then
+    # The database content is already restored and is NOT atomically
+    # undoable. Report that precisely: never dress this up as success.
+    echo "" >&2
+    echo "pg-restore: ===============================================" >&2
+    echo "pg-restore: FAIL - RECOVERY MARKING FAILED" >&2
+    echo "pg-restore: ===============================================" >&2
+    echo "pg-restore: DATABASE_CONTENT_RESTORED = yes (this is NOT undoable" >&2
+    echo "pg-restore:   by this script; the target already contains the" >&2
+    echo "pg-restore:   restored content)" >&2
+    echo "pg-restore: RECOVERY_MARKING_COMPLETE = NO" >&2
+    echo "pg-restore: STORE_RECONCILED           = NO" >&2
+    echo "" >&2
+    echo "pg-restore: The restored Cloud may be missing acknowledged business" >&2
+    echo "pg-restore: events and devices are NOT flagged to say so. Do NOT" >&2
+    echo "pg-restore: report this restore as successful." >&2
+    echo "" >&2
+    echo "pg-restore: Action required: mark every device manually, then run" >&2
+    echo "pg-restore: reconciliation. See docs/operations/disaster-recovery.md" >&2
+    echo "pg-restore: section 5.2 for the manual marking SQL." >&2
+    exit 9
   fi
-  echo "pg-restore: $COUNT device(s) now require reconciliation"
+  MARKED=$(psql "$URL" -Atqc "SELECT count(*) FROM sync_recovery_state WHERE required" 2>/dev/null || echo -1)
+  echo "pg-restore: RECOVERY_MARKING_COMPLETE - $MARKED device(s) now require reconciliation"
 else
-  echo "pg-restore: WARNING - recovery marking disabled (PG_RESTORE_MARK_RECOVERY=0)"
+  echo "pg-restore: RECOVERY_MARKING_COMPLETE = SKIPPED (break-glass)" >&2
 fi
 
 echo ""
-echo "pg-restore: === DATABASE_RESTORED (not STORE_RECONCILED) ==="
+echo "pg-restore: ======================================================="
+echo "pg-restore: DATABASE_CONTENT_RESTORED    = yes"
+if [[ "$MARKING" == "1" ]]; then
+  echo "pg-restore: RECOVERY_MARKING_COMPLETE    = yes"
+else
+  echo "pg-restore: RECOVERY_MARKING_COMPLETE    = NO (break-glass skipped)"
+fi
+echo "pg-restore: STORE_RECONCILED             = NOT YET"
+echo "pg-restore: ======================================================="
 echo "pg-restore: Cloud serves traffic but business projections may be"
 echo "pg-restore: historically incomplete. Do NOT report this Store as"
 echo "pg-restore: synchronized until reconciliation completes."
@@ -172,8 +308,8 @@ echo ""
 echo "pg-restore: next steps per docs/operations/disaster-recovery.md:"
 echo "  1. confirm migrate status matches the release you are running"
 echo "  2. verify /health/ready on the Cloud binary (infrastructure only)"
-echo "  3. run the reconciliation on each Retail device:"
-echo "       Retail -> Settings -> Cloud Sync -> Reconcile"
-echo "       (CLI: moonlight-retail sync reconcile)"
-echo "  4. verify recovery/status reports required=false for every device"
+echo "  3. on EACH Retail device open Settings -> Cloud Sync and run"
+echo "     the Reconcile action (see the Retail Cloud Sync panel)"
+echo "  4. confirm the Cloud recovery status reports required=false,"
+echo "     devices_unresolved=0 and projections_pending=0 for the Store"
 echo "  5. only then report the Store as reconciled"

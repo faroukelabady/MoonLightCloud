@@ -246,49 +246,47 @@ curl -s -H "Authorization: Bearer $DEVICE_CREDENTIAL" \
 # 5. Only then report the Store as reconciled.
 ```
 
-> **Retail reconciliation entry point (Phase 20 limitation).** The
-> protocol is implemented in MoonLightRetail as
-> `(*syncservice.Service).ReconcileCloud` / `StatusWithRecovery`, but the
-> committed tree has **no operator entry point** for it: no CLI and no
-> desktop binding. Earlier revisions of this runbook referred to
-> `Retail -> Settings -> Cloud Sync -> Reconcile` and
-> `moonlight-retail sync reconcile`; **neither exists**, and those
-> references are removed here. Exposing the operation is an open
-> remediation (MoonLightRetail `ADR-043`, MoonLightCloud `ADR-0054`).
-> Until then, treat reconciliation as reachable only through the
-> application API, and do not schedule a restore drill that assumes an
-> operator can run it.
+> **Retail reconciliation entry point.** The operator path is
+> Settings → Cloud Sync → Cloud recovery in the MoonLightRetail desktop:
+> a recovery section showing the real server-confirmed state
+> (`GetCloudRecoveryStatus`) and an admin-only **Reconcile** action
+> (`ReconcileCloud` binding). There is no `sync reconcile` CLI — do not
+> quote one.
 
-**Recovery marking override — `PG_RESTORE_MARK_RECOVERY`.**
-`pg-restore.sh` reads `PG_RESTORE_MARK_RECOVERY` (default `1`, i.e. mark
-devices). Setting it to `0` skips recovery marking entirely and only
-prints a one-line warning before reporting `DATABASE_RESTORED`.
+**Recovery marking override — `PG_RESTORE_MARK_RECOVERY` and break-glass.**
+Recovery marking is **enabled by default** and is no longer controllable
+through the environment: `PG_RESTORE_MARK_RECOVERY` accepts only *unset*
+or exactly `1`. Every other value (`0`, `true`, `false`, `yes`, `no`,
+`garbage`, empty-but-present, …) is a **configuration error** and the
+script exits before touching anything.
 
-- **Environments:** it is an ordinary environment variable with **no
-  environment gating**. It can be set in production.
-- **Risk:** with marking skipped, a restored Cloud returns
+- **Break-glass:** the only way to skip marking is two explicit CLI
+  flags together — `--allow-unmarked-restore --confirm-unmarked-restore`.
+  An inherited environment variable can never enable it.
+- **Risk (unchanged):** with marking skipped, a restored Cloud returns
   `/health/ready` 200 and appears healthy while acknowledged business
-  projections are missing and **no device is flagged**. The divergence
-  becomes silent — exactly the failure Phase 20 exists to prevent.
-- **Malformed values fail open:** *any* value other than exactly `1`
-  (including `0`, `false`, `no`, `true`, `yes`, or a typo) disables
-  marking. A typo in this setting silently turns the safety marker off.
-- **Recommended use:** only for a deliberate lab/test restore where you
-  will verify synchronisation by other means. **Never set it in
-  production.**
-- **Remediation (source change required):** this should fail closed —
-  accept only explicit `0` or `1` and treat anything else as a
-  configuration error, and ideally require an explicit
-  `--allow-unmarked-restore` flag plus confirmation before skipping.
-  Recorded as an open finding in `ADR-0054`; not changed in this
-  documentation pass.
+  projections are missing and **no device is flagged**. The script prints
+  a prominent break-glass banner, reports
+  `RECOVERY_MARKING_COMPLETE = NO`, and **never claims `STORE_RECONCILED`**.
+- **Recommended use:** only for a deliberate disposable lab/test restore
+  that you will verify by other means. **Never use it in production.**
+- **Marking failure fails the operation:** if the per-device writes do
+  not take effect (wrong schema, silent no-op, partial write), the script
+  exits nonzero and reports `DATABASE_CONTENT_RESTORED = yes` alongside
+  `RECOVERY_MARKING_COMPLETE = NO` — the restored content is not
+  undoable, and the operator is told exactly that instead of seeing a
+  success message.
 
-The normal supported recovery procedure **can** silently bypass marking
-if this variable is set in the environment. Check it before relying on
-the marker:
+The environment variable can no longer bypass marking. Only the two
+explicit CLI flags together can, and they announce themselves loudly.
 
 ```bash
-echo "PG_RESTORE_MARK_RECOVERY=${PG_RESTORE_MARK_RECOVERY:-<unset, defaults to 1>}"
+# Normal restore: marking is on and needs no configuration.
+$CLOUD/scripts/pg-restore.sh --url "$URL" --dump /backups/backup.dump --force
+
+# Disposable-lab break-glass ONLY — never in production:
+$CLOUD/scripts/pg-restore.sh --url "$URL" --dump /backups/backup.dump --force \
+  --allow-unmarked-restore --confirm-unmarked-restore
 ```
 
 **If retained history is unavailable** (the Retail database itself was
@@ -352,15 +350,16 @@ replayed page is refused outright.
 complete; skipped/replayed pages are refused; an interrupted pass resumes
 and completes only after a full walk.
 
-**Trust boundary — not proven:** `verify_declared_total` is supplied by
-the device. Cloud cannot independently know how many events a device
-retains, because retained history lives in Retail's own database. An
-authenticated device that **under-declares** its total and walks only that
-many events can complete. The constraints prove consistency with the
-declaration, not that the declaration is truthful. The supported Retail
-client declares its true retained row count. Hardening this (rejecting a
-declared total below the number of `sync_events` Cloud already holds for
-the device) is an open remediation in `ADR-0054`.
+**Trust boundary — hardened, with a documented residual.** `verify_declared_total`
+is supplied by the device, but Cloud now refuses any declaration below the
+number of `sync_events` it already holds for that device (an independent
+lower bound on retained history), in addition to all prior ledger
+constraints (contiguous keyset pages, one generation, terminal
+end_of_history, zero missing). The supported Retail client declares its
+true retained row count. Residual: a compromised device can still
+under-declare down to — but never below — the Cloud-known bound for
+events Cloud has never seen. See `ADR-0054` for the explicit
+proven-vs-assumed table.
 
 ### 5.4 PostgreSQL backup confidentiality
 
