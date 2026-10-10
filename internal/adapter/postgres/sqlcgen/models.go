@@ -1029,6 +1029,22 @@ type SyncEventProcessing struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SyncRecoveryState struct {
+	DeviceID            pgtype.UUID        `json:"device_id"`
+	Required            bool               `json:"required"`
+	Reason              string             `json:"reason"`
+	StartedAt           pgtype.Timestamptz `json:"started_at"`
+	ClearedAt           pgtype.Timestamptz `json:"cleared_at"`
+	VerifiedEvents      int64              `json:"verified_events"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	VerifyGeneration    int64              `json:"verify_generation"`
+	VerifyLastEventID   string             `json:"verify_last_event_id"`
+	VerifyPages         int32              `json:"verify_pages"`
+	VerifyEvents        int64              `json:"verify_events"`
+	VerifyComplete      bool               `json:"verify_complete"`
+	VerifyDeclaredTotal int64              `json:"verify_declared_total"`
+}
+
 type UpdateAuditEvent struct {
 	ID         int64              `json:"id"`
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`

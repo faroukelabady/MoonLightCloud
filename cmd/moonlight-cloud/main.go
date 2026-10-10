@@ -99,6 +99,8 @@ func run(args []string) error {
 		return probe(args)
 	case "dbprobe":
 		return dbprobe()
+	case "diagnostics":
+		return diagnosticsCmd(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("moonlight-cloud version=%s commit=%s build_time=%s\n", version, commit, buildTime)
 		return nil

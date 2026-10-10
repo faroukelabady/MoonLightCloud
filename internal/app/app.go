@@ -41,6 +41,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
+	"github.com/faroukelabady/MoonLightCloud/internal/syncrecovery"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -358,6 +359,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// commands only flow to capable bound devices.
 	catalogAdminSvc := catalogadmin.NewService(store, catalogAdminDevices{stores: store, auth: a.Devices})
 	catalogAdminHandlers := &adapterhttp.CatalogAdminHandlers{Svc: catalogAdminSvc, Log: log}
+	// Phase 20 R2: Cloud-restore recovery protocol. Durable state so a
+	// restored database can never silently claim full synchronization
+	// while canonical Retail events are missing.
+	syncRecoverySvc := syncrecovery.NewService(store)
+	syncRecoveryHandlers := &adapterhttp.SyncRecoveryHandlers{Svc: syncRecoverySvc, Log: log}
 	opsNotify := notifications.NewService(opsStore, opsStore, log)
 	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
 	opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
@@ -381,7 +387,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	updateHandlers := newUpdateHandlers(cfg, pool, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
