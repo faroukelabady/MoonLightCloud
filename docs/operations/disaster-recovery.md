@@ -389,15 +389,21 @@ out-of-order page is refused outright. Marking a device (again) starts a
 fresh generation: an earlier completed ledger can never be reused.
 
 Completion is tied to the exact verification generation that was read. The
-database checks the generation, complete-page marker, declared total,
-exact page coverage and zero-missing ledger in the same conditional write
-that clears the device flag. If a newer pass or restore mark starts first,
-the old request is rejected as stale/incomplete and the device remains
-recovery-required; refresh status and finish the current pass before
-retrying. Page writes carry the same generation fence, so delayed pages do
-not change a later pass. Repeating a valid completion for the same
-generation is safe. Event-history completion remains separate from
-projection convergence and the Store-wide `store_reconciled` result.
+database checks the generation, complete-page marker, effective lower-bound
+total, coverage of at least that total, and zero-missing ledger in the same
+conditional write that clears the device flag. At generation initialization,
+the stored lower bound atomically includes Cloud-known events accepted after
+Retail's initial count. During Retail's live keyset walk, Sales and inventory
+activity may further increase verified coverage before the terminal page;
+reconciliation does not require pausing business activity. Events created
+after that terminal page continue through ordinary synchronization and
+projection. If a newer pass or restore mark starts first, the old request is
+rejected as stale/incomplete and the device remains recovery-required;
+refresh status and finish the current pass before retrying. Page writes carry
+the same generation fence, so delayed pages do not change a later pass.
+Repeating a valid completion for the same generation is safe. Event-history
+completion remains separate from projection convergence and the Store-wide
+`store_reconciled` result.
 
 Identity matches are scoped by Cloud to the authenticated device's
 server-side Store binding. A bound device can verify events ingested for

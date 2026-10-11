@@ -162,8 +162,10 @@ verification generation:
 - `verify_pages` / `verify_events` — cumulative coverage;
 - `verify_complete` — set **only** by a page submitted as
   `end_of_history`;
-- `verify_declared_total` — the retained-history size the device commits
-  to walking, supplied when the pass opens;
+- `verify_declared_total` — the effective minimum coverage: the retained
+  count Retail supplies when the pass opens, raised atomically to the count
+  of events Cloud already holds from that device at generation start. It is
+  a lower bound, not a snapshot size;
 - `verify_missing` — identities the server did not hold (or held with a
   different hash) in this generation, recorded by the server itself.
 
@@ -178,9 +180,24 @@ verify_declared_total != 0              (a total was declared)
 verify_events >= verify_declared_total  (coverage reached the total)
 ```
 
+Retail continues to accept and create business events during reconciliation.
+The retained outbox is paged live in ascending event-ID order until Retail
+returns the terminal page. The effective lower bound is initialized in the
+same database statement that opens a generation, capturing Cloud events
+accepted after Retail's initial count but before its first verification
+page. New events encountered later may increase `verify_events`; therefore
+the stored total is a minimum coverage commitment, and equality is not
+required. A valid completed walk must still reach the live outbox's end,
+report no missing identity, and pass Cloud's generation-qualified atomic
+completion check. Events created after
+the terminal page are handled by ordinary synchronization and projection;
+they do not require the verification pass to chase a moving count forever.
+There is no UUID maximum-ID snapshot boundary: event IDs include random
+inventory IDs, so a maximum ID would not reliably describe creation time.
+
 The completion write is conditional on the exact `verify_generation` read
 and validated by the request. PostgreSQL repeats the generation, page,
-end-of-history, declared-total, exact-coverage and zero-missing predicates
+end-of-history, lower-bound-coverage and zero-missing predicates
 in the same statement that clears `required`. If a newer pass or restore
 mark wins the row update first, the older completion affects zero rows and
 returns a stale/incomplete result; the caller refreshes status and retries
@@ -196,18 +213,26 @@ missing identity, nor by padding a page with repeated identities; cannot verify 
 skipped page is refused; a replayed page is refused; a restart resumes
 and completes only after a full walk.
 
-**Trust boundary — explicitly not proven:** `verify_declared_total` is
-**client-supplied**. Cloud cannot independently know how many events the
-device retains, because retained history lives in Retail's own database.
-An authenticated device that declares a total **smaller** than its true
-retained history, walks only that many events and submits
-`end_of_history`, satisfies every constraint above and completes. The
-constraints prove *consistency with the declaration*; they do not prove
-the declaration is truthful.
+**Trust boundary — explicitly not proven:** Retail supplies the starting
+count, but Cloud stores the greater of that value and its own current
+device-event count as the generation's lower bound. Cloud cannot
+independently know how many events the device retains, because retained
+history lives in Retail's own database. An authenticated device can still
+under-declare history Cloud has never seen, walk only to the Cloud-known
+bound and submit `end_of_history`. The constraints prove consistency with
+the known lower bound, not truthful disclosure of unknown history; they are
+not cryptographic proof that no undisclosed history was lost.
 
-The honest Retail client sends `CountRetained()` (its true retained row
-count), so the supported path is sound. The residual risk is a
-compromised or defective device deliberately under-declaring. See
+The honest Retail client sends `CountRetained()` (the count at the start of
+the pass). During the supported live keyset walk, new business events can
+become retained and be observed before the terminal page, so verified
+coverage may exceed that initial count. Retail continues the finite walk to
+the terminal page instead of stopping at the count; events created after
+that page flow through ordinary synchronization. This contract does not
+require Sales or inventory activity to stop. The residual trust risk is a
+compromised or defective device deliberately under-declaring or omitting
+history; the lower bound and terminal marker do not cryptographically prove
+undisclosed history. See
 "Rejected alternatives" for the smallest server-side hardening that
 remains open.
 
@@ -384,7 +409,7 @@ throughout.
 | *Declared total is truthful* | **Assumption (trusted device)** |
 | *Arbitrary (non-scripted) restores are detected* | **Not guaranteed — not detected** |
 | *Lost pre-backup device identities self-heal* | **Not guaranteed — manual** |
-| *`projections_pending` is Store-scoped* | **Not guaranteed — global** |
+| `projections_pending` is Store-scoped | **Proven** |
 
 ## Verification evidence
 
@@ -403,10 +428,10 @@ throughout.
 1. ~~`verify_declared_total` is client-supplied. Smallest fail-closed
    hardening: reject a pass whose `verify_declared_total` is lower than
    the number of `sync_events` Cloud already holds for that device.~~
-   **Fixed in Phase 20 R5** (`CountDeviceSyncEvents` +
-   `BeginVerifyPass` floor check). Residual: a compromised device can
-   still under-declare down to the Cloud-known bound for events Cloud has
-   never seen — documented in the proven-vs-assumed table above.
+   **Fixed in Phase 20 R5/R11** (the generation initializer atomically
+   captures the Cloud-known count). Residual: a
+   compromised device can still under-declare history Cloud has never seen
+   — documented in the proven-vs-assumed table above.
 2. ~~`projections_pending` should be scoped per-Store.~~ **Fixed in Phase
    20 R6** together with `devices_unresolved` (active devices only).
 3. ~~The instructions string references a `sync reconcile` CLI that does

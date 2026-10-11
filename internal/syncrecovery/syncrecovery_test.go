@@ -31,7 +31,7 @@ func (f *fakeStore) UpsertRecoveryState(_ context.Context, deviceID, reason stri
 
 func (f *fakeStore) ClearRecoveryState(_ context.Context, deviceID string, generation, verified int64) error {
 	p := f.ledger[deviceID]
-	if p.Generation != generation || !p.Complete || p.Pages == 0 || p.DeclaredTotal == 0 || p.Events != p.DeclaredTotal || p.Events != verified || p.Missing != 0 {
+	if p.Generation != generation || !p.Complete || p.Pages == 0 || p.DeclaredTotal == 0 || p.Events < p.DeclaredTotal || p.Events != verified || p.Missing != 0 {
 		return ErrStaleOrIncompleteGeneration
 	}
 	s := f.state[deviceID]
@@ -73,10 +73,6 @@ func newStore() *fakeStore {
 		cloudKnown: map[string]int64{}, storeOf: map[string]string{}, revoked: map[string]bool{}, defaultHash: "a"}
 }
 
-func (f *fakeStore) CountDeviceSyncEvents(_ context.Context, deviceID string) (int64, error) {
-	return f.cloudKnown[deviceID], nil
-}
-
 func (f *fakeStore) CountPendingProjections(_ context.Context, _ string) (int64, error) {
 	return f.pendingProjections, nil
 }
@@ -90,7 +86,11 @@ func (f *fakeStore) VerifyProgress(_ context.Context, deviceID string) (VerifyPr
 
 func (f *fakeStore) BeginVerifyPass(_ context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	p := f.ledger[deviceID]
-	p = VerifyProgress{Generation: p.Generation + 1, DeclaredTotal: declaredTotal}
+	effectiveTotal := declaredTotal
+	if f.cloudKnown[deviceID] > effectiveTotal {
+		effectiveTotal = f.cloudKnown[deviceID]
+	}
+	p = VerifyProgress{Generation: p.Generation + 1, DeclaredTotal: effectiveTotal}
 	f.ledger[deviceID] = p
 	return p.Generation, nil
 }
@@ -542,12 +542,12 @@ func TestProjectionsPendingQualifiesStoreReconciled(t *testing.T) {
 	}
 }
 
-// ---- Phase 20 R5 adversarial verification tests -----------------------
+// ---- Phase 20 R5/R11 adversarial verification tests -------------------
 
-// TestUnderDeclarationBelowCloudBoundIsRefused proves the independent
-// lower bound: a device cannot declare fewer retained events than Cloud
-// already holds for it.
-func TestUnderDeclarationBelowCloudBoundIsRefused(t *testing.T) {
+// TestUnderDeclarationBelowCloudBoundCannotComplete proves the atomic
+// Cloud-known floor: a stale client count is raised at generation start,
+// and the smaller walk cannot clear recovery.
+func TestUnderDeclarationBelowCloudBoundCannotComplete(t *testing.T) {
 	store := newStore()
 	svc := NewService(store)
 	device := uuid.NewString()
@@ -555,13 +555,26 @@ func TestUnderDeclarationBelowCloudBoundIsRefused(t *testing.T) {
 	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
 		t.Fatal(err)
 	}
-	err := svc.BeginVerifyPass(context.Background(), device, 2)
-	if err == nil {
-		t.Fatal("declaring 2 retained events when Cloud holds 3 must be refused")
+	if err := svc.BeginVerifyPass(context.Background(), device, 2); err != nil {
+		t.Fatalf("a stale lower count may start, but must be bounded by Cloud's count: %v", err)
 	}
-	t.Logf("refusal: %v", err)
+	progress, found, err := svc.VerifyProgress(context.Background(), device)
+	if err != nil || !found || progress.DeclaredTotal != 3 {
+		t.Fatalf("effective floor should be the Cloud-known count, progress=%+v found=%v err=%v", progress, found, err)
+	}
+	events := []EventIdentity{
+		{EventID: "00000000-0000-0000-0000-000000000001", PayloadHash: "a"},
+		{EventID: "00000000-0000-0000-0000-000000000002", PayloadHash: "a"},
+	}
+	if _, err := svc.Verify(context.Background(), device, VerifyRequest{Events: events, EndOfHistory: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Complete(context.Background(), device, 0); err == nil {
-		t.Fatal("completion after refused pass must fail")
+		t.Fatal("walking only the stale declared count must not clear recovery below Cloud's known floor")
+	}
+	state, found, err := store.GetRecoveryState(context.Background(), device)
+	if err != nil || !found || !state.Required {
+		t.Fatalf("recovery must remain required below the effective Cloud floor: %+v found=%v err=%v", state, found, err)
 	}
 }
 
@@ -626,6 +639,43 @@ func TestDeclaredTotalAboveSuppliedEventsCannotComplete(t *testing.T) {
 	}
 	if err := svc.Complete(context.Background(), device, 0); err == nil {
 		t.Fatal("declaring 5 but supplying 1 must not complete")
+	}
+}
+
+func TestConcurrentBusinessActivityMayExceedDeclaredLowerBound(t *testing.T) {
+	store := newStore()
+	svc := NewService(store)
+	device := uuid.NewString()
+	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{
+		"00000000-0000-0000-0000-000000000001",
+		"00000000-0000-0000-0000-000000000002",
+		"00000000-0000-0000-0000-000000000003",
+	}
+	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
+		Events: []EventIdentity{
+			{EventID: ids[0], PayloadHash: "a"},
+			{EventID: ids[1], PayloadHash: "a"},
+			{EventID: ids[2], PayloadHash: "a"},
+		},
+		DeclaredTotal: 2,
+		EndOfHistory:  true,
+	})
+	if err != nil || len(resp.Missing) != 0 {
+		t.Fatalf("complete live walk with concurrent events should verify cleanly: response=%+v err=%v", resp, err)
+	}
+	progress, ok, err := svc.VerifyProgress(context.Background(), device)
+	if err != nil || !ok || progress.Events != 3 || progress.DeclaredTotal != 2 || !progress.Complete {
+		t.Fatalf("expected terminal coverage above the declared lower bound, progress=%+v ok=%v err=%v", progress, ok, err)
+	}
+	if err := svc.Complete(context.Background(), device, 0); err != nil {
+		t.Fatalf("zero-missing terminal walk must complete when it covers the initial lower bound: %v", err)
+	}
+	state, found, err := store.GetRecoveryState(context.Background(), device)
+	if err != nil || !found || state.Required || state.VerifiedEvents != 3 {
+		t.Fatalf("expected recovery cleared with all three verified events: state=%+v found=%v err=%v", state, found, err)
 	}
 }
 

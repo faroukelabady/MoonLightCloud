@@ -27,7 +27,7 @@ WHERE device_id = sqlc.arg(device_id)::uuid
   AND verify_pages > 0
   AND verify_complete
   AND verify_declared_total > 0
-  AND verify_events = verify_declared_total
+  AND verify_events >= verify_declared_total
   AND verify_events = sqlc.arg(verified_events)::bigint
   AND verify_missing = 0;
 
@@ -91,13 +91,16 @@ SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, ver
 FROM sync_recovery_state WHERE device_id = $1;
 
 -- name: SyncRecoveryBeginVerify :one
-UPDATE sync_recovery_state
+UPDATE sync_recovery_state AS recovery
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = sqlc.arg(verify_declared_total)::bigint, verify_missing = 0,
+    verify_declared_total = GREATEST(
+      sqlc.arg(verify_declared_total)::bigint,
+      (SELECT count(*) FROM sync_events e WHERE e.device_id = recovery.device_id)
+    ), verify_missing = 0,
     updated_at = now()
-WHERE device_id = sqlc.arg(device_id)::uuid
+WHERE recovery.device_id = sqlc.arg(device_id)::uuid
 RETURNING verify_generation;
 
 -- name: SyncRecoveryRecordVerifyPage :execrows
@@ -143,11 +146,3 @@ WHERE p.status IS DISTINCT FROM 'processed'
   AND (e.device_id = sqlc.arg(device_id)::uuid
        OR e.store_id = (SELECT s.store_id FROM device_store_bindings s
                         WHERE s.device_id = sqlc.arg(device_id)::uuid));
-
--- name: CountDeviceSyncEvents :one
--- Phase 20 R5: independent lower bound on a device's retained history.
--- Every event Cloud accepted from this device necessarily came from that
--- device's durable outbox, so this count is a lower bound for the number
--- of retained rows the device must be able to enumerate. A verification
--- pass that declares fewer retained events than this is refused.
-SELECT count(*) FROM sync_events WHERE device_id = $1;

@@ -94,7 +94,8 @@ type VerifyRequest struct {
 	// positive DeclaredTotal begins a new pass; later pages omit it.
 	//
 	// Complete() refuses unless the cumulative verified count reaches
-	// DeclaredTotal, so verifying a subset can never look exhaustive.
+	// DeclaredTotal. The retained outbox is live during this bounded walk,
+	// so ordinary business activity may make the final count larger.
 	DeclaredTotal int64 `json:"declared_total"`
 }
 
@@ -107,9 +108,12 @@ type VerifyProgress struct {
 	Pages       int    `json:"pages"`
 	Events      int64  `json:"events"`
 	Complete    bool   `json:"complete"`
-	// DeclaredTotal is the retained-history size the device declared
-	// when the pass began. Complete requires Events to reach it, so
-	// skipped pages cannot look exhaustive.
+	// DeclaredTotal is the effective retained-history lower bound stored
+	// for the generation: at least the device's declaration and the
+	// Cloud-known event count captured atomically at pass initialization.
+	// Complete requires Events to reach it, so skipped pages cannot look
+	// exhaustive. Events may exceed it when newly-created retained events
+	// are encountered during the live walk.
 	DeclaredTotal int64 `json:"declared_total"`
 	// Missing is how many submitted identities Cloud did not hold (or
 	// held with a different payload hash) in this generation. It is
@@ -152,13 +156,11 @@ type Store interface {
 	SyncEventHashes(ctx context.Context, deviceID string, eventIDs []string) (map[string]string, error)
 	// VerifyProgress reads the server-side coverage ledger.
 	VerifyProgress(ctx context.Context, deviceID string) (VerifyProgress, bool, error)
-	// BeginVerifyPass starts a fresh verification generation and
-	// records the retained-history size the device will walk.
+	// BeginVerifyPass starts a fresh verification generation and records
+	// an effective retained-history lower bound: at least the client's
+	// starting count and any additional events Cloud already holds when
+	// the generation is atomically initialized.
 	BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error)
-	// CountDeviceSyncEvents reports how many events Cloud already holds
-	// for this device - an independent lower bound on the device's
-	// retained history (Phase 20 R5).
-	CountDeviceSyncEvents(ctx context.Context, deviceID string) (int64, error)
 	// RecordVerifyPage advances the coverage cursor and the missing
 	// ledger. It returns false when the page does not advance the cursor
 	// in byte order (a skipped, replayed or out-of-order page).
@@ -250,8 +252,10 @@ func (s *Service) Status(ctx context.Context, deviceID string) (Report, error) {
 //     how many identities Cloud did not hold (verify_missing);
 //   - a page may declare end_of_history, which is the ONLY way
 //     verify_complete becomes true;
-//   - Complete refuses unless the walk is complete, reached the declared
-//     total and recorded zero missing identities.
+//   - Complete refuses unless the walk is complete, reached at least the
+//     declared lower bound and recorded zero missing identities. Retail's
+//     retained outbox remains live during the walk, so new events observed
+//     before its terminal page may increase the verified count.
 //
 // Identity is (event_id, payload_hash): an event ID present with a
 // different hash is reported missing — a content conflict, never
@@ -364,9 +368,9 @@ func (s *Service) Complete(ctx context.Context, deviceID string, lastMissing int
 			"recovery cannot complete: no retained-history total was declared for this pass. " +
 				"Open the pass with declared_total so exhaustiveness can be proven")
 	}
-	if progress.Events != progress.DeclaredTotal {
+	if progress.Events < progress.DeclaredTotal {
 		return fmt.Errorf(
-			"recovery cannot complete: verified %d events but the pass declared exactly %d retained events. "+
+			"recovery cannot complete: verified %d events but the pass declared at least %d retained events. "+
 				"Every retained-history page must be submitted; skipped pages leave the device unreconciled",
 			progress.Events, progress.DeclaredTotal)
 	}
@@ -397,26 +401,11 @@ func (s *Service) beginVerifyPass(ctx context.Context, deviceID string, declared
 	if declaredTotal < 0 {
 		return 0, fmt.Errorf("declared total must not be negative")
 	}
-	// Phase 20 R5: refuse an implausibly small declaration. Every event
-	// Cloud accepted from this device came from that device's retained
-	// outbox, so its retained history cannot be smaller than what Cloud
-	// already holds. This turns deliberate under-declaration into a
-	// refused pass instead of a false completion.
-	//
-	// It is a LOWER BOUND, not a proof of honest disclosure: after a
-	// restore Cloud may hold fewer events than the device retains, so a
-	// device that under-declares to the bound can still omit history
-	// Cloud has never seen. The device remains the authority for its own
-	// retained history (see ADR-0054).
-	known, err := s.store.CountDeviceSyncEvents(ctx, deviceID)
-	if err != nil {
-		return 0, err
-	}
-	if declaredTotal < known {
-		return 0, fmt.Errorf(
-			"refusing verification pass: declared %d retained events but Cloud already holds %d for this device. "+
-				"A device cannot retain fewer events than it delivered; under-declaration is refused",
-			declaredTotal, known)
-	}
+	// Cloud's event count is captured atomically by the database statement
+	// that opens the generation. The stored effective minimum is the greater
+	// of that count and the client's starting count; this both closes the
+	// race with ordinary sync and prevents a walk below Cloud-known history.
+	// This remains only a lower bound: the trusted Retail device owns any
+	// history Cloud has never seen (see ADR-0054).
 	return s.store.BeginVerifyPass(ctx, deviceID, declaredTotal)
 }

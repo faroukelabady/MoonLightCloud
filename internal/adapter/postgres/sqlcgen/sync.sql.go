@@ -20,7 +20,7 @@ WHERE device_id = $2::uuid
   AND verify_pages > 0
   AND verify_complete
   AND verify_declared_total > 0
-  AND verify_events = verify_declared_total
+  AND verify_events >= verify_declared_total
   AND verify_events = $1::bigint
   AND verify_missing = 0
 `
@@ -42,22 +42,6 @@ func (q *Queries) ClearSyncRecoveryState(ctx context.Context, arg ClearSyncRecov
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const countDeviceSyncEvents = `-- name: CountDeviceSyncEvents :one
-SELECT count(*) FROM sync_events WHERE device_id = $1
-`
-
-// Phase 20 R5: independent lower bound on a device's retained history.
-// Every event Cloud accepted from this device necessarily came from that
-// device's durable outbox, so this count is a lower bound for the number
-// of retained rows the device must be able to enumerate. A verification
-// pass that declares fewer retained events than this is refused.
-func (q *Queries) CountDeviceSyncEvents(ctx context.Context, deviceID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countDeviceSyncEvents, deviceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const countStorePendingProjections = `-- name: CountStorePendingProjections :one
@@ -255,13 +239,16 @@ func (q *Queries) SyncEventHashes(ctx context.Context, arg SyncEventHashesParams
 }
 
 const syncRecoveryBeginVerify = `-- name: SyncRecoveryBeginVerify :one
-UPDATE sync_recovery_state
+UPDATE sync_recovery_state AS recovery
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = $1::bigint, verify_missing = 0,
+    verify_declared_total = GREATEST(
+      $1::bigint,
+      (SELECT count(*) FROM sync_events e WHERE e.device_id = recovery.device_id)
+    ), verify_missing = 0,
     updated_at = now()
-WHERE device_id = $2::uuid
+WHERE recovery.device_id = $2::uuid
 RETURNING verify_generation
 `
 
