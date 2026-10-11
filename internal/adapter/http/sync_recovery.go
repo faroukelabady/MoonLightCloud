@@ -47,6 +47,27 @@ func (h *SyncRecoveryHandlers) RecoveryStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, report)
 }
 
+// RecoveryBegin opens a generation before Retail captures its finite local
+// history snapshot. Cloud captures its current accepted-history floor in
+// the same database statement that advances the generation.
+func (h *SyncRecoveryHandlers) RecoveryBegin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return
+	}
+	dev, ok := DeviceOf(r)
+	if !ok {
+		WriteError(w, r, apperr.New(apperr.Unauthorized, "missing device credential"))
+		return
+	}
+	generation, err := h.Svc.StartVerifyPass(r.Context(), dev.ID)
+	if err != nil {
+		WriteError(w, r, apperr.New(apperr.InvalidInput, err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"generation": generation})
+}
+
 // RecoveryVerify serves POST /api/v1/device-control/recovery/verify.
 // The device posts one bounded page of retained event identities; the
 // response says which Cloud is missing. Identity is (event_id,

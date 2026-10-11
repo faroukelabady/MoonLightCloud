@@ -96,11 +96,12 @@ general restore detection is made.
 
 ### 4. Device-authenticated recovery status, verification and completion
 
-Three endpoints, all gated by ordinary device authentication (`DeviceAuth`)
+Four endpoints, all gated by ordinary device authentication (`DeviceAuth`)
 and scoped to the calling device:
 
 ```text
 GET  /api/v1/device-control/recovery/status
+POST /api/v1/device-control/recovery/verify/begin
 POST /api/v1/device-control/recovery/verify
 POST /api/v1/device-control/recovery/complete
 ```
@@ -162,10 +163,9 @@ verification generation:
 - `verify_pages` / `verify_events` — cumulative coverage;
 - `verify_complete` — set **only** by a page submitted as
   `end_of_history`;
-- `verify_declared_total` — the effective minimum coverage: the retained
-  count Retail supplies when the pass opens, raised atomically to the count
-  of events Cloud already holds from that device at generation start. It is
-  a lower bound, not a snapshot size;
+- `verify_declared_total` — the effective minimum coverage: Cloud's
+  accepted-event count captured atomically when the generation opens, raised
+  on Retail's first page to the count in its fixed local snapshot;
 - `verify_missing` — identities the server did not hold (or held with a
   different hash) in this generation, recorded by the server itself.
 
@@ -177,21 +177,29 @@ verify_missing == 0                     (server-recorded; the client's
 progress exists and pages > 0           (never a zero-work shortcut)
 verify_complete == true                 (history walked to the end)
 verify_declared_total != 0              (a total was declared)
-verify_events >= verify_declared_total  (coverage reached the total)
+verify_events >= verify_declared_total  (coverage reached the finite boundary)
 ```
 
 Retail continues to accept and create business events during reconciliation.
-The retained outbox is paged live in ascending event-ID order until Retail
-returns the terminal page. The effective lower bound is initialized in the
-same database statement that opens a generation, capturing Cloud events
-accepted after Retail's initial count but before its first verification
-page. New events encountered later may increase `verify_events`; therefore
-the stored total is a minimum coverage commitment, and equality is not
-required. A valid completed walk must still reach the live outbox's end,
-report no missing identity, and pass Cloud's generation-qualified atomic
-completion check. Events created after
-the terminal page are handled by ordinary synchronization and projection;
-they do not require the verification pass to chase a moving count forever.
+The current client first calls the authenticated `verify/begin` endpoint;
+Cloud atomically opens a generation and captures the accepted-event count
+for that device. Retail then captures the retained, non-blocked outbox count
+and SQLite insertion `rowid` high-water mark in one read statement. This
+`rowid` is a local insertion boundary, not an event-ID watermark. Retail
+declares that count on the first page and enumerates only rows at or below
+the captured `rowid`, in the byte order required by Cloud's event-ID cursor.
+The first page raises the generation's effective minimum to the greater of
+Cloud's captured count and the local snapshot count. All pages carry the
+generation token; page and completion writes remain generation-fenced.
+
+Events inserted after the local snapshot are outside that finite pass and
+continue through ordinary synchronization and projection. Events accepted
+by Cloud before generation initialization are covered by Cloud's lower
+bound; local retained events present at snapshot capture are covered by the
+snapshot count and bounded enumeration. Thus a growing history does not
+move the current pass's end or require Sales and inventory activity to
+pause. A restart safely starts a fresh generation and captures a new
+snapshot; a partially recorded generation is not treated as complete.
 There is no UUID maximum-ID snapshot boundary: event IDs include random
 inventory IDs, so a maximum ID would not reliably describe creation time.
 
@@ -210,31 +218,26 @@ processes; no process-local lock is relied on.
 **Proven:** a client cannot clear recovery by claiming `missing=0`
 without a coverage walk, nor after a walk in which the server recorded a
 missing identity, nor by padding a page with repeated identities; cannot verify one page of many and complete; a
-skipped page is refused; a replayed page is refused; a restart resumes
-and completes only after a full walk.
+  skipped page is refused; a replayed page is refused; after restart the
+  supported client starts a fresh generation and completes only after a new
+  full snapshot walk.
 
-**Trust boundary — explicitly not proven:** Retail supplies the starting
-count, but Cloud stores the greater of that value and its own current
-device-event count as the generation's lower bound. Cloud cannot
-independently know how many events the device retains, because retained
-history lives in Retail's own database. An authenticated device can still
-under-declare history Cloud has never seen, walk only to the Cloud-known
-bound and submit `end_of_history`. The constraints prove consistency with
-the known lower bound, not truthful disclosure of unknown history; they are
-not cryptographic proof that no undisclosed history was lost.
+**Trust boundary — explicitly not proven:** Cloud stores the count of
+accepted events at generation initialization and raises it on the first
+page to Retail's declared finite snapshot count. Cloud cannot independently
+know whether Retail's local database retained every event that was lost
+during restoration. A compromised or defective trusted client can omit
+history Cloud has never seen. These checks enforce the declared boundary and
+server-known floor; they are not cryptographic proof that no undisclosed
+history was lost.
 
-The honest Retail client sends `CountRetained()` (the count at the start of
-the pass). During the supported live keyset walk, new business events can
-become retained and be observed before the terminal page, so verified
-coverage may exceed that initial count. Retail continues the finite walk to
-the terminal page instead of stopping at the count; events created after
-that page flow through ordinary synchronization. This contract does not
-require Sales or inventory activity to stop. The residual trust risk is a
-compromised or defective device deliberately under-declaring or omitting
-history; the lower bound and terminal marker do not cryptographically prove
-undisclosed history. See
-"Rejected alternatives" for the smallest server-side hardening that
-remains open.
+The current client declares the count from its finite insertion-boundary
+snapshot, not a live count captured before the walk. The boundary prevents
+new IDs that sort behind the cursor from being silently omitted from a
+moving walk: post-snapshot rows are deliberately left to ordinary sync.
+The residual trust risk is unchanged: a compromised or defective device can
+omit history that Cloud has never seen. The lower bound and terminal marker
+do not cryptographically prove that undisclosed history was not lost.
 
 ### 8. Multiple-device recovery requirements
 
@@ -399,7 +402,7 @@ throughout.
 | `missing=0` alone cannot clear recovery | **Proven** |
 | Partial walk cannot complete | **Proven** |
 | Skipped / replayed verification page refused | **Proven** |
-| Restart resumes and completes only on full walk | **Proven** |
+| Restart starts a fresh generation and requires a full snapshot walk | **Supported-client contract** |
 | Identity mismatch is reported missing | **Proven** |
 | Canonical hash matches Retail | **Proven (live)** |
 | Replay idempotent (`already_accepted`) | **Proven (live)** |
@@ -416,7 +419,7 @@ throughout.
 - `internal/syncrecovery` unit tests: durable marking, missing detection,
   identity mismatch, unbounded-page refusal, complete-only-after-verified,
   multi-device rule, incomplete-walk refusal, skipped-page refusal,
-  replayed-page refusal, restart-resume, no-declared-total refusal,
+  replayed-page refusal, restart-fresh-generation, no-declared-total refusal,
   projection-pending qualification of `store_reconciled`.
 - Live Phase 20 acceptance: divergent Cloud restore (3 events / 1 sale vs
   12 Retail-delivered) reconciled to exact equality (4 sales, 5000 minor
@@ -464,6 +467,21 @@ throughout.
 - **Verification is one query per page** (`SyncEventHashes`).
 
 ## Related documentation
+
+### Phase 20 R12 amendment — finite recovery boundary
+
+The previous live-outbox walk could miss a new event whose ID sorted below
+the already-materialized page cursor, even though the event was included in
+Cloud's later generation count. The supported client now opens a generation
+before capturing its local retained-history snapshot. Snapshot count and
+SQLite insertion high-water mark are read together; pages carry the
+generation and enumerate that finite boundary in event-ID cursor order.
+Cloud uses the greater of its accepted count at generation start and the
+first-page snapshot count, while retaining terminal-page, zero-missing,
+cursor, current-ledger and generation-qualified completion predicates.
+Post-snapshot activity is delivered by ordinary sync. A restart safely
+starts a fresh pass. The boundary is not based on UUID ordering and does
+not alter the documented trusted-client disclosure limitation.
 
 - `docs/operations/disaster-recovery.md` — restore and reconciliation
   runbook.

@@ -115,6 +115,8 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			DeviceAuth(devices)(http.HandlerFunc(syncRecovery.RecoveryStatus)))
 		mux.Handle("POST /api/v1/device-control/recovery/verify",
 			DeviceAuth(devices)(http.HandlerFunc(syncRecovery.RecoveryVerify)))
+		mux.Handle("POST /api/v1/device-control/recovery/verify/begin",
+			DeviceAuth(devices)(http.HandlerFunc(syncRecovery.RecoveryBegin)))
 		mux.Handle("POST /api/v1/device-control/recovery/complete",
 			DeviceAuth(devices)(http.HandlerFunc(syncRecovery.RecoveryComplete)))
 	}

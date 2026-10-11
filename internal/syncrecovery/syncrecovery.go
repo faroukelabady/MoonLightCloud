@@ -84,6 +84,9 @@ type Report struct {
 // VerifyRequest is one bounded page of retained Retail history.
 type VerifyRequest struct {
 	Events []EventIdentity `json:"events"`
+	// Generation binds every page to the pass returned by BeginVerifyPass.
+	// Zero retains the legacy first-page declaration flow for older clients.
+	Generation int64 `json:"generation,omitempty"`
 	// EndOfHistory marks the FINAL page of the device's retained
 	// history. Only an end-of-history page can make verification
 	// complete; an early claim is rejected.
@@ -108,12 +111,10 @@ type VerifyProgress struct {
 	Pages       int    `json:"pages"`
 	Events      int64  `json:"events"`
 	Complete    bool   `json:"complete"`
-	// DeclaredTotal is the effective retained-history lower bound stored
-	// for the generation: at least the device's declaration and the
-	// Cloud-known event count captured atomically at pass initialization.
-	// Complete requires Events to reach it, so skipped pages cannot look
-	// exhaustive. Events may exceed it when newly-created retained events
-	// are encountered during the live walk.
+	// DeclaredTotal is the effective retained-history lower bound: the
+	// Cloud-known event count captured when the generation starts, raised
+	// on its first page to the count in Retail's fixed local snapshot.
+	// Complete requires Events to reach it.
 	DeclaredTotal int64 `json:"declared_total"`
 	// Missing is how many submitted identities Cloud did not hold (or
 	// held with a different payload hash) in this generation. It is
@@ -157,14 +158,14 @@ type Store interface {
 	// VerifyProgress reads the server-side coverage ledger.
 	VerifyProgress(ctx context.Context, deviceID string) (VerifyProgress, bool, error)
 	// BeginVerifyPass starts a fresh verification generation and records
-	// an effective retained-history lower bound: at least the client's
-	// starting count and any additional events Cloud already holds when
-	// the generation is atomically initialized.
+	// the Cloud-known event count before Retail captures a finite local
+	// outbox snapshot. A current client's first page raises this floor to
+	// the snapshot count.
 	BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error)
 	// RecordVerifyPage advances the coverage cursor and the missing
 	// ledger. It returns false when the page does not advance the cursor
 	// in byte order (a skipped, replayed or out-of-order page).
-	RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error)
+	RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing, declaredTotal int64, endOfHistory bool) (bool, error)
 	// CountPendingProjections reports non-terminal processor rows
 	// (pending, retry, blocked) for the requesting device's Store (§5).
 	CountPendingProjections(ctx context.Context, deviceID string) (int64, error)
@@ -252,10 +253,9 @@ func (s *Service) Status(ctx context.Context, deviceID string) (Report, error) {
 //     how many identities Cloud did not hold (verify_missing);
 //   - a page may declare end_of_history, which is the ONLY way
 //     verify_complete becomes true;
-//   - Complete refuses unless the walk is complete, reached at least the
-//     declared lower bound and recorded zero missing identities. Retail's
-//     retained outbox remains live during the walk, so new events observed
-//     before its terminal page may increase the verified count.
+//   - Complete refuses unless the walk is complete, reached the effective
+//     boundary (Cloud-known count at pass start and Retail's fixed snapshot
+//     count) and recorded zero missing identities.
 //
 // Identity is (event_id, payload_hash): an event ID present with a
 // different hash is reported missing — a content conflict, never
@@ -278,12 +278,30 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 		}
 		ids = append(ids, e.EventID)
 	}
-	// A page carrying a declared total opens a fresh verification
-	// generation. This is the only way the server learns how much
-	// retained history the device commits to walking; without it the
-	// ledger's total is zero and any short walk would look complete.
+	// Legacy clients open a generation on their first declared page. Current
+	// clients begin a generation before capturing their finite Retail snapshot,
+	// then bind all pages to that generation. The first page raises the
+	// generation's Cloud-known lower bound to the snapshot's retained count.
 	var generation int64
-	if req.DeclaredTotal > 0 {
+	if req.Generation < 0 {
+		return VerifyResponse{}, fmt.Errorf("verification generation must not be negative")
+	}
+	if req.Generation > 0 {
+		progress, found, err := s.store.VerifyProgress(ctx, deviceID)
+		if err != nil {
+			return VerifyResponse{}, err
+		}
+		if !found || progress.Generation != req.Generation {
+			return VerifyResponse{}, ErrStaleOrIncompleteGeneration
+		}
+		if progress.Pages == 0 && req.DeclaredTotal <= 0 {
+			return VerifyResponse{}, fmt.Errorf("first verification page must declare the retained snapshot size")
+		}
+		if progress.Pages > 0 && req.DeclaredTotal != 0 {
+			return VerifyResponse{}, fmt.Errorf("only the first verification page may declare a retained snapshot size")
+		}
+		generation = req.Generation
+	} else if req.DeclaredTotal > 0 {
 		var err error
 		generation, err = s.beginVerifyPass(ctx, deviceID, req.DeclaredTotal)
 		if err != nil {
@@ -318,7 +336,7 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 	// the recorded keyset position, so a skipped-back, replayed or
 	// out-of-order page affects zero rows and is refused.
 	recorded, err := s.store.RecordVerifyPage(ctx, deviceID, generation, ids[0], ids[len(ids)-1],
-		int64(len(ids)), int64(len(out)), req.EndOfHistory)
+		int64(len(ids)), int64(len(out)), req.DeclaredTotal, req.EndOfHistory)
 	if err != nil {
 		return VerifyResponse{}, err
 	}
@@ -397,15 +415,21 @@ func (s *Service) BeginVerifyPass(ctx context.Context, deviceID string, declared
 	return err
 }
 
+// StartVerifyPass opens a current-client generation before Retail captures
+// its finite local history snapshot. Cloud's accepted event count is
+// captured atomically with the generation transition.
+func (s *Service) StartVerifyPass(ctx context.Context, deviceID string) (int64, error) {
+	return s.beginVerifyPass(ctx, deviceID, 0)
+}
+
 func (s *Service) beginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	if declaredTotal < 0 {
 		return 0, fmt.Errorf("declared total must not be negative")
 	}
-	// Cloud's event count is captured atomically by the database statement
-	// that opens the generation. The stored effective minimum is the greater
-	// of that count and the client's starting count; this both closes the
-	// race with ordinary sync and prevents a walk below Cloud-known history.
-	// This remains only a lower bound: the trusted Retail device owns any
-	// history Cloud has never seen (see ADR-0054).
+	// Cloud's event count is captured atomically before Retail captures its
+	// fixed local snapshot. Current clients call this with zero, then declare
+	// the snapshot size on the first page. Legacy clients may still declare
+	// the total here. This remains a lower bound: Retail owns any history Cloud
+	// has never seen (see ADR-0054).
 	return s.store.BeginVerifyPass(ctx, deviceID, declaredTotal)
 }

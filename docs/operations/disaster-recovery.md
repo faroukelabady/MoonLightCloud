@@ -197,13 +197,15 @@ The protocol is explicit and durable:
             pending_outbox=0 is NEVER treated as proof that Cloud's
             projections are complete.
 
-3. VERIFY   Retail walks its RETAINED canonical outbox history in
-            bounded keyset pages ordered by event_id (byte order;
-            pages strictly ascending and contiguous) and POSTs
-            (event_id, payload_hash)
-            identities to /recovery/verify. Cloud replies with the
-            subset it is MISSING. Identity comparison only - never
-            counts, never a fabricated ordering.
+3. VERIFY   Retail opens /recovery/verify/begin with device auth, then
+            captures the retained outbox count and SQLite insertion
+            high-water mark together. It declares the count on page one
+            and sends only rows at or below that finite boundary in
+            bounded event_id byte-order pages. Every page carries the
+            returned generation. New rows after the snapshot flow through
+            ordinary sync; a restart opens a fresh generation and snapshot.
+            Cloud returns missing identities and records server-side
+            coverage; it does not trust a client missing-count claim.
 
 4. REPLAY   Retail re-queues only delivered rows Cloud reported
             missing, at most 200 per pass, and the normal sync
@@ -380,7 +382,7 @@ verify_missing == 0                    the server recorded no missing identity
 pages > 0                              never a zero-work shortcut
 verify_complete == true                a page was submitted end_of_history
 verify_declared_total != 0             a retained-history total was declared
-verify_events >= verify_declared_total coverage reached that total
+verify_events >= verify_declared_total coverage reached the finite boundary
 ```
 
 Each verification page must be strictly ascending by `event_id` in byte
@@ -391,19 +393,21 @@ fresh generation: an earlier completed ledger can never be reused.
 Completion is tied to the exact verification generation that was read. The
 database checks the generation, complete-page marker, effective lower-bound
 total, coverage of at least that total, and zero-missing ledger in the same
-conditional write that clears the device flag. At generation initialization,
-the stored lower bound atomically includes Cloud-known events accepted after
-Retail's initial count. During Retail's live keyset walk, Sales and inventory
-activity may further increase verified coverage before the terminal page;
-reconciliation does not require pausing business activity. Events created
-after that terminal page continue through ordinary synchronization and
-projection. If a newer pass or restore mark starts first, the old request is
-rejected as stale/incomplete and the device remains recovery-required;
-refresh status and finish the current pass before retrying. Page writes carry
-the same generation fence, so delayed pages do not change a later pass.
-Repeating a valid completion for the same generation is safe. Event-history
-completion remains separate from projection convergence and the Store-wide
-`store_reconciled` result.
+conditional write that clears the device flag. Retail opens a generation
+before taking its local snapshot. Cloud captures its accepted-event count
+atomically at generation start; Retail then reads the retained outbox count
+and SQLite insertion `rowid` high-water mark together and declares the count
+on page one. It pages only snapshot rows at or below that boundary in
+`event_id` byte order. The first page raises the effective lower bound to
+the snapshot count when needed. New Sales and inventory events after the
+snapshot continue through ordinary synchronization and projection; they do
+not extend the current pass or require pausing business activity. A restart
+opens a fresh generation and takes a fresh snapshot, so partial prior
+coverage cannot complete. If a newer pass or restore mark starts first, an
+old page/completion is rejected as stale and the device remains
+recovery-required. Repeating a valid completion for the same generation is
+safe. Event-history completion remains separate from projection convergence
+and the Store-wide `store_reconciled` result.
 
 Identity matches are scoped by Cloud to the authenticated device's
 server-side Store binding. A bound device can verify events ingested for

@@ -95,10 +95,17 @@ func (f *fakeStore) BeginVerifyPass(_ context.Context, deviceID string, declared
 	return p.Generation, nil
 }
 
-func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
+func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing, declaredTotal int64, endOfHistory bool) (bool, error) {
 	p := f.ledger[deviceID]
 	if p.Generation != generation || firstEventID <= p.LastEventID || lastEventID < firstEventID {
 		return false, nil // does not advance
+	}
+	if p.Pages == 0 {
+		if declaredTotal > p.DeclaredTotal {
+			p.DeclaredTotal = declaredTotal
+		}
+	} else if declaredTotal != 0 {
+		return false, nil
 	}
 	p.LastEventID = lastEventID
 	p.Pages++

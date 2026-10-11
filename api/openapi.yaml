@@ -3445,16 +3445,49 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/device-control/recovery/verify/begin:
+    post:
+      summary: Retail starts a recovery verification generation
+      description: >-
+        Capture Cloud's accepted-event lower bound and open a generation
+        before Retail captures its finite local retained-outbox snapshot.
+        Every verification page must include the returned generation.
+      operationId: deviceRecoveryVerifyBegin
+      security:
+        - deviceAuth: []
+      responses:
+        '200':
+          description: Generation bound to the authenticated device.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generation]
+                properties:
+                  generation: {type: integer, minimum: 1, format: int64}
+        '400':
+          description: Recovery is not required for this device.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: Missing, invalid or revoked device credential.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   /api/v1/device-control/recovery/verify:
     post:
       summary: Retail verifies one page of its retained event history
       description: >-
         One bounded page (1-200 identities) of retained (event_id,
         payload_hash) identities, strictly ascending by event_id in byte
-        order and starting above the server's recorded cursor. A positive
-        declared_total opens a new verification pass (it may not be below the
-        number of events Cloud already holds for the device). The server
-        records coverage and how many identities it does not hold.
+        order and starting above the server's recorded cursor. Current clients
+        include the generation returned by recovery/verify/begin on every
+        page. The first page declares the count in Retail's finite SQLite
+        insertion-bound snapshot; the server floors it at the event count
+        captured when that generation began. The server records coverage and
+        how many identities it does not hold. Legacy clients may still open a
+        pass with a positive declared_total on their first page.
       operationId: deviceRecoveryVerify
       security:
         - deviceAuth: []
@@ -3478,6 +3511,7 @@ paths:
                       payload_hash: {type: string, description: lowercase hex SHA-256 of the canonical payload}
                 end_of_history: {type: boolean}
                 declared_total: {type: integer, minimum: 0, format: int64}
+                generation: {type: integer, minimum: 1, format: int64}
       responses:
         '200':
           description: Identities Cloud does not hold (or holds with a different hash).

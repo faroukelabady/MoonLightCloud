@@ -84,6 +84,7 @@ func newRecoveryHTTPFixture(t *testing.T, serviceStore syncrecovery.Store) *reco
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/device-control/recovery/status", DeviceAuth(authService)(http.HandlerFunc(handler.RecoveryStatus)))
 	mux.Handle("POST /api/v1/device-control/recovery/verify", DeviceAuth(authService)(http.HandlerFunc(handler.RecoveryVerify)))
+	mux.Handle("POST /api/v1/device-control/recovery/verify/begin", DeviceAuth(authService)(http.HandlerFunc(handler.RecoveryBegin)))
 	mux.Handle("POST /api/v1/device-control/recovery/complete", DeviceAuth(authService)(http.HandlerFunc(handler.RecoveryComplete)))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -472,7 +473,7 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 	if err != nil || progress.Generation != current.generation || progress.DeclaredTotal != current.declared {
 		t.Fatalf("initialization did not preserve newest generation/cursor: current=%+v ledger=%+v err=%v", current, progress, err)
 	}
-	advanced, err := f.devices.RecordVerifyPage(ctx, deviceID, old.generation, oldEvent, oldEvent, 1, 0, true)
+	advanced, err := f.devices.RecordVerifyPage(ctx, deviceID, old.generation, oldEvent, oldEvent, 1, 0, 1, true)
 	if err != nil || advanced {
 		t.Fatalf("stale page record advanced new generation: advanced=%v err=%v", advanced, err)
 	}
@@ -480,11 +481,11 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 	if err != nil || progress.Generation != current.generation || progress.Events != 0 || progress.Pages != 0 || progress.LastEventID != "" {
 		t.Fatalf("stale page mutated current generation: %+v err=%v", progress, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, oldEvent, oldEvent, 1, 0, false)
+	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, oldEvent, oldEvent, 1, 0, 1, false)
 	if err != nil || !advanced {
 		t.Fatalf("current generation first page did not advance: advanced=%v err=%v", advanced, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, newEvent, newEvent, 1, 0, true)
+	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, newEvent, newEvent, 1, 0, 0, true)
 	if err != nil || !advanced {
 		t.Fatalf("current generation second page did not advance: advanced=%v err=%v", advanced, err)
 	}

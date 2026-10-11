@@ -249,6 +249,7 @@ SET verify_generation = verify_generation + 1,
     ), verify_missing = 0,
     updated_at = now()
 WHERE recovery.device_id = $2::uuid
+  AND recovery.required
 RETURNING verify_generation
 `
 
@@ -270,18 +271,24 @@ SET verify_last_event_id = $1::text,
     verify_pages = verify_pages + 1,
     verify_events = verify_events + $2::bigint,
     verify_missing = verify_missing + $3::bigint,
-    verify_complete = (verify_complete OR $4::bool),
+    verify_declared_total = CASE WHEN verify_pages = 0
+      THEN GREATEST(verify_declared_total, $4::bigint)
+      ELSE verify_declared_total END,
+    verify_complete = (verify_complete OR $5::bool),
     updated_at = now()
-WHERE device_id = $5::uuid
-  AND verify_generation = $6::bigint
-  AND verify_last_event_id COLLATE "C" < $7::text COLLATE "C"
-  AND $7::text COLLATE "C" <= $1::text COLLATE "C"
+WHERE device_id = $6::uuid
+  AND verify_generation = $7::bigint
+  AND ((verify_pages = 0)
+       OR (verify_pages > 0 AND $4::bigint = 0))
+  AND verify_last_event_id COLLATE "C" < $8::text COLLATE "C"
+  AND $8::text COLLATE "C" <= $1::text COLLATE "C"
 `
 
 type SyncRecoveryRecordVerifyPageParams struct {
 	LastEventID      string      `json:"last_event_id"`
 	Events           int64       `json:"events"`
 	Missing          int64       `json:"missing"`
+	DeclaredTotal    int64       `json:"declared_total"`
 	EndOfHistory     bool        `json:"end_of_history"`
 	DeviceID         pgtype.UUID `json:"device_id"`
 	VerifyGeneration int64       `json:"verify_generation"`
@@ -293,6 +300,7 @@ func (q *Queries) SyncRecoveryRecordVerifyPage(ctx context.Context, arg SyncReco
 		arg.LastEventID,
 		arg.Events,
 		arg.Missing,
+		arg.DeclaredTotal,
 		arg.EndOfHistory,
 		arg.DeviceID,
 		arg.VerifyGeneration,

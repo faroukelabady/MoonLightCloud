@@ -178,7 +178,7 @@ func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredT
 // The UPDATE applies only when the page starts above the recorded cursor
 // in byte order (COLLATE "C"), so a skipped-back, replayed or
 // out-of-order page affects zero rows and is reported as refused.
-func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
+func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing, declaredTotal int64, endOfHistory bool) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -187,7 +187,7 @@ func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generati
 	}
 	affected, err := sqlcgen.New(d.pool).SyncRecoveryRecordVerifyPage(ctx, sqlcgen.SyncRecoveryRecordVerifyPageParams{
 		DeviceID: duid, VerifyGeneration: generation, FirstEventID: firstEventID, LastEventID: lastEventID,
-		Events: events, Missing: missing, EndOfHistory: endOfHistory,
+		Events: events, Missing: missing, DeclaredTotal: declaredTotal, EndOfHistory: endOfHistory,
 	})
 	if err != nil {
 		return false, catalogAdminErr(err)
