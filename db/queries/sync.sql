@@ -88,13 +88,32 @@ WHERE device_id = sqlc.arg(device_id)::uuid
   AND sqlc.arg(first_event_id)::text COLLATE "C" <= sqlc.arg(last_event_id)::text COLLATE "C";
 
 -- name: CountStorePendingProjections :one
--- §5: ingest is not projection. Processor rows not yet terminal
--- (pending, retry or blocked) for events of the requesting device's
--- Store, never another Store's.
-SELECT count(*)
-FROM sync_event_processing p
-JOIN sync_events e ON e.event_id = p.event_id
-WHERE p.status IN ('pending', 'retry', 'blocked')
+-- §5: ingest is not projection. Count every accepted event's canonical
+-- required processor when it has no row or is not processed. Event/version
+-- mapping prevents an unrelated processor from implying convergence.
+WITH required_processor(event_type, processor) AS (VALUES
+    ('sale.finalized.v1', 'sale_projection.v1'),
+    ('sale.finalized.v2', 'sale_projection.v2'),
+    ('sale.finalized.v3', 'sale_projection.v3'),
+    ('sale.return_refund.finalized.v1', 'return_refund_projection.v1'),
+    ('catalog.category.snapshot.v1', 'catalog_category_projection.v1'),
+    ('catalog.category.snapshot.v2', 'catalog_category_projection.v1'),
+    ('catalog.tag.snapshot.v1', 'catalog_tag_projection.v1'),
+    ('catalog.product.snapshot.v1', 'catalog_product_projection.v1'),
+    ('catalog.product.snapshot.v2', 'catalog_product_projection.v1'),
+    ('catalog.product.sales_policy.snapshot.v1', 'catalog_product_sales_policy_projection.v1'),
+    ('inventory.product.snapshot.v1', 'inventory_product_projection.v1'),
+    ('catalog.product.configuration.snapshot.v1', 'catalog_product_configuration_projection.v1'),
+    ('catalog.product_variant.snapshot.v1', 'catalog_product_variant_projection.v1'),
+    ('catalog.product_type.snapshot.v1', 'catalog_product_type_projection.v1'),
+    ('inventory.product_variant.snapshot.v1', 'inventory_product_variant_projection.v1')
+)
+SELECT count(*)::bigint
+FROM sync_events e
+JOIN required_processor r ON r.event_type = e.event_type
+LEFT JOIN sync_event_processing p
+  ON p.event_id = e.event_id AND p.processor = r.processor
+WHERE p.status IS DISTINCT FROM 'processed'
   AND (e.device_id = sqlc.arg(device_id)::uuid
        OR e.store_id = (SELECT s.store_id FROM device_store_bindings s
                         WHERE s.device_id = sqlc.arg(device_id)::uuid));

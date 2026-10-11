@@ -62,10 +62,13 @@ func TestSyncRecoveryLedgerStoreScopeAndOrdering(t *testing.T) {
 	sort.Strings(ids)
 	for _, id := range ids {
 		event(a, s1, id)
+		if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing(event_id,processor,status) VALUES($1,'sale_projection.v3','processed')`, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cEvent := uuid.NewString()
 	event(c, s2, cEvent)
-	if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing (event_id, processor, status) VALUES ($1, 'sale_projection.v2', 'retry')`, cEvent); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing (event_id, processor, status) VALUES ($1, 'sale_projection.v3', 'retry')`, cEvent); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,4 +142,93 @@ func TestSyncRecoveryLedgerStoreScopeAndOrdering(t *testing.T) {
 	if err != nil || progress.Missing != 1 {
 		t.Fatalf("missing ledger: %+v %v", progress, err)
 	}
+}
+
+// TestSyncRecoveryCountsEveryCanonicalProcessor proves convergence is based
+// on each accepted event's required processor, including an absent row and
+// every non-processed state. A successful unrelated processor cannot hide it.
+func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
+	pool, authSvc := openTestRepo(t)
+	ctx := context.Background()
+	devices := NewDevices(pool, 5*time.Second)
+	p, err := authSvc.Create(ctx, "recovery-required-processors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type required struct{ event, processor string }
+	all := []required{
+		{"sale.finalized.v1", "sale_projection.v1"},
+		{"sale.finalized.v2", "sale_projection.v2"},
+		{"sale.finalized.v3", "sale_projection.v3"},
+		{"sale.return_refund.finalized.v1", "return_refund_projection.v1"},
+		{"catalog.category.snapshot.v1", "catalog_category_projection.v1"},
+		{"catalog.category.snapshot.v2", "catalog_category_projection.v1"},
+		{"catalog.tag.snapshot.v1", "catalog_tag_projection.v1"},
+		{"catalog.product.snapshot.v1", "catalog_product_projection.v1"},
+		{"catalog.product.snapshot.v2", "catalog_product_projection.v1"},
+		{"catalog.product.sales_policy.snapshot.v1", "catalog_product_sales_policy_projection.v1"},
+		{"inventory.product.snapshot.v1", "inventory_product_projection.v1"},
+		{"catalog.product.configuration.snapshot.v1", "catalog_product_configuration_projection.v1"},
+		{"catalog.product_variant.snapshot.v1", "catalog_product_variant_projection.v1"},
+		{"catalog.product_type.snapshot.v1", "catalog_product_type_projection.v1"},
+		{"inventory.product_variant.snapshot.v1", "inventory_product_variant_projection.v1"},
+	}
+	ids := make([]string, len(all))
+	for i, item := range all {
+		ids[i] = uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO sync_events
+			(event_id,device_id,event_type,occurred_at,payload,payload_hash)
+			VALUES ($1,$2,$3,now(),'{}',decode('aa','hex'))`, ids[i], p.Device.ID, item.event); err != nil {
+			t.Fatalf("insert %s: %v", item.event, err)
+		}
+	}
+	status := func(want int64) {
+		t.Helper()
+		report, err := syncrecovery.NewService(devices).Status(ctx, p.Device.ID)
+		if err != nil || int64(report.ProjectionsPending) != want || report.StoreReconciled != (want == 0) {
+			t.Fatalf("pending=%d reconciled=%v, want pending=%d: %v", report.ProjectionsPending, report.StoreReconciled, want, err)
+		}
+	}
+	status(int64(len(all))) // Every accepted event begins undiscovered.
+	for i, item := range all {
+		// An unrelated success must not satisfy this event's required processor.
+		if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing(event_id,processor,status) VALUES($1,'unrelated.success.v1','processed')`, ids[i]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing(event_id,processor,status) VALUES($1,$2,'pending')`, ids[i], item.processor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status(int64(len(all)))
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE processor <> 'unrelated.success.v1'`); err != nil {
+		t.Fatal(err)
+	}
+	status(0)
+	// Dependency-blocked Category and Variant inventory events remain
+	// unresolved even though unrelated projections have succeeded.
+	for _, index := range []int{4, 14} {
+		if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='blocked' WHERE event_id=$1 AND processor=$2`, ids[index], all[index].processor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status(2)
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[4]); err != nil {
+		t.Fatal(err)
+	}
+	status(1)
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='retry' WHERE event_id=$1`, ids[14]); err != nil {
+		t.Fatal(err)
+	}
+	status(1)
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[14]); err != nil {
+		t.Fatal(err)
+	}
+	status(0)
+	// Unsupported/non-projecting events are intentionally outside the mapping.
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_events
+		(event_id,device_id,event_type,occurred_at,payload,payload_hash)
+		VALUES ($1,$2,'system.test.v1',now(),'{}',decode('aa','hex'))`, uuid.NewString(), p.Device.ID); err != nil {
+		t.Fatal(err)
+	}
+	status(0)
 }

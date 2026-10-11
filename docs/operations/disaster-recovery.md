@@ -205,9 +205,9 @@ The protocol is explicit and durable:
             subset it is MISSING. Identity comparison only - never
             counts, never a fabricated ordering.
 
-4. REPLAY   Retail re-queues EXACTLY the delivered rows Cloud reported
-            missing (bounded batches) and the normal sync worker
-            resends them. Rows Cloud permanently rejected (blocked)
+4. REPLAY   Retail re-queues only delivered rows Cloud reported
+            missing, at most 200 per pass, and the normal sync
+            worker resends them; repeat Reconcile until zero missing. Rows Cloud permanently rejected (blocked)
             were never acknowledged and are not part of the walk. Cloud ingest is
             idempotent: duplicates ACK already_accepted; missing
             events ingest and reproject.
@@ -231,9 +231,8 @@ verified by the replacement device from the restored Retail database.
 
 **Projection convergence:** completing verification proves *event
 history*, not business projection. `projections_pending` counts Cloud
-event processors of this Store still `pending`/`retry`/`blocked`
-(`sync_event_processing`). An event no processor has claimed yet has no
-row; re-check the status after a short wait before reporting.
+accepted events of this Store whose required processor has not reached
+`processed` (including events not yet claimed by any processor).
 A Store is reconciled only when
 `devices_unresolved == 0 && projections_pending == 0`. Never infer
 reconciliation from `/health/ready`, from `required=false` alone, or from

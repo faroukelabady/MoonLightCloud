@@ -217,11 +217,12 @@ claimed.
 
 Receiving and acknowledging an event is **not** the same as projecting it.
 Event processors record their own state in `sync_event_processing`
-(`pending`, `processed`, `retry`, `blocked`). `projections_pending` counts
-rows still `pending`, `retry` or `blocked` for events of the requesting
-device's Store (Phase 20 R6). An event no processor has claimed yet has no
-row at all and is not counted; Retail therefore re-reads the status after
-replay and the operator re-checks after a short wait.
+(`pending`, `processed`, `retry`, `blocked`). `projections_pending` counts,
+for events of the requesting device's Store, every accepted event whose
+**required processor** (an explicit event-type -> processor mapping) is not
+`processed` - including an event no processor has claimed yet (no row at
+all). An unrelated processor's success never satisfies another event type.
+Event types with no projector are outside the mapping (Phase 20 R6).
 
 Recovery verification therefore proves **event history**, not business
 projection convergence. The two are reported separately:
