@@ -310,7 +310,12 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 	} else if req.DeclaredTotal < 0 {
 		return VerifyResponse{}, fmt.Errorf("declared total must not be negative")
 	}
-	if req.DeclaredTotal == 0 {
+	// Only generation-less legacy requests may resolve their continuation
+	// against whichever pass is current now. An explicit generation was
+	// already validated above and must remain the generation used by the
+	// conditional RecordVerifyPage write; re-reading here could retarget a
+	// delayed old page after BeginVerifyPass or a recovery re-mark.
+	if req.Generation == 0 && req.DeclaredTotal == 0 {
 		progress, found, err := s.store.VerifyProgress(ctx, deviceID)
 		if err != nil {
 			return VerifyResponse{}, err

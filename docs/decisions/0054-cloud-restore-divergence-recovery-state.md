@@ -210,10 +210,20 @@ in the same statement that clears `required`. If a newer pass or restore
 mark wins the row update first, the older completion affects zero rows and
 returns a stale/incomplete result; the caller refreshes status and retries
 only after the current pass is complete. Repeating completion for the same
-already-cleared valid generation remains idempotent. Page recording is
-also generation-qualified, so a delayed page cannot add coverage to a
-newer pass. These row-level conditions are database-backed across Cloud
-processes; no process-local lock is relied on.
+already-cleared valid generation remains idempotent. Explicit-generation
+page recording is also generation-qualified, so a delayed page cannot add
+coverage to a newer pass. Only generation-less legacy requests resolve
+against the current pass under the legacy protocol. These row-level
+conditions are database-backed across Cloud processes; no process-local
+lock is relied on.
+
+An explicit generation remains fixed from service validation through the
+page write; a later ledger read cannot retarget it. The page update itself
+requires a positive retained-snapshot declaration when `verify_pages = 0`
+and requires a zero declaration for every continuation. These declaration
+rules are repeated in the conditional SQL update, so concurrent first-page,
+continuation, begin-pass, or recovery-mark operations cannot bypass the
+service checks.
 
 **Proven:** a client cannot clear recovery by claiming `missing=0`
 without a coverage walk, nor after a walk in which the server recorded a

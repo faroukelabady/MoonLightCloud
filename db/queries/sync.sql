@@ -117,7 +117,7 @@ SET verify_last_event_id = sqlc.arg(last_event_id)::text,
     updated_at = now()
 WHERE device_id = sqlc.arg(device_id)::uuid
   AND verify_generation = sqlc.arg(verify_generation)::bigint
-  AND ((verify_pages = 0)
+  AND ((verify_pages = 0 AND sqlc.arg(declared_total)::bigint > 0)
        OR (verify_pages > 0 AND sqlc.arg(declared_total)::bigint = 0))
   AND verify_last_event_id COLLATE "C" < sqlc.arg(first_event_id)::text COLLATE "C"
   AND sqlc.arg(first_event_id)::text COLLATE "C" <= sqlc.arg(last_event_id)::text COLLATE "C";

@@ -278,7 +278,7 @@ SET verify_last_event_id = $1::text,
     updated_at = now()
 WHERE device_id = $6::uuid
   AND verify_generation = $7::bigint
-  AND ((verify_pages = 0)
+  AND ((verify_pages = 0 AND $4::bigint > 0)
        OR (verify_pages > 0 AND $4::bigint = 0))
   AND verify_last_event_id COLLATE "C" < $8::text COLLATE "C"
   AND $8::text COLLATE "C" <= $1::text COLLATE "C"

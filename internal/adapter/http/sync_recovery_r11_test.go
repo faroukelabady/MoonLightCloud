@@ -3,9 +3,11 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/syncrecovery"
 )
@@ -192,5 +194,175 @@ func TestR11BeginPassCapturesCloudEventsAcceptedBeforeFirstPage(t *testing.T) {
 	progress, found, err = f.devices.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.DeclaredTotal != 3 || progress.Events != 3 || progress.Missing != 0 || !progress.Complete {
 		t.Fatalf("expected complete generation at captured floor: %+v found=%v err=%v", progress, found, err)
+	}
+}
+
+func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		newFirstPage bool
+		recoveryMark bool
+	}{
+		{name: "begin leaves new generation empty"},
+		{name: "begin records a valid first page", newFirstPage: true},
+		{name: "recovery remark resets generation", recoveryMark: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			barrier := &completionReadBarrier{read: make(chan struct{}), release: make(chan struct{})}
+			f := newRecoveryHTTPFixture(t, barrier)
+			deviceID, token := f.newToken("r13-stale-explicit-continuation")
+			f.bind(t, deviceID, f.storeA)
+			if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "restore"); err != nil {
+				t.Fatal(err)
+			}
+
+			first := syncrecovery.EventIdentity{EventID: "10000000-0000-4000-8000-000000000001", PayloadHash: "aa"}
+			tails := []syncrecovery.EventIdentity{
+				{EventID: "40000000-0000-4000-8000-000000000002", PayloadHash: "bb"},
+				{EventID: "50000000-0000-4000-8000-000000000003", PayloadHash: "cc"},
+			}
+			for _, event := range tails {
+				f.insertEvent(t, event.EventID, deviceID, &f.storeA, event.PayloadHash)
+			}
+			start := func() int64 {
+				t.Helper()
+				code, body := f.request(t, token, http.MethodPost, "/api/v1/device-control/recovery/verify/begin", "")
+				if code != http.StatusOK {
+					t.Fatalf("begin HTTP %d: %s", code, body)
+				}
+				var result struct {
+					Generation int64 `json:"generation"`
+				}
+				if err := json.Unmarshal(body, &result); err != nil || result.Generation <= 0 {
+					t.Fatalf("invalid begin response %s: %v", body, err)
+				}
+				return result.Generation
+			}
+			oldGeneration := start()
+			code, body := f.verify(t, token, []syncrecovery.EventIdentity{first}, 3, false,
+				fmt.Sprintf("\"generation\":%d", oldGeneration))
+			if code != http.StatusOK {
+				t.Fatalf("old first page HTTP %d: %s", code, body)
+			}
+			before, found, err := f.devices.VerifyProgress(ctx, deviceID)
+			if err != nil || !found || before.Generation != oldGeneration || before.Pages != 1 || before.Events != 1 || before.Missing != 1 {
+				t.Fatalf("old generation was not prepared with missing history: %+v found=%v err=%v", before, found, err)
+			}
+
+			barrier.armed.Store(true)
+			type response struct {
+				code int
+				body []byte
+			}
+			done := make(chan response, 1)
+			go func() {
+				code, body := f.verify(t, token, tails, 0, true, fmt.Sprintf("\"generation\":%d", oldGeneration))
+				done <- response{code: code, body: body}
+			}()
+			select {
+			case <-barrier.read:
+			case <-time.After(10 * time.Second):
+				t.Fatal("old continuation did not reach the post-ledger-read barrier")
+			}
+
+			var currentGeneration int64
+			want := syncrecovery.VerifyProgress{}
+			switch {
+			case tc.recoveryMark:
+				if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "operator re-mark"); err != nil {
+					t.Fatal(err)
+				}
+				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				currentGeneration = want.Generation
+			case tc.newFirstPage:
+				currentGeneration = start()
+				newFirst := syncrecovery.EventIdentity{EventID: "30000000-0000-4000-8000-000000000004", PayloadHash: "dd"}
+				f.insertEvent(t, newFirst.EventID, deviceID, &f.storeA, newFirst.PayloadHash)
+				code, body = f.verify(t, token, []syncrecovery.EventIdentity{newFirst}, 1, false,
+					fmt.Sprintf("\"generation\":%d", currentGeneration))
+				if code != http.StatusOK {
+					t.Fatalf("new generation first page HTTP %d: %s", code, body)
+				}
+				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			default:
+				currentGeneration = start()
+				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if currentGeneration != oldGeneration+1 || want.Generation != currentGeneration {
+				t.Fatalf("new generation mismatch: old=%d current=%d ledger=%+v", oldGeneration, currentGeneration, want)
+			}
+
+			close(barrier.release)
+			var stale response
+			select {
+			case stale = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("stale continuation did not finish")
+			}
+			if stale.code != http.StatusBadRequest {
+				t.Fatalf("old explicit continuation must be rejected, HTTP %d: %s", stale.code, stale.body)
+			}
+			after, found, err := f.devices.VerifyProgress(ctx, deviceID)
+			if err != nil || !found || after != want {
+				t.Fatalf("stale continuation changed current ledger: want=%+v got=%+v found=%v err=%v", want, after, found, err)
+			}
+			state, found, err := f.devices.GetRecoveryState(ctx, deviceID)
+			if err != nil || !found || !state.Required {
+				t.Fatalf("stale continuation cleared recovery: state=%+v found=%v err=%v", state, found, err)
+			}
+			code, body = f.request(t, token, http.MethodPost, "/api/v1/device-control/recovery/complete", `{"last_missing":0}`)
+			if code != http.StatusBadRequest {
+				t.Fatalf("incomplete current generation must not complete, HTTP %d: %s", code, body)
+			}
+		})
+	}
+}
+
+func TestR13SQLPageDeclarationRulesAreAtomic(t *testing.T) {
+	ctx := context.Background()
+	f := newRecoveryHTTPFixture(t, nil)
+	deviceID, _ := f.newToken("r13-sql-declaration-fence")
+	if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "restore"); err != nil {
+		t.Fatal(err)
+	}
+	generation, err := f.devices.BeginVerifyPass(ctx, deviceID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := "10000000-0000-4000-8000-000000000011"
+	second := "20000000-0000-4000-8000-000000000022"
+	advanced, err := f.devices.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 0, false)
+	if err != nil || advanced {
+		t.Fatalf("SQL accepted first page without snapshot declaration: advanced=%v err=%v", advanced, err)
+	}
+	progress, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	if err != nil || progress.Generation != generation || progress.Pages != 0 || progress.Events != 0 {
+		t.Fatalf("rejected first page mutated ledger: %+v err=%v", progress, err)
+	}
+	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 2, false)
+	if err != nil || !advanced {
+		t.Fatalf("SQL rejected valid declared first page: advanced=%v err=%v", advanced, err)
+	}
+	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 2, true)
+	if err != nil || advanced {
+		t.Fatalf("SQL accepted continuation that redeclared snapshot: advanced=%v err=%v", advanced, err)
+	}
+	progress, _, err = f.devices.VerifyProgress(ctx, deviceID)
+	if err != nil || progress.Pages != 1 || progress.Events != 1 || progress.DeclaredTotal != 2 || progress.Complete {
+		t.Fatalf("rejected declaration mutated ledger: %+v err=%v", progress, err)
+	}
+	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 0, true)
+	if err != nil || !advanced {
+		t.Fatalf("SQL rejected valid continuation: advanced=%v err=%v", advanced, err)
 	}
 }

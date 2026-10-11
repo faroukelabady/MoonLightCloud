@@ -409,6 +409,14 @@ recovery-required. Repeating a valid completion for the same generation is
 safe. Event-history completion remains separate from projection convergence
 and the Store-wide `store_reconciled` result.
 
+Current Retail verification requests carry an explicit generation on every
+page. Cloud keeps that generation fixed through the conditional page write,
+so a delayed page is rejected if a newer pass or restore mark has replaced
+it. Generation-less legacy requests use the legacy current-pass resolution;
+they still must satisfy the database page-order and first-page declaration
+predicates. A first page must declare a positive finite snapshot count, while
+continuations must declare zero.
+
 Identity matches are scoped by Cloud to the authenticated device's
 server-side Store binding. A bound device can verify events ingested for
 that Store, including same-Store replacement-device history. An event
