@@ -29,7 +29,11 @@ func (f *fakeStore) UpsertRecoveryState(_ context.Context, deviceID, reason stri
 	return nil
 }
 
-func (f *fakeStore) ClearRecoveryState(_ context.Context, deviceID string, verified int64) error {
+func (f *fakeStore) ClearRecoveryState(_ context.Context, deviceID string, generation, verified int64) error {
+	p := f.ledger[deviceID]
+	if p.Generation != generation || !p.Complete || p.Pages == 0 || p.DeclaredTotal == 0 || p.Events != p.DeclaredTotal || p.Events != verified || p.Missing != 0 {
+		return ErrStaleOrIncompleteGeneration
+	}
 	s := f.state[deviceID]
 	s.Required = false
 	s.VerifiedEvents = verified
@@ -52,7 +56,7 @@ func (f *fakeStore) CountRecoveryRequired(_ context.Context, deviceID string) (i
 	return n, nil
 }
 
-func (f *fakeStore) SyncEventHashes(_ context.Context, eventIDs []string) (map[string]string, error) {
+func (f *fakeStore) SyncEventHashes(_ context.Context, _ string, eventIDs []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, id := range eventIDs {
 		if h, ok := f.present[id]; ok {
@@ -84,15 +88,16 @@ func (f *fakeStore) VerifyProgress(_ context.Context, deviceID string) (VerifyPr
 	return f.ledger[deviceID], true, nil
 }
 
-func (f *fakeStore) BeginVerifyPass(_ context.Context, deviceID string, declaredTotal int64) error {
+func (f *fakeStore) BeginVerifyPass(_ context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	p := f.ledger[deviceID]
-	f.ledger[deviceID] = VerifyProgress{Generation: p.Generation + 1, DeclaredTotal: declaredTotal}
-	return nil
+	p = VerifyProgress{Generation: p.Generation + 1, DeclaredTotal: declaredTotal}
+	f.ledger[deviceID] = p
+	return p.Generation, nil
 }
 
-func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
+func (f *fakeStore) RecordVerifyPage(_ context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
 	p := f.ledger[deviceID]
-	if firstEventID <= p.LastEventID || lastEventID < firstEventID {
+	if p.Generation != generation || firstEventID <= p.LastEventID || lastEventID < firstEventID {
 		return false, nil // does not advance
 	}
 	p.LastEventID = lastEventID

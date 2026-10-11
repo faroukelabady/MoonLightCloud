@@ -388,6 +388,28 @@ order and start above the recorded cursor, so a replayed, repeated or
 out-of-order page is refused outright. Marking a device (again) starts a
 fresh generation: an earlier completed ledger can never be reused.
 
+Completion is tied to the exact verification generation that was read. The
+database checks the generation, complete-page marker, declared total,
+exact page coverage and zero-missing ledger in the same conditional write
+that clears the device flag. If a newer pass or restore mark starts first,
+the old request is rejected as stale/incomplete and the device remains
+recovery-required; refresh status and finish the current pass before
+retrying. Page writes carry the same generation fence, so delayed pages do
+not change a later pass. Repeating a valid completion for the same
+generation is safe. Event-history completion remains separate from
+projection convergence and the Store-wide `store_reconciled` result.
+
+Identity matches are scoped by Cloud to the authenticated device's
+server-side Store binding. A bound device can verify events ingested for
+that Store, including same-Store replacement-device history. An event
+whose historical `store_id` is NULL is eligible only for its original
+device; an unbound device fails closed and cannot use another Store's
+event IDs and hashes as acceptance matches. The device cannot choose this
+scope in its request. The existing trust limitation is unchanged: the
+server can compare submitted identities and enforce the Cloud-known lower
+bound, but it cannot cryptographically prove that a compromised trusted
+client disclosed every event lost from the restored database.
+
 **Proven:** a client claim of `missing=0` cannot clear recovery (the
 server's own `verify_missing` decides); a partial walk cannot
 complete; skipped/replayed pages are refused; an interrupted pass resumes

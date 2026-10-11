@@ -13,10 +13,23 @@ SET required = TRUE, reason = EXCLUDED.reason,
     verify_last_event_id = '', verify_pages = 0, verify_events = 0,
     verify_complete = FALSE, verify_declared_total = 0, verify_missing = 0;
 
--- name: ClearSyncRecoveryState :exec
+-- name: ClearSyncRecoveryState :execrows
+-- Clearing is fenced to the exact ledger generation read and validated by
+-- the service. Every authoritative completion predicate is repeated here,
+-- in the same statement as the state transition, so a newer pass or restore
+-- mark cannot be cleared by an older in-flight request. Projection
+-- convergence remains a separate Store-level status condition.
 UPDATE sync_recovery_state
-SET required = FALSE, cleared_at = now(), verified_events = $2, updated_at = now()
-WHERE device_id = $1;
+SET required = FALSE, cleared_at = COALESCE(cleared_at, now()),
+    verified_events = sqlc.arg(verified_events)::bigint, updated_at = now()
+WHERE device_id = sqlc.arg(device_id)::uuid
+  AND verify_generation = sqlc.arg(verify_generation)::bigint
+  AND verify_pages > 0
+  AND verify_complete
+  AND verify_declared_total > 0
+  AND verify_events = verify_declared_total
+  AND verify_events = sqlc.arg(verified_events)::bigint
+  AND verify_missing = 0;
 
 -- name: GetSyncRecoveryState :one
 SELECT device_id, required, reason, started_at, cleared_at, verified_events, updated_at
@@ -49,9 +62,20 @@ WHERE r.required
 -- Identity is (event_id, payload_hash); an absent row or a different hash
 -- is reported missing. One bounded query per page (no N+1).
 -- name: SyncEventHashes :many
+-- The authenticated device's binding is resolved server-side. All event
+-- rows belonging to that Store remain visible for supported replacement
+-- devices. Legacy rows without a Store are matchable only by their original
+-- device; unbound callers therefore receive no identity matches.
 SELECT e.event_id, e.payload_hash
 FROM sync_events e
-WHERE e.event_id = ANY($1::uuid[]);
+WHERE e.event_id = ANY(sqlc.arg(event_ids)::uuid[])
+  AND EXISTS (
+      SELECT 1
+      FROM device_store_bindings b
+      WHERE b.device_id = sqlc.arg(device_id)::uuid
+        AND (e.store_id = b.store_id
+             OR (e.store_id IS NULL AND e.device_id = b.device_id))
+  );
 
 -- name: CountSyncEventsForDevice :one
 SELECT count(*) FROM sync_events WHERE device_id = $1;
@@ -66,14 +90,15 @@ SELECT verify_generation, verify_last_event_id, verify_pages, verify_events, ver
        verify_declared_total, verify_missing
 FROM sync_recovery_state WHERE device_id = $1;
 
--- name: SyncRecoveryBeginVerify :exec
+-- name: SyncRecoveryBeginVerify :one
 UPDATE sync_recovery_state
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = $2, verify_missing = 0,
+    verify_declared_total = sqlc.arg(verify_declared_total)::bigint, verify_missing = 0,
     updated_at = now()
-WHERE device_id = $1;
+WHERE device_id = sqlc.arg(device_id)::uuid
+RETURNING verify_generation;
 
 -- name: SyncRecoveryRecordVerifyPage :execrows
 UPDATE sync_recovery_state
@@ -84,6 +109,7 @@ SET verify_last_event_id = sqlc.arg(last_event_id)::text,
     verify_complete = (verify_complete OR sqlc.arg(end_of_history)::bool),
     updated_at = now()
 WHERE device_id = sqlc.arg(device_id)::uuid
+  AND verify_generation = sqlc.arg(verify_generation)::bigint
   AND verify_last_event_id COLLATE "C" < sqlc.arg(first_event_id)::text COLLATE "C"
   AND sqlc.arg(first_event_id)::text COLLATE "C" <= sqlc.arg(last_event_id)::text COLLATE "C";
 

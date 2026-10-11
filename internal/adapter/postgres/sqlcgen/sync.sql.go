@@ -11,20 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const clearSyncRecoveryState = `-- name: ClearSyncRecoveryState :exec
+const clearSyncRecoveryState = `-- name: ClearSyncRecoveryState :execrows
 UPDATE sync_recovery_state
-SET required = FALSE, cleared_at = now(), verified_events = $2, updated_at = now()
-WHERE device_id = $1
+SET required = FALSE, cleared_at = COALESCE(cleared_at, now()),
+    verified_events = $1::bigint, updated_at = now()
+WHERE device_id = $2::uuid
+  AND verify_generation = $3::bigint
+  AND verify_pages > 0
+  AND verify_complete
+  AND verify_declared_total > 0
+  AND verify_events = verify_declared_total
+  AND verify_events = $1::bigint
+  AND verify_missing = 0
 `
 
 type ClearSyncRecoveryStateParams struct {
-	DeviceID       pgtype.UUID `json:"device_id"`
-	VerifiedEvents int64       `json:"verified_events"`
+	VerifiedEvents   int64       `json:"verified_events"`
+	DeviceID         pgtype.UUID `json:"device_id"`
+	VerifyGeneration int64       `json:"verify_generation"`
 }
 
-func (q *Queries) ClearSyncRecoveryState(ctx context.Context, arg ClearSyncRecoveryStateParams) error {
-	_, err := q.db.Exec(ctx, clearSyncRecoveryState, arg.DeviceID, arg.VerifiedEvents)
-	return err
+// Clearing is fenced to the exact ledger generation read and validated by
+// the service. Every authoritative completion predicate is repeated here,
+// in the same statement as the state transition, so a newer pass or restore
+// mark cannot be cleared by an older in-flight request. Projection
+// convergence remains a separate Store-level status condition.
+func (q *Queries) ClearSyncRecoveryState(ctx context.Context, arg ClearSyncRecoveryStateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearSyncRecoveryState, arg.VerifiedEvents, arg.DeviceID, arg.VerifyGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countDeviceSyncEvents = `-- name: CountDeviceSyncEvents :one
@@ -191,7 +208,19 @@ const syncEventHashes = `-- name: SyncEventHashes :many
 SELECT e.event_id, e.payload_hash
 FROM sync_events e
 WHERE e.event_id = ANY($1::uuid[])
+  AND EXISTS (
+      SELECT 1
+      FROM device_store_bindings b
+      WHERE b.device_id = $2::uuid
+        AND (e.store_id = b.store_id
+             OR (e.store_id IS NULL AND e.device_id = b.device_id))
+  )
 `
+
+type SyncEventHashesParams struct {
+	EventIds []pgtype.UUID `json:"event_ids"`
+	DeviceID pgtype.UUID   `json:"device_id"`
+}
 
 type SyncEventHashesRow struct {
 	EventID     pgtype.UUID `json:"event_id"`
@@ -201,8 +230,12 @@ type SyncEventHashesRow struct {
 // Continuity verification: the stored identity of each reported event.
 // Identity is (event_id, payload_hash); an absent row or a different hash
 // is reported missing. One bounded query per page (no N+1).
-func (q *Queries) SyncEventHashes(ctx context.Context, dollar_1 []pgtype.UUID) ([]SyncEventHashesRow, error) {
-	rows, err := q.db.Query(ctx, syncEventHashes, dollar_1)
+// The authenticated device's binding is resolved server-side. All event
+// rows belonging to that Store remain visible for supported replacement
+// devices. Legacy rows without a Store are matchable only by their original
+// device; unbound callers therefore receive no identity matches.
+func (q *Queries) SyncEventHashes(ctx context.Context, arg SyncEventHashesParams) ([]SyncEventHashesRow, error) {
+	rows, err := q.db.Query(ctx, syncEventHashes, arg.EventIds, arg.DeviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,24 +254,27 @@ func (q *Queries) SyncEventHashes(ctx context.Context, dollar_1 []pgtype.UUID) (
 	return items, nil
 }
 
-const syncRecoveryBeginVerify = `-- name: SyncRecoveryBeginVerify :exec
+const syncRecoveryBeginVerify = `-- name: SyncRecoveryBeginVerify :one
 UPDATE sync_recovery_state
 SET verify_generation = verify_generation + 1,
     verify_last_event_id = '',
     verify_pages = 0, verify_events = 0, verify_complete = FALSE,
-    verify_declared_total = $2, verify_missing = 0,
+    verify_declared_total = $1::bigint, verify_missing = 0,
     updated_at = now()
-WHERE device_id = $1
+WHERE device_id = $2::uuid
+RETURNING verify_generation
 `
 
 type SyncRecoveryBeginVerifyParams struct {
-	DeviceID            pgtype.UUID `json:"device_id"`
 	VerifyDeclaredTotal int64       `json:"verify_declared_total"`
+	DeviceID            pgtype.UUID `json:"device_id"`
 }
 
-func (q *Queries) SyncRecoveryBeginVerify(ctx context.Context, arg SyncRecoveryBeginVerifyParams) error {
-	_, err := q.db.Exec(ctx, syncRecoveryBeginVerify, arg.DeviceID, arg.VerifyDeclaredTotal)
-	return err
+func (q *Queries) SyncRecoveryBeginVerify(ctx context.Context, arg SyncRecoveryBeginVerifyParams) (int64, error) {
+	row := q.db.QueryRow(ctx, syncRecoveryBeginVerify, arg.VerifyDeclaredTotal, arg.DeviceID)
+	var verify_generation int64
+	err := row.Scan(&verify_generation)
+	return verify_generation, err
 }
 
 const syncRecoveryRecordVerifyPage = `-- name: SyncRecoveryRecordVerifyPage :execrows
@@ -250,17 +286,19 @@ SET verify_last_event_id = $1::text,
     verify_complete = (verify_complete OR $4::bool),
     updated_at = now()
 WHERE device_id = $5::uuid
-  AND verify_last_event_id COLLATE "C" < $6::text COLLATE "C"
-  AND $6::text COLLATE "C" <= $1::text COLLATE "C"
+  AND verify_generation = $6::bigint
+  AND verify_last_event_id COLLATE "C" < $7::text COLLATE "C"
+  AND $7::text COLLATE "C" <= $1::text COLLATE "C"
 `
 
 type SyncRecoveryRecordVerifyPageParams struct {
-	LastEventID  string      `json:"last_event_id"`
-	Events       int64       `json:"events"`
-	Missing      int64       `json:"missing"`
-	EndOfHistory bool        `json:"end_of_history"`
-	DeviceID     pgtype.UUID `json:"device_id"`
-	FirstEventID string      `json:"first_event_id"`
+	LastEventID      string      `json:"last_event_id"`
+	Events           int64       `json:"events"`
+	Missing          int64       `json:"missing"`
+	EndOfHistory     bool        `json:"end_of_history"`
+	DeviceID         pgtype.UUID `json:"device_id"`
+	VerifyGeneration int64       `json:"verify_generation"`
+	FirstEventID     string      `json:"first_event_id"`
 }
 
 func (q *Queries) SyncRecoveryRecordVerifyPage(ctx context.Context, arg SyncRecoveryRecordVerifyPageParams) (int64, error) {
@@ -270,6 +308,7 @@ func (q *Queries) SyncRecoveryRecordVerifyPage(ctx context.Context, arg SyncReco
 		arg.Missing,
 		arg.EndOfHistory,
 		arg.DeviceID,
+		arg.VerifyGeneration,
 		arg.FirstEventID,
 	)
 	if err != nil {

@@ -34,12 +34,19 @@ package syncrecovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrStaleOrIncompleteGeneration means the durable completion transition
+// did not match the generation and ledger predicates validated by the
+// caller. Clients must refresh recovery status/progress and retry only after
+// a complete, current pass exists.
+var ErrStaleOrIncompleteGeneration = errors.New("recovery verification generation is stale or incomplete")
 
 // State is one device's durable recovery requirement.
 type State struct {
@@ -129,20 +136,25 @@ type VerifyResponse struct {
 // Store is the durable recovery-state boundary.
 type Store interface {
 	UpsertRecoveryState(ctx context.Context, deviceID, reason string) error
-	ClearRecoveryState(ctx context.Context, deviceID string, verifiedEvents int64) error
+	// ClearRecoveryState performs a generation-qualified conditional
+	// transition. The database rechecks the authoritative ledger in the same
+	// statement that clears the flag; Store-level unresolved-device and
+	// projection convergence remain separate Status conditions.
+	ClearRecoveryState(ctx context.Context, deviceID string, generation, verifiedEvents int64) error
 	GetRecoveryState(ctx context.Context, deviceID string) (State, bool, error)
 	// CountRecoveryRequired counts unresolved, active devices of the
 	// requesting device's Store (never another Store's).
 	CountRecoveryRequired(ctx context.Context, deviceID string) (int, error)
-	// SyncEventHashes returns the stored payload hash (lowercase hex) of
-	// every reported event Cloud holds, keyed by canonical event ID.
-	// Absent events are omitted. One bounded query per page.
-	SyncEventHashes(ctx context.Context, eventIDs []string) (map[string]string, error)
+	// SyncEventHashes returns stored hashes only within the authenticated
+	// device's server-derived recovery scope. A bound device may match
+	// events owned by its Store (including same-Store replacement devices),
+	// plus its own legacy NULL-Store events. Unbound devices fail closed.
+	SyncEventHashes(ctx context.Context, deviceID string, eventIDs []string) (map[string]string, error)
 	// VerifyProgress reads the server-side coverage ledger.
 	VerifyProgress(ctx context.Context, deviceID string) (VerifyProgress, bool, error)
 	// BeginVerifyPass starts a fresh verification generation and
 	// records the retained-history size the device will walk.
-	BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) error
+	BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error)
 	// CountDeviceSyncEvents reports how many events Cloud already holds
 	// for this device - an independent lower bound on the device's
 	// retained history (Phase 20 R5).
@@ -150,7 +162,7 @@ type Store interface {
 	// RecordVerifyPage advances the coverage cursor and the missing
 	// ledger. It returns false when the page does not advance the cursor
 	// in byte order (a skipped, replayed or out-of-order page).
-	RecordVerifyPage(ctx context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error)
+	RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error)
 	// CountPendingProjections reports non-terminal processor rows
 	// (pending, retry, blocked) for the requesting device's Store (§5).
 	CountPendingProjections(ctx context.Context, deviceID string) (int64, error)
@@ -266,19 +278,27 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 	// generation. This is the only way the server learns how much
 	// retained history the device commits to walking; without it the
 	// ledger's total is zero and any short walk would look complete.
+	var generation int64
 	if req.DeclaredTotal > 0 {
-		if err := s.BeginVerifyPass(ctx, deviceID, req.DeclaredTotal); err != nil {
+		var err error
+		generation, err = s.beginVerifyPass(ctx, deviceID, req.DeclaredTotal)
+		if err != nil {
 			return VerifyResponse{}, err
 		}
 	} else if req.DeclaredTotal < 0 {
 		return VerifyResponse{}, fmt.Errorf("declared total must not be negative")
 	}
-	if _, found, err := s.store.VerifyProgress(ctx, deviceID); err != nil {
-		return VerifyResponse{}, err
-	} else if !found {
-		return VerifyResponse{}, fmt.Errorf("recovery verification is not active for this device")
+	if req.DeclaredTotal == 0 {
+		progress, found, err := s.store.VerifyProgress(ctx, deviceID)
+		if err != nil {
+			return VerifyResponse{}, err
+		}
+		if !found {
+			return VerifyResponse{}, fmt.Errorf("recovery verification is not active for this device")
+		}
+		generation = progress.Generation
 	}
-	held, err := s.store.SyncEventHashes(ctx, ids)
+	held, err := s.store.SyncEventHashes(ctx, deviceID, ids)
 	if err != nil {
 		return VerifyResponse{}, err
 	}
@@ -293,7 +313,7 @@ func (s *Service) Verify(ctx context.Context, deviceID string, req VerifyRequest
 	// Record coverage. The cursor must ADVANCE: the page must start above
 	// the recorded keyset position, so a skipped-back, replayed or
 	// out-of-order page affects zero rows and is refused.
-	recorded, err := s.store.RecordVerifyPage(ctx, deviceID, ids[0], ids[len(ids)-1],
+	recorded, err := s.store.RecordVerifyPage(ctx, deviceID, generation, ids[0], ids[len(ids)-1],
 		int64(len(ids)), int64(len(out)), req.EndOfHistory)
 	if err != nil {
 		return VerifyResponse{}, err
@@ -344,9 +364,9 @@ func (s *Service) Complete(ctx context.Context, deviceID string, lastMissing int
 			"recovery cannot complete: no retained-history total was declared for this pass. " +
 				"Open the pass with declared_total so exhaustiveness can be proven")
 	}
-	if progress.Events < progress.DeclaredTotal {
+	if progress.Events != progress.DeclaredTotal {
 		return fmt.Errorf(
-			"recovery cannot complete: verified %d of %d declared retained events. "+
+			"recovery cannot complete: verified %d events but the pass declared exactly %d retained events. "+
 				"Every retained-history page must be submitted; skipped pages leave the device unreconciled",
 			progress.Events, progress.DeclaredTotal)
 	}
@@ -355,7 +375,7 @@ func (s *Service) Complete(ctx context.Context, deviceID string, lastMissing int
 			"recovery cannot complete: this verification pass found %d missing or conflicting event(s). "+
 				"Replay them, then run a new verification pass", progress.Missing)
 	}
-	return s.store.ClearRecoveryState(ctx, deviceID, progress.Events)
+	return s.store.ClearRecoveryState(ctx, deviceID, progress.Generation, progress.Events)
 }
 
 // VerifyProgress exposes the server-side coverage ledger for operator
@@ -369,8 +389,13 @@ func (s *Service) VerifyProgress(ctx context.Context, deviceID string) (VerifyPr
 // progress is discarded so a partial walk can never be mistaken for a
 // complete one.
 func (s *Service) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) error {
+	_, err := s.beginVerifyPass(ctx, deviceID, declaredTotal)
+	return err
+}
+
+func (s *Service) beginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	if declaredTotal < 0 {
-		return fmt.Errorf("declared total must not be negative")
+		return 0, fmt.Errorf("declared total must not be negative")
 	}
 	// Phase 20 R5: refuse an implausibly small declaration. Every event
 	// Cloud accepted from this device came from that device's retained
@@ -385,10 +410,10 @@ func (s *Service) BeginVerifyPass(ctx context.Context, deviceID string, declared
 	// retained history (see ADR-0054).
 	known, err := s.store.CountDeviceSyncEvents(ctx, deviceID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if declaredTotal < known {
-		return fmt.Errorf(
+		return 0, fmt.Errorf(
 			"refusing verification pass: declared %d retained events but Cloud already holds %d for this device. "+
 				"A device cannot retain fewer events than it delivered; under-declaration is refused",
 			declaredTotal, known)

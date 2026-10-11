@@ -32,16 +32,23 @@ func (d Devices) UpsertRecoveryState(ctx context.Context, deviceID, reason strin
 
 // ClearRecoveryState marks one device reconciled, recording how many
 // retained events were verified.
-func (d Devices) ClearRecoveryState(ctx context.Context, deviceID string, verifiedEvents int64) error {
+func (d Devices) ClearRecoveryState(ctx context.Context, deviceID string, generation, verifiedEvents int64) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
 	if err != nil {
 		return err
 	}
-	return catalogAdminErr(sqlcgen.New(d.pool).ClearSyncRecoveryState(ctx, sqlcgen.ClearSyncRecoveryStateParams{
-		DeviceID: duid, VerifiedEvents: verifiedEvents,
-	}))
+	affected, err := sqlcgen.New(d.pool).ClearSyncRecoveryState(ctx, sqlcgen.ClearSyncRecoveryStateParams{
+		DeviceID: duid, VerifyGeneration: generation, VerifiedEvents: verifiedEvents,
+	})
+	if err != nil {
+		return catalogAdminErr(err)
+	}
+	if affected != 1 {
+		return syncrecovery.ErrStaleOrIncompleteGeneration
+	}
+	return nil
 }
 
 // GetRecoveryState reads one device's durable recovery requirement.
@@ -97,9 +104,13 @@ func (d Devices) CountRecoveryRequired(ctx context.Context, deviceID string) (in
 // SyncEventHashes returns the stored payload hash of every reported event
 // Cloud holds, keyed by canonical (lowercase) event ID, in one bounded
 // query. Comparison is by identity only — counts never prove equality.
-func (d Devices) SyncEventHashes(ctx context.Context, eventIDs []string) (map[string]string, error) {
+func (d Devices) SyncEventHashes(ctx context.Context, deviceID string, eventIDs []string) (map[string]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
+	duid, err := parseUUID(deviceID)
+	if err != nil {
+		return nil, err
+	}
 	ids := make([]pgtype.UUID, 0, len(eventIDs))
 	for _, id := range eventIDs {
 		uid, err := parseUUID(id)
@@ -108,7 +119,7 @@ func (d Devices) SyncEventHashes(ctx context.Context, eventIDs []string) (map[st
 		}
 		ids = append(ids, uid)
 	}
-	rows, err := sqlcgen.New(d.pool).SyncEventHashes(ctx, ids)
+	rows, err := sqlcgen.New(d.pool).SyncEventHashes(ctx, sqlcgen.SyncEventHashesParams{DeviceID: duid, EventIds: ids})
 	if err != nil {
 		return nil, catalogAdminErr(err)
 	}
@@ -147,23 +158,27 @@ func (d Devices) VerifyProgress(ctx context.Context, deviceID string) (syncrecov
 
 // BeginVerifyPass starts a fresh verification generation so an
 // interrupted reconciliation resumes cleanly.
-func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) error {
+func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return catalogAdminErr(sqlcgen.New(d.pool).SyncRecoveryBeginVerify(ctx, sqlcgen.SyncRecoveryBeginVerifyParams{
+	generation, err := sqlcgen.New(d.pool).SyncRecoveryBeginVerify(ctx, sqlcgen.SyncRecoveryBeginVerifyParams{
 		DeviceID: duid, VerifyDeclaredTotal: declaredTotal,
-	}))
+	})
+	if err != nil {
+		return 0, catalogAdminErr(err)
+	}
+	return generation, nil
 }
 
 // RecordVerifyPage advances the coverage cursor and the missing ledger.
 // The UPDATE applies only when the page starts above the recorded cursor
 // in byte order (COLLATE "C"), so a skipped-back, replayed or
 // out-of-order page affects zero rows and is reported as refused.
-func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
+func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing int64, endOfHistory bool) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -171,7 +186,7 @@ func (d Devices) RecordVerifyPage(ctx context.Context, deviceID, firstEventID, l
 		return false, err
 	}
 	affected, err := sqlcgen.New(d.pool).SyncRecoveryRecordVerifyPage(ctx, sqlcgen.SyncRecoveryRecordVerifyPageParams{
-		DeviceID: duid, FirstEventID: firstEventID, LastEventID: lastEventID,
+		DeviceID: duid, VerifyGeneration: generation, FirstEventID: firstEventID, LastEventID: lastEventID,
 		Events: events, Missing: missing, EndOfHistory: endOfHistory,
 	})
 	if err != nil {

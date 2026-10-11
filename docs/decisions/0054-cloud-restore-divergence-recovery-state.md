@@ -108,6 +108,14 @@ POST /api/v1/device-control/recovery/complete
 A device can only read and clear **its own** recovery state. There is no
 cross-device or cross-Store access. Human/dashboard authentication is a
 separate identity (ADR-0053) and cannot substitute for device auth here.
+For identity verification, Cloud derives scope from that authenticated
+device's immutable `device_store_bindings` row; the request cannot select a
+Store or another device. A bound device may match event rows whose
+server-assigned `sync_events.store_id` is its Store, which preserves
+same-Store replacement and re-enrollment continuity. A legacy event with
+`store_id IS NULL` is matchable only by its original `device_id`. An
+unbound device receives no identity matches, and a replacement device
+cannot claim unowned legacy rows whose Store cannot be proven.
 
 ### 5. Identity comparison by `(event_id, payload_hash)`
 
@@ -169,6 +177,18 @@ verify_complete == true                 (history walked to the end)
 verify_declared_total != 0              (a total was declared)
 verify_events >= verify_declared_total  (coverage reached the total)
 ```
+
+The completion write is conditional on the exact `verify_generation` read
+and validated by the request. PostgreSQL repeats the generation, page,
+end-of-history, declared-total, exact-coverage and zero-missing predicates
+in the same statement that clears `required`. If a newer pass or restore
+mark wins the row update first, the older completion affects zero rows and
+returns a stale/incomplete result; the caller refreshes status and retries
+only after the current pass is complete. Repeating completion for the same
+already-cleared valid generation remains idempotent. Page recording is
+also generation-qualified, so a delayed page cannot add coverage to a
+newer pass. These row-level conditions are database-backed across Cloud
+processes; no process-local lock is relied on.
 
 **Proven:** a client cannot clear recovery by claiming `missing=0`
 without a coverage walk, nor after a walk in which the server recorded a
