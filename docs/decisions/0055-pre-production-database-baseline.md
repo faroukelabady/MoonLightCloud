@@ -1,0 +1,69 @@
+# ADR-0055: Pre-production database baseline and schema conventions
+
+- Status: Proposed
+- Relates to: ADR-0012 (explicit migrations, verified schema at startup),
+  ADR-0017 / ADR-0019 (payload-hash compatibility), ADR-0039 / ADR-0040 (Store
+  scope). MoonLightRetail ADR-049 is the matching Retail decision. Execution
+  steps: `MoonLightRetail/plan/database-baseline-plan.md`, Phase 2 and Phase 3.
+
+## Context
+
+No Store runs MoonLight in production. The schema (45 goose migrations) still
+carries compatibility for data that never existed:
+
+- `store_id` was added as nullable to `sync_events`, every `catalog_*` table and
+  the commerce tables (`00022`–`00037`). 38 places in queries and code handle
+  `store_id IS NULL` rows, and several indexes have `WHERE store_id IS NOT NULL`.
+- The ingest and projection code accepts 25 event names, including
+  `sale.finalized.v1`/`v2`/`v3` and product/category snapshot `v1`/`v2`.
+  `payload_hash_version` exists only for the v1 float-based canonicalizer.
+  Sale and return projections keep both `fx_rate TEXT` and `fx_rate_microrate`.
+- Projections store a currency next to every amount (`unit_currency`,
+  `cost_currency`, `line_currency`, `amount_currency`, `change_currency` and
+  five on return lines), although all must equal the header currency.
+- `operational_alert_recipients` and `business_report_recipients` have the same
+  shape. `catalog_admin_device_capabilities` has one boolean column for each
+  capability. `device_control_presence.last_seen_at` repeats
+  `devices.last_seen_at`.
+- Naming differs: `_minor` and `_cents`; UPPER and lower enum values; some ID
+  columns are `text` instead of `uuid`.
+- Retail ADR-049 also removes the product-level inventory stream and changes
+  price, name and frame payloads. The matching projections change here.
+
+## Decision
+
+1. **Pre-production window.** Until the first production install, the event
+   contract changes in place, in lockstep with Retail, without new versions.
+   Cloud keeps exactly one version of each event type: the version Retail emits.
+   Older validators, projectors, parity tests, `payload_hash_version`, the v1
+   hash path and `fx_rate TEXT` are deleted.
+2. **Store scope is mandatory.** `store_id` is `NOT NULL` with a foreign key on
+   every Store-scoped table. Null-handling branches and partial-index predicates
+   are removed.
+3. **One currency per document.** Sale and return headers keep the currency;
+   line, payment and refund rows carry amounts only, plus a CHECK or trigger if
+   a row may differ.
+4. **Shapes and names.** One `notification_recipients` table with a purpose;
+   device capabilities as rows; no duplicate presence columns; `_minor` for all
+   money; one enum casing; `uuid` for all identifiers.
+5. **One baseline.** After the model changes, the goose chain is replaced by one
+   migration with a new number. It first checks that `sync_events` does not
+   exist and raises an error if it does, so an old database cannot receive it.
+   `migrate.TargetVersion` changes with it. Every development and hosted test
+   database is recreated.
+
+## Owner decisions (2026-10-17)
+
+Shared with Retail ADR-049: localized names use `name_ar` / `name_en` columns
+(`catalog_product_translations` is removed); frame options become relational
+rows with stable per-product configuration IDs; Retail keeps delivered outbox
+rows for ever. The currency rule is still open.
+
+## Consequences
+
+- Each wire-contract change ships in Retail and Cloud together. Mixed versions
+  are not supported during the window.
+- Parity and compatibility tests for removed versions are deleted. A test proves
+  the migrated schema equals the reviewed target.
+- After the first production install, ADR-0012 append-only migrations and
+  versioned events apply again without exception.
