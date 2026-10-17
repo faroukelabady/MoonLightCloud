@@ -85,5 +85,9 @@ on all money-bearing documents.
   has matching ready inventory. No Variant revision/event is presented as aggregate
   Product provenance. Variant-aware commerce waits for at least one Variant; it
   never falls back to publishing an aggregate stock pool.
+- Baseline 00103 (with Retail baseline r08, ADR-049 1c) replaces the variant
+  EGP/USD price columns with `catalog_product_variant_prices`: per-currency
+  price and cost overrides, NULL inherits the Product price. The variant
+  snapshot carries them as a `prices` list.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

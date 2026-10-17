@@ -24,8 +24,7 @@ func validVariantWire() map[string]any {
 		"product_id":         "bbbbbbbb-0000-4000-8000-000000000002",
 		"sku":                "ML-V-1",
 		"is_active":          true,
-		"price_egp_cents":    123456,
-		"price_usd_cents":    nil,
+		"prices":             []any{map[string]any{"currency": "EGP", "price_cents": 123456, "cost_cents": nil}},
 		"stock_quantity":     4,
 		"inventory_revision": 7,
 		"variant_revision":   3,
@@ -61,7 +60,7 @@ func TestProductVariantSnapshotRoundTrip(t *testing.T) {
 	if valid.VariantID != "aaaaaaaa-0000-4000-8000-000000000001" || valid.SKU != "ML-V-1" {
 		t.Fatalf("identity: %+v", valid)
 	}
-	if valid.PriceEGPCents == nil || *valid.PriceEGPCents != 123456 || valid.PriceUSDCents != nil {
+	if p := valid.PriceOverride("EGP"); p == nil || *p != 123456 || valid.PriceOverride("USD") != nil {
 		t.Fatalf("money: %+v", valid)
 	}
 	if valid.Deleted {
@@ -74,14 +73,29 @@ func TestProductVariantSnapshotRoundTrip(t *testing.T) {
 
 func TestProductVariantSnapshotValidation(t *testing.T) {
 	cases := map[string]func(w map[string]any){
-		"bad variant_id":      func(w map[string]any) { w["variant_id"] = "nope" },
-		"bad product_id":      func(w map[string]any) { w["product_id"] = "nope" },
-		"blank sku":           func(w map[string]any) { w["sku"] = "   " },
-		"long sku":            func(w map[string]any) { w["sku"] = strings.Repeat("s", 65) },
-		"sku control ws":      func(w map[string]any) { w["sku"] = "a\tb" },
-		"negative egp price":  func(w map[string]any) { w["price_egp_cents"] = -1 },
-		"negative usd price":  func(w map[string]any) { w["price_usd_cents"] = -2 },
-		"float money":         func(w map[string]any) { w["price_egp_cents"] = 1.5 },
+		"bad variant_id": func(w map[string]any) { w["variant_id"] = "nope" },
+		"bad product_id": func(w map[string]any) { w["product_id"] = "nope" },
+		"blank sku":      func(w map[string]any) { w["sku"] = "   " },
+		"long sku":       func(w map[string]any) { w["sku"] = strings.Repeat("s", 65) },
+		"sku control ws": func(w map[string]any) { w["sku"] = "a\tb" },
+		"negative egp price": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": -1, "cost_cents": nil}}
+		},
+		"negative cost": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "USD", "price_cents": nil, "cost_cents": -2}}
+		},
+		"float money": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": 1.5, "cost_cents": nil}}
+		},
+		"empty override": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": nil, "cost_cents": nil}}
+		},
+		"unknown currency": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "EUR", "price_cents": 1, "cost_cents": nil}}
+		},
+		"duplicate currency": func(w map[string]any) {
+			w["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": 1, "cost_cents": nil}, map[string]any{"currency": "EGP", "price_cents": 2, "cost_cents": nil}}
+		},
 		"negative stock":      func(w map[string]any) { w["stock_quantity"] = -1 },
 		"zero variant rev":    func(w map[string]any) { w["variant_revision"] = 0 },
 		"zero catalog rev":    func(w map[string]any) { w["catalog_revision"] = 0 },

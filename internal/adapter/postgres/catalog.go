@@ -3081,6 +3081,15 @@ func validateProductSnapshotEvent(_ catalog.EventRecord, snapshot catalog.Produc
 	return catalog.ValidateProductSnapshotV2(snapshot)
 }
 
+// int8Pointer maps a nullable BIGINT to an optional int64.
+func int8Pointer(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Int64
+	return &v
+}
+
 // currentProductVariantSnapshot reconstructs the normalized semantic
 // state of a projected variant (identity, prices, attributes) for
 // equal-revision comparison. Inventory mirrors never participate.
@@ -3102,13 +3111,14 @@ func currentProductVariantSnapshot(ctx context.Context, q *sqlcgen.Queries, vuid
 		Position: int(row.Position), CombinationKey: row.CombinationKey,
 		VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
 	}
-	if row.PriceEgpCents.Valid {
-		price := row.PriceEgpCents.Int64
-		snapshot.PriceEGPCents = &price
+	prices, err := q.CatalogProductVariantPrices(ctx, vuid)
+	if err != nil {
+		return catalog.NormalizedProductVariant{}, false, err
 	}
-	if row.PriceUsdCents.Valid {
-		price := row.PriceUsdCents.Int64
-		snapshot.PriceUSDCents = &price
+	for _, price := range prices {
+		snapshot.Prices = append(snapshot.Prices, catalog.VariantPriceOverride{
+			Currency: price.Currency, PriceCents: int8Pointer(price.PriceMinor), CostCents: int8Pointer(price.CostMinor),
+		})
 	}
 	for _, attr := range attrs {
 		entry := catalog.VariantAttribute{
@@ -3299,18 +3309,10 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 		}
 	}
 
-	var priceEGP, priceUSD pgtype.Int8
-	if valid.PriceEGPCents != nil {
-		priceEGP = pgtype.Int8{Int64: *valid.PriceEGPCents, Valid: true}
-	}
-	if valid.PriceUSDCents != nil {
-		priceUSD = pgtype.Int8{Int64: *valid.PriceUSDCents, Valid: true}
-	}
 	fingerprint := catalog.FingerprintProductVariant(valid)
 	if err := q.UpsertCatalogProductVariant(ctx, sqlcgen.UpsertCatalogProductVariantParams{
 		VariantID: vuid, ProductID: puid, Sku: valid.SKU,
 		IsActive: valid.IsActive, Deleted: valid.Deleted,
-		PriceEgpCents: priceEGP, PriceUsdCents: priceUSD,
 		Position: int32(valid.Position), CombinationKey: valid.CombinationKey,
 		VariantRevision: valid.VariantRevision, CatalogRevision: valid.CatalogRevision,
 		SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
@@ -3325,6 +3327,19 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 			return d.markCatalogBlocked(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrCatalogRevisionConflict, "variant identity collision")
 		}
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "variant upsert failed", err)
+	}
+	if err := q.DeleteCatalogProductVariantPrices(ctx, vuid); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "price replace failed", err)
+	}
+	for _, price := range valid.Prices {
+		if err := q.InsertCatalogProductVariantPrice(ctx, sqlcgen.InsertCatalogProductVariantPriceParams{
+			VariantID: vuid, Currency: price.Currency,
+			PriceMinor: int8FromPtr(price.PriceCents), CostMinor: int8FromPtr(price.CostCents),
+		}); err != nil {
+			_ = tx.Rollback(ctx)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductVariantProjectionV1, attempt.euid, now, ErrProjection, "price insert failed", err)
+		}
 	}
 	if err := q.DeleteCatalogProductVariantAttributes(ctx, vuid); err != nil {
 		_ = tx.Rollback(ctx)

@@ -33,7 +33,7 @@ func variantPayload(variantID, productID, sku string, active, deleted bool, comb
 	raw, _ := json.Marshal(map[string]any{
 		"variant_id": variantID, "product_id": productID, "sku": sku,
 		"is_active": active, "deleted": deleted,
-		"price_egp_cents": 123456, "price_usd_cents": nil,
+		"prices":         []any{map[string]any{"currency": "EGP", "price_cents": 123456, "cost_cents": nil}},
 		"stock_quantity": 4, "inventory_revision": 7,
 		"variant_revision": variantRevision, "position": 0,
 		"combination_key": combinationKey,
@@ -500,8 +500,9 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 			VALUES ('%s', true, true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, devID))
 	}
 	mkVariant := func(id, product, sku, combination string, active bool) {
-		exec(fmt.Sprintf(`INSERT INTO catalog_product_variants (variant_id, product_id, sku, is_active, deleted, price_egp_cents, position, combination_key, variant_revision, catalog_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', '%s', '%s', %v, false, 100, 0, '%s', 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, id, product, sku, active, combination, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_product_variants (variant_id, product_id, sku, is_active, deleted, position, combination_key, variant_revision, catalog_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+			VALUES ('%s', '%s', '%s', %v, false, 0, '%s', 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, id, product, sku, active, combination, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_product_variant_prices (variant_id, currency, price_minor) VALUES ('%s', 'EGP', 100)`, id))
 	}
 	mkStock := func(variant, product, sku string, stock int64) {
 		exec(fmt.Sprintf(`INSERT INTO catalog_product_variant_inventory (variant_id, product_id, sku, stock_quantity, ready, sell_online, policy_revision, catalog_revision, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)

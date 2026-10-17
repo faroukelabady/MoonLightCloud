@@ -13,7 +13,7 @@ set -euo pipefail
 # Recovery marking writes the Phase 20 ledger columns. Before the first
 # production install the single baseline carries them; its version is the
 # minimum (ADR-0055). Keep this equal to migrate.TargetVersion.
-MARKING_SCHEMA=102
+MARKING_SCHEMA=103
 
 die() { echo "pg-restore: FAIL: $*" >&2; exit 1; }
 

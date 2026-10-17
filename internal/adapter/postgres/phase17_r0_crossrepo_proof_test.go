@@ -52,7 +52,7 @@ func proofSiblingVariant(t *testing.T, variantID, sku, combinationKey string, pr
 	raw, _ := json.Marshal(map[string]any{
 		"variant_id": variantID, "product_id": proofProductID, "sku": sku,
 		"is_active": true, "deleted": false,
-		"price_egp_cents": priceEGP, "price_usd_cents": nil,
+		"prices":         []any{map[string]any{"currency": "EGP", "price_cents": priceEGP, "cost_cents": nil}},
 		"stock_quantity": stockMirror, "inventory_revision": 1,
 		"variant_revision": revision, "position": 0,
 		"combination_key": combinationKey,
@@ -269,7 +269,7 @@ func TestPhase17R0CrossRepoVariantConvergence(t *testing.T) {
 	}
 	var priceEGP int64
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT price_egp_cents FROM catalog_product_variants WHERE variant_id=$1`, proofBlueVariantID).Scan(&priceEGP); err != nil || priceEGP != 100001 {
+		`SELECT price_minor FROM catalog_product_variant_prices WHERE variant_id=$1 AND currency='EGP'`, proofBlueVariantID).Scan(&priceEGP); err != nil || priceEGP != 100001 {
 		t.Fatalf("stale revision rewound price: %d (%v)", priceEGP, err)
 	}
 }

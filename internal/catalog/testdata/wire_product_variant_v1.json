@@ -4,8 +4,13 @@
   "sku": "NEF-BLU-TRA",
   "is_active": true,
   "deleted": false,
-  "price_egp_cents": 100000,
-  "price_usd_cents": null,
+  "prices": [
+    {
+      "currency": "EGP",
+      "price_cents": 100000,
+      "cost_cents": 52000
+    }
+  ],
   "stock_quantity": 4,
   "inventory_revision": 1,
   "variant_revision": 1,

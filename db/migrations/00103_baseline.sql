@@ -1487,8 +1487,6 @@ CREATE TABLE catalog_product_variants (
     is_active           BOOLEAN NOT NULL,
     -- Tombstone marker: deleted variants keep their rows forever.
     deleted             BOOLEAN NOT NULL DEFAULT FALSE,
-    price_egp_cents     BIGINT CHECK (price_egp_cents IS NULL OR price_egp_cents >= 0),
-    price_usd_cents     BIGINT CHECK (price_usd_cents IS NULL OR price_usd_cents >= 0),
     position            INT NOT NULL CHECK (position >= 0),
     -- Normalized stable identity of the option combination; entries are
     -- joined with U+001F (unit separator).
@@ -1501,6 +1499,17 @@ CREATE TABLE catalog_product_variants (
     source_received_at  TIMESTAMPTZ NOT NULL,
     projected_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     store_id            UUID REFERENCES stores(id) ON DELETE RESTRICT
+);
+-- ADR-0055 / Retail ADR-049 1c: per-currency Variant overrides of the
+-- Product price and cost. NULL inherits catalog_product_prices; the
+-- variant projector replaces the set with each accepted variant revision.
+CREATE TABLE catalog_product_variant_prices (
+    variant_id  UUID NOT NULL REFERENCES catalog_product_variants(variant_id) ON DELETE CASCADE,
+    currency    TEXT NOT NULL CHECK (currency IN ('EGP', 'USD')),
+    price_minor BIGINT CHECK (price_minor IS NULL OR price_minor >= 0),
+    cost_minor  BIGINT CHECK (cost_minor IS NULL OR cost_minor >= 0),
+    PRIMARY KEY (variant_id, currency),
+    CHECK (price_minor IS NOT NULL OR cost_minor IS NOT NULL)
 );
 -- Store-local identities (00023): legacy NULL rows never collide.
 ALTER TABLE catalog_product_variants
@@ -2295,6 +2304,7 @@ DROP TABLE IF EXISTS catalog_categories CASCADE;
 DROP TABLE IF EXISTS catalog_category_edges CASCADE;
 DROP TABLE IF EXISTS catalog_product_configurations CASCADE;
 DROP TABLE IF EXISTS catalog_product_prices CASCADE;
+DROP TABLE IF EXISTS catalog_product_variant_prices CASCADE;
 DROP TABLE IF EXISTS catalog_product_sales_policies CASCADE;
 DROP TABLE IF EXISTS catalog_product_subcategories CASCADE;
 DROP TABLE IF EXISTS catalog_product_tags CASCADE;

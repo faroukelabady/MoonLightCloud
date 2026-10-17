@@ -56,25 +56,42 @@ type VariantAttribute struct {
 }
 
 // ProductVariantSnapshot is the authoritative variant state at a
-// variant_revision. Money is int64 minor units (never floats); nullable
-// USD preserves blank-vs-zero exactly like admin payloads. StockQuantity/
+// variant_revision. Money is int64 minor units (never floats); a null
+// price or cost override inherits the Product value. StockQuantity/
 // InventoryRevision are non-semantic mirrors of the inventory stream
 // (validated for shape only, never projected here).
 type ProductVariantSnapshot struct {
-	VariantID         string             `json:"variant_id"`
-	ProductID         string             `json:"product_id"`
-	SKU               string             `json:"sku"`
-	IsActive          bool               `json:"is_active"`
-	Deleted           bool               `json:"deleted"`
-	PriceEGPCents     *int64             `json:"price_egp_cents"`
-	PriceUSDCents     *int64             `json:"price_usd_cents"`
-	StockQuantity     int                `json:"stock_quantity"`
-	InventoryRevision int64              `json:"inventory_revision"`
-	VariantRevision   int64              `json:"variant_revision"`
-	Position          int                `json:"position"`
-	CombinationKey    string             `json:"combination_key"`
-	Attributes        []VariantAttribute `json:"attributes"`
-	CatalogRevision   int64              `json:"catalog_revision"`
+	VariantID         string                 `json:"variant_id"`
+	ProductID         string                 `json:"product_id"`
+	SKU               string                 `json:"sku"`
+	IsActive          bool                   `json:"is_active"`
+	Deleted           bool                   `json:"deleted"`
+	Prices            []VariantPriceOverride `json:"prices"`
+	StockQuantity     int                    `json:"stock_quantity"`
+	InventoryRevision int64                  `json:"inventory_revision"`
+	VariantRevision   int64                  `json:"variant_revision"`
+	Position          int                    `json:"position"`
+	CombinationKey    string                 `json:"combination_key"`
+	Attributes        []VariantAttribute     `json:"attributes"`
+	CatalogRevision   int64                  `json:"catalog_revision"`
+}
+
+// VariantPriceOverride is one currency's Variant override of the Product
+// price and cost (Retail ADR-049 1c). Null inherits the Product value.
+type VariantPriceOverride struct {
+	Currency   string `json:"currency"`
+	PriceCents *int64 `json:"price_cents"`
+	CostCents  *int64 `json:"cost_cents"`
+}
+
+// PriceOverride returns the variant price override for currency, or nil.
+func (p ProductVariantSnapshot) PriceOverride(currency string) *int64 {
+	for _, price := range p.Prices {
+		if price.Currency == currency {
+			return price.PriceCents
+		}
+	}
+	return nil
 }
 
 // DecodeProductVariantSnapshot parses canonical payload bytes. Decoding
@@ -111,11 +128,21 @@ func ValidateProductVariantSnapshot(p ProductVariantSnapshot) (ProductVariantSna
 	if utf8Len(p.CombinationKey) > MaxCombinationKeyRunes || strings.ContainsAny(p.CombinationKey, "\r\n\t") {
 		return fail("combination_key must be %d runes at most without control whitespace", MaxCombinationKeyRunes)
 	}
-	if p.PriceEGPCents != nil && *p.PriceEGPCents < 0 {
-		return fail("price_egp_cents must not be negative")
-	}
-	if p.PriceUSDCents != nil && *p.PriceUSDCents < 0 {
-		return fail("price_usd_cents must not be negative")
+	seenCurrency := map[string]bool{}
+	for _, price := range p.Prices {
+		if price.Currency != "EGP" && price.Currency != "USD" {
+			return fail("prices currency must be EGP|USD")
+		}
+		if seenCurrency[price.Currency] {
+			return fail("prices currency %s is duplicated", price.Currency)
+		}
+		seenCurrency[price.Currency] = true
+		if price.PriceCents == nil && price.CostCents == nil {
+			return fail("prices entry for %s has no amount", price.Currency)
+		}
+		if (price.PriceCents != nil && *price.PriceCents < 0) || (price.CostCents != nil && *price.CostCents < 0) {
+			return fail("prices amounts must not be negative")
+		}
 	}
 	if p.StockQuantity < 0 || p.StockQuantity > math.MaxInt32 {
 		return fail("stock_quantity must be 0..MaxInt32")
@@ -265,17 +292,16 @@ func ValidateProductVariantInventorySnapshot(p ProductVariantInventorySnapshot) 
 // equal-revision conflict. Attributes compare as an ordered list
 // (position carries order; sorted deterministically).
 type NormalizedProductVariant struct {
-	VariantID      string             `json:"variant_id"`
-	ProductID      string             `json:"product_id"`
-	SKU            string             `json:"sku"`
-	IsActive       bool               `json:"is_active"`
-	Deleted        bool               `json:"deleted"`
-	PriceEGPCents  *int64             `json:"price_egp_cents"`
-	PriceUSDCents  *int64             `json:"price_usd_cents"`
-	Position       int                `json:"position"`
-	CombinationKey string             `json:"combination_key"`
-	Attributes     []VariantAttribute `json:"attributes"`
-	Revision       int64              `json:"variant_revision"`
+	VariantID      string                 `json:"variant_id"`
+	ProductID      string                 `json:"product_id"`
+	SKU            string                 `json:"sku"`
+	IsActive       bool                   `json:"is_active"`
+	Deleted        bool                   `json:"deleted"`
+	Prices         []VariantPriceOverride `json:"prices"`
+	Position       int                    `json:"position"`
+	CombinationKey string                 `json:"combination_key"`
+	Attributes     []VariantAttribute     `json:"attributes"`
+	Revision       int64                  `json:"variant_revision"`
 }
 
 // NormalizeProductVariantSnapshot reduces a validated variant snapshot to
@@ -290,10 +316,12 @@ func NormalizeProductVariantSnapshot(v ProductVariantSnapshot) NormalizedProduct
 		}
 		return attrs[i].DefinitionCode < attrs[j].DefinitionCode
 	})
+	prices := make([]VariantPriceOverride, 0, len(v.Prices))
+	prices = append(prices, v.Prices...)
+	sort.Slice(prices, func(i, j int) bool { return prices[i].Currency < prices[j].Currency })
 	return NormalizedProductVariant{
 		VariantID: v.VariantID, ProductID: v.ProductID, SKU: v.SKU,
-		IsActive: v.IsActive, Deleted: v.Deleted,
-		PriceEGPCents: v.PriceEGPCents, PriceUSDCents: v.PriceUSDCents,
+		IsActive: v.IsActive, Deleted: v.Deleted, Prices: prices,
 		Position: v.Position, CombinationKey: v.CombinationKey,
 		Attributes: attrs, Revision: v.VariantRevision,
 	}

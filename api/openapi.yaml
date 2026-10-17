@@ -4090,8 +4090,11 @@ components:
         sku: {type: string, minLength: 1, maxLength: 64, pattern: '^[^\r\n\t]{1,64}$'}
         is_active: {type: boolean}
         deleted: {type: boolean, default: false, description: Tombstone marker; the row is never deleted.}
-        price_egp_cents: {type: integer, minimum: 0, nullable: true}
-        price_usd_cents: {type: integer, minimum: 0, nullable: true}
+        prices:
+          type: array
+          maxItems: 2
+          description: Per-currency Variant overrides of the Product price and cost; null inherits. Currencies are unique.
+          items: {$ref: '#/components/schemas/CatalogProductVariantPrice'}
         stock_quantity: {type: integer, minimum: 0, maximum: 2147483647}
         inventory_revision: {type: integer, minimum: 1}
         variant_revision: {type: integer, minimum: 1}
@@ -4102,6 +4105,14 @@ components:
           maxItems: 32
           items: {$ref: '#/components/schemas/CatalogProductVariantAttribute'}
         catalog_revision: {type: integer, minimum: 1}
+    CatalogProductVariantPrice:
+      type: object
+      additionalProperties: false
+      required: [currency, price_cents, cost_cents]
+      properties:
+        currency: {type: string, enum: [EGP, USD]}
+        price_cents: {type: integer, format: int64, minimum: 0, nullable: true}
+        cost_cents: {type: integer, format: int64, minimum: 0, nullable: true}
     CatalogProductVariantAttribute:
       type: object
       additionalProperties: false

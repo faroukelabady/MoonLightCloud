@@ -363,8 +363,6 @@ type CatalogProductVariant struct {
 	Sku               string             `json:"sku"`
 	IsActive          bool               `json:"is_active"`
 	Deleted           bool               `json:"deleted"`
-	PriceEgpCents     pgtype.Int8        `json:"price_egp_cents"`
-	PriceUsdCents     pgtype.Int8        `json:"price_usd_cents"`
 	Position          int32              `json:"position"`
 	CombinationKey    string             `json:"combination_key"`
 	VariantRevision   int64              `json:"variant_revision"`
@@ -405,6 +403,13 @@ type CatalogProductVariantInventory struct {
 	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
 	StoreID               pgtype.UUID        `json:"store_id"`
+}
+
+type CatalogProductVariantPrice struct {
+	VariantID  pgtype.UUID `json:"variant_id"`
+	Currency   string      `json:"currency"`
+	PriceMinor pgtype.Int8 `json:"price_minor"`
+	CostMinor  pgtype.Int8 `json:"cost_minor"`
 }
 
 type CatalogTag struct {

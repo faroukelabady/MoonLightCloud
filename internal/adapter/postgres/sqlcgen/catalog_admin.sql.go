@@ -691,7 +691,7 @@ func (q *Queries) AdminProductVariantAttributes(ctx context.Context, variantID p
 
 const adminProductVariantByVariantID = `-- name: AdminProductVariantByVariantID :one
 SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
-    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
     v.variant_revision, v.catalog_revision,
     COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
     COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
@@ -704,6 +704,8 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
+LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
 WHERE v.variant_id = $2::uuid AND v.store_id = $1::uuid
 `
 
@@ -753,7 +755,7 @@ func (q *Queries) AdminProductVariantByVariantID(ctx context.Context, arg AdminP
 
 const adminProductVariants = `-- name: AdminProductVariants :many
 SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
-    v.price_egp_cents, v.price_usd_cents, v.position, v.combination_key,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
     v.variant_revision, v.catalog_revision,
     COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
     COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
@@ -766,6 +768,8 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
+LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
+LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
 WHERE v.product_id = $2::uuid AND v.store_id = $1::uuid
 ORDER BY v.position, v.variant_id
 `

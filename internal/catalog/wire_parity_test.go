@@ -71,8 +71,8 @@ func TestWireParityProductVariantV1(t *testing.T) {
 		t.Fatalf("variant state parity broken: stock=%d variant_rev=%d catalog_rev=%d",
 			valid.StockQuantity, valid.VariantRevision, valid.CatalogRevision)
 	}
-	if valid.PriceEGPCents == nil || *valid.PriceEGPCents != 100000 || valid.PriceUSDCents != nil {
-		t.Fatalf("variant money parity broken: egp=%v usd=%v", valid.PriceEGPCents, valid.PriceUSDCents)
+	if len(valid.Prices) != 1 || valid.Prices[0].Currency != "EGP" || *valid.Prices[0].PriceCents != 100000 || *valid.Prices[0].CostCents != 52000 {
+		t.Fatalf("variant money parity broken: %+v", valid.Prices)
 	}
 	if len(valid.Attributes) != 2 || valid.Attributes[0].DefinitionCode != "color" || valid.Attributes[1].DefinitionCode != "painting_style" {
 		t.Fatalf("variant attribute parity broken: %+v", valid.Attributes)

@@ -12,14 +12,13 @@
 -- Phase 9B store ownership semantics: see UpsertCatalogCategory.
 INSERT INTO catalog_product_variants (
     variant_id, product_id, sku, is_active, deleted,
-    price_egp_cents, price_usd_cents, position, combination_key,
+    position, combination_key,
     variant_revision, catalog_revision,
     source_event_id, source_device_id, source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (variant_id) DO UPDATE SET
     product_id = excluded.product_id, sku = excluded.sku,
     is_active = excluded.is_active, deleted = excluded.deleted,
-    price_egp_cents = excluded.price_egp_cents, price_usd_cents = excluded.price_usd_cents,
     position = excluded.position, combination_key = excluded.combination_key,
     variant_revision = excluded.variant_revision, catalog_revision = excluded.catalog_revision,
     source_event_id = excluded.source_event_id, source_device_id = excluded.source_device_id,
@@ -28,20 +27,40 @@ ON CONFLICT (variant_id) DO UPDATE SET
     projected_at = now();
 
 -- name: CatalogProductVariantByID :one
-SELECT variant_id, product_id, sku, is_active, deleted,
-    price_egp_cents, price_usd_cents, position, combination_key,
-    variant_revision, catalog_revision,
-    source_event_id, source_device_id, source_payload_hash, store_id
-FROM catalog_product_variants WHERE variant_id = $1;
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    v.source_event_id, v.source_device_id, v.source_payload_hash, v.store_id
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
+LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
+WHERE v.variant_id = $1;
 
 -- name: CatalogProductVariantsByProduct :many
 -- Tombstones stay queryable for historical safety (callers decide).
-SELECT variant_id, product_id, sku, is_active, deleted,
-    price_egp_cents, price_usd_cents, position, combination_key,
-    variant_revision, catalog_revision,
-    source_event_id, source_device_id, source_payload_hash, store_id
-FROM catalog_product_variants WHERE product_id = $1
-ORDER BY position, variant_id;
+SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
+    v.variant_revision, v.catalog_revision,
+    v.source_event_id, v.source_device_id, v.source_payload_hash, v.store_id
+FROM catalog_product_variants v
+LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
+LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
+WHERE v.product_id = $1
+ORDER BY v.position, v.variant_id;
+
+-- ADR-0055 / Retail ADR-049 1c: the override set is replaced with each
+-- accepted variant revision, like the attribute values.
+-- name: DeleteCatalogProductVariantPrices :exec
+DELETE FROM catalog_product_variant_prices WHERE variant_id = $1;
+
+-- name: InsertCatalogProductVariantPrice :exec
+INSERT INTO catalog_product_variant_prices (variant_id, currency, price_minor, cost_minor)
+VALUES ($1, $2, $3, $4);
+
+-- name: CatalogProductVariantPrices :many
+SELECT currency, price_minor, cost_minor
+FROM catalog_product_variant_prices WHERE variant_id = $1
+ORDER BY currency;
 
 -- name: DeleteCatalogProductVariantAttributes :exec
 DELETE FROM catalog_product_variant_attribute_values WHERE variant_id = $1;

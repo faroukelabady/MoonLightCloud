@@ -20,7 +20,7 @@ import (
 // boot on mismatch. Before the first production install it is the version
 // of the single baseline migration, which increases whenever the baseline
 // changes (ADR-0055).
-const TargetVersion int64 = 102
+const TargetVersion int64 = 103
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())
