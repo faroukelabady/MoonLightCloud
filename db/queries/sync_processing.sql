@@ -41,41 +41,11 @@ UPDATE sync_event_processing
 SET status = 'pending', next_attempt_at = NULL, updated_at = now()
 WHERE event_id = $1 AND processor = $2 AND status IN ('retry', 'blocked');
 
--- name: PendingSaleEvents :many
--- Durable discovery: accepted sale events with no processing row (missing),
--- a pending row, or a due retry. Blocked and processed rows are never
--- returned; retry rows are returned only when next_attempt_at <= now (NULL
--- counts as due). Survivor of restarts; no in-memory signal required.
-SELECT e.event_id
-FROM sync_events e
-LEFT JOIN sync_event_processing p
-  ON p.event_id = e.event_id AND p.processor = $1
-WHERE e.event_type = 'sale.finalized.v1'
-  AND (p.event_id IS NULL
-       OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
-ORDER BY e.received_at
-LIMIT $2;
-
--- name: PendingSaleV2Events :many
--- Durable discovery for sale.finalized.v2 under the v2 processor. v1 rows
--- are never returned here; the v1 processor owns them independently.
-SELECT e.event_id
-FROM sync_events e
-LEFT JOIN sync_event_processing p
-  ON p.event_id = e.event_id AND p.processor = $1
-WHERE e.event_type = 'sale.finalized.v2'
-  AND (p.event_id IS NULL
-       OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
-ORDER BY e.received_at
-LIMIT $2;
-
 -- name: PendingSaleV3Events :many
--- Durable discovery for sale.finalized.v3 under the v3 processor (Phase
--- 17-R0: per-line frozen variant snapshots). v1/v2 rows are never returned
--- here; their processors own them independently. All three versions stay
--- fully supported.
+-- Durable discovery: accepted sale.finalized.v3 events with no processing
+-- row (missing), a pending row, or a due retry. Blocked and processed rows
+-- are never returned; retry rows are returned only when next_attempt_at <=
+-- now (NULL counts as due). v3 is the only accepted sale version (ADR-0055).
 SELECT e.event_id
 FROM sync_events e
 LEFT JOIN sync_event_processing p

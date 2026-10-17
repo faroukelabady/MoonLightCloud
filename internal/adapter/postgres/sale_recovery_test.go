@@ -54,7 +54,7 @@ func TestProjectionRollback(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err == nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err == nil {
 		t.Fatal("injected failure must surface")
 	}
 	// Zero partial projection rows; source event intact.
@@ -121,7 +121,7 @@ func TestMalformedPersistedEvent(t *testing.T) {
 	eventID := "22222222-2222-7222-8222-222222222222"
 	if _, err := env.pool.Exec(context.Background(), `
 		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v1', now(), now(), '{}', '\x00')`,
+		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00')`,
 		eventID, env.devID); err != nil {
 		t.Fatal(err)
 	}

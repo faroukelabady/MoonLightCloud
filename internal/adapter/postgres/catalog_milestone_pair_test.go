@@ -62,14 +62,14 @@ func TestCatalogMilestoneActualRetailOutboxPair(t *testing.T) {
 	store := NewDevices(env.pool, 5*time.Second)
 	// Sales first, then returns, regardless of timestamp ties in Retail.
 	for _, event := range batch.Events {
-		if event.Type != sale.EventSaleFinalizedV2 {
+		if event.Type != sale.EventSaleFinalizedV3 {
 			continue
 		}
 		record, ok, err := store.LoadSaleEvent(ctx, event.ID)
 		if err != nil || !ok {
 			t.Fatalf("load sale: %v %v", ok, err)
 		}
-		out, err := store.ProjectSaleV2(ctx, record, time.Now())
+		out, err := store.ProjectSaleV3(ctx, record, time.Now())
 		if err != nil || out.Outcome != sale.OutcomeProcessed {
 			t.Fatalf("project sale: %+v %v", out, err)
 		}

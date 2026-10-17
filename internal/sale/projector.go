@@ -62,11 +62,7 @@ type Stats struct {
 // Store is the durable projector boundary, implemented by the postgres
 // adapter. One ProjectSale call is one atomic claim+project transaction.
 type Store interface {
-	PendingSaleEvents(ctx context.Context, processor string, limit int) ([]string, error)
-	PendingSaleV2Events(ctx context.Context, limit int) ([]string, error)
 	PendingSaleV3Events(ctx context.Context, limit int) ([]string, error)
-	ProjectSale(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
-	ProjectSaleV2(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectSaleV3(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadSaleEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
@@ -147,30 +143,18 @@ func (p *Projector) Run(ctx context.Context) {
 	}
 }
 
-// drain projects due v1, v2, and v3 events until none remain or ctx ends.
-// Versions drain under independent processors; dispatch is by event type.
+// drain projects due sale.finalized.v3 events until none remain or ctx
+// ends. v3 is the only accepted sale version (ADR-0055).
 func (p *Projector) drain(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		ids, err := p.store.PendingSaleEvents(ctx, ProcessorSaleProjectionV1, p.batchSize)
-		if err != nil {
-			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV1, "err", err.Error())
-			return
-		}
-		v2ids, err := p.store.PendingSaleV2Events(ctx, p.batchSize)
-		if err != nil {
-			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV2, "err", err.Error())
-			return
-		}
-		v3ids, err := p.store.PendingSaleV3Events(ctx, p.batchSize)
+		ids, err := p.store.PendingSaleV3Events(ctx, p.batchSize)
 		if err != nil {
 			p.log.Error("projection scan failed", "processor", ProcessorSaleProjectionV3, "err", err.Error())
 			return
 		}
-		ids = append(ids, v2ids...)
-		ids = append(ids, v3ids...)
 		if len(ids) == 0 {
 			return
 		}
@@ -197,15 +181,7 @@ func (p *Projector) projectOnce(ctx context.Context, eventID string) {
 		p.log.Error("projection event missing", "event_id", eventID)
 		return
 	}
-	var res ProjectResult
-	switch rec.EventType {
-	case EventSaleFinalizedV2:
-		res, err = p.store.ProjectSaleV2(ctx, rec, p.clock.Now())
-	case EventSaleFinalizedV3:
-		res, err = p.store.ProjectSaleV3(ctx, rec, p.clock.Now())
-	default:
-		res, err = p.store.ProjectSale(ctx, rec, p.clock.Now())
-	}
+	res, err := p.store.ProjectSaleV3(ctx, rec, p.clock.Now())
 	if err != nil {
 		p.log.Error("projection attempt failed",
 			"event_id", eventID, "err", err.Error(),

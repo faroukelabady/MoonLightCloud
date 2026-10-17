@@ -33,7 +33,7 @@ func (e *saleEnv) ingestV3(t *testing.T, eventID, payload string) isync.BatchRes
 func v3Fixture(t *testing.T, saleID, variantSKU string) string {
 	t.Helper()
 	var m map[string]any
-	if err := json.Unmarshal([]byte(v2Fixture(t, nil)), &m); err != nil {
+	if err := json.Unmarshal([]byte(taggedSaleFixture(t, nil)), &m); err != nil {
 		t.Fatal(err)
 	}
 	if saleID != "" {
@@ -190,80 +190,13 @@ func TestSaleV3LabelRenameImmutability(t *testing.T) {
 	}
 }
 
-// TestSaleV3CoexistsWithV1V2: frozen v1/v2 keep projecting under their
-// own processors; lines without variant data stay truthful NULL — never
-// fabricated snapshots.
-func TestSaleV3CoexistsWithV1V2(t *testing.T) {
-	env := openSaleEnv(t)
-	// v2 sale (same fixture shape, no variant fields).
-	if res := env.ingestV2(t, "33333333-3333-7222-8222-222222222205", v2FixtureWithSaleID(t, "11111111-1111-4111-8111-000000000005")); res.Events[0].Status != "accepted" {
-		t.Fatalf("v2 ingest: %+v", res)
-	}
-	// v3 sale WITHOUT variant data on its line.
-	plain := v2FixtureWithSaleID(t, "11111111-1111-4111-8111-000000000006")
-	if res := env.ingestV3(t, "33333333-3333-7333-8333-333333333306", plain); res.Events[0].Status != "accepted" {
-		t.Fatalf("v3 plain ingest: %+v", res)
-	}
-	// v3 sale WITH the frozen snapshot.
-	if res := env.ingestV3(t, "33333333-3333-7333-8333-333333333307", v3Fixture(t, "11111111-1111-4111-8111-000000000007", "NFT-BLU-TRD")); res.Events[0].Status != "accepted" {
-		t.Fatalf("v3 ingest: %+v", res)
-	}
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 3 }, "three projections")
-
-	rows, err := env.pool.Query(context.Background(),
-		`SELECT l.variant_sku, l.variant_attributes IS NOT NULL,
-		        l.variant_price_egp_cents IS NOT NULL, l.variant_id IS NOT NULL
-		 FROM sale_lines_projection l JOIN sales_projection s ON s.sale_id = l.sale_id
-		 ORDER BY s.sale_id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	type state struct {
-		sku       *string
-		attrs     bool
-		price     bool
-		variantID bool
-	}
-	var got []state
-	for rows.Next() {
-		var s state
-		if err := rows.Scan(&s.sku, &s.attrs, &s.price, &s.variantID); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, s)
-	}
-	if len(got) != 3 {
-		t.Fatalf("three lines: %+v", got)
-	}
-	// v2 line and the snapshot-less v3 line: truthful NULLs everywhere.
-	for _, i := range []int{0, 1} {
-		if got[i].sku != nil || got[i].attrs || got[i].price {
-			t.Fatalf("line %d must stay truthful NULL: %+v", i, got[i])
-		}
-	}
-	// The snapshot line carries the frozen identity.
-	if got[2].sku == nil || *got[2].sku != "NFT-BLU-TRD" || !got[2].attrs || !got[2].price || !got[2].variantID {
-		t.Fatalf("snapshot line: %+v", got[2])
-	}
-	// All three versions track processing independently.
-	for _, processor := range []string{sale.ProcessorSaleProjectionV2, sale.ProcessorSaleProjectionV3} {
-		var n int
-		if err := env.pool.QueryRow(context.Background(),
-			`SELECT count(*) FROM sync_event_processing WHERE processor=$1 AND status='processed'`, processor).Scan(&n); err != nil || n == 0 {
-			t.Fatalf("processor %s: %d %v", processor, n, err)
-		}
-	}
-}
-
-// TestSaleV3CrossVersionArbitration: sale_id ownership is version
-// independent (revision/ownership gating) — the first event wins and a
-// later v3 for the same sale blocks as a conflict, never merging.
-func TestSaleV3CrossVersionArbitration(t *testing.T) {
+// TestSaleV3SameSaleArbitration: sale_id ownership is per event — the
+// first event wins and a later event for the same sale blocks as a
+// conflict, never merging.
+func TestSaleV3SameSaleArbitration(t *testing.T) {
 	env := openSaleEnv(t)
 	saleID := "11111111-1111-4111-8111-000000000008"
-	if res := env.ingestV2(t, "33333333-3333-7222-8222-222222222208", v2FixtureWithSaleID(t, saleID)); res.Events[0].Status != "accepted" {
+	if res := env.ingestV3(t, "33333333-3333-7222-8222-222222222208", taggedSaleFixtureWithSaleID(t, saleID)); res.Events[0].Status != "accepted" {
 		t.Fatalf("v2 ingest: %+v", res)
 	}
 	env.drain(t)
@@ -301,11 +234,11 @@ func TestSaleV3CrossVersionArbitration(t *testing.T) {
 	}
 }
 
-// v2FixtureWithSaleID mirrors v2Fixture with a chosen sale identity.
-func v2FixtureWithSaleID(t *testing.T, saleID string) string {
+// taggedSaleFixtureWithSaleID mirrors v2Fixture with a chosen sale identity.
+func taggedSaleFixtureWithSaleID(t *testing.T, saleID string) string {
 	t.Helper()
 	var m map[string]any
-	if err := json.Unmarshal([]byte(v2Fixture(t, nil)), &m); err != nil {
+	if err := json.Unmarshal([]byte(taggedSaleFixture(t, nil)), &m); err != nil {
 		t.Fatal(err)
 	}
 	m["sale_id"] = saleID

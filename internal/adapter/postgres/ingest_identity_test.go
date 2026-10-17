@@ -70,7 +70,7 @@ func TestImmutableEventIdentity(t *testing.T) {
 
 	// Different payload → EVENT_ID_REUSE.
 	other := mutatePayload(t, payload, "99999999-9999-4999-8999-999999999999", "2026-09-20T10:00:00Z")
-	if err := ingestOne(t, env, id, "sale.finalized.v1", occurred, other); err == nil {
+	if err := ingestOne(t, env, id, "sale.finalized.v3", occurred, other); err == nil {
 		t.Fatal("different payload must conflict")
 	} else if identityKindOf(err) != apperr.Conflict || !strings.Contains(err.Error(), "EVENT_ID_REUSE") {
 		t.Fatalf("want EVENT_ID_REUSE, got %v", err)
@@ -84,14 +84,14 @@ func TestImmutableEventIdentity(t *testing.T) {
 	}
 
 	// Different occurred_at instant → EVENT_ID_REUSE.
-	if err := ingestOne(t, env, id, "sale.finalized.v1", "2026-09-20T11:00:00Z", payload); err == nil {
+	if err := ingestOne(t, env, id, "sale.finalized.v3", "2026-09-20T11:00:00Z", payload); err == nil {
 		t.Fatal("different occurred_at instant must conflict")
 	} else if identityKindOf(err) != apperr.Conflict {
 		t.Fatalf("want conflict, got %v", err)
 	}
 
 	// Equivalent textual occurred_at (Z vs +03:00, same instant) → already_accepted.
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T13:00:00+03:00","payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T13:00:00+03:00","payload":%s}]}`,
 		id, payload)
 	res, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
 	if err != nil {
@@ -215,7 +215,7 @@ func TestLegacyRotationExactRetry(t *testing.T) {
 	id := "22222222-2222-7222-8222-222222222222"
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO sync_events (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, payload_hash_version)
-		 VALUES ($1,$2,$3,'sale.finalized.v1','2026-09-20T10:00:00Z',now(),$4::jsonb,$5,1)`,
+		 VALUES ($1,$2,$3,'sale.finalized.v3','2026-09-20T10:00:00Z',now(),$4::jsonb,$5,1)`,
 		id, p.Device.ID, p.Credential.ID, payload, legacyHashOf(t, payload)); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestLegacySaleRetryMatrix(t *testing.T) {
 	legacy := legacyHashOf(t, payload)
 	if _, err := env.pool.Exec(ctx,
 		`INSERT INTO sync_events (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, payload_hash_version)
-		 VALUES ($1,$2,$3,'sale.finalized.v1','2026-09-20T10:00:00Z',now(),$4::jsonb,$5,1)`,
+		 VALUES ($1,$2,$3,'sale.finalized.v3','2026-09-20T10:00:00Z',now(),$4::jsonb,$5,1)`,
 		id, env.devID, env.credID, payload, legacy); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestLegacySaleRetryMatrix(t *testing.T) {
 	}
 	for name, pair := range map[string][2]string{
 		"type changed":     {"system.test.v1", "2026-09-20T10:00:00Z"},
-		"occurred changed": {"sale.finalized.v1", "2026-09-21T10:00:00Z"},
+		"occurred changed": {"sale.finalized.v3", "2026-09-21T10:00:00Z"},
 	} {
 		typ, occ := pair[0], pair[1]
 		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":%q,"occurred_at":%q,"payload":%s}]}`,

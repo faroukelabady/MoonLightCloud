@@ -269,8 +269,6 @@ func migrateCmd(args []string) error {
 // be visible in one and rejected by the other (Phase 5B Low).
 func allProjectionProcessors() []string {
 	return []string{
-		sale.ProcessorSaleProjectionV1,
-		sale.ProcessorSaleProjectionV2,
 		sale.ProcessorSaleProjectionV3,
 		returnrefund.ProcessorReturnProjectionV1,
 		catalog.ProcessorCategoryProjectionV1,
@@ -344,7 +342,7 @@ func projectionCmd(args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: moonlight-cloud projection retry <event-id> [processor]")
 		}
-		processor := sale.ProcessorSaleProjectionV1
+		processor := sale.ProcessorSaleProjectionV3
 		if len(args) >= 3 {
 			processor = args[2]
 		}

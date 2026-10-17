@@ -157,8 +157,6 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	}
 	type required struct{ event, processor string }
 	all := []required{
-		{"sale.finalized.v1", "sale_projection.v1"},
-		{"sale.finalized.v2", "sale_projection.v2"},
 		{"sale.finalized.v3", "sale_projection.v3"},
 		{"sale.return_refund.finalized.v1", "return_refund_projection.v1"},
 		{"catalog.category.snapshot.v1", "catalog_category_projection.v1"},
@@ -206,21 +204,21 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	status(0)
 	// Dependency-blocked Category and Variant inventory events remain
 	// unresolved even though unrelated projections have succeeded.
-	for _, index := range []int{4, 14} {
+	for _, index := range []int{2, 12} {
 		if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='blocked' WHERE event_id=$1 AND processor=$2`, ids[index], all[index].processor); err != nil {
 			t.Fatal(err)
 		}
 	}
 	status(2)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[4]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[2]); err != nil {
 		t.Fatal(err)
 	}
 	status(1)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='retry' WHERE event_id=$1`, ids[14]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='retry' WHERE event_id=$1`, ids[12]); err != nil {
 		t.Fatal(err)
 	}
 	status(1)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[14]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[12]); err != nil {
 		t.Fatal(err)
 	}
 	status(0)

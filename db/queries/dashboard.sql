@@ -140,7 +140,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
         d.name AS device_name, NULL::text AS detail
     FROM sync_events e
     LEFT JOIN devices d ON d.id = e.device_id
-    WHERE e.event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+    WHERE e.event_type = 'sale.finalized.v3'
     ORDER BY e.received_at DESC, e.event_id ASC
     LIMIT @limit_n::int)
     UNION ALL
@@ -150,8 +150,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     FROM sync_event_processing p
     JOIN sync_events e ON e.event_id = p.event_id
     LEFT JOIN devices d ON d.id = e.device_id
-    WHERE ((e.event_type = 'sale.finalized.v1' AND p.processor = 'sale_projection.v1')
-        OR (e.event_type = 'sale.finalized.v2' AND p.processor = 'sale_projection.v2'))
+    WHERE e.event_type = 'sale.finalized.v3' AND p.processor = 'sale_projection.v3'
       AND p.status IN ('processed', 'blocked')
     ORDER BY ts DESC, kind ASC, event_id ASC
     LIMIT @limit_n::int)
@@ -430,7 +429,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     FROM sync_events e
     LEFT JOIN devices d ON d.id = e.device_id
     WHERE e.store_id = @store_id::uuid
-      AND e.event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+      AND e.event_type = 'sale.finalized.v3'
     ORDER BY e.received_at DESC, e.event_id ASC
     LIMIT @limit_n::int)
     UNION ALL
@@ -441,8 +440,7 @@ SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     JOIN sync_events e ON e.event_id = p.event_id
     LEFT JOIN devices d ON d.id = e.device_id
     WHERE e.store_id = @store_id::uuid
-      AND ((e.event_type = 'sale.finalized.v1' AND p.processor = 'sale_projection.v1')
-        OR (e.event_type = 'sale.finalized.v2' AND p.processor = 'sale_projection.v2'))
+      AND e.event_type = 'sale.finalized.v3' AND p.processor = 'sale_projection.v3'
       AND p.status IN ('processed', 'blocked')
     ORDER BY ts DESC, kind ASC, event_id ASC
     LIMIT @limit_n::int)

@@ -53,12 +53,12 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[0].res, outs[0].err = storeA.ProjectSale(context.Background(), recA, time.Now().UTC())
+		outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 	}()
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[1].res, outs[1].err = storeB.ProjectSale(context.Background(), recB, time.Now().UTC())
+		outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 	}()
 	close(start)
 	done := make(chan struct{})
@@ -73,7 +73,7 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	for i, o := range outs {
 		if o.err != nil || (o.res.Outcome != sale.OutcomeProcessed && o.res.Outcome != sale.OutcomeBlocked) {
 			for k := 0; k < 10; k++ {
-				res, err := stores[i].ProjectSale(context.Background(), recs[i], time.Now().UTC())
+				res, err := stores[i].ProjectSaleV3(context.Background(), recs[i], time.Now().UTC())
 				outs[i] = outcome{res, err}
 				if err == nil && (res.Outcome == sale.OutcomeProcessed || res.Outcome == sale.OutcomeBlocked) {
 					break
@@ -141,7 +141,7 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("load e1")
 	}
-	if _, err := store.ProjectSale(ctx, rec1, time.Now().UTC()); err == nil {
+	if _, err := store.ProjectSaleV3(ctx, rec1, time.Now().UTC()); err == nil {
 		t.Fatal("E1 projection must fail under sabotage")
 	}
 	var owner string
@@ -160,7 +160,7 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("load e2")
 	}
-	res2, err := store.ProjectSale(ctx, rec2, time.Now().UTC())
+	res2, err := store.ProjectSaleV3(ctx, rec2, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("E2 must resolve deterministically: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 		`UPDATE sync_event_processing SET next_attempt_at = now() - interval '1 second' WHERE event_id=$1`, e1); err != nil {
 		t.Fatal(err)
 	}
-	res1, err := store.ProjectSale(ctx, rec1, time.Now().UTC())
+	res1, err := store.ProjectSaleV3(ctx, rec1, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("E1 retry: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestConflictingRebuildPreservesWinner(t *testing.T) {
 		if _, err := poolA.Exec(context.Background(),
 			`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
 			 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-			 WHERE processor='sale_projection.v1' AND event_id IN ($1,$2)`, e1, e2); err != nil {
+			 WHERE processor='sale_projection.v3' AND event_id IN ($1,$2)`, e1, e2); err != nil {
 			t.Fatal(err)
 		}
 
@@ -314,7 +314,7 @@ func TestConflictingRebuildPreservesWinner(t *testing.T) {
 				<-start
 				// Settle transient retries sequentially inside worker.
 				for k := 0; k < 10; k++ {
-					res, err := s.ProjectSale(context.Background(), rec, time.Now().UTC())
+					res, err := s.ProjectSaleV3(context.Background(), rec, time.Now().UTC())
 					if err == nil && (res.Outcome == sale.OutcomeProcessed || res.Outcome == sale.OutcomeBlocked) {
 						return
 					}

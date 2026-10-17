@@ -95,7 +95,7 @@ func TestReturnPartialDurableAccept(t *testing.T) {
 	// Reporting stays finalized-sale-only: sale-scoped inbox counts unchanged.
 	var saleEvents int
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM sync_events WHERE event_type='sale.finalized.v1'`).Scan(&saleEvents); err != nil || saleEvents != 0 {
+		`SELECT count(*) FROM sync_events WHERE event_type='sale.finalized.v3'`).Scan(&saleEvents); err != nil || saleEvents != 0 {
 		t.Fatalf("sale inbox untouched: %d (%v)", saleEvents, err)
 	}
 }

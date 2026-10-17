@@ -3,7 +3,7 @@ info:
   title: MoonLightCloud API
   description: >-
     Device lifecycle + versioned sync ingestion with the first Sale-sync
-    vertical slice: durable inbox, sale.finalized.v1 validated before ACK,
+    vertical slice: durable inbox, sale.finalized.v3 validated before ACK,
     async projection with durable processing state. Business APIs are
     versioned under /api/v1. Health and version stay outside the version
     boundary. ACK means durable PostgreSQL commit, never queueing alone.
@@ -3772,7 +3772,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v1, sale.finalized.v2, sale.finalized.v3, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v3, sale.return_refund.finalized.v1, catalog.category.snapshot.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, inventory.product.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -3804,8 +3804,6 @@ components:
             $ref: '#/components/schemas/SyncEvent'
     SyncEvent:
       oneOf:
-        - $ref: '#/components/schemas/SaleFinalizedV1Event'
-        - $ref: '#/components/schemas/SaleFinalizedV2Event'
         - $ref: '#/components/schemas/SaleFinalizedV3Event'
         - $ref: '#/components/schemas/ReturnRefundFinalizedV1Event'
         - $ref: '#/components/schemas/CatalogCategorySnapshotV1Event'
@@ -3822,8 +3820,6 @@ components:
       discriminator:
         propertyName: event_type
         mapping:
-          sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'
-          sale.finalized.v2: '#/components/schemas/SaleFinalizedV2Event'
           sale.finalized.v3: '#/components/schemas/SaleFinalizedV3Event'
           sale.return_refund.finalized.v1: '#/components/schemas/ReturnRefundFinalizedV1Event'
           catalog.category.snapshot.v1: '#/components/schemas/CatalogCategorySnapshotV1Event'
@@ -3853,17 +3849,6 @@ components:
           type: string
           format: date-time
           description: Business timestamp; bounded (2020-01-01 .. now+24h), never authority.
-    SaleFinalizedV1Event:
-      allOf:
-        - $ref: '#/components/schemas/SyncEventEnvelope'
-        - type: object
-          required: [event_type, payload]
-          properties:
-            event_type:
-              type: string
-              enum: [sale.finalized.v1]
-            payload:
-              $ref: '#/components/schemas/SaleFinalizedV1'
     SystemTestV1Event:
       allOf:
         - $ref: '#/components/schemas/SyncEventEnvelope'
@@ -5052,22 +5037,6 @@ components:
         subcategories:
           type: array
           items: {$ref: '#/components/schemas/ClassificationSnapshot'}
-    SaleLine:
-      type: object
-      required: [sale_item_id, sku, product_name, quantity, unit_price, line_total, classifications]
-      properties:
-        sale_item_id: {type: string, format: uuid}
-        product_id: {type: string, format: uuid, nullable: true}
-        variant_id: {type: string, format: uuid, nullable: true}
-        sku: {type: string}
-        product_name: {type: string}
-        width_cm: {type: integer, nullable: true}
-        height_cm: {type: integer, nullable: true}
-        quantity: {type: integer, minimum: 1, maximum: 2147483647}
-        unit_price: {$ref: '#/components/schemas/Money'}
-        cost: {$ref: '#/components/schemas/Money'}
-        line_total: {$ref: '#/components/schemas/Money'}
-        classifications: {$ref: '#/components/schemas/LineClassifications'}
     EventPayment:
       type: object
       required: [method, amount, change_given]
@@ -5085,44 +5054,6 @@ components:
         discount: {$ref: '#/components/schemas/Money'}
         tax: {$ref: '#/components/schemas/Money'}
         total: {$ref: '#/components/schemas/Money'}
-    SaleFinalizedV1:
-      type: object
-      required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]
-      properties:
-        sale_id: {type: string, format: uuid}
-        sale_number: {type: string}
-        channel: {type: string, enum: [STORE]}
-        occurred_at: {type: string, format: date-time}
-        paid_at: {type: string, format: date-time}
-        shop: {$ref: '#/components/schemas/ShopSnapshot'}
-        actor: {$ref: '#/components/schemas/ActorSnapshot'}
-        currency: {type: string, enum: [EGP, USD]}
-        fx:
-          $ref: '#/components/schemas/FxSnapshot'
-        totals: {$ref: '#/components/schemas/SaleTotals'}
-        lines:
-          type: array
-          minItems: 1
-          items: {$ref: '#/components/schemas/SaleLine'}
-        payments:
-          type: array
-          minItems: 1
-          items: {$ref: '#/components/schemas/EventPayment'}
-      description: >-
-        sale.finalized.v1 — the first business event. Frozen: no tag
-        fields exist. Integer money throughout; subtotal = Σ lines;
-        total = max(0, subtotal + tax − discount).
-    SaleFinalizedV2Event:
-      allOf:
-        - $ref: '#/components/schemas/SyncEventEnvelope'
-        - type: object
-          required: [event_type, payload]
-          properties:
-            event_type:
-              type: string
-              enum: [sale.finalized.v2]
-            payload:
-              $ref: '#/components/schemas/SaleFinalizedV2'
     SaleLineTag:
       type: object
       required: [tag_id, slug, name_ar, name_en]
@@ -5134,54 +5065,6 @@ components:
       description: >-
         Frozen sale-time tag snapshot. Historical identity only; never
         resolved against current catalog tags.
-    SaleLineV2:
-      type: object
-      required: [sale_item_id, sku, product_name, quantity, unit_price, line_total, classifications, tags]
-      properties:
-        sale_item_id: {type: string, format: uuid}
-        product_id: {type: string, format: uuid, nullable: true}
-        variant_id: {type: string, format: uuid, nullable: true}
-        sku: {type: string}
-        product_name: {type: string}
-        width_cm: {type: integer, nullable: true}
-        height_cm: {type: integer, nullable: true}
-        quantity: {type: integer, minimum: 1, maximum: 2147483647}
-        unit_price: {$ref: '#/components/schemas/Money'}
-        cost: {$ref: '#/components/schemas/Money'}
-        line_total: {$ref: '#/components/schemas/Money'}
-        classifications: {$ref: '#/components/schemas/LineClassifications'}
-        tags:
-          type: array
-          items: {$ref: '#/components/schemas/SaleLineTag'}
-          description: >-
-            Always present; empty means capture occurred with zero tags.
-            Sorted by tag_id.
-    SaleFinalizedV2:
-      type: object
-      required: [sale_id, sale_number, channel, occurred_at, paid_at, shop, actor, currency, totals, lines, payments]
-      properties:
-        sale_id: {type: string, format: uuid}
-        sale_number: {type: string}
-        channel: {type: string, enum: [STORE]}
-        occurred_at: {type: string, format: date-time}
-        paid_at: {type: string, format: date-time}
-        shop: {$ref: '#/components/schemas/ShopSnapshot'}
-        actor: {$ref: '#/components/schemas/ActorSnapshot'}
-        currency: {type: string, enum: [EGP, USD]}
-        fx:
-          $ref: '#/components/schemas/FxSnapshot'
-        totals: {$ref: '#/components/schemas/SaleTotals'}
-        lines:
-          type: array
-          minItems: 1
-          items: {$ref: '#/components/schemas/SaleLineV2'}
-        payments:
-          type: array
-          minItems: 1
-          items: {$ref: '#/components/schemas/EventPayment'}
-      description: >-
-        sale.finalized.v2 — v1 shape plus per-line historical tag
-        snapshots. v1 remains accepted with unknown tag capture.
     SaleFinalizedV3Event:
       allOf:
         - $ref: '#/components/schemas/SyncEventEnvelope'
@@ -5287,8 +5170,8 @@ components:
         frozen ProductVariant snapshots (variant_sku, sale-time option
         attribute labels, nullable sale-time variant pricing override).
         Snapshots are sourced ONLY from this event: Cloud never joins
-        current catalog state into stored history. v1 and v2 remain
-        accepted and fully supported.
+        current catalog state into stored history. It is the only accepted
+        sale version (ADR-0055).
     ReturnActorSnapshot:
       type: object
       properties:

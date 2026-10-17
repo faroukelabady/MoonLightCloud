@@ -1249,7 +1249,7 @@ func TestSaleReturnCombinedRebuild(t *testing.T) {
 	if _, err := env.pool.Exec(ctx,
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
 		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-		 WHERE processor IN ('sale_projection.v1', 'return_refund_projection.v1')`); err != nil {
+		 WHERE processor IN ('sale_projection.v3', 'return_refund_projection.v1')`); err != nil {
 		t.Fatal(err)
 	}
 

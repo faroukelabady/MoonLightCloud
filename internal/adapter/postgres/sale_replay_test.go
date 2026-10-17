@@ -60,12 +60,12 @@ func TestConcurrentSameEventReplay(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[0].res, outs[0].err = storeA.ProjectSale(context.Background(), recA, time.Now().UTC())
+			outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[1].res, outs[1].err = storeB.ProjectSale(context.Background(), recB, time.Now().UTC())
+			outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 		}()
 		close(start)
 		done := make(chan struct{})
@@ -142,7 +142,7 @@ func TestImpossibleWinningEventReuse(t *testing.T) {
 	s1, _ := parseUUID("4aaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa")
 	s2, _ := parseUUID("4bbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb")
 	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, "41111111-1111-7111-8111-111111111111", p.Device.ID); err != nil {
+		VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, "41111111-1111-7111-8111-111111111111", p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO sale_event_ownership (sale_id, winning_event_id, winning_device_id)

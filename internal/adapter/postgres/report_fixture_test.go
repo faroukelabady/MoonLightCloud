@@ -48,6 +48,7 @@ func TestIntegratedAdversarialFixture(t *testing.T) {
 				"unit_price": map[string]any{"amount_minor": 60000, "currency": "EGP"},
 				"cost":       map[string]any{"amount_minor": 15000, "currency": "EGP"},
 				"line_total": map[string]any{"amount_minor": 60000, "currency": "EGP"},
+				"tags":       []any{},
 				"classifications": map[string]any{
 					"roots": []any{map[string]any{
 						"category_id": "00000000-0000-0000-0000-000000000101",

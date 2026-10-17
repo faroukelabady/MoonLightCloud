@@ -133,7 +133,7 @@ func testR3RealUpgrade(t *testing.T) {
 	// recovery. Their IDs, labels, capture state and exact money remain
 	// untouched even when current catalog identities change.
 	var historicalPayload map[string]any
-	if err = json.Unmarshal([]byte(v2Fixture(t, nil)), &historicalPayload); err != nil {
+	if err = json.Unmarshal([]byte(taggedSaleFixture(t, nil)), &historicalPayload); err != nil {
 		t.Fatal(err)
 	}
 	for _, line := range historicalPayload["lines"].([]any) {
@@ -143,8 +143,8 @@ func testR3RealUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.ingest(t, f.devA, f.credA, r2EventID(808), sale.EventSaleFinalizedV2, string(encoded))
-	if result := f.projectSaleV2(t, r2EventID(808)); result.Outcome != sale.OutcomeProcessed {
+	f.ingest(t, f.devA, f.credA, r2EventID(808), sale.EventSaleFinalizedV3, string(encoded))
+	if result := f.projectSaleV3(t, r2EventID(808)); result.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("old Sale projection: %+v", result)
 	}
 	f.ingest(t, f.devA, f.credA, r2EventID(809), returnrefund.EventReturnRefundFinalizedV1, alignedUSDReturnPayload(t, "a9000000-0000-4000-8000-000000000034", "OLD-RETURN"))

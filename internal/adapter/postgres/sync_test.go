@@ -123,7 +123,7 @@ func TestUnsupportedEventType(t *testing.T) {
 	_, svc, deviceID, credID := openSync(t)
 	_, err := svc.Ingest(context.Background(), deviceID, credID,
 		[]byte(batch(ev("22222222-2222-7222-8222-222222222222", `{"a":1}`)[:0]+
-			`{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{}}`)))
+			`{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v3","occurred_at":"2026-09-19T10:20:30Z","payload":{}}`)))
 	if err == nil || kindOf(err) != apperr.Unprocessable {
 		t.Fatalf("want 422 unsupported, got %v", err)
 	}

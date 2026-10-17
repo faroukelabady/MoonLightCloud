@@ -258,16 +258,16 @@ func TestReportRebuildInvariance(t *testing.T) {
 	}
 	if _, err := env.pool.Exec(ctx,
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=now()
-		  WHERE processor='sale_projection.v1'`); err != nil {
+		  WHERE processor='sale_projection.v3'`); err != nil {
 		t.Fatal(err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	ids, err := store.PendingSaleEvents(ctx, "sale_projection.v1", 25)
+	ids, err := store.PendingSaleV3Events(ctx, 25)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("rediscovery: %v %v", ids, err)
 	}
 	rec, _, _ := store.LoadSaleEvent(ctx, ids[0])
-	if _, err := store.ProjectSale(ctx, rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(ctx, rec, time.Now()); err != nil {
 		t.Fatalf("re-project: %v", err)
 	}
 	after := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")

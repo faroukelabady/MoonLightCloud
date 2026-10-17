@@ -492,14 +492,14 @@ func TestReportParityWithCanonicalService(t *testing.T) {
 	projectSale(t, env, "44444444-4444-4444-8444-444444444444", "2026-09-20T10:00:00Z", nil)
 	saleEventSeq++
 	usdEvent := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
-	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		usdEvent, fixture(t, "sale_usd.json"))
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(usdBody)); err != nil {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
 	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 	var saleA map[string]any

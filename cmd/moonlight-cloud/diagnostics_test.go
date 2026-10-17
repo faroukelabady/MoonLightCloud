@@ -20,7 +20,7 @@ func TestSupportBundleContainsNoSecrets(t *testing.T) {
 		TargetSchema:  43,
 		DatabaseOK:    true,
 		Projection: []ProjectionSummary{{
-			Processor: "sale_projection.v1", Pending: 3, Blocked: 1,
+			Processor: "sale_projection.v3", Pending: 3, Blocked: 1,
 			LastErrorCode: "SYNC_FAILED_INTERNAL",
 		}},
 		Environment: EnvironmentSummary{

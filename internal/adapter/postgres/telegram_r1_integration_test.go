@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
-	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/whatsapp"
 	"github.com/faroukelabady/MoonLightCloud/internal/operations"
@@ -263,76 +261,6 @@ func r1DatabaseState(t *testing.T, env *saleEnv) map[string]string {
 	return result
 }
 
-func TestTelegramR1V25To26Preservation(t *testing.T) {
-	env := openSaleEnv(t)
-	ctx := context.Background()
-	conn, err := sql.Open("pgx", env.pool.Config().ConnString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if err = migrate.DownTo(ctx, conn, 25); err != nil {
-		t.Fatal(err)
-	}
-	seedTelegramTemplateMapping(t, env)
-	id := r1Enqueue(t, env, "existing-identity", "-000111", "old content")
-	source := &stubReportSummary{summary: cannedSummary()}
-	service := reportTestService(t, env, source)
-	recipient, err := service.AddRecipient(ctx, "old TG", "telegram-main", "@operations", "ar")
-	if err != nil {
-		t.Fatal(err)
-	}
-	schedule := createTestSchedule(t, service, "old schedule", "DAILY", "08:00", "", recipient.ID)
-	if _, _, err = service.RunNow(ctx, schedule.ID, "old-run"); err != nil {
-		t.Fatal(err)
-	}
-	drainRunner(t, testRunnerNoSeed(t, env, source))
-	r1OpsLifecycle(t, env, "@operations")
-	projectSale(t, env, "44444444-4444-4444-8444-444444444444", "2026-09-20T10:00:00Z", nil)
-	r, err := env.pool.Exec(ctx, `INSERT INTO notification_delivery_status_history(notification_id,provider_key,provider_message_id,provider_status_raw,canonical_status,event_fingerprint) VALUES($1,'telegram-main','111:42','ACCEPTED','ACCEPTED','\x01')`, id)
-	if err != nil || r.RowsAffected() != 1 {
-		t.Fatal("history fixture", err)
-	}
-	before := r1DatabaseState(t, env)
-	if err = migrate.UpTo(ctx, conn, 26); err != nil {
-		t.Fatal(err)
-	}
-	version, err := migrate.Current(ctx, conn)
-	if err != nil || version != 26 {
-		t.Fatalf("version=%d %v", version, err)
-	}
-	after := r1DatabaseState(t, env)
-	for table, state := range before {
-		if state != after[table] {
-			t.Fatalf("migration changed %s", table)
-		}
-	}
-	// Explicit rollback is safe while all persisted values fit the old bound.
-	if err = migrate.DownTo(ctx, conn, 25); err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate.UpTo(ctx, conn, 26); err != nil {
-		t.Fatal(err)
-	}
-	maximum := "@" + strings.Repeat("a", 32)
-	r1Enqueue(t, env, "wide-identity", maximum, "new content")
-	preserved := r1DatabaseState(t, env)
-	if err = migrate.DownTo(ctx, conn, 25); err == nil {
-		t.Fatal("rollback must refuse wider durable values")
-	}
-	version, _ = migrate.Current(ctx, conn)
-	if version != 26 {
-		t.Fatal("failed rollback changed version")
-	}
-	after = r1DatabaseState(t, env)
-	for table, state := range preserved {
-		if state != after[table] {
-			t.Fatal("failed rollback changed durable state", table)
-		}
-	}
-	t.Log("exact v25→v26 preserved 15 seeded tables; safe short-value down/up; wide-value rollback refused without truncation")
-}
-
 func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 	for _, kind := range []string{"DAILY", "TEN_DAY"} {
 		t.Run(kind, func(t *testing.T) {
@@ -362,7 +290,7 @@ func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 				t.Fatal(err)
 			}
 			event := ids.System{}.New()
-			batch := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":%q,"payload":%s}]}`, event, occurred, raw)
+			batch := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":%q,"payload":%s}]}`, event, occurred, raw)
 			result, err := env.syncSvc.Ingest(ctx, env.devID, env.credID, []byte(batch))
 			if err != nil || result.Events[0].Status != "accepted" {
 				t.Fatal("USD ingest", err)
@@ -372,7 +300,7 @@ func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatal(err)
 			}
-			if projected, err := store.ProjectSale(ctx, record, time.Now()); err != nil || projected.Outcome != 1 {
+			if projected, err := store.ProjectSaleV3(ctx, record, time.Now()); err != nil || projected.Outcome != 1 {
 				t.Fatal("USD projection", err)
 			}
 			seedTelegramTemplateMapping(t, env)

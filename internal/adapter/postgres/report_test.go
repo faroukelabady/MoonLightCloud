@@ -62,7 +62,7 @@ func projectSale(t *testing.T, env *saleEnv, saleID, occurred string, mutate fun
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":%q,"payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":%q,"payload":%s}]}`,
 		eventID, occurred, payload)
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -72,7 +72,7 @@ func projectSale(t *testing.T, env *saleEnv, saleID, occurred string, mutate fun
 	if err != nil || !ok {
 		t.Fatalf("load event: %v %v", ok, err)
 	}
-	res, err := store.ProjectSale(context.Background(), rec, time.Now())
+	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -102,14 +102,14 @@ func TestReportSummaryExact(t *testing.T) {
 	// USD sale via fixture file (its own sale_id 11111111-...).
 	saleEventSeq++
 	usdEvent := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
-	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		usdEvent, fixture(t, "sale_usd.json"))
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(usdBody)); err != nil {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
 	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 
@@ -226,7 +226,7 @@ func TestReportConflictLoserExcluded(t *testing.T) {
 	env := openSaleEnv(t)
 	payload := fixture(t, "sale_egp.json")
 	mk := func(eventID string) {
-		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 			eventID, payload)
 		if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 			t.Fatalf("ingest: %v", err)
@@ -239,7 +239,7 @@ func TestReportConflictLoserExcluded(t *testing.T) {
 	store := NewDevices(env.pool, 5*time.Second)
 	for _, id := range []string{e1, e2} {
 		rec, _, _ := store.LoadSaleEvent(context.Background(), id)
-		if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+		if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 			t.Fatalf("project %s: %v", id, err)
 		}
 	}

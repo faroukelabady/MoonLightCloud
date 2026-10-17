@@ -25,10 +25,22 @@
     "rate_microrate": 52000000
   },
   "totals": {
-    "subtotal": {"amount_minor": 1300, "currency": "USD"},
-    "discount": {"amount_minor": 100, "currency": "USD"},
-    "tax": {"amount_minor": 50, "currency": "USD"},
-    "total": {"amount_minor": 1250, "currency": "USD"}
+    "subtotal": {
+      "amount_minor": 1300,
+      "currency": "USD"
+    },
+    "discount": {
+      "amount_minor": 100,
+      "currency": "USD"
+    },
+    "tax": {
+      "amount_minor": 50,
+      "currency": "USD"
+    },
+    "total": {
+      "amount_minor": 1250,
+      "currency": "USD"
+    }
   },
   "lines": [
     {
@@ -39,21 +51,59 @@
       "width_cm": 70,
       "height_cm": 100,
       "quantity": 1,
-      "unit_price": {"amount_minor": 1300, "currency": "USD"},
-      "cost": {"amount_minor": 400, "currency": "USD"},
-      "line_total": {"amount_minor": 1300, "currency": "USD"},
+      "unit_price": {
+        "amount_minor": 1300,
+        "currency": "USD"
+      },
+      "cost": {
+        "amount_minor": 400,
+        "currency": "USD"
+      },
+      "line_total": {
+        "amount_minor": 1300,
+        "currency": "USD"
+      },
       "classifications": {
         "roots": [
-          {"category_id": "00000000-0000-0000-0000-000000000102", "name_ar": "فرعوني", "name_en": "Pharaonic"}
+          {
+            "category_id": "00000000-0000-0000-0000-000000000102",
+            "name_ar": "فرعوني",
+            "name_en": "Pharaonic"
+          }
         ],
         "subcategories": [
-          {"category_id": "00000000-0000-0000-0000-000000000301", "name_ar": "قطط", "name_en": "Cats"}
+          {
+            "category_id": "00000000-0000-0000-0000-000000000301",
+            "name_ar": "قطط",
+            "name_en": "Cats"
+          }
         ]
-      }
+      },
+      "tags": []
     }
   ],
   "payments": [
-    {"method": "cash", "amount": {"amount_minor": 1000, "currency": "USD"}, "change_given": {"amount_minor": 0, "currency": "USD"}},
-    {"method": "card", "amount": {"amount_minor": 250, "currency": "USD"}, "change_given": {"amount_minor": 0, "currency": "USD"}}
+    {
+      "method": "cash",
+      "amount": {
+        "amount_minor": 1000,
+        "currency": "USD"
+      },
+      "change_given": {
+        "amount_minor": 0,
+        "currency": "USD"
+      }
+    },
+    {
+      "method": "card",
+      "amount": {
+        "amount_minor": 250,
+        "currency": "USD"
+      },
+      "change_given": {
+        "amount_minor": 0,
+        "currency": "USD"
+      }
+    }
   ]
 }

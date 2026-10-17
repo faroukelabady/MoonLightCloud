@@ -172,23 +172,9 @@ func (f *scopeFixture) projectSale(t *testing.T, eventID string) sale.ProjectRes
 	if err != nil || !ok {
 		t.Fatalf("load sale %s: %v %v", eventID, ok, err)
 	}
-	res, err := store.ProjectSale(context.Background(), rec, time.Now())
+	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project sale: %v", err)
-	}
-	return res
-}
-
-func (f *scopeFixture) projectSaleV2(t *testing.T, eventID string) sale.ProjectResult {
-	t.Helper()
-	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
-	if err != nil || !ok {
-		t.Fatalf("load sale %s: %v %v", eventID, ok, err)
-	}
-	res, err := store.ProjectSaleV2(context.Background(), rec, time.Now())
-	if err != nil {
-		t.Fatalf("project sale v2: %v", err)
 	}
 	return res
 }

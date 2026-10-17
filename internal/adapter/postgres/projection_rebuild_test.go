@@ -37,7 +37,7 @@ func TestProjectionRebuildFromInbox(t *testing.T) {
 	if _, err := env.pool.Exec(context.Background(),
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
 		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-		 WHERE processor='sale_projection.v1'`); err != nil {
+		 WHERE processor='sale_projection.v3'`); err != nil {
 		t.Fatal(err)
 	}
 	if n := saleCount(t, env.pool, "sync_events"); n != 2 {
@@ -54,7 +54,7 @@ func TestProjectionRebuildFromInbox(t *testing.T) {
 	// Processing states are processed again.
 	var processed int
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM sync_event_processing WHERE processor='sale_projection.v1' AND status='processed'`).Scan(&processed); err != nil || processed != 2 {
+		`SELECT count(*) FROM sync_event_processing WHERE processor='sale_projection.v3' AND status='processed'`).Scan(&processed); err != nil || processed != 2 {
 		t.Fatalf("want 2 processed, got %d (%v)", processed, err)
 	}
 }

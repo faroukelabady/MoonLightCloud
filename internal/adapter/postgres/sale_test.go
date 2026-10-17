@@ -20,22 +20,6 @@ import (
 
 func TestMain(m *testing.M) {
 	// Mirror app wiring: sale validation runs before ACK in this binary.
-	isync.RegisterEventType(sale.EventSaleFinalizedV1, func(raw json.RawMessage) error {
-		p, err := sale.Decode(raw)
-		if err != nil {
-			return err
-		}
-		_, err = sale.Validate(p)
-		return err
-	})
-	isync.RegisterEventType(sale.EventSaleFinalizedV2, func(raw json.RawMessage) error {
-		p, err := sale.DecodeV2(raw)
-		if err != nil {
-			return err
-		}
-		_, err = sale.ValidateV2(p)
-		return err
-	})
 	isync.RegisterEventType(sale.EventSaleFinalizedV3, func(raw json.RawMessage) error {
 		p, err := sale.DecodeV3(raw)
 		if err != nil {
@@ -172,7 +156,8 @@ func openSaleEnv(t *testing.T) *saleEnv {
 
 func (e *saleEnv) ingest(t *testing.T, eventID, payload string) isync.BatchResult {
 	t.Helper()
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	payload = withSaleTags(t, payload)
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		eventID, payload)
 	res, err := e.syncSvc.Ingest(context.Background(), e.devID, e.credID, []byte(body))
 	if err != nil {

@@ -73,15 +73,15 @@ def check(name, schema_name, instance, expect_valid=True):
 # Canonical fixtures match exactly one branch each.
 check("return_partial.json", "ReturnRefundFinalizedV1", load_fixture("internal/returnrefund/testdata/return_partial.json"))
 check("return_full.json", "ReturnRefundFinalizedV1", load_fixture("internal/returnrefund/testdata/return_full.json"))
-check("sale_usd.json", "SaleFinalizedV1", load_fixture("internal/sale/testdata/sale_usd.json"))
-check("sale_egp.json", "SaleFinalizedV1", load_fixture("internal/sale/testdata/sale_egp.json"))
+check("sale_usd.json", "SaleFinalizedV3", load_fixture("internal/sale/testdata/sale_usd.json"))
+check("sale_egp.json", "SaleFinalizedV3", load_fixture("internal/sale/testdata/sale_egp.json"))
 
 # Minimal Retail-valid shop (Arabic name only; English name and phone blank)
 # must validate for both events (R60 drift guard).
 minimal_sale = load_fixture("internal/sale/testdata/sale_egp.json")
 minimal_sale["shop"] = {"name_ar": "متجر", "name_en": "", "address_ar": "", "address_en": "",
                         "phone": "", "receipt_footer_ar": "", "receipt_footer_en": ""}
-check("minimal-shop sale", "SaleFinalizedV1", minimal_sale)
+check("minimal-shop sale", "SaleFinalizedV3", minimal_sale)
 minimal_ret = load_fixture("internal/returnrefund/testdata/return_full.json")
 minimal_ret["shop"] = dict(minimal_sale["shop"])
 check("minimal-shop return", "ReturnRefundFinalizedV1", minimal_ret)
@@ -97,7 +97,7 @@ sale_v2 = load_fixture("internal/sale/testdata/sale_usd.json")
 for line in sale_v2["lines"]:
     line["tags"] = [{"tag_id": "aaaaaaaa-0000-4000-8000-000000000001",
                      "slug": "horse", "name_ar": "حصان", "name_en": "Horse"}]
-check("sale_v2", "SaleFinalizedV2", sale_v2)
+check("sale_tagged", "SaleFinalizedV3", sale_v2)
 sale_v3 = copy.deepcopy(sale_v2)
 for line in sale_v3["lines"]:
     line["variant_id"] = "bbbbbbbb-0000-4000-8000-000000000001"
@@ -128,7 +128,7 @@ check("sync_event_union_sale_v3", "SyncEvent", sale_v3_envelope)
 check("sync_batch_sale_v3", "SyncBatch", {"events": [sale_v3_envelope]})
 bad_sale = load_fixture("internal/sale/testdata/sale_usd.json")
 bad_sale["lines"] = []
-check("empty-lines sale", "SaleFinalizedV1", bad_sale, expect_valid=False)
+check("empty-lines sale", "SaleFinalizedV3", bad_sale, expect_valid=False)
 bad_shop = load_fixture("internal/returnrefund/testdata/return_partial.json")
 bad_shop["shop"]["name_ar"] = ""
 check("blank-name_ar return", "ReturnRefundFinalizedV1", bad_shop, expect_valid=False)
@@ -160,7 +160,7 @@ ws_return["shop"] = {"name_ar": "   ", "name_en": "", "address_ar": "", "address
 check("whitespace-name_ar return", "ReturnRefundFinalizedV1", ws_return, expect_valid=False)
 ws_sale = load_fixture("internal/sale/testdata/sale_egp.json")
 ws_sale["shop"] = dict(ws_return["shop"])
-check("whitespace-name_ar sale", "SaleFinalizedV1", ws_sale, expect_valid=False)
+check("whitespace-name_ar sale", "SaleFinalizedV3", ws_sale, expect_valid=False)
 
 # Phase 4B: return-aware report responses validate against the additive
 # reporting schemas. The negative-net case is the load-bearing proof that

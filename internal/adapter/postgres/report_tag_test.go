@@ -16,7 +16,7 @@ import (
 
 // projectSaleV2 ingests a v2 sale payload (tags injected per line) and
 // projects it synchronously. Returns the event ID.
-func projectSaleV2(t *testing.T, env *saleEnv, saleID, occurred string, tags []map[string]any) string {
+func projectSaleWithTags(t *testing.T, env *saleEnv, saleID, occurred string, tags []map[string]any) string {
 	t.Helper()
 	saleEventSeq++
 	eventID := fmt.Sprintf("bbbbbbbb-bbbb-7bbb-8bbb-%012d", saleEventSeq)
@@ -39,7 +39,7 @@ func projectSaleV2(t *testing.T, env *saleEnv, saleID, occurred string, tags []m
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v2","occurred_at":%q,"payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":%q,"payload":%s}]}`,
 		eventID, occurred, payload)
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -49,7 +49,7 @@ func projectSaleV2(t *testing.T, env *saleEnv, saleID, occurred string, tags []m
 	if err != nil || !ok {
 		t.Fatalf("load event: %v %v", ok, err)
 	}
-	res, err := store.ProjectSaleV2(context.Background(), rec, time.Now())
+	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestReportTagBreakdownHistorical(t *testing.T) {
 	env := openSaleEnv(t)
 	horse := tagFixture("aaaaaaaa-0000-4000-8000-000000000001", "horse", "حصان", "Horse")
 	blue := tagFixture("aaaaaaaa-0000-4000-8000-000000000002", "blue", "أزرق", "Blue")
-	projectSaleV2(t, env, "aaaaaaaa-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", []map[string]any{horse, blue})
+	projectSaleWithTags(t, env, "aaaaaaaa-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", []map[string]any{horse, blue})
 	// v1 sale (unknown capture) in the same period.
 	projectSale(t, env, "aaaaaaaa-2222-4111-8111-222222222222", "2026-09-20T11:00:00Z", nil)
 

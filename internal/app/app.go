@@ -137,8 +137,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		clock.System{}, ids.System{},
 	)
 	a.Sync = sync.NewService(store, clock.System{})
-	sync.RegisterEventType(sale.EventSaleFinalizedV1, ValidateSalePayload)
-	sync.RegisterEventType(sale.EventSaleFinalizedV2, ValidateSaleV2Payload)
 	sync.RegisterEventType(sale.EventSaleFinalizedV3, ValidateSaleV3Payload)
 	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
 	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
@@ -403,30 +401,6 @@ func commerceOwner() string {
 	return "cloud-serve"
 }
 
-// ValidateSalePayload is the ingestion-time sale.finalized.v1 gate: decode
-// the canonical payload, run the strict validator. One authoritative
-// Decode+Validate shared with the projector's defensive re-check.
-func ValidateSalePayload(raw json.RawMessage) error {
-	p, err := sale.Decode(raw)
-	if err != nil {
-		return err
-	}
-	_, err = sale.Validate(p)
-	return err
-}
-
-// ValidateSaleV2Payload is the ingestion-time sale.finalized.v2 gate.
-// v1 events keep flowing through ValidateSalePayload with unknown tag
-// capture; v2 additionally freezes historical tag snapshots.
-func ValidateSaleV2Payload(raw json.RawMessage) error {
-	p, err := sale.DecodeV2(raw)
-	if err != nil {
-		return err
-	}
-	_, err = sale.ValidateV2(p)
-	return err
-}
-
 // ValidateSaleV3Payload is the ingestion-time sale.finalized.v3 gate
 // (Phase 17-R0): every v2 invariant plus the frozen per-line variant
 // snapshots (variant SKU, option attribute labels, sale-time pricing
@@ -589,7 +563,7 @@ func (a *App) ProjectOne(ctx context.Context, eventID string) (sale.ProjectResul
 	if !ok {
 		return sale.ProjectResult{}, fmt.Errorf("event %s not found", eventID)
 	}
-	return a.SaleStore.ProjectSale(ctx, rec, clock.System{}.Now())
+	return a.SaleStore.ProjectSaleV3(ctx, rec, clock.System{}.Now())
 }
 
 // notifyProjectors wakes both projectors after a durable ingestion. Scan

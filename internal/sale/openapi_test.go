@@ -20,17 +20,11 @@ func TestOpenAPIEventModel(t *testing.T) {
 	for _, want := range []string{
 		"discriminator:",
 		"propertyName: event_type",
-		"sale.finalized.v1: '#/components/schemas/SaleFinalizedV1Event'",
-		"sale.finalized.v2: '#/components/schemas/SaleFinalizedV2Event'",
 		"sale.finalized.v3: '#/components/schemas/SaleFinalizedV3Event'",
 		"system.test.v1: '#/components/schemas/SystemTestV1Event'",
-		"SaleFinalizedV1Event:",
-		"SaleFinalizedV2Event:",
 		"SaleFinalizedV3Event:",
 		"SaleLineTag:",
 		"SaleLineVariantAttribute:",
-		"enum: [sale.finalized.v1]",
-		"enum: [sale.finalized.v2]",
 		"enum: [sale.finalized.v3]",
 		"enum: [system.test.v1]",
 	} {
@@ -42,17 +36,17 @@ func TestOpenAPIEventModel(t *testing.T) {
 		t.Fatal("overlapping generic oneOf branch must be gone")
 	}
 
-	// Exactly one branch matches a real sale.finalized.v1 fixture: it
-	// decodes + validates as SaleFinalizedV1 and is not a SystemTest event.
+	// Exactly one branch matches a real sale fixture: it decodes +
+	// validates as SaleFinalizedV3 and is not a SystemTest event.
 	matches := 0
 	for _, name := range []string{"sale_usd.json", "sale_egp.json"} {
 		fix := loadFixture(t, name)
-		p, err := Decode(fix)
+		p, err := DecodeV3(fix)
 		if err != nil {
-			t.Fatalf("%s: must decode as SaleFinalizedV1: %v", name, err)
+			t.Fatalf("%s: must decode as SaleFinalizedV3: %v", name, err)
 		}
-		if _, err := Validate(p); err != nil {
-			t.Fatalf("%s: must validate as SaleFinalizedV1: %v", name, err)
+		if _, err := ValidateV3(p); err != nil {
+			t.Fatalf("%s: must validate as SaleFinalizedV3: %v", name, err)
 		}
 		var m map[string]any
 		if err := json.Unmarshal(fix, &m); err != nil {
@@ -62,20 +56,20 @@ func TestOpenAPIEventModel(t *testing.T) {
 		_ = m
 	}
 	if matches != 2 {
-		t.Fatal("both sale fixtures must match the SaleFinalizedV1 branch")
+		t.Fatal("both sale fixtures must match the SaleFinalizedV3 branch")
 	}
 	// A malformed Sale (no roots) is rejected by the modeled contract.
 	bad := mutate(t, loadFixture(t, "sale_usd.json"), func(m map[string]any) {
 		m["lines"].([]any)[0].(map[string]any)["classifications"].(map[string]any)["roots"] = []any{}
 	})
-	if p, err := Decode(bad); err == nil {
-		if _, err := Validate(p); err == nil {
+	if p, err := DecodeV3(bad); err == nil {
+		if _, err := ValidateV3(p); err == nil {
 			t.Fatal("malformed Sale must be rejected by the modeled contract")
 		}
 	}
-	// system.test.v1 diagnostics do not validate as SaleFinalizedV1.
-	if p, err := Decode(json.RawMessage(`{"ping":1}`)); err == nil {
-		if _, err := Validate(p); err == nil {
+	// system.test.v1 diagnostics do not validate as SaleFinalizedV3.
+	if p, err := DecodeV3(json.RawMessage(`{"ping":1}`)); err == nil {
+		if _, err := ValidateV3(p); err == nil {
 			t.Fatal("system.test payload must not match the Sale branch")
 		}
 	}

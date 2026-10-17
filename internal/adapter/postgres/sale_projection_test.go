@@ -103,7 +103,7 @@ func TestSaleEndToEndUSD(t *testing.T) {
 		t.Fatalf("processing status: %q (%v)", status, err)
 	}
 	// Operator stats must survive NULL error columns (regression).
-	stats, err := NewDevices(env.pool, 5*time.Second).ProcessingStats(context.Background(), "sale_projection.v1")
+	stats, err := NewDevices(env.pool, 5*time.Second).ProcessingStats(context.Background(), "sale_projection.v3")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestTransportDuplicateOneSale(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	if _, err := NewDevices(env.pool, 5*time.Second).ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := NewDevices(env.pool, 5*time.Second).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	for table, n := range before {
@@ -179,7 +179,7 @@ func TestConcurrentDuplicateTransportOneSale(t *testing.T) {
 	env := openSaleEnv(t)
 	eventID := "22222222-2222-7222-8222-222222222222"
 	payload := fixture(t, "sale_egp.json")
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		eventID, payload)
 	var wg sync.WaitGroup
 	errs := make([]error, 6)
@@ -214,7 +214,7 @@ func TestInvalidSaleRejectsWholeBatch(t *testing.T) {
 	}
 	m["totals"].(map[string]any)["total"].(map[string]any)["amount_minor"] = 1
 	raw, _ := json.Marshal(m)
-	body := fmt.Sprintf(`{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v1","occurred_at":"2026-09-20T11:00:00Z","payload":%s}]}`, raw)
+	body := fmt.Sprintf(`{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v3","occurred_at":"2026-09-20T11:00:00Z","payload":%s}]}`, raw)
 	_, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
 	if err == nil {
 		t.Fatal("invalid sale must reject the batch")

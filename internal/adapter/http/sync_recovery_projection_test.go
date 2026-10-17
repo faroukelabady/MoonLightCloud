@@ -55,7 +55,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	if err := recovery.MarkRestoreRequired(ctx, []string{created.Device.ID}, "restore regression"); err != nil {
 		t.Fatal(err)
 	}
-	syncsvc.RegisterEventType(sale.EventSaleFinalizedV1, func(raw json.RawMessage) error {
+	syncsvc.RegisterEventType(sale.EventSaleFinalizedV3, func(raw json.RawMessage) error {
 		payload, err := sale.Decode(raw)
 		if err != nil {
 			return err
@@ -111,7 +111,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	}
 	eventID := "a1111111-1111-4111-8111-111111111111"
 	batch := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":%q,"occurred_at":"2026-09-20T11:00:00Z","payload":%s}]}`,
-		eventID, sale.EventSaleFinalizedV1, payload)
+		eventID, sale.EventSaleFinalizedV3, payload)
 	code, body := request(http.MethodPost, "/api/v1/sync/batches", batch)
 	if code != http.StatusOK {
 		t.Fatalf("sale ingestion HTTP %d: %s", code, body)
@@ -119,7 +119,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	assertStatus := func(want string) {
 		t.Helper()
 		var exists bool
-		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v1')`, eventID).Scan(&exists); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v3')`, eventID).Scan(&exists); err != nil {
 			t.Fatal(err)
 		}
 		if !exists {
@@ -130,7 +130,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 			return
 		}
 		var state string
-		if err := pool.QueryRow(ctx, `SELECT status FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v1'`, eventID).Scan(&state); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT status FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v3'`, eventID).Scan(&state); err != nil {
 			t.Fatalf("read sale processor status: %v", err)
 		}
 		if state != want {
@@ -143,17 +143,17 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 		readStatus(pending, false)
 	}
 	assertStatus("<absent>")
-	if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing(event_id,processor,status) VALUES($1,'sale_projection.v1','pending')`, eventID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_event_processing(event_id,processor,status) VALUES($1,'sale_projection.v3','pending')`, eventID); err != nil {
 		t.Fatal(err)
 	}
 	assertStatus("pending")
 	for _, state := range []string{"retry", "blocked"} {
-		if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status=$1 WHERE event_id=$2 AND processor='sale_projection.v1'`, state, eventID); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status=$1 WHERE event_id=$2 AND processor='sale_projection.v3'`, state, eventID); err != nil {
 			t.Fatal(err)
 		}
 		assertStatus(state)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='pending',last_error_code=NULL WHERE event_id=$1 AND processor='sale_projection.v1'`, eventID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='pending',last_error_code=NULL WHERE event_id=$1 AND processor='sale_projection.v3'`, eventID); err != nil {
 		t.Fatal(err)
 	}
 	projector := sale.NewProjector(devices, clock.System{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -164,7 +164,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var state string
-		if err := pool.QueryRow(ctx, `SELECT status FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v1'`, eventID).Scan(&state); err == nil && state == "processed" {
+		if err := pool.QueryRow(ctx, `SELECT status FROM sync_event_processing WHERE event_id=$1 AND processor='sale_projection.v3'`, eventID).Scan(&state); err == nil && state == "processed" {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

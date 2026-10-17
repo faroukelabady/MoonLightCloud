@@ -165,13 +165,9 @@ GROUP BY s.channel, s.currency;
 
 -- name: ReportFreshness :one
 WITH sale_events AS (
-    SELECT event_id, received_at,
-        CASE event_type
-            WHEN 'sale.finalized.v1' THEN 'sale_projection.v1'
-            WHEN 'sale.finalized.v2' THEN 'sale_projection.v2'
-        END AS processor
+    SELECT event_id, received_at, 'sale_projection.v3'::text AS processor
     FROM sync_events
-    WHERE event_type IN ('sale.finalized.v1', 'sale.finalized.v2')
+    WHERE event_type = 'sale.finalized.v3'
 )
 SELECT
     (SELECT max(received_at)::timestamptz FROM sale_events) AS latest_received,

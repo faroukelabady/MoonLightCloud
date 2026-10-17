@@ -75,8 +75,8 @@ func TestRunServerCleanShutdown(t *testing.T) {
 // sale processors, which were missing from the registry.)
 func TestProjectionProcessorRegistry(t *testing.T) {
 	processors := allProjectionProcessors()
-	if len(processors) != 13 {
-		t.Fatalf("want 13 processors, got %d: %v", len(processors), processors)
+	if len(processors) != 11 {
+		t.Fatalf("want 11 processors, got %d: %v", len(processors), processors)
 	}
 	seen := map[string]bool{}
 	for _, processor := range processors {
@@ -89,7 +89,6 @@ func TestProjectionProcessorRegistry(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"sale_projection.v2",
 		"sale_projection.v3",
 		"catalog_product_sales_policy_projection.v1",
 		"inventory_product_projection.v1",

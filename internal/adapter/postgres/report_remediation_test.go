@@ -137,6 +137,7 @@ func TestH4ExtendedCost(t *testing.T) {
 				"unit_price": map[string]any{"amount_minor": 30000, "currency": "EGP"},
 				"cost":       map[string]any{"amount_minor": 20000, "currency": "EGP"},
 				"line_total": map[string]any{"amount_minor": 60000, "currency": "EGP"},
+				"tags":       []any{},
 				"classifications": map[string]any{
 					"roots": []any{map[string]any{
 						"category_id": "00000000-0000-0000-0000-000000000102",
@@ -207,14 +208,14 @@ func TestH4PerLineOverflow(t *testing.T) {
 	payload, _ := json.Marshal(m)
 	saleEventSeq++
 	eventID := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		eventID, payload)
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
 	rec, _, _ := store.LoadSaleEvent(context.Background(), eventID)
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project: %v", err)
 	}
 	svc := repService(env)

@@ -101,7 +101,7 @@ func TestBlockedProjectionKeepsHealth(t *testing.T) {
 	eventID := "22222222-2222-7222-8222-222222222222"
 	if _, err := a.Pool.Exec(ctx, `
 		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v1', now(), now(), '{}', '\x00')`,
+		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00')`,
 		eventID, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}

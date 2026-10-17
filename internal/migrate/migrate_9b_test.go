@@ -32,8 +32,8 @@ func TestV22To23PreservesBusinessValues(t *testing.T) {
 		VALUES ('11111111-1111-4111-8111-111111111111', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')`)
 	// Legacy NULL event + scoped Store A event.
 	exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash) VALUES
-		('aaaaaaaa-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'sale.finalized.v1', now(), '{"sale_id":"aaaaaaaa-0000-4000-8000-0000000000a1"}', '\x00'),
-		('aaaaaaaa-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'sale.finalized.v1', now(), '{"sale_id":"aaaaaaaa-0000-4000-8000-0000000000a2"}', '\x00')`)
+		('aaaaaaaa-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'sale.finalized.v3', now(), '{"sale_id":"aaaaaaaa-0000-4000-8000-0000000000a1"}', '\x00'),
+		('aaaaaaaa-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'sale.finalized.v3', now(), '{"sale_id":"aaaaaaaa-0000-4000-8000-0000000000a2"}', '\x00')`)
 	exec(`UPDATE sync_events SET store_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 		WHERE event_id = 'aaaaaaaa-0000-4000-8000-000000000002'`)
 	// Legacy catalog/inventory/policy rows.

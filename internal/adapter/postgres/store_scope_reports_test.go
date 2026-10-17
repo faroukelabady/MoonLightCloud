@@ -27,9 +27,9 @@ func scopeSalesFixture(t *testing.T, f *scopeFixture) (saleA, saleB, saleLegacy 
 	saleA = "aaaaaaaa-0000-4000-8000-0000000000d1"
 	saleB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbd1"
 	saleLegacy = "cccccccc-cccc-4ccc-8ccc-ccccccccccd1"
-	f.ingest(t, f.devA, f.credA, "e0000250-0000-4000-8000-000000000001", "sale.finalized.v1", scopedSalePayload(t, saleA))
-	f.ingest(t, f.devB, f.credB, "e0000250-0000-4000-8000-000000000002", "sale.finalized.v1", scaledSalePayload(t, saleB, 2))
-	f.ingest(t, f.devC, f.credC, "e0000250-0000-4000-8000-000000000003", "sale.finalized.v1", scopedSalePayload(t, saleLegacy))
+	f.ingest(t, f.devA, f.credA, "e0000250-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleA))
+	f.ingest(t, f.devB, f.credB, "e0000250-0000-4000-8000-000000000002", "sale.finalized.v3", scaledSalePayload(t, saleB, 2))
+	f.ingest(t, f.devC, f.credC, "e0000250-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleLegacy))
 	for _, event := range []string{
 		"e0000250-0000-4000-8000-000000000001", "e0000250-0000-4000-8000-000000000002", "e0000250-0000-4000-8000-000000000003",
 	} {
@@ -104,7 +104,7 @@ func TestScope_ReportIsolation(t *testing.T) {
 func TestScope_TagReportIsolation(t *testing.T) {
 	f := openScopeFixture(t)
 	mkV2 := func(saleID, tagID string) string {
-		raw := v2Fixture(t, nil)
+		raw := taggedSaleFixture(t, nil)
 		var m map[string]any
 		if err := json.Unmarshal([]byte(raw), &m); err != nil {
 			t.Fatal(err)
@@ -122,12 +122,12 @@ func TestScope_TagReportIsolation(t *testing.T) {
 		return string(out)
 	}
 	tagA, tagB := "aaaaaaaa-0000-4000-8000-0000000000e1", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbe1"
-	f.ingest(t, f.devA, f.credA, "e0000251-0000-4000-8000-000000000001", "sale.finalized.v2", mkV2("aaaaaaaa-0000-4000-8000-0000000000e2", tagA))
-	f.ingest(t, f.devB, f.credB, "e0000251-0000-4000-8000-000000000002", "sale.finalized.v2", mkV2("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbe2", tagB))
+	f.ingest(t, f.devA, f.credA, "e0000251-0000-4000-8000-000000000001", "sale.finalized.v3", mkV2("aaaaaaaa-0000-4000-8000-0000000000e2", tagA))
+	f.ingest(t, f.devB, f.credB, "e0000251-0000-4000-8000-000000000002", "sale.finalized.v3", mkV2("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbe2", tagB))
 	for _, event := range []string{
 		"e0000251-0000-4000-8000-000000000001", "e0000251-0000-4000-8000-000000000002",
 	} {
-		if res := f.projectSaleV2(t, event); res.Outcome != sale.OutcomeProcessed {
+		if res := f.projectSaleV3(t, event); res.Outcome != sale.OutcomeProcessed {
 			t.Fatalf("v2 %s: %+v", event, res)
 		}
 	}
@@ -165,7 +165,7 @@ func TestScope_MoneyExactness(t *testing.T) {
 	f := openScopeFixture(t)
 	const big = int64(9007199254740993)
 	saleID := "aaaaaaaa-0000-4000-8000-0000000000f1"
-	f.ingest(t, f.devA, f.credA, "e0000252-0000-4000-8000-000000000001", "sale.finalized.v1", bigSalePayload(t, saleID))
+	f.ingest(t, f.devA, f.credA, "e0000252-0000-4000-8000-000000000001", "sale.finalized.v3", bigSalePayload(t, saleID))
 	if res := f.projectSale(t, "e0000252-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("big sale: %+v", res)
 	}
@@ -342,7 +342,7 @@ func TestScope_ConcurrentAdoptionRace(t *testing.T) {
 func TestScope_ConcurrentCrossStoreReturn(t *testing.T) {
 	f := openScopeFixture(t)
 	salePayload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000b1")
-	f.ingest(t, f.devA, f.credA, "e0000290-0000-4000-8000-000000000001", "sale.finalized.v1", salePayload)
+	f.ingest(t, f.devA, f.credA, "e0000290-0000-4000-8000-000000000001", "sale.finalized.v3", salePayload)
 	if res := f.projectSale(t, "e0000290-0000-4000-8000-000000000001"); res.Outcome != 1 {
 		t.Fatalf("sale: %+v", res)
 	}
@@ -530,12 +530,12 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 	}
 	syncSvc := isyncNewService(t, devices)
 	payload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000c1")
-	ingestScoped(t, syncSvc, p.Device.ID, p.Credential.ID, "e0000340-0000-4000-8000-000000000001", "sale.finalized.v1", payload)
+	ingestScoped(t, syncSvc, p.Device.ID, p.Credential.ID, "e0000340-0000-4000-8000-000000000001", "sale.finalized.v3", payload)
 	rec, ok, err := devices.LoadSaleEvent(ctx, "e0000340-0000-4000-8000-000000000001")
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
-	if res, err := devices.ProjectSale(ctx, rec, time.Now()); err != nil || res.Outcome != sale.OutcomeProcessed {
+	if res, err := devices.ProjectSaleV3(ctx, rec, time.Now()); err != nil || res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale: %+v %v", res, err)
 	}
 	var before *string

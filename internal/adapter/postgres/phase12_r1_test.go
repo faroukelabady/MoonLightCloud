@@ -123,7 +123,7 @@ func TestPhase12R1TagTiePlans(t *testing.T) {
 	env := openSaleEnv(t)
 	tagA := tagFixture("ffffffff-ffff-4fff-8fff-ffffffffffff", "tie-a", "متعادل", "Same")
 	tagB := tagFixture("00000000-0000-4000-8000-000000000001", "tie-b", "متعادل", "Same")
-	projectSaleV2(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-21T10:00:00Z", []map[string]any{tagA, tagB})
+	projectSaleWithTags(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-21T10:00:00Z", []map[string]any{tagA, tagB})
 	ctx := context.Background()
 	cfg := env.pool.Config().Copy()
 	cfg.MaxConns = 1
@@ -391,7 +391,7 @@ func TestPhase12R1TopNRepresentativePerformance(t *testing.T) {
 		tags[i] = tagFixture(fmt.Sprintf("10000000-0000-4000-8000-%012d", i+1), fmt.Sprintf("tag-%02d", i), "وسم", fmt.Sprintf("Tag %02d", i))
 	}
 	for i := 0; i < 300; i++ {
-		projectSaleV2(t, env, fmt.Sprintf("20000000-0000-4000-8000-%012d", i+1), "2026-09-21T10:00:00Z", tags)
+		projectSaleWithTags(t, env, fmt.Sprintf("20000000-0000-4000-8000-%012d", i+1), "2026-09-21T10:00:00Z", tags)
 	}
 	ctx := context.Background()
 	d := NewDevices(env.pool, 5*time.Second)

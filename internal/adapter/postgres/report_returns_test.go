@@ -110,14 +110,14 @@ func returnScenario(t *testing.T, env *saleEnv) {
 	// Sale B: USD fixture (own sale_id 1111...), full return at 52.0.
 	saleEventSeq++
 	usdEvent := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
-	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+	usdBody := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 		usdEvent, fixture(t, "sale_usd.json"))
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(usdBody)); err != nil {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
 	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 	projectReturnSync(t, env,
@@ -508,7 +508,7 @@ func TestReportUSDNetRanking(t *testing.T) {
 		payload, _ := json.Marshal(m)
 		saleEventSeq++
 		eventID := fmt.Sprintf("aaaaaaaa-aaaa-7aaa-8aaa-%012d", saleEventSeq)
-		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 			eventID, payload)
 		if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 			t.Fatalf("ingest usd: %v", err)
@@ -518,7 +518,7 @@ func TestReportUSDNetRanking(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("load usd: %v %v", ok, err)
 		}
-		if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+		if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 			t.Fatalf("project usd: %v", err)
 		}
 	}

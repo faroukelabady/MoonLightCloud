@@ -51,7 +51,7 @@ func dashReq(t *testing.T, env *dashEnv, kind, from, to string) report.Request {
 // projectDashSale ingests a payload string and projects it synchronously.
 func projectDashSale(t *testing.T, env *dashEnv, eventID, occurred, payload string) {
 	t.Helper()
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":%q,"payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":%q,"payload":%s}]}`,
 		eventID, occurred, payload)
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -61,7 +61,7 @@ func projectDashSale(t *testing.T, env *dashEnv, eventID, occurred, payload stri
 	if err != nil || !ok {
 		t.Fatalf("load: %v %v", ok, err)
 	}
-	if _, err := store.ProjectSale(context.Background(), rec, time.Now()); err != nil {
+	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func TestDashboardMissingFxFailsLoudly(t *testing.T) {
 	ctx := context.Background()
 	if _, err := env.pool.Exec(ctx, `
 		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ('22222222-2222-7222-8222-222222222222', $1, 'sale.finalized.v1', '2026-09-22T10:00:00Z', now(), '{}', '\x00')`,
+		VALUES ('22222222-2222-7222-8222-222222222222', $1, 'sale.finalized.v3', '2026-09-22T10:00:00Z', now(), '{}', '\x00')`,
 		env.devID); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}

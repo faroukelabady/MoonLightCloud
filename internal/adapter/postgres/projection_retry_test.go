@@ -24,7 +24,7 @@ func TestManualRetryDiscoverability(t *testing.T) {
 	// Force states: blocked (deterministic) and retry (future due).
 	if _, err := env.pool.Exec(ctx,
 		`INSERT INTO sync_event_processing (event_id, processor, status, attempt_count, last_error_code)
-		 VALUES ($1,'sale_projection.v1','blocked',1,'SALE_ID_CONFLICT'),($2,'sale_projection.v1','retry',3,'PROJECTION_FAILED')`,
+		 VALUES ($1,'sale_projection.v3','blocked',1,'SALE_ID_CONFLICT'),($2,'sale_projection.v3','retry',3,'PROJECTION_FAILED')`,
 		blockedID, retryID); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestManualRetryDiscoverability(t *testing.T) {
 	}
 
 	// Blocked is not discoverable (no hot-loop); future retry is not due.
-	due, err := store.PendingSaleEvents(ctx, sale.ProcessorSaleProjectionV1, 25)
+	due, err := store.PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,10 +45,10 @@ func TestManualRetryDiscoverability(t *testing.T) {
 	}
 
 	// Manual retry both.
-	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV1, blockedID); err != nil {
+	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, blockedID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV1, retryID); err != nil {
+	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, retryID); err != nil {
 		t.Fatal(err)
 	}
 	var status string
@@ -62,7 +62,7 @@ func TestManualRetryDiscoverability(t *testing.T) {
 			t.Fatalf("%s: want pending/NULL, got %q/%v", id, status, next)
 		}
 	}
-	due, err = store.PendingSaleEvents(ctx, sale.ProcessorSaleProjectionV1, 25)
+	due, err = store.PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 	env.ingest(t, missingID, payload)
 	store := NewDevices(env.pool, 5*time.Second)
 	ctx := context.Background()
-	due, err := store.PendingSaleEvents(ctx, sale.ProcessorSaleProjectionV1, 25)
+	due, err := store.PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,10 +98,10 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 	}
 	// Claim as pending explicitly: still discoverable.
 	if _, err := env.pool.Exec(ctx,
-		`INSERT INTO sync_event_processing (event_id, processor, status) VALUES ($1,'sale_projection.v1','pending')`, missingID); err != nil {
+		`INSERT INTO sync_event_processing (event_id, processor, status) VALUES ($1,'sale_projection.v3','pending')`, missingID); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingSaleEvents(ctx, sale.ProcessorSaleProjectionV1, 25)
+	due, err = store.PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 		`UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, missingID); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingSaleEvents(ctx, sale.ProcessorSaleProjectionV1, 25)
+	due, err = store.PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}

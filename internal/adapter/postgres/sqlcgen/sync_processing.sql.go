@@ -140,88 +140,6 @@ func (q *Queries) OldestPendingAge(ctx context.Context, processor string) (Oldes
 	return i, err
 }
 
-const pendingSaleEvents = `-- name: PendingSaleEvents :many
-SELECT e.event_id
-FROM sync_events e
-LEFT JOIN sync_event_processing p
-  ON p.event_id = e.event_id AND p.processor = $1
-WHERE e.event_type = 'sale.finalized.v1'
-  AND (p.event_id IS NULL
-       OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
-ORDER BY e.received_at
-LIMIT $2
-`
-
-type PendingSaleEventsParams struct {
-	Processor string `json:"processor"`
-	Limit     int32  `json:"limit"`
-}
-
-// Durable discovery: accepted sale events with no processing row (missing),
-// a pending row, or a due retry. Blocked and processed rows are never
-// returned; retry rows are returned only when next_attempt_at <= now (NULL
-// counts as due). Survivor of restarts; no in-memory signal required.
-func (q *Queries) PendingSaleEvents(ctx context.Context, arg PendingSaleEventsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, pendingSaleEvents, arg.Processor, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var event_id pgtype.UUID
-		if err := rows.Scan(&event_id); err != nil {
-			return nil, err
-		}
-		items = append(items, event_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const pendingSaleV2Events = `-- name: PendingSaleV2Events :many
-SELECT e.event_id
-FROM sync_events e
-LEFT JOIN sync_event_processing p
-  ON p.event_id = e.event_id AND p.processor = $1
-WHERE e.event_type = 'sale.finalized.v2'
-  AND (p.event_id IS NULL
-       OR p.status = 'pending'
-       OR (p.status = 'retry' AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= now())))
-ORDER BY e.received_at
-LIMIT $2
-`
-
-type PendingSaleV2EventsParams struct {
-	Processor string `json:"processor"`
-	Limit     int32  `json:"limit"`
-}
-
-// Durable discovery for sale.finalized.v2 under the v2 processor. v1 rows
-// are never returned here; the v1 processor owns them independently.
-func (q *Queries) PendingSaleV2Events(ctx context.Context, arg PendingSaleV2EventsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, pendingSaleV2Events, arg.Processor, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []pgtype.UUID{}
-	for rows.Next() {
-		var event_id pgtype.UUID
-		if err := rows.Scan(&event_id); err != nil {
-			return nil, err
-		}
-		items = append(items, event_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const pendingSaleV3Events = `-- name: PendingSaleV3Events :many
 SELECT e.event_id
 FROM sync_events e
@@ -240,10 +158,10 @@ type PendingSaleV3EventsParams struct {
 	Limit     int32  `json:"limit"`
 }
 
-// Durable discovery for sale.finalized.v3 under the v3 processor (Phase
-// 17-R0: per-line frozen variant snapshots). v1/v2 rows are never returned
-// here; their processors own them independently. All three versions stay
-// fully supported.
+// Durable discovery: accepted sale.finalized.v3 events with no processing
+// row (missing), a pending row, or a due retry. Blocked and processed rows
+// are never returned; retry rows are returned only when next_attempt_at <=
+// now (NULL counts as due). v3 is the only accepted sale version (ADR-0055).
 func (q *Queries) PendingSaleV3Events(ctx context.Context, arg PendingSaleV3EventsParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, pendingSaleV3Events, arg.Processor, arg.Limit)
 	if err != nil {

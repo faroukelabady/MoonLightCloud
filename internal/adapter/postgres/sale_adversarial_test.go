@@ -80,7 +80,7 @@ func TestAdversarialSaleInputs(t *testing.T) {
 		} else {
 			_, payload = mk(tc.id, tc.fn)
 		}
-		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
 			tc.id, payload)
 		before := saleCount(t, env.pool, "sync_events")
 		_, err := env.syncSvc.Ingest(ctx, env.devID, env.credID, []byte(body))
@@ -108,8 +108,8 @@ func TestAdversarialSaleInputs(t *testing.T) {
 		pay  string
 	}{
 		{"changed type", "system.test.v1", "2026-09-20T10:00:00Z", fixture(t, "sale_egp.json")},
-		{"changed occurred_at", "sale.finalized.v1", "2026-09-21T10:00:00Z", fixture(t, "sale_egp.json")},
-		{"large-number variation", "sale.finalized.v1", "2026-09-20T10:00:00Z", bigVariant(t)},
+		{"changed occurred_at", "sale.finalized.v3", "2026-09-21T10:00:00Z", fixture(t, "sale_egp.json")},
+		{"large-number variation", "sale.finalized.v3", "2026-09-20T10:00:00Z", bigVariant(t)},
 	}
 	for _, m := range mutations {
 		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":%q,"occurred_at":%q,"payload":%s}]}`,

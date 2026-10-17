@@ -1011,7 +1011,7 @@ func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 	if err != nil {
 		return SyncHealthItem{}, err
 	}
-	stats, err := s.saleStore.ProcessingStats(ctx, sale.ProcessorSaleProjectionV1)
+	stats, err := s.saleStore.ProcessingStats(ctx, sale.ProcessorSaleProjectionV3)
 	if err != nil {
 		return SyncHealthItem{}, err
 	}

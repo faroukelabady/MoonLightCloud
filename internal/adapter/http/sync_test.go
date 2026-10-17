@@ -130,7 +130,7 @@ func TestSyncBodyTooLarge(t *testing.T) {
 
 func TestSyncCapabilitiesAdvertisesSale(t *testing.T) {
 	// Mirror app wiring: registration advertises the type + limits.
-	sync.RegisterEventType("sale.finalized.v1", func(json.RawMessage) error { return nil })
+	sync.RegisterEventType("sale.finalized.v3", func(json.RawMessage) error { return nil })
 	h, token := syncTestSetup(t)
 	req := httptest.NewRequest("GET", "/api/v1/sync/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -151,7 +151,7 @@ func TestSyncCapabilitiesAdvertisesSale(t *testing.T) {
 	}
 	found := false
 	for _, e := range caps.SupportedEvents {
-		if e == "sale.finalized.v1" {
+		if e == "sale.finalized.v3" {
 			found = true
 		}
 	}

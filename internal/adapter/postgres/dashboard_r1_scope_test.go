@@ -56,9 +56,9 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 	prodB := "bbbbbbbb-1111-4111-8111-0000000000b1"
 	prodL := "cccccccc-1111-4111-8111-0000000000c1"
 
-	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000001", "sale.finalized.v1", saleWithProduct(t, saleA, prodA, "NR1", "NR A"))
-	f.ingest(t, f.devB, f.credB, "e0000700-0000-4000-8000-000000000002", "sale.finalized.v1", saleWithProduct(t, saleB, prodB, "NR1", "NR B"))
-	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000003", "sale.finalized.v1", saleWithProduct(t, saleL, prodL, "NRLEG", "NR Leg"))
+	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000001", "sale.finalized.v3", saleWithProduct(t, saleA, prodA, "NR1", "NR A"))
+	f.ingest(t, f.devB, f.credB, "e0000700-0000-4000-8000-000000000002", "sale.finalized.v3", saleWithProduct(t, saleB, prodB, "NR1", "NR B"))
+	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000003", "sale.finalized.v3", saleWithProduct(t, saleL, prodL, "NRLEG", "NR Leg"))
 	for _, event := range []string{
 		"e0000700-0000-4000-8000-000000000001", "e0000700-0000-4000-8000-000000000002", "e0000700-0000-4000-8000-000000000003",
 	} {
@@ -115,8 +115,8 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 	// Same product ID with a legacy sale and a Store A sale: the global
 	// group is mixed ownership and must not claim a Store badge.
 	prodM := "dddddddd-1111-4111-8111-0000000000d1"
-	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000004", "sale.finalized.v1", saleWithProduct(t, "cccccccc-0000-4000-8000-0000000000d2", prodM, "NRMIX", "NR Mix"))
-	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000005", "sale.finalized.v1", saleWithProduct(t, "aaaaaaaa-0000-4000-8000-0000000000d3", prodM, "NRMIX", "NR Mix"))
+	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000004", "sale.finalized.v3", saleWithProduct(t, "cccccccc-0000-4000-8000-0000000000d2", prodM, "NRMIX", "NR Mix"))
+	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000005", "sale.finalized.v3", saleWithProduct(t, "aaaaaaaa-0000-4000-8000-0000000000d3", prodM, "NRMIX", "NR Mix"))
 	for _, event := range []string{"e0000700-0000-4000-8000-000000000004", "e0000700-0000-4000-8000-000000000005"} {
 		if res := f.projectSale(t, event); res.Outcome != 1 {
 			t.Fatalf("mixed sale %s: %+v", event, res)
@@ -143,7 +143,7 @@ func TestDashboardNormalizedRefundsScopeIdentity(t *testing.T) {
 	saleA := "aaaaaaaa-0000-4000-8000-0000000000e1"
 	prodA := "aaaaaaaa-2222-4222-8222-0000000000a2"
 	payload := saleWithProduct(t, saleA, prodA, "NRREF", "NR Ref")
-	f.ingest(t, f.devA, f.credA, "e0000710-0000-4000-8000-000000000001", "sale.finalized.v1", payload)
+	f.ingest(t, f.devA, f.credA, "e0000710-0000-4000-8000-000000000001", "sale.finalized.v3", payload)
 	if res := f.projectSale(t, "e0000710-0000-4000-8000-000000000001"); res.Outcome != 1 {
 		t.Fatalf("sale: %+v", res)
 	}
@@ -191,7 +191,7 @@ func storeOfProductRaw(rows []dashboard.NormalizedRefundProductRowRaw, id string
 func TestDashboardNormalizedExactMoneyAbove53(t *testing.T) {
 	f := openScopeFixture(t)
 	const big = int64(9007199254740993)
-	f.ingest(t, f.devA, f.credA, "e0000720-0000-4000-8000-000000000001", "sale.finalized.v1", bigSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000f1"))
+	f.ingest(t, f.devA, f.credA, "e0000720-0000-4000-8000-000000000001", "sale.finalized.v3", bigSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000f1"))
 	if res := f.projectSale(t, "e0000720-0000-4000-8000-000000000001"); res.Outcome != 1 {
 		t.Fatalf("big sale: %+v", res)
 	}

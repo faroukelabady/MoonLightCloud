@@ -98,7 +98,7 @@ func TestExistingProjectionsMigrateOwnership(t *testing.T) {
 	exec(`INSERT INTO devices (id, name, status) VALUES ($1,'shop','active')`, dev)
 	for _, e := range []string{e1, e2} {
 		exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-			VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e, dev)
+			VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, e, dev)
 	}
 	exec(`INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel,
 		occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone,
@@ -106,7 +106,7 @@ func TestExistingProjectionsMigrateOwnership(t *testing.T) {
 		VALUES ($1,$2,$3,'MLR-1','STORE',now(),now(),'a','b','c','d','e','f','g','EGP',1,0,0,1,now())`,
 		saleID, e1, dev)
 	exec(`INSERT INTO sync_event_processing (event_id, processor, status, last_error_code)
-		VALUES ($1,'sale_projection.v1','processed',NULL),($2,'sale_projection.v1','blocked','SALE_ID_CONFLICT')`, e1, e2)
+		VALUES ($1,'sale_projection.v3','processed',NULL),($2,'sale_projection.v3','blocked','SALE_ID_CONFLICT')`, e1, e2)
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestDownOwnershipPolicy(t *testing.T) {
 	}
 	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		 VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e1, dev); err != nil {
+		 VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, e1, dev); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.ExecContext(ctx,
@@ -309,7 +309,7 @@ func TestV12ToLatest(t *testing.T) {
 		t.Fatalf("seed device at v12: %v", err)
 	}
 	if _, err := conn.Exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v1',now(),now(),'{}','\x00')`); err != nil {
+		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v3',now(),now(),'{}','\x00')`); err != nil {
 		t.Fatalf("seed event at v12: %v", err)
 	}
 	if err := migrate.Up(ctx, conn); err != nil {
@@ -371,7 +371,7 @@ func TestV13ToLatest(t *testing.T) {
 	exec(`INSERT INTO devices (id, name, status) VALUES ($1,'shop','active')`, dev)
 	for _, e := range []string{eSale, eReturn, eCatalog} {
 		exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-			VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e, dev)
+			VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, e, dev)
 	}
 	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ($1,'active','ورق',1,$2,$3,'\x00',now())`, catID, eCatalog, dev)
@@ -493,7 +493,7 @@ func TestV14ToLatest(t *testing.T) {
 		t.Fatalf("seed device at v14: %v", err)
 	}
 	if _, err := conn.Exec(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v1',now(),now(),'{}','\x00')`); err != nil {
+		VALUES ('22222222-2222-7222-8222-222222222222','11111111-1111-7111-8111-111111111111','sale.finalized.v3',now(),now(),'{}','\x00')`); err != nil {
 		t.Fatalf("seed event at v14: %v", err)
 	}
 	if err := migrate.Up(ctx, conn); err != nil {
@@ -618,7 +618,7 @@ func TestV20To21PreservesSales(t *testing.T) {
 	}
 	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		 VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e1, dev); err != nil {
+		 VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, e1, dev); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.ExecContext(ctx,
@@ -667,7 +667,7 @@ func TestV21To22PreservesEverything(t *testing.T) {
 	}
 	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		 VALUES ($1,$2,'sale.finalized.v1',now(),now(),'{}','\x00')`, e1, dev); err != nil {
+		 VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, e1, dev); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.ExecContext(ctx,

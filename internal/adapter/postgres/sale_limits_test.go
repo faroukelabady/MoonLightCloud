@@ -27,6 +27,7 @@ func bigSale(t *testing.T, n int, nameRepeat int) string {
 			"unit_price": money{"amount_minor": 1300, "currency": "EGP"},
 			"cost":       money{"amount_minor": 400, "currency": "EGP"},
 			"line_total": money{"amount_minor": 3900, "currency": "EGP"},
+			"tags":       []any{},
 			"classifications": map[string]any{
 				"roots":         []any{map[string]any{"category_id": "00000000-0000-0000-0000-000000000102", "name_ar": "فرعوني", "name_en": "Pharaonic"}},
 				"subcategories": []any{map[string]any{"category_id": "00000000-0000-0000-0000-000000000301", "name_ar": "قطط", "name_en": "Cats"}},
@@ -111,7 +112,7 @@ func TestPayloadSizeBoundaries(t *testing.T) {
 		t.Fatal("probe setup error")
 	}
 	_, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID,
-		[]byte(fmt.Sprintf(`{"events":[{"event_id":"33333333-3333-7333-8333-333333333333","event_type":"sale.finalized.v1","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`, over)))
+		[]byte(fmt.Sprintf(`{"events":[{"event_id":"33333333-3333-7333-8333-333333333333","event_type":"sale.finalized.v3","occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`, over)))
 	if err == nil {
 		t.Fatal("payload over 256KiB must be rejected in bytes")
 	}

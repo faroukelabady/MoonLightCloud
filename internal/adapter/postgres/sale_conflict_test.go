@@ -75,7 +75,7 @@ func variantSale(t *testing.T, base, saleID, itemID, sku string, unit int64, qty
 
 func ingestRaw(t *testing.T, env *saleEnv, eventID, occurred string, payload string) {
 	t.Helper()
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v1","occurred_at":%q,"payload":%s}]}`,
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.finalized.v3","occurred_at":%q,"payload":%s}]}`,
 		eventID, occurred, payload)
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err != nil {
 		t.Fatalf("ingest %s: %v", eventID, err)
@@ -146,12 +146,12 @@ func TestConcurrentDistinctEventsSameSaleID(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[0].res, outs[0].err = storeA.ProjectSale(context.Background(), recA, time.Now().UTC())
+			outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[1].res, outs[1].err = storeB.ProjectSale(context.Background(), recB, time.Now().UTC())
+			outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 		}()
 		close(start)
 		done := make(chan struct{})
@@ -164,13 +164,13 @@ func TestConcurrentDistinctEventsSameSaleID(t *testing.T) {
 
 		// Settle any transient serialization loser sequentially (bounded).
 		stores := []interface {
-			ProjectSale(context.Context, sale.EventRecord, time.Time) (sale.ProjectResult, error)
+			ProjectSaleV3(context.Context, sale.EventRecord, time.Time) (sale.ProjectResult, error)
 		}{storeA, storeB}
 		recs := []sale.EventRecord{recA, recB}
 		for i, o := range outs {
 			if o.err != nil || o.res.Outcome == sale.OutcomeRetryable || o.res.Outcome == sale.OutcomeNotDue {
 				for k := 0; k < 5; k++ {
-					res, err := stores[i].ProjectSale(context.Background(), recs[i], time.Now().UTC())
+					res, err := stores[i].ProjectSaleV3(context.Background(), recs[i], time.Now().UTC())
 					outs[i] = outcome{res, err}
 					if err == nil && (res.Outcome == sale.OutcomeProcessed || res.Outcome == sale.OutcomeBlocked) {
 						break

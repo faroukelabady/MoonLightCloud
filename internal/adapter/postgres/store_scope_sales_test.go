@@ -207,9 +207,9 @@ func TestScope_PolicyIsolation(t *testing.T) {
 func TestScope_SalesOwnership(t *testing.T) {
 	f := openScopeFixture(t)
 	saleA, saleB, saleLegacy := "aaaaaaaa-0000-4000-8000-0000000000a1", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1", "cccccccc-cccc-4ccc-8ccc-ccccccccccc1"
-	f.ingest(t, f.devA, f.credA, "e0000240-0000-4000-8000-000000000001", "sale.finalized.v1", scopedSalePayload(t, saleA))
-	f.ingest(t, f.devB, f.credB, "e0000240-0000-4000-8000-000000000002", "sale.finalized.v1", scopedSalePayload(t, saleB))
-	f.ingest(t, f.devC, f.credC, "e0000240-0000-4000-8000-000000000003", "sale.finalized.v1", scopedSalePayload(t, saleLegacy))
+	f.ingest(t, f.devA, f.credA, "e0000240-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleA))
+	f.ingest(t, f.devB, f.credB, "e0000240-0000-4000-8000-000000000002", "sale.finalized.v3", scopedSalePayload(t, saleB))
+	f.ingest(t, f.devC, f.credC, "e0000240-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleLegacy))
 	res := f.projectSale(t, "e0000240-0000-4000-8000-000000000001")
 	if res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale A: %+v", res)
@@ -237,7 +237,7 @@ func TestScope_SalesOwnership(t *testing.T) {
 		t.Fatalf("sale A children: %d (%v)", lines, err)
 	}
 	// A different event claiming A's sale_id: blocked, A intact.
-	f.ingest(t, f.devB, f.credB, "e0000240-0000-4000-8000-000000000004", "sale.finalized.v1", scopedSalePayload(t, saleA))
+	f.ingest(t, f.devB, f.credB, "e0000240-0000-4000-8000-000000000004", "sale.finalized.v3", scopedSalePayload(t, saleA))
 	res = f.projectSale(t, "e0000240-0000-4000-8000-000000000004")
 	if res.Outcome != sale.OutcomeBlocked {
 		t.Fatalf("cross-store sale_id reuse must block: %+v", res)
@@ -254,7 +254,7 @@ func TestScope_SalesOwnership(t *testing.T) {
 // context, historical categories/tags, and exact money.
 func TestScope_SaleV2StorePreserved(t *testing.T) {
 	f := openScopeFixture(t)
-	raw := v2Fixture(t, nil)
+	raw := taggedSaleFixture(t, nil)
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		t.Fatal(err)
@@ -265,8 +265,8 @@ func TestScope_SaleV2StorePreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.ingest(t, f.devA, f.credA, "e0000241-0000-4000-8000-000000000001", "sale.finalized.v2", string(out))
-	res := f.projectSaleV2(t, "e0000241-0000-4000-8000-000000000001")
+	f.ingest(t, f.devA, f.credA, "e0000241-0000-4000-8000-000000000001", "sale.finalized.v3", string(out))
+	res := f.projectSaleV3(t, "e0000241-0000-4000-8000-000000000001")
 	if res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale v2: %+v", res)
 	}
@@ -298,7 +298,7 @@ func TestScope_SaleV2StorePreserved(t *testing.T) {
 func TestScope_CrossStoreReturnRejected(t *testing.T) {
 	f := openScopeFixture(t)
 	salePayload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000a3")
-	f.ingest(t, f.devA, f.credA, "e0000242-0000-4000-8000-000000000001", "sale.finalized.v1", salePayload)
+	f.ingest(t, f.devA, f.credA, "e0000242-0000-4000-8000-000000000001", "sale.finalized.v3", salePayload)
 	if res := f.projectSale(t, "e0000242-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale A: %+v", res)
 	}
@@ -350,7 +350,7 @@ func saleMoney(t *testing.T, f *scopeFixture, saleID string) saleAmounts {
 func TestScope_ReturnSameStoreProjects(t *testing.T) {
 	f := openScopeFixture(t)
 	salePayload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000a4")
-	f.ingest(t, f.devA, f.credA, "e0000243-0000-4000-8000-000000000001", "sale.finalized.v1", salePayload)
+	f.ingest(t, f.devA, f.credA, "e0000243-0000-4000-8000-000000000001", "sale.finalized.v3", salePayload)
 	if res := f.projectSale(t, "e0000243-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale A: %+v", res)
 	}
@@ -379,7 +379,7 @@ func TestScope_ReturnSameStoreProjects(t *testing.T) {
 func TestScope_ReturnLegacyContinuity(t *testing.T) {
 	f := openScopeFixture(t)
 	salePayload := scopedSalePayload(t, "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")
-	f.ingest(t, f.devC, f.credC, "e0000244-0000-4000-8000-000000000001", "sale.finalized.v1", salePayload)
+	f.ingest(t, f.devC, f.credC, "e0000244-0000-4000-8000-000000000001", "sale.finalized.v3", salePayload)
 	if res := f.projectSale(t, "e0000244-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("legacy sale: %+v", res)
 	}
@@ -415,11 +415,11 @@ func TestScope_ReturnLegacyContinuity(t *testing.T) {
 func TestScope_LegacySaleCollision(t *testing.T) {
 	f := openScopeFixture(t)
 	saleID := "cccccccc-cccc-4ccc-8ccc-ccccccccccd2"
-	f.ingest(t, f.devC, f.credC, "e0000245-0000-4000-8000-000000000001", "sale.finalized.v1", scopedSalePayload(t, saleID))
+	f.ingest(t, f.devC, f.credC, "e0000245-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleID))
 	if res := f.projectSale(t, "e0000245-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("legacy sale: %+v", res)
 	}
-	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000002", "sale.finalized.v1", scopedSalePayload(t, saleID))
+	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000002", "sale.finalized.v3", scopedSalePayload(t, saleID))
 	res := f.projectSale(t, "e0000245-0000-4000-8000-000000000002")
 	if res.Outcome != sale.OutcomeBlocked {
 		t.Fatalf("scoped collision with legacy sale: %+v", res)
@@ -437,7 +437,7 @@ func TestScope_LegacySaleCollision(t *testing.T) {
 		`DELETE FROM sale_event_ownership WHERE sale_id=$1`, saleID); err != nil {
 		t.Fatal(err)
 	}
-	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000003", "sale.finalized.v1", scopedSalePayload(t, saleID))
+	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleID))
 	res = f.projectSale(t, "e0000245-0000-4000-8000-000000000003")
 	if res.Outcome != sale.OutcomeBlocked || res.ErrorCode != ErrStoreScopeConflict {
 		t.Fatalf("write-boundary scope backstop: %+v", res)

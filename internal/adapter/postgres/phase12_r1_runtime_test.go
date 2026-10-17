@@ -41,10 +41,10 @@ func TestPhase12R1Runtime(t *testing.T) {
 	}
 	env := &saleEnv{pool: f.pool, syncSvc: f.syncSvc, devID: f.devA, credID: f.credA}
 	tag := tagFixture("aaaaaaaa-0000-4000-8000-000000000001", "gold", "ذهب", "Gold")
-	projectSaleV2(t, env, "11111111-0000-4000-8000-000000000001", "2026-09-21T10:00:00Z", []map[string]any{tag})
+	projectSaleWithTags(t, env, "11111111-0000-4000-8000-000000000001", "2026-09-21T10:00:00Z", []map[string]any{tag})
 	tag["name_en"] = "Golden"
 	tag["name_ar"] = "ذهبي"
-	projectSaleV2(t, env, "11111111-0000-4000-8000-000000000002", "2026-09-22T10:00:00Z", []map[string]any{tag})
+	projectSaleWithTags(t, env, "11111111-0000-4000-8000-000000000002", "2026-09-22T10:00:00Z", []map[string]any{tag})
 	ln, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)

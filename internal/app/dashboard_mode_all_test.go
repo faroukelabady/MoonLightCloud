@@ -33,7 +33,7 @@ func TestDashboardModeAllHTTPReturns200(t *testing.T) {
 	productID := "aaaaaaaa-aaaa-4aaa-8aaa-111111111111"
 	if _, err := a.Pool.Exec(ctx, `
 		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v1', '2026-09-20T10:00:00Z', now(), '{}', '\x00')`, eventID, p.Device.ID); err != nil {
+		VALUES ($1, $2, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00')`, eventID, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Pool.Exec(ctx, `

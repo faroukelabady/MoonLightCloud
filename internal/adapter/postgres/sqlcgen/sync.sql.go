@@ -46,8 +46,6 @@ func (q *Queries) ClearSyncRecoveryState(ctx context.Context, arg ClearSyncRecov
 
 const countStorePendingProjections = `-- name: CountStorePendingProjections :one
 WITH required_processor(event_type, processor) AS (VALUES
-    ('sale.finalized.v1', 'sale_projection.v1'),
-    ('sale.finalized.v2', 'sale_projection.v2'),
     ('sale.finalized.v3', 'sale_projection.v3'),
     ('sale.return_refund.finalized.v1', 'return_refund_projection.v1'),
     ('catalog.category.snapshot.v1', 'catalog_category_projection.v1'),
