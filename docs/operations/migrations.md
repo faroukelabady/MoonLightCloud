@@ -1,8 +1,18 @@
 # Migration and Rollback Policy
 
-Migrations are append-only (`db/migrations`, goose, embedded). Never edit
-applied history. Startup verifies the schema version and refuses to boot on
-mismatch (readiness fails).
+## Pre-production baseline (ADR-0055)
+
+Until the first production install, `db/migrations` holds one migration,
+`00100_baseline.sql`: the Up bodies of the historical chain 00001–00045 in
+order, then the ADR-0055 changes. Each change edits that file and raises its
+version (`00101_…`, `00102_…`) together with `migrate.TargetVersion`. The
+baseline first refuses any existing MoonLight schema, so a database from an
+older revision fails closed and must be recreated. The historical sections
+below describe the chain the baseline replaced.
+
+After the first production install, migrations are append-only (`db/migrations`,
+goose, embedded). Never edit applied history. Startup verifies the schema
+version and refuses to boot on mismatch (readiness fails).
 
 ## Schema 40 development rollback and reapply
 
@@ -171,6 +181,7 @@ recovery table and its verification ledger (ADR-0054).
 `00045_sync_recovery_missing_ledger` (Phase 20 R6) adds
 `verify_missing`, the server-recorded count of identities a verification
 pass found missing. Both are additive; the Down migrations drop only these
-objects. `TargetVersion` is 45. `scripts/pg-restore.sh` requires schema 45
-to mark devices after a restore and migrates older archives first when
-given `--cloud-binary` (runbook `disaster-recovery.md` §5.2).
+objects. With the pre-production baseline, `TargetVersion` is the baseline
+version and `scripts/pg-restore.sh` requires it to mark devices after a restore;
+archives from an older baseline revision are refused (runbook
+`disaster-recovery.md` §5.2).

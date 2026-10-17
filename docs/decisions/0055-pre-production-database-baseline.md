@@ -1,6 +1,6 @@
 # ADR-0055: Pre-production database baseline and schema conventions
 
-- Status: Proposed
+- Status: Accepted (2026-10-17)
 - Relates to: ADR-0012 (explicit migrations, verified schema at startup),
   ADR-0017 / ADR-0019 (payload-hash compatibility), ADR-0039 / ADR-0040 (Store
   scope). MoonLightRetail ADR-049 is the matching Retail decision. Execution
@@ -46,11 +46,13 @@ carries compatibility for data that never existed:
 4. **Shapes and names.** One `notification_recipients` table with a purpose;
    device capabilities as rows; no duplicate presence columns; `_minor` for all
    money; one enum casing; `uuid` for all identifiers.
-5. **One baseline.** After the model changes, the goose chain is replaced by one
-   migration with a new number. It first checks that `sync_events` does not
-   exist and raises an error if it does, so an old database cannot receive it.
-   `migrate.TargetVersion` changes with it. Every development and hosted test
-   database is recreated.
+5. **One baseline first.** The goose chain 00001–00045 is replaced by
+   `00100_baseline.sql` (their Up bodies in order, proven equal with
+   `pg_dump --schema-only`). It first checks that `sync_events` does not exist
+   and raises an error if it does, so an old database cannot receive it. Each
+   later change edits the baseline and raises its version together with
+   `migrate.TargetVersion` (00101, 00102, …), matching Retail ADR-049. Every
+   development and hosted test database is recreated.
 
 ## Owner decisions (2026-10-17)
 

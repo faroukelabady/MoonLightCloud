@@ -8,8 +8,7 @@ source "$(dirname "$0")/lib.sh"
 cd "$REPO_ROOT"
 
 required=(
-  db/migrations/00006_sync_event_hash_version.sql
-  db/migrations/00007_sale_event_ownership.sql
+  db/migrations/00100_baseline.sql
   db/queries/sale_ownership.sql
   db/queries/sale_projection.sql
   db/queries/sync_events.sql

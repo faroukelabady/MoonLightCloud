@@ -2,18 +2,15 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
-	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -417,126 +414,6 @@ func TestR1HealthSummaryDetailParity(t *testing.T) {
 		t.Fatalf("suppression misclassified %v", counts)
 	}
 	t.Log("complete summary/detail parity for enabled/suppressed, all/A/B Stores, all/two/unknown providers")
-}
-
-func TestR1Migration28To29Preservation(t *testing.T) {
-	pf := buildPolicyFixture(t)
-	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
-	r1ReadyProduct(t, pf)
-	drainReevaluations(t, d)
-	conn, err := sql.Open("pgx", pf.pool.Config().ConnString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if err := migrate.DownTo(ctx, conn, 28); err != nil {
-		t.Fatal(err)
-	}
-	// Seed representative existing operational state in the exact old schema.
-	seeds := []string{
-		`INSERT INTO commerce_product_mappings(provider_key,product_id,external_product_id) VALUES ('review','11111111-0000-4000-8000-000000000001','preserved')`,
-		`INSERT INTO commerce_product_mutation_barriers(operation_id,provider_key,product_id,request_fingerprint,state) VALUES ('11111111-0000-7000-8000-000000000009','review','11111111-0000-4000-8000-000000000001',repeat('a',64),'uncertain')`,
-		`INSERT INTO notification_template_mappings(provider_key,template_key,locale,external_template_name,external_language_code) VALUES ('telegram-main','preserved','ar','plain','ar')`,
-		`INSERT INTO notification_messages(id,provider_key,idempotency_key,semantic_fingerprint,recipient,template_key,locale,ext_template_name,ext_language_code,parameters,dispatch_status) VALUES ('11111111-0000-7000-8000-000000000001','telegram-main','preserve','\x0102','@preservedrecipient','preserved','ar','plain','ar','{"body":"تقرير محفوظ"}','accepted')`,
-		`INSERT INTO business_report_recipients(id,label,provider_key,recipient,locale) VALUES ('11111111-0000-7000-8000-000000000002','preserved-report','telegram-main','@preservedreport','ar')`,
-		`INSERT INTO operational_alert_recipients(id,label,provider_key,recipient,locale) VALUES ('11111111-0000-7000-8000-000000000003','preserved-operation','telegram-main','@preservedops','en')`,
-		`INSERT INTO commerce_product_reevaluations(product_id,store_id,reason,attempts,next_attempt_at,last_error_code) VALUES ('11111111-0000-4000-8000-000000000001',NULL,'pending',0,now()-interval '1 minute',NULL),('11111111-0000-4000-8000-000000000002',NULL,'retry',3,now()+interval '1 hour','PRESERVED')`,
-	}
-	for _, q := range seeds {
-		tag, err := pf.pool.Exec(ctx, q)
-		want := int64(1)
-		if strings.Contains(q, "'pending',0") {
-			want = 2
-		}
-		if err != nil || tag.RowsAffected() != want {
-			t.Fatalf("fixture %v %v", tag, err)
-		}
-	}
-	tables, err := pf.pool.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name<>'goose_db_version' ORDER BY table_name`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for tables.Next() {
-		var name string
-		if err := tables.Scan(&name); err != nil {
-			t.Fatal(err)
-		}
-		names = append(names, name)
-	}
-	if err := tables.Err(); err != nil {
-		t.Fatal(err)
-	}
-	tables.Close()
-	snapshot := func(name string, after bool) string {
-		t.Helper()
-		expr := "to_jsonb(t)"
-		if after && name == "commerce_product_reevaluations" {
-			expr += "-'requested_generation'-'claimed_generation'-'lease_generation'-'lease_token'-'lease_until'"
-		}
-		// Phase 15 00030 adds documented defaulted columns; business
-		// values stay byte-identical across the upgrade cycle.
-		if after && name == "catalog_products" {
-			expr += "-'configuration_revision'"
-			// Phase 17 00037 adds a nullable structural Type reference.
-			// Compare all pre-existing values; assert the new column's
-			// no-backfill semantics separately below.
-			expr += "-'product_type_id'"
-		}
-		// Phase 17-R0 00035 RETIRES catalog_products.sku (Product has no
-		// SKU authority anywhere, ADR-0049): the column is dropped in the
-		// after schema, so both snapshots exclude the retired key. Every
-		// remaining business value must stay byte-identical.
-		if name == "catalog_products" {
-			expr += "-'sku'"
-		}
-		if after && name == "commerce_online_order_lines" {
-			expr += "-'configuration_id'-'frame_style_code'-'frame_style_name_ar'-'frame_style_name_en'-'frame_color_code'-'frame_color_name_ar'-'frame_color_name_en'-'configuration_price_delta_minor'-'provider_configuration_id'-'configuration_unresolved'"
-		}
-		// Append-only 00031 adds nullable receipt fields; compare every
-		// pre-existing column exactly, as with the additions above.
-		if after && name == "commerce_product_mutation_barriers" {
-			expr += "-'async_role'-'async_intent'-'provider_operation_id'-'async_state'-'async_product_id'"
-		}
-		var data string
-		if err := pf.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COALESCE(jsonb_agg(%s ORDER BY (%s)::text),'[]'::jsonb)::text FROM %s t`, expr, expr, `"`+strings.ReplaceAll(name, `"`, `""`)+`"`)).Scan(&data); err != nil {
-			t.Fatal(err)
-		}
-		return data
-	}
-	before := map[string]string{}
-	for _, name := range names {
-		before[name] = snapshot(name, false)
-	}
-	if err := migrate.Up(ctx, conn); err != nil {
-		t.Fatal(err)
-	}
-	version, err := migrate.Current(ctx, conn)
-	if err != nil || version != migrate.TargetVersion {
-		t.Fatalf("schema %d %v", version, err)
-	}
-	var assignedTypes int64
-	if err := pf.pool.QueryRow(ctx, `SELECT count(*) FROM catalog_products WHERE product_type_id IS NOT NULL`).Scan(&assignedTypes); err != nil || assignedTypes != 0 {
-		t.Fatalf("migration fabricated ProductType references: %d %v", assignedTypes, err)
-	}
-	for _, name := range names {
-		if snapshot(name, true) != before[name] {
-			t.Fatalf("old table values altered: %s", name)
-		}
-	}
-	claimed, err := d.ClaimProductReevaluations(ctx, 25, time.Now().Add(time.Hour))
-	if err != nil || len(claimed) != 1 || claimed[0].ProductID != prodP1 || claimed[0].ClaimedGeneration != 1 {
-		t.Fatalf("old pending work not claimable %+v %v", claimed, err)
-	}
-	if err := migrate.DownTo(ctx, conn, 28); err == nil {
-		t.Fatal("rollback discarded fenced work")
-	}
-	version, err = migrate.Current(ctx, conn)
-	if err != nil || version != 29 {
-		t.Fatal("rollback partially applied", version, err)
-	}
-	t.Logf("exact 28→29 preserves values in %d old tables; old due work claimable, retry horizon/code retained; pending rollback refuses atomically", len(names))
 }
 
 func TestR1ProviderFailureIndependence(t *testing.T) {

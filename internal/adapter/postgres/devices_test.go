@@ -2,8 +2,6 @@ package postgres
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"database/sql"
 	"strings"
 	"testing"
@@ -128,77 +126,6 @@ func TestRotationLifecycle(t *testing.T) {
 	}
 	if _, _, err := svc.Authenticate(ctx, p.Device.ID, p.Credential.ID, p.RawSecret); err == nil {
 		t.Fatal("pre-rotation credential must fail")
-	}
-}
-
-func TestMigration1Ato1BPreservesCredentials(t *testing.T) {
-	// Build a Phase-1A schema (version 1 only), insert a device with the
-	// exact legacy construction, migrate to current, authenticate.
-	url := testutil.Raw(t)
-	conn, err := sql.Open("pgx", url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if err := migrate.UpTo(context.Background(), conn, 1); err != nil {
-		t.Fatal(err)
-	}
-	// Legacy row, no pepper: verifier = SHA-256(salt || secret).
-	raw := "aa"
-	salt := []byte("0123456789abcdef")
-	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
-	deviceID := "11111111-1111-7111-8111-111111111111"
-	if _, err := conn.Exec(`INSERT INTO devices
-		(id, name, status, secret_hash, secret_salt, created_at, updated_at)
-		VALUES ($1, 'legacy-shop', 'active', $2, $3, now(), now())`,
-		deviceID, sum[:], salt); err != nil {
-		t.Fatal(err)
-	}
-	// Legacy row with a pepper string: HMAC(pepper, salt || secret).
-	pepperedSalt := []byte("fedcba9876543210")
-	mac := hmac.New(sha256.New, []byte("oldpepper"))
-	mac.Write(pepperedSalt)
-	mac.Write([]byte(raw))
-	deviceID2 := "22222222-2222-7222-8222-222222222222"
-	if _, err := conn.Exec(`INSERT INTO devices
-		(id, name, status, secret_hash, secret_salt, created_at, updated_at)
-		VALUES ($1, 'legacy-peppered', 'active', $2, $3, now(), now())`,
-		deviceID2, mac.Sum(nil), pepperedSalt); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate.Up(context.Background(), conn); err != nil {
-		t.Fatal(err)
-	}
-	v, err := migrate.Current(context.Background(), conn)
-	if err != nil || v != migrate.TargetVersion {
-		t.Fatalf("version %d (want %d): %v", v, migrate.TargetVersion, err)
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	h, _ := auth.NewHasher(testPepperBytes)
-	repo := NewDevices(pool, 5*time.Second)
-	svc := auth.NewService(repo, h, "", 1, clock.System{}, ids.System{})
-	creds, err := repo.ActiveCredentials(context.Background(), deviceID)
-	if err != nil || len(creds) != 1 {
-		t.Fatalf("migrated device must own one credential: %v %d", err, len(creds))
-	}
-	if creds[0].VerifierVersion != auth.VerifierV0 {
-		t.Fatalf("migrated credential must be v0, got %d", creds[0].VerifierVersion)
-	}
-	if _, _, err := svc.Authenticate(context.Background(), deviceID, creds[0].ID, raw); err != nil {
-		t.Fatalf("migrated legacy credential must authenticate: %v", err)
-	}
-	// Peppered legacy row verifies under the same pepper string.
-	svcPeppered := auth.NewService(repo, mustTestHasher(t), "oldpepper", 1, clock.System{}, ids.System{})
-	creds2, err := repo.ActiveCredentials(context.Background(), deviceID2)
-	if err != nil || len(creds2) != 1 {
-		t.Fatalf("migrated peppered device must own one credential: %v", err)
-	}
-	if _, _, err := svcPeppered.Authenticate(context.Background(), deviceID2, creds2[0].ID, raw); err != nil {
-		t.Fatalf("migrated peppered credential must authenticate: %v", err)
 	}
 }
 

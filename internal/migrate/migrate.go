@@ -17,8 +17,10 @@ import (
 )
 
 // TargetVersion is the required schema version: startup refuses to
-// boot on mismatch.
-const TargetVersion int64 = 45
+// boot on mismatch. Before the first production install it is the version
+// of the single baseline migration, which increases whenever the baseline
+// changes (ADR-0055).
+const TargetVersion int64 = 100
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())
@@ -34,28 +36,8 @@ func Up(ctx context.Context, conn *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	if err := normalizeMigration40Rollback(ctx, conn, p); err != nil {
-		return err
-	}
 	if _, err := p.Up(ctx); err != nil {
 		return fmt.Errorf("goose up: %w", err)
-	}
-	return nil
-}
-
-// UpTo applies migrations up to a version (migration-path tests).
-func UpTo(ctx context.Context, conn *sql.DB, version int64) error {
-	p, err := provider(conn)
-	if err != nil {
-		return err
-	}
-	if version >= 40 {
-		if err := normalizeMigration40Rollback(ctx, conn, p); err != nil {
-			return err
-		}
-	}
-	if _, err := p.UpTo(ctx, version); err != nil {
-		return fmt.Errorf("goose up-to: %w", err)
 	}
 	return nil
 }

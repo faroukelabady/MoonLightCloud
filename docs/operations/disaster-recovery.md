@@ -336,7 +336,7 @@ Recovery marking happens **only** in the supported restore workflow
 Such a restore is indistinguishable from a healthy Cloud to this
 mechanism: `/health/ready` is 200, projections are internally consistent,
 and yet acknowledged events may be absent. If you restore Cloud by any
-other means, first run `moonlight-cloud migrate up` (schema 45 or later),
+other means, first make sure the schema is at `migrate.TargetVersion` (`moonlight-cloud migrate status`),
 then mark the devices yourself (the statement also starts a fresh
 verification generation) and run reconciliation:
 
@@ -354,9 +354,11 @@ psql "$URL" -Atqc "SELECT id FROM devices" | while read -r dev; do
 done
 ```
 
-**Backups taken before Phase 20 (schema < 45).** Every backup taken before
-the Phase 20 release is schema 43 or 44 and has no (or an older) recovery
-ledger. `pg-restore.sh` reads the archive's schema version **before** any
+**Backups from an older schema.** Before the first production install the
+schema is one baseline (ADR-0055); an archive from an older chain or an older
+baseline revision cannot be migrated forward and must not be restored. After
+the first production install, an archive older than the marking schema has
+no (or an older) recovery ledger. `pg-restore.sh` reads the archive's schema version **before** any
 destructive step and refuses with exit 10 unless you pass
 `--cloud-binary <moonlight-cloud binary of the release you will run>`. With
 it, the script restores, runs `migrate up` with that binary (run the script
