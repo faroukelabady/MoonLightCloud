@@ -3982,22 +3982,6 @@ components:
         enabled: {type: boolean}
         position: {type: integer, minimum: 0}
         configuration_revision: {type: integer, minimum: 1}
-    CatalogName:
-      type: object
-      additionalProperties: false
-      required: [locale, name]
-      properties:
-        locale: {type: string, enum: [ar, en]}
-        name: {type: string, minLength: 1, maxLength: 200}
-      description: One locale/name pair. Category names carry no description.
-    CatalogProductTranslation:
-      type: object
-      additionalProperties: false
-      required: [locale, name]
-      properties:
-        locale: {type: string, enum: [ar, en]}
-        name: {type: string, minLength: 1, maxLength: 200}
-        description: {type: string, nullable: true}
     CatalogPrice:
       type: object
       additionalProperties: false
@@ -4010,14 +3994,12 @@ components:
     CatalogCategorySnapshotV2:
       type: object
       additionalProperties: false
-      required: [category_id, status, names, parent_ids, catalog_revision, online_enabled]
+      required: [category_id, status, name_ar, parent_ids, catalog_revision, online_enabled]
       properties:
         category_id: {type: string, format: uuid}
         status: {type: string, enum: [active, hidden, archived]}
-        names:
-          type: array
-          minItems: 1
-          items: {$ref: '#/components/schemas/CatalogName'}
+        name_ar: {type: string, minLength: 1, maxLength: 200}
+        name_en: {type: string, minLength: 1, maxLength: 200, nullable: true}
         parent_ids:
           type: array
           items: {type: string, format: uuid}
@@ -4028,20 +4010,19 @@ components:
     CatalogTagSnapshotV1:
       type: object
       additionalProperties: false
-      required: [tag_id, slug, is_active, names, catalog_revision]
+      required: [tag_id, slug, is_active, name_ar, catalog_revision]
       properties:
         tag_id: {type: string, format: uuid}
         slug: {type: string, pattern: '^[a-z0-9-]+$'}
         is_active: {type: boolean}
-        names:
-          type: array
-          items: {$ref: '#/components/schemas/CatalogName'}
+        name_ar: {type: string, minLength: 1, maxLength: 200}
+        name_en: {type: string, minLength: 1, maxLength: 200, nullable: true}
         catalog_revision: {type: integer, minimum: 1}
       description: Authoritative tag state at a monotonic revision.
     CatalogProductSnapshotV2:
       type: object
       additionalProperties: false
-      required: [product_id, name, translations, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
+      required: [product_id, name_ar, prices, top_category_id, subcategory_ids, tag_ids, is_active, catalog_revision]
       description: >
         Product aggregate at catalog_revision (Phase 17-R0). The payload
         carries NO SKU-bearing field at all: Product has no SKU authority
@@ -4053,11 +4034,10 @@ components:
         stored, or projected and the next release may reject it like `sku`.
       properties:
         product_id: {type: string, format: uuid}
-        name: {type: string, minLength: 1, maxLength: 200}
-        description: {type: string, nullable: true}
-        translations:
-          type: array
-          items: {$ref: '#/components/schemas/CatalogProductTranslation'}
+        name_ar: {type: string, minLength: 1, maxLength: 200}
+        name_en: {type: string, minLength: 1, maxLength: 200, nullable: true}
+        description_ar: {type: string, nullable: true}
+        description_en: {type: string, nullable: true}
         prices:
           type: array
           items: {$ref: '#/components/schemas/CatalogPrice'}

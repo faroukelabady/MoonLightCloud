@@ -41,18 +41,8 @@ const (
 	LocaleEN    = "en"
 )
 
-// CatalogName is one locale/name pair.
-type CatalogName struct {
-	Locale string `json:"locale"`
-	Name   string `json:"name"`
-}
-
-// CatalogProductTranslation is one product locale row.
-type CatalogProductTranslation struct {
-	Locale      string  `json:"locale"`
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
-}
+// Localized names are fields (Retail ADR-049 1f): name_ar is required,
+// name_en is null when absent. Descriptions follow the same rule.
 
 // CatalogPrice is one currency price row with optional cost.
 type CatalogPrice struct {
@@ -68,33 +58,36 @@ type CatalogPrice struct {
 // identity (fingerprint/equal-revision comparison): two states differing
 // only in online_enabled are NOT the same snapshot.
 type CategorySnapshot struct {
-	CategoryID      string        `json:"category_id"`
-	Status          string        `json:"status"`
-	Names           []CatalogName `json:"names"`
-	ParentIDs       []string      `json:"parent_ids"`
-	CatalogRevision int64         `json:"catalog_revision"`
-	OnlineEnabled   bool          `json:"-"`
+	CategoryID      string   `json:"category_id"`
+	Status          string   `json:"status"`
+	NameAR          string   `json:"name_ar"`
+	NameEN          *string  `json:"name_en"`
+	ParentIDs       []string `json:"parent_ids"`
+	CatalogRevision int64    `json:"catalog_revision"`
+	OnlineEnabled   bool     `json:"-"`
 }
 
 // CategorySnapshotV2 is the Phase 13 wire shape. online_enabled is
 // REQUIRED (presence-checked: a missing field is a validation failure,
 // never a silent default).
 type CategorySnapshotV2 struct {
-	CategoryID      string        `json:"category_id"`
-	Status          string        `json:"status"`
-	Names           []CatalogName `json:"names"`
-	ParentIDs       []string      `json:"parent_ids"`
-	OnlineEnabled   *bool         `json:"online_enabled"`
-	CatalogRevision int64         `json:"catalog_revision"`
+	CategoryID      string   `json:"category_id"`
+	Status          string   `json:"status"`
+	NameAR          string   `json:"name_ar"`
+	NameEN          *string  `json:"name_en"`
+	ParentIDs       []string `json:"parent_ids"`
+	OnlineEnabled   *bool    `json:"online_enabled"`
+	CatalogRevision int64    `json:"catalog_revision"`
 }
 
 // TagSnapshot is the authoritative tag state at a revision.
 type TagSnapshot struct {
-	TagID           string        `json:"tag_id"`
-	Slug            string        `json:"slug"`
-	IsActive        bool          `json:"is_active"`
-	Names           []CatalogName `json:"names"`
-	CatalogRevision int64         `json:"catalog_revision"`
+	TagID           string  `json:"tag_id"`
+	Slug            string  `json:"slug"`
+	IsActive        bool    `json:"is_active"`
+	NameAR          string  `json:"name_ar"`
+	NameEN          *string `json:"name_en"`
+	CatalogRevision int64   `json:"catalog_revision"`
 }
 
 // ProductSnapshot is the authoritative product state at a revision.
@@ -106,18 +99,19 @@ type ProductSnapshot struct {
 	ProductID string `json:"product_id"`
 	SKU       string `json:"sku"`
 	// Phase 17-R2: structural type identity (v2 only; v1 never carries it).
-	ProductTypeID   string                      `json:"product_type_id,omitempty"`
-	Name            string                      `json:"name"`
-	Description     *string                     `json:"description,omitempty"`
-	Translations    []CatalogProductTranslation `json:"translations"`
-	Prices          []CatalogPrice              `json:"prices"`
-	TopCategoryID   string                      `json:"top_category_id"`
-	SubcategoryIDs  []string                    `json:"subcategory_ids"`
-	TagIDs          []string                    `json:"tag_ids"`
-	WidthCM         *int                        `json:"width_cm,omitempty"`
-	HeightCM        *int                        `json:"height_cm,omitempty"`
-	IsActive        bool                        `json:"is_active"`
-	CatalogRevision int64                       `json:"catalog_revision"`
+	ProductTypeID   string         `json:"product_type_id,omitempty"`
+	NameAR          string         `json:"name_ar"`
+	NameEN          *string        `json:"name_en"`
+	DescriptionAR   *string        `json:"description_ar"`
+	DescriptionEN   *string        `json:"description_en"`
+	Prices          []CatalogPrice `json:"prices"`
+	TopCategoryID   string         `json:"top_category_id"`
+	SubcategoryIDs  []string       `json:"subcategory_ids"`
+	TagIDs          []string       `json:"tag_ids"`
+	WidthCM         *int           `json:"width_cm,omitempty"`
+	HeightCM        *int           `json:"height_cm,omitempty"`
+	IsActive        bool           `json:"is_active"`
+	CatalogRevision int64          `json:"catalog_revision"`
 }
 
 func isUUID(s string) bool {
@@ -143,7 +137,11 @@ func validName(name string) bool {
 	return name != "" && utf8.RuneCountInString(name) <= 200
 }
 
-func validLocale(locale string) bool { return locale == LocaleAR || locale == LocaleEN }
+// validNames checks the required Arabic name and the optional English
+// name.
+func validNames(nameAR string, nameEN *string) bool {
+	return validName(nameAR) && (nameEN == nil || validName(*nameEN))
+}
 
 func validRevision(revision int64) bool { return revision >= 1 }
 
@@ -180,7 +178,7 @@ func DecodeCategorySnapshotV2(raw json.RawMessage) (CategorySnapshot, error) {
 	}
 	normalized := CategorySnapshot{
 		CategoryID: wire.CategoryID, Status: wire.Status,
-		Names: wire.Names, ParentIDs: wire.ParentIDs,
+		NameAR: wire.NameAR, NameEN: wire.NameEN, ParentIDs: wire.ParentIDs,
 		CatalogRevision: wire.CatalogRevision,
 		OnlineEnabled:   *wire.OnlineEnabled,
 	}
@@ -202,16 +200,8 @@ func ValidateCategorySnapshot(p CategorySnapshot) (CategorySnapshot, error) {
 	if p.Status != CategoryActive && p.Status != CategoryHidden && p.Status != CategoryArchived {
 		return fail("status must be active|hidden|archived")
 	}
-	if len(p.Names) == 0 {
-		return fail("at least one translation is required")
-	}
-	for _, name := range p.Names {
-		if !validLocale(name.Locale) {
-			return fail("locale must be ar|en")
-		}
-		if !validName(name.Name) {
-			return fail("name must be 1..200 runes")
-		}
+	if !validNames(p.NameAR, p.NameEN) {
+		return fail("name_ar is required and names must be 1..200 runes")
 	}
 	seen := make(map[string]bool, len(p.ParentIDs))
 	for _, parent := range p.ParentIDs {
@@ -256,16 +246,8 @@ func ValidateTagSnapshot(p TagSnapshot) (TagSnapshot, error) {
 	if !validSlug(p.Slug) {
 		return fail("slug must match ^[a-z0-9-]+$")
 	}
-	for _, name := range p.Names {
-		if !validLocale(name.Locale) {
-			return fail("locale must be ar|en")
-		}
-		if !validName(name.Name) {
-			return fail("name must be 1..200 runes")
-		}
-	}
-	if p.Names == nil {
-		p.Names = []CatalogName{}
+	if !validNames(p.NameAR, p.NameEN) {
+		return fail("name_ar is required and names must be 1..200 runes")
 	}
 	if !validRevision(p.CatalogRevision) {
 		return fail("catalog_revision must be >= 1")
@@ -287,19 +269,20 @@ type ProductSnapshotV2 struct {
 	ProductID string `json:"product_id"`
 	// Phase 17-R2: structural type identity (ADR-0050 §43). The deprecated
 	// primary_variant_sku mirror stays tolerated-and-ignored below.
-	ProductTypeID               string                      `json:"product_type_id"`
-	DeprecatedPrimaryVariantSKU *string                     `json:"primary_variant_sku,omitempty"`
-	Name                        string                      `json:"name"`
-	Description                 *string                     `json:"description,omitempty"`
-	Translations                []CatalogProductTranslation `json:"translations"`
-	Prices                      []CatalogPrice              `json:"prices"`
-	TopCategoryID               string                      `json:"top_category_id"`
-	SubcategoryIDs              []string                    `json:"subcategory_ids"`
-	TagIDs                      []string                    `json:"tag_ids"`
-	WidthCM                     *int                        `json:"width_cm,omitempty"`
-	HeightCM                    *int                        `json:"height_cm,omitempty"`
-	IsActive                    bool                        `json:"is_active"`
-	CatalogRevision             int64                       `json:"catalog_revision"`
+	ProductTypeID               string         `json:"product_type_id"`
+	DeprecatedPrimaryVariantSKU *string        `json:"primary_variant_sku,omitempty"`
+	NameAR                      string         `json:"name_ar"`
+	NameEN                      *string        `json:"name_en"`
+	DescriptionAR               *string        `json:"description_ar"`
+	DescriptionEN               *string        `json:"description_en"`
+	Prices                      []CatalogPrice `json:"prices"`
+	TopCategoryID               string         `json:"top_category_id"`
+	SubcategoryIDs              []string       `json:"subcategory_ids"`
+	TagIDs                      []string       `json:"tag_ids"`
+	WidthCM                     *int           `json:"width_cm,omitempty"`
+	HeightCM                    *int           `json:"height_cm,omitempty"`
+	IsActive                    bool           `json:"is_active"`
+	CatalogRevision             int64          `json:"catalog_revision"`
 }
 
 // DecodeProductSnapshotV2 parses canonical v2 payload bytes and normalizes
@@ -315,8 +298,9 @@ func DecodeProductSnapshotV2(raw json.RawMessage) (ProductSnapshot, error) {
 	return ProductSnapshot{
 		ProductID: wire.ProductID, SKU: "",
 		ProductTypeID: wire.ProductTypeID,
-		Name:          wire.Name, Description: wire.Description,
-		Translations: wire.Translations, Prices: wire.Prices,
+		NameAR:        wire.NameAR, NameEN: wire.NameEN,
+		DescriptionAR: wire.DescriptionAR, DescriptionEN: wire.DescriptionEN,
+		Prices:        wire.Prices,
 		TopCategoryID: wire.TopCategoryID, SubcategoryIDs: wire.SubcategoryIDs,
 		TagIDs: wire.TagIDs, WidthCM: wire.WidthCM, HeightCM: wire.HeightCM,
 		IsActive: wire.IsActive, CatalogRevision: wire.CatalogRevision,
@@ -350,8 +334,8 @@ func validateProductSnapshot(p ProductSnapshot, event string) (ProductSnapshot, 
 	if !isUUID(p.ProductID) {
 		return fail("product_id must be a UUID")
 	}
-	if !validName(p.Name) {
-		return fail("name must be 1..200 runes")
+	if !validNames(p.NameAR, p.NameEN) {
+		return fail("name_ar is required and names must be 1..200 runes")
 	}
 	for _, price := range p.Prices {
 		if price.Currency != CurrencyEGP && price.Currency != CurrencyUSD {
@@ -366,17 +350,6 @@ func validateProductSnapshot(p ProductSnapshot, event string) (ProductSnapshot, 
 	}
 	if p.Prices == nil {
 		p.Prices = []CatalogPrice{}
-	}
-	for _, translation := range p.Translations {
-		if !validLocale(translation.Locale) {
-			return fail("locale must be ar|en")
-		}
-		if !validName(translation.Name) {
-			return fail("translation name must be 1..200 runes")
-		}
-	}
-	if p.Translations == nil {
-		p.Translations = []CatalogProductTranslation{}
 	}
 	if !isUUID(p.TopCategoryID) {
 		return fail("top_category_id must be a UUID")

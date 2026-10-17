@@ -1,16 +1,7 @@
 {
   "product_id": "55555555-5555-4555-8555-555555555555",
-  "name": "توت عنخ آمون",
-  "translations": [
-    {
-      "locale": "ar",
-      "name": "توت عنخ آمون"
-    },
-    {
-      "locale": "en",
-      "name": "Tutankhamun"
-    }
-  ],
+  "name_ar": "توت عنخ آمون",
+  "name_en": "Tutankhamun",
   "prices": [
     {
       "currency": "EGP",

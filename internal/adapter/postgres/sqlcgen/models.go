@@ -233,8 +233,10 @@ type CatalogCategoryEdge struct {
 
 type CatalogProduct struct {
 	ProductID             pgtype.UUID        `json:"product_id"`
-	Name                  string             `json:"name"`
-	Description           pgtype.Text        `json:"description"`
+	NameAr                string             `json:"name_ar"`
+	NameEn                pgtype.Text        `json:"name_en"`
+	DescriptionAr         pgtype.Text        `json:"description_ar"`
+	DescriptionEn         pgtype.Text        `json:"description_en"`
 	TopCategoryID         pgtype.UUID        `json:"top_category_id"`
 	WidthCm               pgtype.Int4        `json:"width_cm"`
 	HeightCm              pgtype.Int4        `json:"height_cm"`
@@ -319,13 +321,6 @@ type CatalogProductSubcategory struct {
 type CatalogProductTag struct {
 	ProductID pgtype.UUID `json:"product_id"`
 	TagID     pgtype.UUID `json:"tag_id"`
-}
-
-type CatalogProductTranslation struct {
-	ProductID   pgtype.UUID `json:"product_id"`
-	Locale      string      `json:"locale"`
-	Name        string      `json:"name"`
-	Description pgtype.Text `json:"description"`
 }
 
 type CatalogProductType struct {
@@ -416,7 +411,7 @@ type CatalogTag struct {
 	TagID             pgtype.UUID        `json:"tag_id"`
 	Slug              string             `json:"slug"`
 	IsActive          bool               `json:"is_active"`
-	NameAr            pgtype.Text        `json:"name_ar"`
+	NameAr            string             `json:"name_ar"`
 	NameEn            pgtype.Text        `json:"name_en"`
 	SourceRevision    int64              `json:"source_revision"`
 	SourceEventID     pgtype.UUID        `json:"source_event_id"`

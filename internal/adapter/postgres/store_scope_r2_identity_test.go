@@ -150,7 +150,7 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 func countCatalogRows(t *testing.T, f *scopeFixture) string {
 	t.Helper()
 	state := map[string][]json.RawMessage{}
-	for _, table := range []string{"catalog_categories", "catalog_tags", "catalog_products", "catalog_category_edges", "catalog_product_subcategories", "catalog_product_tags", "catalog_product_prices", "catalog_product_translations"} {
+	for _, table := range []string{"catalog_categories", "catalog_tags", "catalog_products", "catalog_category_edges", "catalog_product_subcategories", "catalog_product_tags", "catalog_product_prices"} {
 		rows, err := f.pool.Query(context.Background(), `SELECT (to_jsonb(t)-'projected_at')::text FROM `+table+` t ORDER BY (to_jsonb(t)-'projected_at')::text`)
 		if err != nil {
 			t.Fatal(err)

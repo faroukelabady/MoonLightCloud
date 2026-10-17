@@ -22,7 +22,8 @@ type Price struct {
 // stock is derived only.
 type ProductHeader struct {
 	ID            string
-	Name          string
+	NameAR        string
+	NameEN        *string
 	IsActive      bool
 	Revision      int64
 	SourceEventID string
@@ -33,12 +34,12 @@ type ProductHeader struct {
 // Product is the full projected product aggregate.
 type Product struct {
 	ProductHeader
-	Description    *string
+	DescriptionAR  *string
+	DescriptionEN  *string
 	TopCategoryID  string
 	WidthCM        *int
 	HeightCM       *int
 	Prices         []Price
-	Translations   []CatalogProductTranslation
 	SubcategoryIDs []string
 	TagIDs         []string
 }
@@ -59,7 +60,7 @@ type Tag struct {
 	ID            string
 	Slug          string
 	IsActive      bool
-	NameAR        *string
+	NameAR        string
 	NameEN        *string
 	Revision      int64
 	SourceEventID string

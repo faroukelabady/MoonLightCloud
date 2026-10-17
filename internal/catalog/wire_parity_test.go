@@ -36,11 +36,14 @@ func TestWireParityProductV2(t *testing.T) {
 	if valid.ProductID != "77777777-0000-4000-8000-000000000001" || valid.SKU != "" {
 		t.Fatalf("product v2 parity broken: id=%q sku=%q", valid.ProductID, valid.SKU)
 	}
-	if valid.Name != "نفرتيتي" || valid.CatalogRevision != 1 {
-		t.Fatalf("product v2 identity parity broken: name=%q rev=%d", valid.Name, valid.CatalogRevision)
+	if valid.NameAR != "نفرتيتي" || valid.NameEN == nil || *valid.NameEN != "Nefertiti" || valid.CatalogRevision != 1 {
+		t.Fatalf("product v2 identity parity broken: name=%q rev=%d", valid.NameAR, valid.CatalogRevision)
 	}
-	if len(valid.Prices) != 2 || len(valid.Translations) != 2 {
-		t.Fatalf("product v2 relations parity broken: prices=%d translations=%d", len(valid.Prices), len(valid.Translations))
+	if valid.DescriptionAR == nil || valid.DescriptionEN == nil || *valid.DescriptionEN != "Nefertiti fixture" {
+		t.Fatalf("product v2 description parity broken: %+v", valid)
+	}
+	if len(valid.Prices) != 2 {
+		t.Fatalf("product v2 relations parity broken: prices=%d", len(valid.Prices))
 	}
 	var wire map[string]any
 	if err := json.Unmarshal(raw, &wire); err != nil {

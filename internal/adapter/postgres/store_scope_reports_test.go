@@ -420,7 +420,7 @@ func TestScope_RebuildPreservesOwnership(t *testing.T) {
 	ctx := context.Background()
 	for _, query := range []string{
 		`DELETE FROM catalog_product_tags`, `DELETE FROM catalog_product_subcategories`,
-		`DELETE FROM catalog_product_translations`, `DELETE FROM catalog_product_prices`,
+		`DELETE FROM catalog_product_prices`,
 		`DELETE FROM catalog_products`, `DELETE FROM catalog_category_edges`,
 		`DELETE FROM catalog_categories`, `DELETE FROM catalog_tags`,
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL, processed_at=NULL, last_error_code=NULL, last_error_message=NULL`,

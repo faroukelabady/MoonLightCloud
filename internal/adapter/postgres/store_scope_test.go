@@ -356,7 +356,7 @@ func TestScope_ProductAdoptionAndConflict(t *testing.T) {
 	var name string
 	var rev int64
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT name, source_revision FROM catalog_products WHERE product_id=$1`, prodC).Scan(&name, &rev); err != nil {
+		`SELECT name_ar, source_revision FROM catalog_products WHERE product_id=$1`, prodC).Scan(&name, &rev); err != nil {
 		t.Fatal(err)
 	}
 	if name != "Adopt A" || rev != 2 {
@@ -448,7 +448,7 @@ func TestScope_LegacyEventKeepsAdoptedStore(t *testing.T) {
 	}
 	var name string
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT name FROM catalog_products WHERE product_id=$1`, prodL).Scan(&name); err != nil || name != "Keep legacy" {
+		`SELECT name_ar FROM catalog_products WHERE product_id=$1`, prodL).Scan(&name); err != nil || name != "Keep legacy" {
 		t.Fatalf("arbitration still advances data: %q (%v)", name, err)
 	}
 }
@@ -477,7 +477,7 @@ func TestScope_RevisionRulesPreserved(t *testing.T) {
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrCatalogRevisionConflict)
 	var name string
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT name FROM catalog_products WHERE product_id=$1`, prodR).Scan(&name); err != nil || name != "R2" {
+		`SELECT name_ar FROM catalog_products WHERE product_id=$1`, prodR).Scan(&name); err != nil || name != "R2" {
 		t.Fatalf("stored revision intact: %q (%v)", name, err)
 	}
 }

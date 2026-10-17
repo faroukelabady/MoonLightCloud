@@ -3,7 +3,7 @@ sql:
   - engine: "postgresql"
     queries: "db/queries"
     schema:
-      - "db/migrations/00103_baseline.sql"
+      - "db/migrations/00104_baseline.sql"
     gen:
       go:
         package: "sqlcgen"

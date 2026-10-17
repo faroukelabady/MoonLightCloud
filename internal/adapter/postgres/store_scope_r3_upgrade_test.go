@@ -116,7 +116,7 @@ func TestR3_RecoveryPreservesEqualConflictWithForeignRaw(t *testing.T) {
 	}
 	exec(2, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$3,'processed',1,now()),($2,$3,'processed',1,now())`, first, foreign, catalog.ProcessorTagProjectionV1)
 	exec(1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,last_error_code,last_error_message) VALUES($1,$2,'blocked',1,$3,'equal revision with conflicting state')`, conflict, catalog.ProcessorTagProjectionV1, ErrCatalogRevisionConflict)
-	exec(1, `INSERT INTO catalog_tags(tag_id,slug,is_active,name_en,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'gold',true,'B accepted',1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, foreign, sharedTagGold)
+	exec(1, `INSERT INTO catalog_tags(tag_id,slug,is_active,name_ar,name_en,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'gold',true,'B accepted','B accepted',1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, foreign, sharedTagGold)
 	n, err := d.RecoverDefaultCatalogBlocked(ctx)
 	if err != nil || n != 2 {
 		t.Fatalf("recovery sources=%d %v", n, err)

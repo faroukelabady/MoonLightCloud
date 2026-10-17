@@ -13,14 +13,14 @@ func raw(payload string) json.RawMessage { return json.RawMessage(payload) }
 // malformed types fail closed.
 func TestCategorySnapshotV2PolicyRequired(t *testing.T) {
 	for _, payload := range []string{
-		`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"online_enabled":true,"catalog_revision":5}`,
-		`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"online_enabled":false,"catalog_revision":5}`,
+		`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","name_ar":"A","name_en":"A","parent_ids":[],"online_enabled":true,"catalog_revision":5}`,
+		`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","name_ar":"A","name_en":"A","parent_ids":[],"online_enabled":false,"catalog_revision":5}`,
 	} {
 		if _, err := DecodeCategorySnapshotV2(raw(payload)); err != nil {
 			t.Fatalf("valid v2 rejected: %v", err)
 		}
 	}
-	disabled, err := DecodeCategorySnapshotV2(raw(`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"online_enabled":false,"catalog_revision":5}`))
+	disabled, err := DecodeCategorySnapshotV2(raw(`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","name_ar":"A","name_en":"A","parent_ids":[],"online_enabled":false,"catalog_revision":5}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,11 +28,11 @@ func TestCategorySnapshotV2PolicyRequired(t *testing.T) {
 		t.Fatal("v2 false must decode as false")
 	}
 
-	missing := `{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"catalog_revision":5}`
+	missing := `{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","name_ar":"A","name_en":"A","parent_ids":[],"catalog_revision":5}`
 	if _, err := DecodeCategorySnapshotV2(raw(missing)); err == nil {
 		t.Fatal("missing online_enabled must fail closed")
 	}
-	malformed := `{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"online_enabled":"yes","catalog_revision":5}`
+	malformed := `{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","name_ar":"A","name_en":"A","parent_ids":[],"online_enabled":"yes","catalog_revision":5}`
 	if _, err := DecodeCategorySnapshotV2(raw(malformed)); err == nil {
 		t.Fatal("non-boolean online_enabled must fail closed")
 	}
@@ -42,7 +42,7 @@ func TestCategorySnapshotV2PolicyRequired(t *testing.T) {
 // never be fingerprint-equivalent.
 func TestCategoryFingerprintIsPolicyAware(t *testing.T) {
 	base := CategorySnapshot{CategoryID: "aaaaaaaa-0000-4000-8000-000000000001", Status: "active",
-		Names: []CatalogName{{Locale: "en", Name: "A"}}, CatalogRevision: 5, OnlineEnabled: true}
+		NameAR: "A", CatalogRevision: 5, OnlineEnabled: true}
 	disabled := base
 	disabled.OnlineEnabled = false
 

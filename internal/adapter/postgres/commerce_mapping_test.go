@@ -399,10 +399,7 @@ func TestCommerceTranslationFidelity(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &m); err != nil {
 		t.Fatal(err)
 	}
-	m["translations"] = []any{
-		map[string]any{"locale": "ar", "name": "بردية توت", "description": "وصف"},
-		map[string]any{"locale": "en", "name": "Tutankhamun Papyrus"},
-	}
+	m["name_ar"], m["description_ar"], m["name_en"] = "بردية توت", "وصف", "Tutankhamun Papyrus"
 	raw, _ := json.Marshal(m)
 	event := commerceIDs(t, 0x1B0, "product")["product"]
 	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(raw))
@@ -470,7 +467,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	for _, table := range []string{
 		"catalog_product_variant_inventory",
 		"catalog_product_sales_policies",
-		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
+		"catalog_product_tags", "catalog_product_subcategories",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
 		"catalog_tags", "catalog_categories",
 	} {

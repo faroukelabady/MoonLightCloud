@@ -377,13 +377,12 @@ per-event storm). Procedure:
 ```sql
 DELETE FROM catalog_product_variant_inventory;
 DELETE FROM catalog_product_variant_attribute_values;
+DELETE FROM catalog_product_variant_prices;
 DELETE FROM catalog_product_variants;
-DELETE FROM catalog_product_inventory;
 DELETE FROM catalog_product_sales_policies;
 DELETE FROM catalog_product_configurations;
 DELETE FROM catalog_product_tags;
 DELETE FROM catalog_product_subcategories;
-DELETE FROM catalog_product_translations;
 DELETE FROM catalog_product_prices;
 DELETE FROM catalog_products;
 DELETE FROM catalog_category_edges;
@@ -420,11 +419,13 @@ No dashboard surface exists for catalog in Phase 5A/5B by design.
 
 ## Inventory projection and availability (Phase 5C)
 
-Inventory events (`inventory.product.snapshot.v1`) project into
-`catalog_product_inventory`: one row per product carrying the highest
-valid `inventory_revision` and its stock. Inactive products and
-`SELL_ONLINE=false` still project rows — lifecycle and policy affect
-availability, never inventory truth.
+Inventory events (`inventory.product_variant.snapshot.v1`) project into
+`catalog_product_variant_inventory`: one row per Variant carrying the
+highest valid `inventory_revision` and its stock. Product stock is the
+read-only view `catalog_product_stock`: the sum over active Variants,
+NULL unless every active Variant has ready inventory (ADR-0055, baseline
+00102). Inactive products and `SELL_ONLINE=false` still project rows —
+lifecycle and policy affect availability, never inventory truth.
 
 Availability is a derived read, not a stored projection: ONLINE
 availability = 0 when product, policy, or inventory is missing
@@ -440,13 +441,11 @@ allocation.
 ```sql
 -- Pending inventory snapshots by state (normal: zeros outside outage).
 SELECT status, count(*) FROM sync_event_processing
-WHERE processor = 'inventory_product_projection.v1' GROUP BY status;
--- Current inventory revision per product.
-SELECT product_id, stock_quantity, source_revision, projected_at
-FROM catalog_product_inventory WHERE product_id = $1;
--- Any row here is an integrity failure (CHECK plus dual-layer
--- validation forbid negative stock); investigate before trusting reads.
-SELECT product_id FROM catalog_product_inventory WHERE stock_quantity < 0;
+WHERE processor = 'inventory_product_variant_projection.v1' GROUP BY status;
+-- Current inventory revision per Variant of one product, and the total.
+SELECT variant_id, stock_quantity, source_revision, ready, projected_at
+FROM catalog_product_variant_inventory WHERE product_id = $1;
+SELECT stock_quantity FROM catalog_product_stock WHERE product_id = $1;
 ```
 
 Inventory rebuild clears only the inventory table plus the inventory

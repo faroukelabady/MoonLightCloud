@@ -494,7 +494,7 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 	// p4: online-eligible, one live variant with stock but no mapping.
 	for i := 1; i <= 4; i++ {
 		p := fmt.Sprintf("f0000000-0000-4000-8000-00000000000%d", 2+i)
-		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 			VALUES ('%s', 'p%d', 'f0000000-0000-4000-8000-000000000002', true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, i, devID))
 		exec(fmt.Sprintf(`INSERT INTO catalog_product_sales_policies (product_id, sell_offline, sell_online, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 			VALUES ('%s', true, true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, devID))

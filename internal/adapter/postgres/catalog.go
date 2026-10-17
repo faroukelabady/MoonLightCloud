@@ -229,10 +229,6 @@ func currentCategorySnapshot(ctx context.Context, q *sqlcgen.Queries, cuid pgtyp
 	if err != nil {
 		return catalog.NormalizedCategory{}, false, err
 	}
-	names := []catalog.CatalogName{{Locale: catalog.LocaleAR, Name: row.NameAr}}
-	if row.NameEn.Valid {
-		names = append(names, catalog.CatalogName{Locale: catalog.LocaleEN, Name: row.NameEn.String})
-	}
 	parentIDs := make([]string, 0, len(parents))
 	for _, parent := range parents {
 		parentIDs = append(parentIDs, uuidString(parent))
@@ -240,7 +236,7 @@ func currentCategorySnapshot(ctx context.Context, q *sqlcgen.Queries, cuid pgtyp
 	return catalog.NormalizeCategorySnapshot(catalog.CategorySnapshot{
 		CategoryID: uuidString(row.CategoryID), Status: row.Status,
 		OnlineEnabled: row.OnlineEnabled,
-		Names:         names, ParentIDs: parentIDs, CatalogRevision: row.SourceRevision,
+		NameAR:        row.NameAr, NameEN: optionalTextPtr(row.NameEn), ParentIDs: parentIDs, CatalogRevision: row.SourceRevision,
 	}), true, nil
 }
 
@@ -254,16 +250,9 @@ func currentTagSnapshot(ctx context.Context, q *sqlcgen.Queries, tuid pgtype.UUI
 		}
 		return catalog.NormalizedTag{}, false, err
 	}
-	var names []catalog.CatalogName
-	if row.NameAr.Valid {
-		names = append(names, catalog.CatalogName{Locale: catalog.LocaleAR, Name: row.NameAr.String})
-	}
-	if row.NameEn.Valid {
-		names = append(names, catalog.CatalogName{Locale: catalog.LocaleEN, Name: row.NameEn.String})
-	}
 	return catalog.NormalizeTagSnapshot(catalog.TagSnapshot{
 		TagID: uuidString(row.TagID), Slug: row.Slug, IsActive: row.IsActive,
-		Names: names, CatalogRevision: row.SourceRevision,
+		NameAR: row.NameAr, NameEN: optionalTextPtr(row.NameEn), CatalogRevision: row.SourceRevision,
 	}), true, nil
 }
 
@@ -281,10 +270,6 @@ func currentProductSnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype
 	if err != nil {
 		return catalog.NormalizedProduct{}, false, err
 	}
-	translations, err := q.CatalogProductTranslations(ctx, puid)
-	if err != nil {
-		return catalog.NormalizedProduct{}, false, err
-	}
 	subs, err := q.CatalogProductSubcategories(ctx, puid)
 	if err != nil {
 		return catalog.NormalizedProduct{}, false, err
@@ -294,13 +279,11 @@ func currentProductSnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype
 		return catalog.NormalizedProduct{}, false, err
 	}
 	snapshot := catalog.ProductSnapshot{
-		ProductID: uuidString(row.ProductID), ProductTypeID: uuidString(row.ProductTypeID), Name: row.Name,
+		ProductID: uuidString(row.ProductID), ProductTypeID: uuidString(row.ProductTypeID),
+		NameAR: row.NameAr, NameEN: optionalTextPtr(row.NameEn),
+		DescriptionAR: optionalTextPtr(row.DescriptionAr), DescriptionEN: optionalTextPtr(row.DescriptionEn),
 		TopCategoryID: uuidString(row.TopCategoryID), IsActive: row.IsActive,
 		CatalogRevision: row.SourceRevision,
-	}
-	if row.Description.Valid {
-		desc := row.Description.String
-		snapshot.Description = &desc
 	}
 	if row.WidthCm.Valid {
 		width := int(row.WidthCm.Int32)
@@ -317,14 +300,6 @@ func currentProductSnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype
 			entry.CostCents = &cost
 		}
 		snapshot.Prices = append(snapshot.Prices, entry)
-	}
-	for _, translation := range translations {
-		entry := catalog.CatalogProductTranslation{Locale: translation.Locale, Name: translation.Name}
-		if translation.Description.Valid {
-			desc := translation.Description.String
-			entry.Description = &desc
-		}
-		snapshot.Translations = append(snapshot.Translations, entry)
 	}
 	for _, sub := range subs {
 		snapshot.SubcategoryIDs = append(snapshot.SubcategoryIDs, uuidString(sub))
@@ -1382,19 +1357,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		}
 	}
 	fingerprint := catalog.FingerprintCategory(valid)
-	nameAR := ""
-	nameEN := pgtype.Text{}
-	for _, name := range valid.Names {
-		if name.Locale == catalog.LocaleAR && nameAR == "" {
-			nameAR = name.Name
-		}
-		if name.Locale == catalog.LocaleEN && !nameEN.Valid {
-			nameEN = pgText(name.Name)
-		}
-	}
-	if nameAR == "" && len(valid.Names) > 0 {
-		nameAR = valid.Names[0].Name
-	}
+	nameAR, nameEN := valid.NameAR, pgTextPtr(valid.NameEN)
 	defaultAlgorithm := int16(0)
 	if sharedNode {
 		defaultAlgorithm = 1
@@ -1768,15 +1731,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 		}
 	}
 
-	var nameAR, nameEN pgtype.Text
-	for _, name := range valid.Names {
-		switch name.Locale {
-		case catalog.LocaleAR:
-			nameAR = pgText(name.Name)
-		case catalog.LocaleEN:
-			nameEN = pgText(name.Name)
-		}
-	}
+	nameAR, nameEN := valid.NameAR, pgTextPtr(valid.NameEN)
 	if sharedNode {
 		if _, err := q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore}); err != nil {
 			_ = tx.Rollback(ctx)
@@ -2111,10 +2066,6 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		return d.markCatalogBlocked(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrCatalogInvalidRelation, "product relation invalid under settled graph")
 	}
 
-	var description pgtype.Text
-	if valid.Description != nil {
-		description = pgText(*valid.Description)
-	}
 	var width, height pgtype.Int4
 	if valid.WidthCM != nil {
 		width = pgtype.Int4{Int32: int32(*valid.WidthCM), Valid: true}
@@ -2135,7 +2086,8 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "product state read failed", preErr)
 	}
 	if err := q.UpsertCatalogProduct(ctx, sqlcgen.UpsertCatalogProductParams{
-		ProductID: puid, Name: valid.Name, Description: description,
+		ProductID: puid, NameAr: valid.NameAR, NameEn: pgTextPtr(valid.NameEN),
+		DescriptionAr: pgTextPtr(valid.DescriptionAR), DescriptionEn: pgTextPtr(valid.DescriptionEN),
 		TopCategoryID: topUID, WidthCm: width, HeightCm: height, IsActive: valid.IsActive,
 		ProductTypeID:  typeUID,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
@@ -2163,22 +2115,6 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 		}); err != nil {
 			_ = tx.Rollback(ctx)
 			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "price insert failed", err)
-		}
-	}
-	if err := q.DeleteCatalogProductTranslations(ctx, puid); err != nil {
-		_ = tx.Rollback(ctx)
-		return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation replace failed", err)
-	}
-	for _, translation := range valid.Translations {
-		var tdesc pgtype.Text
-		if translation.Description != nil {
-			tdesc = pgText(*translation.Description)
-		}
-		if err := q.InsertCatalogProductTranslation(ctx, sqlcgen.InsertCatalogProductTranslationParams{
-			ProductID: puid, Locale: translation.Locale, Name: translation.Name, Description: tdesc,
-		}); err != nil {
-			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "translation insert failed", err)
 		}
 	}
 	if err := q.DeleteCatalogProductSubcategories(ctx, puid); err != nil {
@@ -2436,10 +2372,6 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 	if err != nil {
 		return catalog.Product{}, apperr.Wrap(apperr.Internal, "catalog prices", redact(err))
 	}
-	translations, err := q.CatalogProductTranslations(ctx, uid)
-	if err != nil {
-		return catalog.Product{}, apperr.Wrap(apperr.Internal, "catalog translations", redact(err))
-	}
 	subs, err := q.CatalogProductSubcategories(ctx, uid)
 	if err != nil {
 		return catalog.Product{}, apperr.Wrap(apperr.Internal, "catalog subcategories", redact(err))
@@ -2450,16 +2382,13 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 	}
 	product := catalog.Product{
 		ProductHeader: catalog.ProductHeader{
-			ID: uuidString(row.ProductID), Name: row.Name,
+			ID: uuidString(row.ProductID), NameAR: row.NameAr, NameEN: optionalTextPtr(row.NameEn),
 			IsActive: row.IsActive, Revision: row.SourceRevision,
 			SourceEventID: uuidString(row.SourceEventID),
 			StoreID:       storeString(row.StoreID),
 		},
 		TopCategoryID: uuidString(row.TopCategoryID),
-	}
-	if row.Description.Valid {
-		desc := row.Description.String
-		product.Description = &desc
+		DescriptionAR: optionalTextPtr(row.DescriptionAr), DescriptionEN: optionalTextPtr(row.DescriptionEn),
 	}
 	if row.WidthCm.Valid {
 		width := int(row.WidthCm.Int32)
@@ -2476,14 +2405,6 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 			entry.CostCents = &cost
 		}
 		product.Prices = append(product.Prices, entry)
-	}
-	for _, translation := range translations {
-		entry := catalog.CatalogProductTranslation{Locale: translation.Locale, Name: translation.Name}
-		if translation.Description.Valid {
-			desc := translation.Description.String
-			entry.Description = &desc
-		}
-		product.Translations = append(product.Translations, entry)
 	}
 	for _, sub := range subs {
 		product.SubcategoryIDs = append(product.SubcategoryIDs, uuidString(sub))
@@ -2505,7 +2426,7 @@ func (d Devices) CatalogActiveProducts(ctx context.Context, limit int) ([]catalo
 	out := make([]catalog.ProductHeader, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, catalog.ProductHeader{
-			ID: uuidString(row.ProductID), Name: row.Name,
+			ID: uuidString(row.ProductID), NameAR: row.NameAr, NameEN: optionalTextPtr(row.NameEn),
 			IsActive: true, Revision: row.SourceRevision,
 			SourceEventID: uuidString(row.SourceEventID),
 		})
@@ -2578,12 +2499,8 @@ func (d Devices) CatalogTag(ctx context.Context, id string) (catalog.Tag, error)
 		return catalog.Tag{}, apperr.Wrap(apperr.Internal, "catalog tag", redact(err))
 	}
 	tag := catalog.Tag{
-		ID: uuidString(row.TagID), Slug: row.Slug, IsActive: row.IsActive,
+		ID: uuidString(row.TagID), Slug: row.Slug, IsActive: row.IsActive, NameAR: row.NameAr,
 		Revision: row.SourceRevision, SourceEventID: uuidString(row.SourceEventID),
-	}
-	if row.NameAr.Valid {
-		name := row.NameAr.String
-		tag.NameAR = &name
 	}
 	if row.NameEn.Valid {
 		name := row.NameEn.String

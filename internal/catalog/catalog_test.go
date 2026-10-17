@@ -2,12 +2,13 @@ package catalog
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
 func TestValidateCategorySnapshotRoundTrip(t *testing.T) {
 	raw := json.RawMessage(`{"category_id":"11111111-1111-4111-8111-111111111111","status":"active",` +
-		`"names":[{"locale":"ar","name":"إسلامي"},{"locale":"en","name":"Islamic"}],` +
+		`"name_ar":"إسلامي","name_en":"Islamic",` +
 		`"parent_ids":["22222222-2222-4222-8222-222222222222"],"online_enabled":true,"catalog_revision":3}`)
 	decoded, err := DecodeCategorySnapshotV2(raw)
 	if err != nil {
@@ -25,7 +26,7 @@ func TestValidateCategorySnapshotRoundTrip(t *testing.T) {
 func TestValidateCategorySnapshotRejects(t *testing.T) {
 	base := CategorySnapshot{
 		CategoryID: "11111111-1111-4111-8111-111111111111", Status: CategoryActive,
-		Names:           []CatalogName{{Locale: "ar", Name: "x"}},
+		NameAR:          "x",
 		ParentIDs:       []string{},
 		CatalogRevision: 1,
 	}
@@ -35,9 +36,9 @@ func TestValidateCategorySnapshotRejects(t *testing.T) {
 	}{
 		{"bad id", func(p *CategorySnapshot) { p.CategoryID = "nope" }},
 		{"bad status", func(p *CategorySnapshot) { p.Status = "deleted" }},
-		{"no names", func(p *CategorySnapshot) { p.Names = nil }},
-		{"bad locale", func(p *CategorySnapshot) { p.Names[0].Locale = "fr" }},
-		{"blank name", func(p *CategorySnapshot) { p.Names[0].Name = "  " }},
+		{"no arabic name", func(p *CategorySnapshot) { p.NameAR = "" }},
+		{"long english name", func(p *CategorySnapshot) { p.NameEN = new(strings.Repeat("e", 201)) }},
+		{"blank name", func(p *CategorySnapshot) { p.NameAR = "  " }},
 		{"self parent", func(p *CategorySnapshot) { p.ParentIDs = []string{p.CategoryID} }},
 		{"bad parent", func(p *CategorySnapshot) { p.ParentIDs = []string{"nope"} }},
 		{"zero revision", func(p *CategorySnapshot) { p.CatalogRevision = 0 }},
@@ -61,7 +62,7 @@ func TestValidateCategorySnapshotRejects(t *testing.T) {
 
 func TestValidateTagSnapshot(t *testing.T) {
 	raw := json.RawMessage(`{"tag_id":"11111111-1111-4111-8111-111111111111","slug":"gold",` +
-		`"is_active":true,"names":[{"locale":"en","name":"Gold"}],"catalog_revision":1}`)
+		`"is_active":true,"name_ar":"Gold","name_en":"Gold","catalog_revision":1}`)
 	decoded, err := DecodeTagSnapshot(raw)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
@@ -81,8 +82,7 @@ func TestValidateProductSnapshotRoundTrip(t *testing.T) {
 	cost := int64(40000)
 	width, height := 70, 100
 	p := ProductSnapshot{
-		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "PAP-001", Name: "توت عنخ آمون",
-		Translations: []CatalogProductTranslation{{Locale: "ar", Name: "توت عنخ آمون"}},
+		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "PAP-001", NameAR: "توت عنخ آمون",
 		Prices: []CatalogPrice{
 			{Currency: "EGP", PriceCents: 65000, CostCents: &cost},
 			{Currency: "USD", PriceCents: 1300},
@@ -111,7 +111,7 @@ func TestValidateProductSnapshotRoundTrip(t *testing.T) {
 	if _, err := DecodeProductSnapshotV2(json.RawMessage(`{"product_id":"11111111-1111-4111-8111-111111111111"}`)); err != nil {
 		t.Fatalf("minimal shape decodes (validation is separate): %v", err)
 	}
-	floatPrice := `{"product_id":"11111111-1111-4111-8111-111111111111","sku":"X","name":"Y",` +
+	floatPrice := `{"product_id":"11111111-1111-4111-8111-111111111111","sku":"X","name_ar":"Y",` +
 		`"prices":[{"currency":"EGP","price_cents":65.5}],"top_category_id":"22222222-2222-4222-8222-222222222222","catalog_revision":1}`
 	if _, err := DecodeProductSnapshotV2(json.RawMessage(floatPrice)); err == nil {
 		t.Fatal("float money must fail decode")
@@ -121,7 +121,7 @@ func TestValidateProductSnapshotRoundTrip(t *testing.T) {
 func TestValidateProductSnapshotRejects(t *testing.T) {
 	width, height := 70, 100
 	base := ProductSnapshot{
-		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "PAP-001", Name: "x",
+		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "PAP-001", NameAR: "x",
 		Prices:          []CatalogPrice{{Currency: "EGP", PriceCents: 1}},
 		TopCategoryID:   "22222222-2222-4222-8222-222222222222",
 		SubcategoryIDs:  []string{},

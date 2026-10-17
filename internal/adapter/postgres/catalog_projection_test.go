@@ -35,29 +35,36 @@ func catalogIDs(t *testing.T, base int, names ...string) map[string]string {
 	return out
 }
 
-func categoryPayload(categoryID, status string, names map[string]string, parents []string, revision int64) string {
-	nameList := []any{}
-	for locale, name := range names {
-		nameList = append(nameList, map[string]any{"locale": locale, "name": name})
+// payloadNames maps a locale->name fixture to the name_ar/name_en wire
+// fields; an English-only fixture also supplies the required Arabic name.
+func payloadNames(names map[string]string) (any, any) {
+	arabic, ok := names["ar"]
+	if !ok {
+		arabic = names["en"]
 	}
+	if english, ok := names["en"]; ok {
+		return arabic, english
+	}
+	return arabic, nil
+}
+
+func categoryPayload(categoryID, status string, names map[string]string, parents []string, revision int64) string {
+	nameAR, nameEN := payloadNames(names)
 	parentList := []any{}
 	for _, parent := range parents {
 		parentList = append(parentList, parent)
 	}
 	raw, _ := json.Marshal(map[string]any{
-		"category_id": categoryID, "status": status, "names": nameList, "online_enabled": true,
+		"category_id": categoryID, "status": status, "name_ar": nameAR, "name_en": nameEN, "online_enabled": true,
 		"parent_ids": parentList, "catalog_revision": revision,
 	})
 	return string(raw)
 }
 
 func tagPayload(tagID, slug string, active bool, names map[string]string, revision int64) string {
-	nameList := []any{}
-	for locale, name := range names {
-		nameList = append(nameList, map[string]any{"locale": locale, "name": name})
-	}
+	nameAR, nameEN := payloadNames(names)
 	raw, _ := json.Marshal(map[string]any{
-		"tag_id": tagID, "slug": slug, "is_active": active, "names": nameList,
+		"tag_id": tagID, "slug": slug, "is_active": active, "name_ar": nameAR, "name_en": nameEN,
 		"catalog_revision": revision,
 	})
 	return string(raw)
@@ -72,8 +79,8 @@ func productPayload(productID, sku, name, top string, subs, tags []string, revis
 		tagList = append(tagList, tag)
 	}
 	raw, _ := json.Marshal(map[string]any{
-		"product_id": productID, "name": name,
-		"translations": []any{map[string]any{"locale": "ar", "name": name}},
+		"product_id": productID, "name_ar": name, "name_en": nil,
+		"description_ar": nil, "description_en": nil,
 		"prices": []any{
 			map[string]any{"currency": "EGP", "price_cents": 65000, "cost_cents": 40000},
 			map[string]any{"currency": "USD", "price_cents": 1300},
@@ -609,10 +616,9 @@ func dumpCatalog(t *testing.T, env *saleEnv) string {
 		FROM catalog_categories ORDER BY category_id::text`)
 	dump(`SELECT parent_id::text, child_id::text, position FROM catalog_category_edges ORDER BY parent_id::text, child_id::text`)
 	dump(`SELECT tag_id::text, slug, is_active, name_en, source_revision FROM catalog_tags ORDER BY tag_id::text`)
-	dump(`SELECT product_id::text, name, top_category_id::text, is_active, source_revision
+	dump(`SELECT product_id::text, name_ar, name_en, description_ar, description_en, top_category_id::text, is_active, source_revision
 		FROM catalog_products ORDER BY product_id::text`)
 	dump(`SELECT product_id::text, currency, price_minor, cost_minor FROM catalog_product_prices ORDER BY product_id::text, currency`)
-	dump(`SELECT product_id::text, locale, name FROM catalog_product_translations ORDER BY product_id::text, locale`)
 	dump(`SELECT product_id::text, category_id::text, position FROM catalog_product_subcategories ORDER BY product_id::text, position`)
 	dump(`SELECT product_id::text, tag_id::text FROM catalog_product_tags ORDER BY product_id::text, tag_id::text`)
 	dump(`SELECT product_id::text, sell_offline, sell_online, online_allocation_limit, source_revision FROM catalog_product_sales_policies ORDER BY product_id::text`)
@@ -654,7 +660,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	for _, table := range []string{
 		"catalog_product_variant_inventory", "catalog_product_variant_attribute_values", "catalog_product_variants",
 		"catalog_product_sales_policies",
-		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
+		"catalog_product_tags", "catalog_product_subcategories",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
 		"catalog_tags", "catalog_categories",
 	} {
@@ -821,13 +827,13 @@ func TestCatalogRenameIsolatesHistory(t *testing.T) {
 	rev(1, "Papyrus Scroll", "0")
 	svc := catalog.NewService(catalogStore(env))
 	before, err := svc.GetProduct(context.Background(), productID)
-	if err != nil || before.Name != "Papyrus Scroll" {
+	if err != nil || before.NameAR != "Papyrus Scroll" {
 		t.Fatalf("current name: %+v %v", before, err)
 	}
 	sumBefore := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
 	rev(2, "RENAMED Scroll", "1")
 	after, err := svc.GetProduct(context.Background(), productID)
-	if err != nil || after.Name != "RENAMED Scroll" {
+	if err != nil || after.NameAR != "RENAMED Scroll" {
 		t.Fatalf("renamed current: %+v %v", after, err)
 	}
 	sumAfter := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
@@ -1061,7 +1067,7 @@ func TestCatalogCoordinatedRebuild(t *testing.T) {
 
 	ctx := context.Background()
 	for _, table := range []string{
-		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
+		"catalog_product_tags", "catalog_product_subcategories",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
 		"catalog_tags", "catalog_categories",
 	} {
@@ -1202,7 +1208,7 @@ func TestCatalogConcurrentRevisionsDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if product.Revision != 6 || product.Name != "six" {
+	if product.Revision != 6 || product.NameAR != "six" {
 		t.Fatalf("newest revision wins: %+v", product)
 	}
 	if len(product.TagIDs) != 0 {
@@ -1403,7 +1409,7 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(context.Background(),
-		`CREATE TRIGGER trg_fail_catalog_tx BEFORE INSERT ON catalog_product_translations
+		`CREATE TRIGGER trg_fail_catalog_tx BEFORE INSERT ON catalog_product_subcategories
 		 FOR EACH ROW EXECUTE FUNCTION fail_catalog_tx();`); err != nil {
 		t.Fatal(err)
 	}
@@ -1419,14 +1425,14 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 	var revision int64
 	var name string
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT source_revision, name FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil {
+		`SELECT source_revision, name_ar FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil {
 		t.Fatal(err)
 	}
 	if revision != 1 || name != "one" {
 		t.Fatalf("rev1 intact: %d %q", revision, name)
 	}
 	for table, want := range map[string]int{
-		"catalog_product_prices": 2, "catalog_product_translations": 1,
+		"catalog_product_prices":        2,
 		"catalog_product_subcategories": 1, "catalog_product_tags": 1,
 	} {
 		var n int
@@ -1439,7 +1445,7 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 		t.Fatalf("retryable: %q", status)
 	}
 	if _, err := env.pool.Exec(context.Background(),
-		`DROP TRIGGER trg_fail_catalog_tx ON catalog_product_translations; DROP FUNCTION fail_catalog_tx();`); err != nil {
+		`DROP TRIGGER trg_fail_catalog_tx ON catalog_product_subcategories; DROP FUNCTION fail_catalog_tx();`); err != nil {
 		t.Fatal(err)
 	}
 	forceCatalogDue(t, env, catalog.ProcessorProductProjectionV1, rev2)
@@ -1447,7 +1453,7 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 		t.Fatalf("retry succeeds: %+v", res)
 	}
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT source_revision, name FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil || revision != 2 || name != "two" {
+		`SELECT source_revision, name_ar FROM catalog_products WHERE product_id=$1`, productID).Scan(&revision, &name); err != nil || revision != 2 || name != "two" {
 		t.Fatalf("rev2 exactly once: %d %q (%v)", revision, name, err)
 	}
 	var headers int
@@ -1786,7 +1792,7 @@ func TestCatalogOldHashCompatibility(t *testing.T) {
 	// NEW event, same entity/revision/semantics (reordered keys): must
 	// reach the equal-revision comparison and stay idempotent.
 	reordered := `{"status":"active","catalog_revision":1,"category_id":"` + ids["root"] + `",` +
-		`"names":[{"locale":"ar","name":"جذر"}],"parent_ids":[],"online_enabled":true}`
+		`"name_ar":"جذر","name_en":null,"parent_ids":[],"online_enabled":true}`
 	replay := "d0005301-0000-4000-8000-000000000001"
 	ingestCatalog(t, env, replay, catalog.EventCategorySnapshotV2, "2026-09-20T10:01:00Z", reordered)
 	if res := projectCatalogOnce(t, env, replay); res.Outcome != catalog.OutcomeProcessed {

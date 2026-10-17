@@ -41,7 +41,7 @@ func (q *Queries) AllCatalogCategoryEdges(ctx context.Context) ([]AllCatalogCate
 }
 
 const catalogActiveProducts = `-- name: CatalogActiveProducts :many
-SELECT product_id, name, source_revision, source_event_id
+SELECT product_id, name_ar, name_en, source_revision, source_event_id
 FROM catalog_products
 WHERE is_active ORDER BY product_id
 LIMIT $1
@@ -49,7 +49,8 @@ LIMIT $1
 
 type CatalogActiveProductsRow struct {
 	ProductID      pgtype.UUID `json:"product_id"`
-	Name           string      `json:"name"`
+	NameAr         string      `json:"name_ar"`
+	NameEn         pgtype.Text `json:"name_en"`
 	SourceRevision int64       `json:"source_revision"`
 	SourceEventID  pgtype.UUID `json:"source_event_id"`
 }
@@ -67,7 +68,8 @@ func (q *Queries) CatalogActiveProducts(ctx context.Context, limit int32) ([]Cat
 		var i CatalogActiveProductsRow
 		if err := rows.Scan(
 			&i.ProductID,
-			&i.Name,
+			&i.NameAr,
+			&i.NameEn,
 			&i.SourceRevision,
 			&i.SourceEventID,
 		); err != nil {
@@ -317,7 +319,7 @@ func (q *Queries) CatalogEntityEventRevisions(ctx context.Context, arg CatalogEn
 }
 
 const catalogProductByID = `-- name: CatalogProductByID :one
-SELECT product_id, name, description, top_category_id, width_cm, height_cm,
+SELECT product_id, name_ar, name_en, description_ar, description_en, top_category_id, width_cm, height_cm,
     is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
     configuration_revision
 FROM catalog_products WHERE product_id = $1
@@ -325,8 +327,10 @@ FROM catalog_products WHERE product_id = $1
 
 type CatalogProductByIDRow struct {
 	ProductID             pgtype.UUID `json:"product_id"`
-	Name                  string      `json:"name"`
-	Description           pgtype.Text `json:"description"`
+	NameAr                string      `json:"name_ar"`
+	NameEn                pgtype.Text `json:"name_en"`
+	DescriptionAr         pgtype.Text `json:"description_ar"`
+	DescriptionEn         pgtype.Text `json:"description_en"`
 	TopCategoryID         pgtype.UUID `json:"top_category_id"`
 	WidthCm               pgtype.Int4 `json:"width_cm"`
 	HeightCm              pgtype.Int4 `json:"height_cm"`
@@ -345,8 +349,10 @@ func (q *Queries) CatalogProductByID(ctx context.Context, productID pgtype.UUID)
 	var i CatalogProductByIDRow
 	err := row.Scan(
 		&i.ProductID,
-		&i.Name,
-		&i.Description,
+		&i.NameAr,
+		&i.NameEn,
+		&i.DescriptionAr,
+		&i.DescriptionEn,
 		&i.TopCategoryID,
 		&i.WidthCm,
 		&i.HeightCm,
@@ -490,37 +496,6 @@ func (q *Queries) CatalogProductTags(ctx context.Context, productID pgtype.UUID)
 	return items, nil
 }
 
-const catalogProductTranslations = `-- name: CatalogProductTranslations :many
-SELECT locale, name, description
-FROM catalog_product_translations WHERE product_id = $1 ORDER BY locale
-`
-
-type CatalogProductTranslationsRow struct {
-	Locale      string      `json:"locale"`
-	Name        string      `json:"name"`
-	Description pgtype.Text `json:"description"`
-}
-
-func (q *Queries) CatalogProductTranslations(ctx context.Context, productID pgtype.UUID) ([]CatalogProductTranslationsRow, error) {
-	rows, err := q.db.Query(ctx, catalogProductTranslations, productID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CatalogProductTranslationsRow{}
-	for rows.Next() {
-		var i CatalogProductTranslationsRow
-		if err := rows.Scan(&i.Locale, &i.Name, &i.Description); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const catalogProductsReferencingCategory = `-- name: CatalogProductsReferencingCategory :many
 SELECT product_id FROM catalog_products WHERE top_category_id = $1
 UNION
@@ -560,7 +535,7 @@ type CatalogTagByIDRow struct {
 	TagID             pgtype.UUID `json:"tag_id"`
 	Slug              string      `json:"slug"`
 	IsActive          bool        `json:"is_active"`
-	NameAr            pgtype.Text `json:"name_ar"`
+	NameAr            string      `json:"name_ar"`
 	NameEn            pgtype.Text `json:"name_en"`
 	SourceRevision    int64       `json:"source_revision"`
 	SourceEventID     pgtype.UUID `json:"source_event_id"`
@@ -776,15 +751,6 @@ func (q *Queries) DeleteCatalogProductTags(ctx context.Context, productID pgtype
 	return err
 }
 
-const deleteCatalogProductTranslations = `-- name: DeleteCatalogProductTranslations :exec
-DELETE FROM catalog_product_translations WHERE product_id = $1
-`
-
-func (q *Queries) DeleteCatalogProductTranslations(ctx context.Context, productID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCatalogProductTranslations, productID)
-	return err
-}
-
 const establishedDefaultCatalog = `-- name: EstablishedDefaultCatalog :one
 SELECT EXISTS (
  SELECT 1 FROM catalog_categories c JOIN sync_events e ON e.event_id=c.source_event_id
@@ -890,30 +856,6 @@ type InsertCatalogProductTagParams struct {
 
 func (q *Queries) InsertCatalogProductTag(ctx context.Context, arg InsertCatalogProductTagParams) error {
 	_, err := q.db.Exec(ctx, insertCatalogProductTag, arg.ProductID, arg.TagID)
-	return err
-}
-
-const insertCatalogProductTranslation = `-- name: InsertCatalogProductTranslation :exec
-INSERT INTO catalog_product_translations (product_id, locale, name, description)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (product_id, locale) DO UPDATE SET
-    name = excluded.name, description = excluded.description
-`
-
-type InsertCatalogProductTranslationParams struct {
-	ProductID   pgtype.UUID `json:"product_id"`
-	Locale      string      `json:"locale"`
-	Name        string      `json:"name"`
-	Description pgtype.Text `json:"description"`
-}
-
-func (q *Queries) InsertCatalogProductTranslation(ctx context.Context, arg InsertCatalogProductTranslationParams) error {
-	_, err := q.db.Exec(ctx, insertCatalogProductTranslation,
-		arg.ProductID,
-		arg.Locale,
-		arg.Name,
-		arg.Description,
-	)
 	return err
 }
 
@@ -1214,13 +1156,14 @@ func (q *Queries) UpsertCatalogCategory(ctx context.Context, arg UpsertCatalogCa
 
 const upsertCatalogProduct = `-- name: UpsertCatalogProduct :exec
 INSERT INTO catalog_products (
-    product_id, name, description, top_category_id, width_cm, height_cm,
+    product_id, name_ar, name_en, description_ar, description_en, top_category_id, width_cm, height_cm,
     is_active, product_type_id,
     source_revision, source_event_id, source_device_id,
     source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (product_id) DO UPDATE SET
-    name = excluded.name, description = excluded.description,
+    name_ar = excluded.name_ar, name_en = excluded.name_en,
+    description_ar = excluded.description_ar, description_en = excluded.description_en,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
     product_type_id = excluded.product_type_id,
@@ -1233,8 +1176,10 @@ ON CONFLICT (product_id) DO UPDATE SET
 
 type UpsertCatalogProductParams struct {
 	ProductID         pgtype.UUID        `json:"product_id"`
-	Name              string             `json:"name"`
-	Description       pgtype.Text        `json:"description"`
+	NameAr            string             `json:"name_ar"`
+	NameEn            pgtype.Text        `json:"name_en"`
+	DescriptionAr     pgtype.Text        `json:"description_ar"`
+	DescriptionEn     pgtype.Text        `json:"description_en"`
 	TopCategoryID     pgtype.UUID        `json:"top_category_id"`
 	WidthCm           pgtype.Int4        `json:"width_cm"`
 	HeightCm          pgtype.Int4        `json:"height_cm"`
@@ -1254,8 +1199,10 @@ type UpsertCatalogProductParams struct {
 func (q *Queries) UpsertCatalogProduct(ctx context.Context, arg UpsertCatalogProductParams) error {
 	_, err := q.db.Exec(ctx, upsertCatalogProduct,
 		arg.ProductID,
-		arg.Name,
-		arg.Description,
+		arg.NameAr,
+		arg.NameEn,
+		arg.DescriptionAr,
+		arg.DescriptionEn,
 		arg.TopCategoryID,
 		arg.WidthCm,
 		arg.HeightCm,
@@ -1292,7 +1239,7 @@ type UpsertCatalogTagParams struct {
 	TagID             pgtype.UUID        `json:"tag_id"`
 	Slug              string             `json:"slug"`
 	IsActive          bool               `json:"is_active"`
-	NameAr            pgtype.Text        `json:"name_ar"`
+	NameAr            string             `json:"name_ar"`
 	NameEn            pgtype.Text        `json:"name_en"`
 	SourceRevision    int64              `json:"source_revision"`
 	SourceEventID     pgtype.UUID        `json:"source_event_id"`

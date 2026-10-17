@@ -238,7 +238,7 @@ func TestCommerceOrderSurvivesCatalogRebuild(t *testing.T) {
 
 	// Documented catalog rebuild: derived tables only, inbox preserved.
 	for _, table := range []string{
-		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
+		"catalog_product_tags", "catalog_product_subcategories",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
 		"catalog_tags", "catalog_categories",
 	} {

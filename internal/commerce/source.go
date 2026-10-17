@@ -114,13 +114,16 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		HeightCM:        product.HeightCM,
 		CatalogRevision: product.Revision,
 	}
-	for _, translation := range product.Translations {
-		assembled.Names = append(assembled.Names, LocalizedName{Locale: translation.Locale, Name: translation.Name})
-		if translation.Description != nil {
+	assembled.Names = append(assembled.Names, LocalizedName{Locale: catalog.LocaleAR, Name: product.NameAR})
+	if product.NameEN != nil {
+		assembled.Names = append(assembled.Names, LocalizedName{Locale: catalog.LocaleEN, Name: *product.NameEN})
+	}
+	for locale, description := range map[string]*string{catalog.LocaleAR: product.DescriptionAR, catalog.LocaleEN: product.DescriptionEN} {
+		if description != nil {
 			if assembled.Descriptions == nil {
 				assembled.Descriptions = map[string]string{}
 			}
-			assembled.Descriptions[translation.Locale] = *translation.Description
+			assembled.Descriptions[locale] = *description
 		}
 	}
 	for _, price := range product.Prices {
@@ -152,9 +155,7 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		ref := TagRef{ID: tagID}
 		if tag, err := s.reader.GetTag(ctx, tagID); err == nil {
 			ref.Slug = tag.Slug
-			if tag.NameAR != nil {
-				ref.NameAR = *tag.NameAR
-			}
+			ref.NameAR = tag.NameAR
 			if tag.NameEN != nil {
 				ref.NameEN = *tag.NameEN
 			}

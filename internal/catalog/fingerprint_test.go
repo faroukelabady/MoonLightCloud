@@ -6,8 +6,8 @@ import (
 )
 
 func TestFingerprintIgnoresObjectKeyOrder(t *testing.T) {
-	a := json.RawMessage(`{"sku":"A","name":"X","product_id":"11111111-1111-4111-8111-111111111111","top_category_id":"22222222-2222-4222-8222-222222222222","catalog_revision":1}`)
-	b := json.RawMessage(`{"name":"X","catalog_revision":1,"top_category_id":"22222222-2222-4222-8222-222222222222","product_id":"11111111-1111-4111-8111-111111111111","sku":"A"}`)
+	a := json.RawMessage(`{"sku":"A","name_ar":"X","product_id":"11111111-1111-4111-8111-111111111111","top_category_id":"22222222-2222-4222-8222-222222222222","catalog_revision":1}`)
+	b := json.RawMessage(`{"name_ar":"X","catalog_revision":1,"top_category_id":"22222222-2222-4222-8222-222222222222","product_id":"11111111-1111-4111-8111-111111111111","sku":"A"}`)
 	pa, err := DecodeProductSnapshotV2(a)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestFingerprintIgnoresObjectKeyOrder(t *testing.T) {
 
 func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 	base := ProductSnapshot{
-		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "A", Name: "X",
+		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "A", NameAR: "X",
 		TopCategoryID:   "22222222-2222-4222-8222-222222222222",
 		SubcategoryIDs:  []string{"33333333-3333-4333-8333-333333333333"},
 		TagIDs:          []string{"44444444-4444-4333-8444-444444444444", "55555555-5555-4555-8555-555555555555"},
@@ -64,7 +64,7 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 		t.Fatal("subcategory order (position semantic) must affect identity")
 	}
 	renamed := base
-	renamed.Name = "Y"
+	renamed.NameAR = "Y"
 	vd, err := ValidateProductSnapshotV2(renamed)
 	if err != nil {
 		t.Fatal(err)
@@ -86,11 +86,8 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 func TestFingerprintTranslationPriceOrder(t *testing.T) {
 	cost := int64(1)
 	base := ProductSnapshot{
-		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "A", Name: "X",
-		Translations: []CatalogProductTranslation{
-			{Locale: "ar", Name: "x"},
-			{Locale: "en", Name: "y"},
-		},
+		ProductID: "11111111-1111-4111-8111-111111111111", SKU: "A", NameAR: "X",
+		NameEN: new("y"),
 		Prices: []CatalogPrice{
 			{Currency: "EGP", PriceCents: 1, CostCents: &cost},
 			{Currency: "USD", PriceCents: 2},
@@ -103,10 +100,6 @@ func TestFingerprintTranslationPriceOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	reordered := base
-	reordered.Translations = []CatalogProductTranslation{
-		{Locale: "en", Name: "y"},
-		{Locale: "ar", Name: "x"},
-	}
 	reordered.Prices = []CatalogPrice{
 		{Currency: "USD", PriceCents: 2},
 		{Currency: "EGP", PriceCents: 1, CostCents: &cost},
@@ -116,7 +109,7 @@ func TestFingerprintTranslationPriceOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if FingerprintProduct(va) != FingerprintProduct(vb) {
-		t.Fatal("locale/currency-keyed order must not affect identity")
+		t.Fatal("currency-keyed order must not affect identity")
 	}
 }
 
@@ -124,7 +117,7 @@ func TestFingerprintCategoryParentOrderPreserved(t *testing.T) {
 	mk := func(parents []string) CategorySnapshot {
 		v, err := ValidateCategorySnapshot(CategorySnapshot{
 			CategoryID: "11111111-1111-4111-8111-111111111111", Status: CategoryActive,
-			Names:           []CatalogName{{Locale: "ar", Name: "x"}},
+			NameAR:          "x",
 			ParentIDs:       parents,
 			CatalogRevision: 1,
 		})

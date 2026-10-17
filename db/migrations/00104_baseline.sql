@@ -355,7 +355,7 @@ CREATE TABLE catalog_tags (
     tag_id              UUID PRIMARY KEY,
     slug                TEXT NOT NULL UNIQUE,
     is_active           BOOLEAN NOT NULL,
-    name_ar             TEXT,
+    name_ar             TEXT NOT NULL,
     name_en             TEXT,
     source_revision     BIGINT NOT NULL CHECK (source_revision >= 1),
     source_event_id     UUID NOT NULL REFERENCES sync_events(event_id),
@@ -368,8 +368,11 @@ CREATE TABLE catalog_tags (
 CREATE TABLE catalog_products (
     product_id          UUID PRIMARY KEY,
     sku                 TEXT NOT NULL UNIQUE,
-    name                TEXT NOT NULL,
-    description         TEXT,
+    -- ADR-0055 / Retail ADR-049 1f: localized names are columns.
+    name_ar             TEXT NOT NULL,
+    name_en             TEXT,
+    description_ar      TEXT,
+    description_en      TEXT,
     top_category_id     UUID NOT NULL REFERENCES catalog_categories(category_id) ON DELETE RESTRICT,
     width_cm            INT CHECK (width_cm IS NULL OR width_cm > 0),
     height_cm           INT CHECK (height_cm IS NULL OR height_cm > 0),
@@ -390,14 +393,6 @@ CREATE TABLE catalog_product_prices (
     price_minor BIGINT NOT NULL CHECK (price_minor >= 0),
     cost_minor  BIGINT CHECK (cost_minor IS NULL OR cost_minor >= 0),
     PRIMARY KEY (product_id, currency)
-);
-
-CREATE TABLE catalog_product_translations (
-    product_id  UUID NOT NULL REFERENCES catalog_products(product_id) ON DELETE CASCADE,
-    locale      TEXT NOT NULL CHECK (locale IN ('ar', 'en')),
-    name        TEXT NOT NULL,
-    description TEXT,
-    PRIMARY KEY (product_id, locale)
 );
 
 CREATE TABLE catalog_product_subcategories (
@@ -2308,7 +2303,6 @@ DROP TABLE IF EXISTS catalog_product_variant_prices CASCADE;
 DROP TABLE IF EXISTS catalog_product_sales_policies CASCADE;
 DROP TABLE IF EXISTS catalog_product_subcategories CASCADE;
 DROP TABLE IF EXISTS catalog_product_tags CASCADE;
-DROP TABLE IF EXISTS catalog_product_translations CASCADE;
 DROP TABLE IF EXISTS catalog_product_type_capabilities CASCADE;
 DROP TABLE IF EXISTS catalog_product_type_variant_dimensions CASCADE;
 DROP TABLE IF EXISTS catalog_product_types CASCADE;

@@ -69,10 +69,10 @@ SELECT product_id FROM commerce_product_mappings
 WHERE provider_key = $1 AND external_product_id = $2;
 -- Provider-facing availability inputs for one product (read-only).
 SELECT p.is_active, pol.sell_online, pol.online_allocation_limit,
-       inv.stock_quantity, inv.source_revision
+       stock.stock_quantity
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
-LEFT JOIN catalog_product_inventory inv ON inv.product_id = p.product_id
+LEFT JOIN catalog_product_stock stock ON stock.product_id = p.product_id
 WHERE p.product_id = $1;
 ```
 

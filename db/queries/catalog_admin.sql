@@ -182,8 +182,8 @@ WHERE t.type_id = @type_id::uuid
 -- the SKU.
 
 -- name: AdminProductList :many
-SELECT p.product_id, p.name AS name_ar,
-    COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
+SELECT p.product_id, p.name_ar,
+    COALESCE(p.name_en, '')::text AS name_en,
     p.is_active, p.product_type_id,
     COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
     type_source.store_id AS source_store_id,
@@ -209,7 +209,8 @@ LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product
 LEFT JOIN sync_events type_source ON type_source.event_id = product_type.source_event_id
     AND type_source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE p.store_id = @store_id::uuid
-  AND (sqlc.arg(search)::text = '' OR p.name ILIKE '%'||sqlc.arg(search)::text||'%'
+  AND (sqlc.arg(search)::text = '' OR p.name_ar ILIKE '%'||sqlc.arg(search)::text||'%'
+       OR p.name_en ILIKE '%'||sqlc.arg(search)::text||'%'
        OR EXISTS (SELECT 1 FROM catalog_product_variants v
                   WHERE v.product_id = p.product_id
                     AND v.sku ILIKE '%'||sqlc.arg(search)::text||'%'))
@@ -218,10 +219,10 @@ ORDER BY p.product_id DESC
 LIMIT @limit_n::int;
 
 -- name: AdminProductDetail :one
-SELECT p.product_id, p.name AS name_ar,
-    COALESCE((SELECT t.name FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS name_en,
-    p.description AS description_ar,
-    COALESCE((SELECT t.description FROM catalog_product_translations t WHERE t.product_id = p.product_id AND t.locale = 'en'), '') AS description_en,
+SELECT p.product_id, p.name_ar,
+    COALESCE(p.name_en, '')::text AS name_en,
+    p.description_ar,
+    COALESCE(p.description_en, '')::text AS description_en,
     p.width_cm, p.height_cm, p.top_category_id, p.is_active, p.product_type_id,
     COALESCE(type_source.payload->>'product_type_id', '')::text AS source_type_id,
     type_source.store_id AS source_store_id,

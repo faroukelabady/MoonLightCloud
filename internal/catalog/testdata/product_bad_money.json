@@ -1,7 +1,6 @@
 {
   "product_id": "55555555-5555-4555-8555-555555555555",
-  "name": "x",
-  "translations": [],
+  "name_ar": "x",
   "prices": [
     {
       "currency": "EGP",

@@ -109,9 +109,9 @@ func TestProductTypeHealthAndReports(t *testing.T) {
 	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, online_enabled, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ('f1000000-0000-4000-8000-000000000002', 'active', 'cat', true, 1, 'f1000000-0000-4000-8000-000000000001', '` + devID + `', '\x00', now())`)
 	// p1: no type (PRODUCT_TYPE_MISSING). p2: dangling type (PROJECTION_MISSING).
-	exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+	exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ('f1000000-0000-4000-8000-000000000011', 'untyped', 'f1000000-0000-4000-8000-000000000002', true, 1, 'f1000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, devID))
-	exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name, top_category_id, is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
+	exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ('f1000000-0000-4000-8000-000000000012', 'dangling', 'f1000000-0000-4000-8000-000000000002', true, 'f1000000-0000-4000-8000-000000000099', 1, 'f1000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, devID))
 
 	devices := catalogStore(env)

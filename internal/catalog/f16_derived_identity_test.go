@@ -31,7 +31,7 @@ func TestF16DerivedStorageIdentityRefused(t *testing.T) {
 	product := func(typeID string) map[string]any {
 		return map[string]any{
 			"product_id": "bbbbbbbb-0000-4000-8000-000000000002", "product_type_id": typeID,
-			"name": "ساعة", "translations": []any{},
+			"name_ar":         "ساعة",
 			"prices":          []any{map[string]any{"currency": "EGP", "price_cents": 100}},
 			"top_category_id": "cccccccc-0000-4000-8000-000000000003",
 			"subcategory_ids": []any{}, "tag_ids": []any{}, "is_active": true, "catalog_revision": 5,

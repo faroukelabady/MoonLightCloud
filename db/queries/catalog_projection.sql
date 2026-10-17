@@ -113,13 +113,14 @@ FROM catalog_tags WHERE tag_id = $1;
 -- Phase 17-R0 (ADR-0049): Product carries NO SKU — SKU/stock identity
 -- lives on ProductVariant; the column was retired by 00035.
 INSERT INTO catalog_products (
-    product_id, name, description, top_category_id, width_cm, height_cm,
+    product_id, name_ar, name_en, description_ar, description_en, top_category_id, width_cm, height_cm,
     is_active, product_type_id,
     source_revision, source_event_id, source_device_id,
     source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (product_id) DO UPDATE SET
-    name = excluded.name, description = excluded.description,
+    name_ar = excluded.name_ar, name_en = excluded.name_en,
+    description_ar = excluded.description_ar, description_en = excluded.description_en,
     top_category_id = excluded.top_category_id, width_cm = excluded.width_cm,
     height_cm = excluded.height_cm, is_active = excluded.is_active,
     product_type_id = excluded.product_type_id,
@@ -130,16 +131,13 @@ ON CONFLICT (product_id) DO UPDATE SET
     projected_at = now();
 
 -- name: CatalogProductByID :one
-SELECT product_id, name, description, top_category_id, width_cm, height_cm,
+SELECT product_id, name_ar, name_en, description_ar, description_en, top_category_id, width_cm, height_cm,
     is_active, product_type_id, source_revision, source_event_id, source_device_id, source_payload_hash, store_id,
     configuration_revision
 FROM catalog_products WHERE product_id = $1;
 
 -- name: DeleteCatalogProductPrices :exec
 DELETE FROM catalog_product_prices WHERE product_id = $1;
-
--- name: DeleteCatalogProductTranslations :exec
-DELETE FROM catalog_product_translations WHERE product_id = $1;
 
 -- name: DeleteCatalogProductSubcategories :exec
 DELETE FROM catalog_product_subcategories WHERE product_id = $1;
@@ -152,12 +150,6 @@ INSERT INTO catalog_product_prices (product_id, currency, price_minor, cost_mino
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (product_id, currency) DO UPDATE SET
     price_minor = excluded.price_minor, cost_minor = excluded.cost_minor;
-
--- name: InsertCatalogProductTranslation :exec
-INSERT INTO catalog_product_translations (product_id, locale, name, description)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (product_id, locale) DO UPDATE SET
-    name = excluded.name, description = excluded.description;
 
 -- name: InsertCatalogProductSubcategory :exec
 INSERT INTO catalog_product_subcategories (product_id, category_id, position)
@@ -173,10 +165,6 @@ ON CONFLICT DO NOTHING;
 SELECT currency, price_minor, cost_minor
 FROM catalog_product_prices WHERE product_id = $1 ORDER BY currency;
 
--- name: CatalogProductTranslations :many
-SELECT locale, name, description
-FROM catalog_product_translations WHERE product_id = $1 ORDER BY locale;
-
 -- name: CatalogProductSubcategories :many
 SELECT category_id FROM catalog_product_subcategories
 WHERE product_id = $1 ORDER BY position, category_id;
@@ -187,7 +175,7 @@ SELECT tag_id FROM catalog_product_tags WHERE product_id = $1 ORDER BY tag_id;
 -- name: CatalogActiveProducts :many
 -- Phase 17-R0: Product has no SKU (ADR-0049); deterministic product_id
 -- ordering replaces the retired SKU ordering.
-SELECT product_id, name, source_revision, source_event_id
+SELECT product_id, name_ar, name_en, source_revision, source_event_id
 FROM catalog_products
 WHERE is_active ORDER BY product_id
 LIMIT $1;

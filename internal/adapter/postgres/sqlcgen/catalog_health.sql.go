@@ -15,14 +15,14 @@ const catalogHealthDetail = `-- name: CatalogHealthDetail :many
 SELECT reason_code, provider_key, product_id, sku, name, store_id
 FROM (
     SELECT 'CATALOG_MISSING_CATEGORY' AS reason_code, ''::text AS provider_key,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     WHERE (p.top_category_id IS NULL OR
            NOT EXISTS (SELECT 1 FROM catalog_categories c WHERE c.category_id = p.top_category_id))
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'AVAILABILITY_NOT_READY', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -32,7 +32,7 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'COMMERCE_MAPPING_MISSING', u.provider_key,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN (
@@ -47,7 +47,7 @@ FROM (
                       WHERE m.provider_key = u.provider_key AND m.product_id = p.product_id)
     UNION ALL
     SELECT 'CATEGORY_ONLINE_DISABLED', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -56,7 +56,7 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'COMMERCE_SYNC_AMBIGUOUS', b.provider_key,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM commerce_product_mutation_barriers b
     JOIN catalog_products p ON p.product_id = b.product_id
     WHERE b.state IN ('in_flight', 'uncertain')
@@ -64,7 +64,7 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'COMMERCE_STORE_CONFLICT', m.provider_key,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM commerce_product_mappings m
     JOIN catalog_products p ON p.product_id = m.product_id
     WHERE m.store_id IS NOT NULL AND p.store_id IS NOT NULL
@@ -75,7 +75,7 @@ FROM (
     -- Phase 17 variant detail: row identity per variant (its SKU) or per
     -- product (its SKU) for product-level codes; no raw provider errors.
     SELECT 'PRODUCT_NO_ACTIVE_VARIANTS', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     WHERE p.is_active
       AND NOT EXISTS (SELECT 1 FROM catalog_product_variants v
@@ -83,7 +83,7 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'PRODUCT_NO_SELLABLE_VARIANT', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
@@ -96,7 +96,7 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'VARIANT_DUPLICATE_COMBINATION', ''::text,
-           v.product_id, v.sku, p.name, v.store_id
+           v.product_id, v.sku, p.name_ar AS name, v.store_id
     FROM catalog_product_variants v
     JOIN catalog_products p ON p.product_id = v.product_id
     WHERE NOT v.deleted
@@ -109,14 +109,14 @@ FROM (
       AND ($1::text = '' OR v.store_id = $1::uuid)
     UNION ALL
     SELECT 'VARIANT_MISSING_SKU', ''::text,
-           v.product_id, v.sku, p.name, v.store_id
+           v.product_id, v.sku, p.name_ar AS name, v.store_id
     FROM catalog_product_variants v
     JOIN catalog_products p ON p.product_id = v.product_id
     WHERE (v.sku IS NULL OR btrim(v.sku) = '')
       AND ($1::text = '' OR v.store_id = $1::uuid)
     UNION ALL
     SELECT 'VARIANT_MAPPING_MISSING', u.provider_key,
-           v.product_id, v.sku, p.name, v.store_id
+           v.product_id, v.sku, p.name_ar AS name, v.store_id
     FROM catalog_product_variants v
     JOIN catalog_products p ON p.product_id = v.product_id
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
@@ -133,7 +133,7 @@ FROM (
                       WHERE m.provider_key = u.provider_key AND m.variant_id = v.variant_id)
     UNION ALL
     SELECT 'VARIANT_INTENTIONALLY_OFFLINE', ''::text,
-           v.product_id, v.sku, p.name, v.store_id
+           v.product_id, v.sku, p.name_ar AS name, v.store_id
     FROM catalog_product_variants v
     JOIN catalog_products p ON p.product_id = v.product_id
     JOIN catalog_product_sales_policies pol ON pol.product_id = p.product_id
@@ -143,13 +143,13 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'PRODUCT_TYPE_MISSING', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     WHERE p.product_type_id IS NULL
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'PRODUCT_TYPE_PROJECTION_MISSING', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     WHERE p.product_type_id IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM catalog_product_types t
@@ -157,14 +157,14 @@ FROM (
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'PRODUCT_TYPE_INACTIVE', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_types t ON t.type_id = p.product_type_id
     WHERE NOT t.is_active
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
     SELECT 'PRODUCT_FRAME_CAPABILITY_MISMATCH', ''::text,
-           p.product_id, ''::text AS sku, p.name, p.store_id
+           p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM catalog_products p
     JOIN catalog_product_types t ON t.type_id = p.product_type_id
     WHERE NOT EXISTS (SELECT 1 FROM catalog_product_type_capabilities c

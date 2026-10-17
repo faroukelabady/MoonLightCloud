@@ -58,7 +58,7 @@ VALUES($1,'custom','مخصص','Custom',true,0,1,$2,$3,'\x00',now(),$4)`, alias, 
 	// Its Product relationship was also projected before F16 refused
 	// derived identities at ingestion; reproduce that stored state.
 	insertPreF16Event(t, f, f.devA, pe, catalog.EventProductSnapshotV2, string(raw), scopeStoreA)
-	if _, err := f.pool.Exec(ctx, `INSERT INTO catalog_products(product_id,name,top_category_id,is_active,product_type_id,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id)
+	if _, err := f.pool.Exec(ctx, `INSERT INTO catalog_products(product_id,name_ar,top_category_id,is_active,product_type_id,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id)
 VALUES($1,'منتج',$2,true,$3,1,$4,$5,'\x00',now(),$6)`, pid, cid, alias, pe, f.devA, scopeStoreA); err != nil {
 		t.Fatal(err)
 	}

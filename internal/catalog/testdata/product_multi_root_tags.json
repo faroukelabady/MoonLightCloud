@@ -1,12 +1,6 @@
 {
   "product_id": "66666666-6666-4666-8666-666666666666",
-  "name": "بردية",
-  "translations": [
-    {
-      "locale": "ar",
-      "name": "بردية"
-    }
-  ],
+  "name_ar": "بردية",
   "prices": [
     {
       "currency": "EGP",

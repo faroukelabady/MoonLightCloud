@@ -89,5 +89,10 @@ on all money-bearing documents.
   EGP/USD price columns with `catalog_product_variant_prices`: per-currency
   price and cost overrides, NULL inherits the Product price. The variant
   snapshot carries them as a `prices` list.
+- Baseline 00104 (with Retail baseline r09, ADR-049 1f) stores product
+  names and descriptions as `name_ar`/`name_en`/`description_ar`/
+  `description_en` columns; `catalog_product_translations` is removed and
+  `catalog_tags.name_ar` is required. Category, tag and product snapshots
+  carry the same fields instead of locale lists.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

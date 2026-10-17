@@ -813,7 +813,7 @@ func (d Devices) AdminTagList(ctx context.Context, storeID string) ([]catalogadm
 	for _, row := range rows {
 		out = append(out, catalogadmin.AdminTagRow{
 			TagID: uuidString(row.TagID), Slug: row.Slug,
-			NameAR: textOrEmpty(row.NameAr), NameEN: textOrEmpty(row.NameEn),
+			NameAR: row.NameAr, NameEN: textOrEmpty(row.NameEn),
 			IsActive: row.IsActive, CatalogRevision: row.CatalogRevision,
 			HasPending: row.HasPending,
 		})

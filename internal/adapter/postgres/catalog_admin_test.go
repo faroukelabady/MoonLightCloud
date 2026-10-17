@@ -61,7 +61,7 @@ func TestCatalogAdminChainEndToEnd(t *testing.T) {
 		VALUES ($1, 'active', 'جذر', 1, $2, $3, '\x00', now(), $4)`, categoryID, eventID, deviceID, storeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO catalog_products (product_id, name, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+	if _, err := pool.Exec(ctx, `INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
 		VALUES ($1, 'منتج', $2, TRUE, 7, $3, $4, '\x00', now(), $5)`,
 		productID, categoryID, eventID, deviceID, storeID); err != nil {
 		t.Fatal(err)

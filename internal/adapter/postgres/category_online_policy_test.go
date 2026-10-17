@@ -36,16 +36,13 @@ const (
 
 // categoryV2Payload renders catalog.category.snapshot.v2 (Phase 13).
 func categoryV2Payload(categoryID, status string, names map[string]string, parents []string, revision int64, onlineEnabled bool) string {
-	nameList := []any{}
-	for locale, name := range names {
-		nameList = append(nameList, map[string]any{"locale": locale, "name": name})
-	}
+	nameAR, nameEN := payloadNames(names)
 	parentList := []any{}
 	for _, parent := range parents {
 		parentList = append(parentList, parent)
 	}
 	raw, _ := json.Marshal(map[string]any{
-		"category_id": categoryID, "status": status, "names": nameList,
+		"category_id": categoryID, "status": status, "name_ar": nameAR, "name_en": nameEN,
 		"parent_ids": parentList, "online_enabled": onlineEnabled,
 		"catalog_revision": revision,
 	})
