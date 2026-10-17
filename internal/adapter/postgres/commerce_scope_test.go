@@ -24,11 +24,11 @@ func scopeProducts(t *testing.T, f *scopeFixture, base int, prefix, sku string) 
 	ids := catalogIDs(t, base+10, prefix+"-a", prefix+"-b")
 	prodA, prodB = ids[prefix+"-a"], ids[prefix+"-b"]
 	f.ingest(t, f.devA, f.credA, uuidEvent(t, base, 11),
-		catalog.EventProductSnapshotV1, productPayload(prodA, sku, "A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodA, sku, "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, uuidEvent(t, base, 12),
-		catalog.EventProductSnapshotV1, productPayload(prodB, sku, "B", rootB, nil, []string{tagB}, 1))
-	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, base, 11), catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
-	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, base, 12), catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodB, sku, "B", rootB, nil, []string{tagB}, 1))
+	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, base, 11), catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, base, 12), catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	return prodA, prodB
 }
 
@@ -85,15 +85,15 @@ func TestMapping_LegacyAdoption(t *testing.T) {
 	rootG, tagG, prodG := ids["root-g"], ids["tag-g"], ids["prod-g"]
 	names := map[string]string{"ar": "g"}
 	f.ingest(t, f.devC, f.credC, "e0000420-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootG, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootG, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000420-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagG, "legacy-map-tag", true, names, 1))
 	f.ingest(t, f.devC, f.credC, "e0000420-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodG, "LEG-1", "G", rootG, nil, []string{tagG}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodG, "LEG-1", "G", rootG, nil, []string{tagG}, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000420-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1},
+		{"e0000420-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
 		{"e0000420-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000420-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1},
+		{"e0000420-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
@@ -103,8 +103,8 @@ func TestMapping_LegacyAdoption(t *testing.T) {
 	}
 	// The product adopts Store A; the same-pair replay adopts the mapping.
 	f.ingest(t, f.devA, f.credA, "e0000420-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodG, "LEG-1", "G", rootG, nil, []string{tagG}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodG, "LEG-1", "G", rootG, nil, []string{tagG}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	adopted := createMapping(t, f, "website", prodG, "902")
 	if adopted.StoreID == nil || *adopted.StoreID != scopeStoreA {
 		t.Fatalf("mapping adopted A: %v", adopted.StoreID)

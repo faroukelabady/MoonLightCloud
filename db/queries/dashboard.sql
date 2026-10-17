@@ -51,10 +51,6 @@ ORDER BY day.day;
 
 -- name: DashboardLatestFx :one
 SELECT
-    (SELECT s.fx_rate FROM sales_projection s
-        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
-          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
-        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_rate,
     (SELECT s.fx_rate_microrate FROM sales_projection s
         WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
           AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
@@ -335,11 +331,6 @@ ORDER BY day.day;
 
 -- name: DashboardLatestFxForStore :one
 SELECT
-    (SELECT s.fx_rate FROM sales_projection s
-        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
-          AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
-          AND s.store_id = @store_id::uuid
-        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_rate,
     (SELECT s.fx_rate_microrate FROM sales_projection s
         WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
           AND s.occurred_at >= @start_utc AND s.occurred_at < @end_utc

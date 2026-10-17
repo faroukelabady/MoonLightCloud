@@ -213,9 +213,9 @@ func TestScope_ConcurrentSameSKU(t *testing.T) {
 	rootA, tagA, rootB, tagB := f.scopeGraph(t, 260, "race")
 	ids := catalogIDs(t, 270, "race-a", "race-b")
 	f.ingest(t, f.devA, f.credA, "e0000270-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(ids["race-a"], "RACE-1", "A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["race-a"], "RACE-1", "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000270-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(ids["race-b"], "RACE-1", "B", rootB, nil, []string{tagB}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["race-b"], "RACE-1", "B", rootB, nil, []string{tagB}, 1))
 	var wg sync.WaitGroup
 	results := make([]catalog.ProjectResult, 2)
 	for i, event := range []string{
@@ -270,22 +270,22 @@ func TestScope_ConcurrentAdoptionRace(t *testing.T) {
 	rootR, tagR, prodR := ids["root-r"], ids["tag-r"], ids["prod-r"]
 	names := map[string]string{"ar": "r"}
 	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootR, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootR, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagR, "race-tag", true, names, 1))
 	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "RACE-2", "R", rootR, nil, []string{tagR}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "R", rootR, nil, []string{tagR}, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000280-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1},
+		{"e0000280-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
 		{"e0000280-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000280-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1},
+		{"e0000280-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
 	f.ingest(t, f.devA, f.credA, "e0000280-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "RACE-2", "RA", rootR, nil, []string{tagR}, 2))
+		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "RA", rootR, nil, []string{tagR}, 2))
 	f.ingest(t, f.devB, f.credB, "e0000280-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "RACE-2", "RB", rootR, nil, []string{tagR}, 2))
+		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "RB", rootR, nil, []string{tagR}, 2))
 	var wg sync.WaitGroup
 	results := make([]catalog.ProjectResult, 2)
 	for i, event := range []string{
@@ -400,14 +400,14 @@ func TestScope_RebuildPreservesOwnership(t *testing.T) {
 	rootA, tagA, rootB, tagB := f.scopeGraph(t, 300, "rebuild")
 	ids := catalogIDs(t, 310, "prod-a", "prod-b")
 	f.ingest(t, f.devA, f.credA, "e0000310-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(ids["prod-a"], "RB-1", "A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["prod-a"], "RB-1", "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000310-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(ids["prod-b"], "RB-1", "B", rootB, nil, []string{tagB}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["prod-b"], "RB-1", "B", rootB, nil, []string{tagB}, 1))
 	f.ingest(t, f.devC, f.credC, "e0000310-0000-4000-8000-000000000003",
 		catalog.EventTagSnapshotV1, tagPayload("c9999999-0000-4000-8000-000000000001", "legacy-tag", true, map[string]string{"ar": "l"}, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000310-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1},
-		{"e0000310-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1},
+		{"e0000310-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2},
+		{"e0000310-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2},
 		{"e0000310-0000-4000-8000-000000000003", catalog.EventTagSnapshotV1},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
@@ -448,9 +448,9 @@ func TestScope_RebuildPreservesOwnership(t *testing.T) {
 	rows.Close()
 	for _, e := range events {
 		switch e.typ {
-		case catalog.EventCategorySnapshotV1, catalog.EventTagSnapshotV1,
-			catalog.EventProductSnapshotV1, catalog.EventProductSalesPolicySnapshotV1,
-			catalog.EventInventoryProductSnapshotV1:
+		case catalog.EventCategorySnapshotV2, catalog.EventTagSnapshotV1,
+			catalog.EventProductSnapshotV2, catalog.EventProductSalesPolicySnapshotV1,
+			catalog.EventInventoryProductVariantSnapshotV1:
 			f.projectCatalog(t, e.id, e.typ)
 		}
 	}
@@ -481,11 +481,11 @@ func TestScope_RetryRestartStability(t *testing.T) {
 	ids := catalogIDs(t, 330, "prod-s")
 	prodS := ids["prod-s"]
 	f.ingest(t, f.devA, f.credA, "e0000330-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodS, "ST-1", "S", rootA, nil, []string{tagA}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000330-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodS, "ST-1", "S", rootA, nil, []string{tagA}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000330-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	f.ingest(t, f.devB, f.credB, "e0000330-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodS, "ST-1", "S2", rootA, nil, []string{tagA}, 2))
-	first := f.projectCatalog(t, "e0000330-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(prodS, "ST-1", "S2", rootA, nil, []string{tagA}, 2))
+	first := f.projectCatalog(t, "e0000330-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2)
 	requireOutcome(t, first, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	// Simulate restart: fresh Devices handle, same event again. The frozen
 	// hasDone path masks the code generically, so stability is proven via
@@ -566,7 +566,7 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 // isyncNewService builds an ingest service over the given store.
 func isyncNewService(t *testing.T, devices Devices) isync.Service {
 	t.Helper()
-	return isync.NewService(devices, clock.System{})
+	return isync.NewService(devices, clock.System{}, testEventRegistry())
 }
 
 func ingestScoped(t *testing.T, syncSvc isync.Service, devID, credID, eventID, eventType, payload string) {

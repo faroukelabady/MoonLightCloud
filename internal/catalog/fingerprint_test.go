@@ -8,19 +8,19 @@ import (
 func TestFingerprintIgnoresObjectKeyOrder(t *testing.T) {
 	a := json.RawMessage(`{"sku":"A","name":"X","product_id":"11111111-1111-4111-8111-111111111111","top_category_id":"22222222-2222-4222-8222-222222222222","catalog_revision":1}`)
 	b := json.RawMessage(`{"name":"X","catalog_revision":1,"top_category_id":"22222222-2222-4222-8222-222222222222","product_id":"11111111-1111-4111-8111-111111111111","sku":"A"}`)
-	pa, err := DecodeProductSnapshot(a)
+	pa, err := DecodeProductSnapshotV2(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pb, err := DecodeProductSnapshot(b)
+	pb, err := DecodeProductSnapshotV2(b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	va, err := ValidateProductSnapshot(pa)
+	va, err := ValidateProductSnapshotV2(pa)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vb, err := ValidateProductSnapshot(pb)
+	vb, err := ValidateProductSnapshotV2(pb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,13 +38,13 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 		IsActive:        true,
 		CatalogRevision: 1,
 	}
-	va, err := ValidateProductSnapshot(base)
+	va, err := ValidateProductSnapshotV2(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reversed := base
 	reversed.TagIDs = []string{"55555555-5555-4555-8555-555555555555", "44444444-4444-4333-8444-444444444444"}
-	vb, err := ValidateProductSnapshot(reversed)
+	vb, err := ValidateProductSnapshotV2(reversed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 		"66666666-6666-4666-8666-666666666666",
 		"33333333-3333-4333-8333-333333333333",
 	}
-	vc, err := ValidateProductSnapshot(moved)
+	vc, err := ValidateProductSnapshotV2(moved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 	}
 	renamed := base
 	renamed.Name = "Y"
-	vd, err := ValidateProductSnapshot(renamed)
+	vd, err := ValidateProductSnapshotV2(renamed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestFingerprintTagOrderIrrelevantSubOrderRelevant(t *testing.T) {
 	}
 	inactive := base
 	inactive.IsActive = false
-	ve, err := ValidateProductSnapshot(inactive)
+	ve, err := ValidateProductSnapshotV2(inactive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestFingerprintTranslationPriceOrder(t *testing.T) {
 		TopCategoryID:   "22222222-2222-4222-8222-222222222222",
 		CatalogRevision: 1,
 	}
-	va, err := ValidateProductSnapshot(base)
+	va, err := ValidateProductSnapshotV2(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestFingerprintTranslationPriceOrder(t *testing.T) {
 		{Currency: "USD", PriceCents: 2},
 		{Currency: "EGP", PriceCents: 1, CostCents: &cost},
 	}
-	vb, err := ValidateProductSnapshot(reordered)
+	vb, err := ValidateProductSnapshotV2(reordered)
 	if err != nil {
 		t.Fatal(err)
 	}

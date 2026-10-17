@@ -110,7 +110,7 @@ func enabledDesiredState(product commerce.CommerceProduct, quantity int64, ready
 		Availability: catalog.ProductAvailability{
 			ProductID: product.ProductID, ProductActive: true, SellOnline: true,
 			OnlineAvailable: int(quantity), Ready: ready,
-			StockQuantity: &stock, InventoryRevision: 27,
+			StockQuantity: &stock,
 		},
 		CatalogRevision: 12, PolicyRevision: 4, InventoryRevision: 27,
 	}

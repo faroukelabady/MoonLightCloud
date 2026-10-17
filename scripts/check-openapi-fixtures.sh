@@ -223,12 +223,12 @@ check("sync health dual errors", "DashboardSyncHealth", {
 # Phase 5A: catalog snapshot events validate against the additive catalog
 # schemas. Shapes mirror the Retail builders (read-only contract parity,
 # never a shared module).
-check("category_valid.json", "CatalogCategorySnapshotV1", load_fixture("internal/catalog/testdata/category_valid.json"))
-check("category_shared_parents.json", "CatalogCategorySnapshotV1", load_fixture("internal/catalog/testdata/category_shared_parents.json"))
+check("category_valid.json", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_valid.json"))
+check("category_shared_parents.json", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_shared_parents.json"))
 check("tag_valid.json", "CatalogTagSnapshotV1", load_fixture("internal/catalog/testdata/tag_valid.json"))
-check("product_valid.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_valid.json"))
-check("product_multi_root_tags.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_multi_root_tags.json"))
-check("product_minimal.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_minimal.json"))
+check("product_valid.json", "CatalogProductSnapshotV2", load_fixture("internal/catalog/testdata/product_valid.json"))
+check("product_multi_root_tags.json", "CatalogProductSnapshotV2", load_fixture("internal/catalog/testdata/product_multi_root_tags.json"))
+check("product_minimal.json", "CatalogProductSnapshotV2", load_fixture("internal/catalog/testdata/product_minimal.json"))
 # Phase 5B: sales-policy snapshots carry channel eligibility plus the
 # allocation cap only (never stock, availability, or provider identity).
 check("policy_offline_only.json", "CatalogProductSalesPolicySnapshotV1", load_fixture("internal/catalog/testdata/policy_offline_only.json"))
@@ -238,32 +238,9 @@ policy_bad["online_allocation_limit"] = -1
 check("policy-negative-cap", "CatalogProductSalesPolicySnapshotV1", policy_bad, expect_valid=False)
 # Canonical rule (cap requires sell_online) is runtime validation, not
 # schema: covered by TestValidateProductSalesPolicySnapshot.
-# Phase 5C: inventory snapshots carry authoritative stock only (never
-# negative: the Retail ledger guarantees >= 0 and Cloud mirrors it).
-check("inventory_valid.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_valid.json"))
-check("inventory_zero.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_zero.json"))
-check("inventory_max.json", "InventoryProductSnapshotV1", load_fixture("internal/catalog/testdata/inventory_max.json"))
-inv_bad = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
-inv_bad["stock_quantity"] = -1
-check("inventory-negative", "InventoryProductSnapshotV1", inv_bad, expect_valid=False)
-inv_huge = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
-inv_huge["stock_quantity"] = 2147483648
-check("inventory-overflow", "InventoryProductSnapshotV1", inv_huge, expect_valid=False)
-inv_rev0 = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
-inv_rev0["inventory_revision"] = 0
-check("inventory-rev0", "InventoryProductSnapshotV1", inv_rev0, expect_valid=False)
-inv_noid = copy.deepcopy(load_fixture("internal/catalog/testdata/inventory_valid.json"))
-del inv_noid["product_id"]
-check("inventory-missing-id", "InventoryProductSnapshotV1", inv_noid, expect_valid=False)
-# R09: SKU parity with Retail/Cloud runtime CR/LF/TAB rejection.
-sku_base = load_fixture("internal/catalog/testdata/product_valid.json")
-for label, char in [("LF", "\n"), ("CR", "\r"), ("TAB", "\t")]:
-    bad_sku = copy.deepcopy(sku_base)
-    bad_sku["sku"] = "PAP" + char + "001"
-    check("sku-" + label + " product", "CatalogProductSnapshotV1", bad_sku, expect_valid=False)
-check("product_bad_money.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_bad_money.json"), expect_valid=False)
-check("product_bad_dims.json", "CatalogProductSnapshotV1", load_fixture("internal/catalog/testdata/product_bad_dims.json"), expect_valid=False)
-check("category_bad_shape.json", "CatalogCategorySnapshotV1", load_fixture("internal/catalog/testdata/category_bad_shape.json"), expect_valid=False)
+check("product_bad_money.json", "CatalogProductSnapshotV2", load_fixture("internal/catalog/testdata/product_bad_money.json"), expect_valid=False)
+check("product_bad_dims.json", "CatalogProductSnapshotV2", load_fixture("internal/catalog/testdata/product_bad_dims.json"), expect_valid=False)
+check("category_bad_shape.json", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_bad_shape.json"), expect_valid=False)
 check("revision_zero.json", "CatalogTagSnapshotV1", load_fixture("internal/catalog/testdata/revision_zero.json"), expect_valid=False)
 
 # Phase 6C: dashboard order list/detail carry exact string money beyond
@@ -391,7 +368,9 @@ category_v2 = dict(load_fixture("internal/catalog/testdata/category_valid.json")
 check("category_v2", "CatalogCategorySnapshotV2", category_v2)
 category_envelope = dict(config_envelope, event_type="catalog.category.snapshot.v2", payload=category_v2)
 check("category_v2_event", "SyncEvent", category_envelope)
-check("category_v2_missing_policy", "CatalogCategorySnapshotV2", load_fixture("internal/catalog/testdata/category_valid.json"), expect_valid=False)
+category_missing_policy = dict(category_v2)
+del category_missing_policy["online_enabled"]
+check("category_v2_missing_policy", "CatalogCategorySnapshotV2", category_missing_policy, expect_valid=False)
 
 # Phase 17: product v2 (SKU authority moved to the variant) and physical
 # variants must validate through the published union, and reject bad leaf
@@ -400,7 +379,6 @@ check("category_v2_missing_policy", "CatalogCategorySnapshotV2", load_fixture("i
 # the contract (Cloud's decoder tolerates-and-ignores the mirror for one
 # release; see TestProductSnapshotV2Contract).
 product_v2 = load_fixture("internal/catalog/testdata/product_valid.json")
-product_v2.pop("sku")
 check("product_v2", "CatalogProductSnapshotV2", product_v2)
 product_v2_bad = dict(product_v2, sku="PAP-001")
 check("product_v2_rejects_sku", "CatalogProductSnapshotV2", product_v2_bad, expect_valid=False)

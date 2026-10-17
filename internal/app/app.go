@@ -23,8 +23,6 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
-	shopifyadapter "github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce/woocommerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
@@ -74,7 +72,6 @@ type App struct {
 	TagProjector                  *catalog.Projector
 	ProductProjector              *catalog.Projector
 	PolicyProjector               *catalog.Projector
-	InventoryProjector            *catalog.Projector
 	ProductConfigurationProjector *catalog.Projector
 	ProductVariantProjector       *catalog.Projector
 	VariantInventoryProjector     *catalog.Projector
@@ -130,26 +127,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		pool.Close()
 		return nil, err
 	}
-	store := postgres.NewDevices(pool, config.DefaultDBQueryTimeout)
+	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	a := &App{Cfg: cfg, Log: log, Pool: pool}
 	a.Devices = auth.NewService(
 		store, hasher, cfg.PepperRaw, cfg.PepperVersion,
 		clock.System{}, ids.System{},
 	)
-	a.Sync = sync.NewService(store, clock.System{})
-	sync.RegisterEventType(sale.EventSaleFinalizedV3, ValidateSaleV3Payload)
-	sync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, ValidateReturnRefundPayload)
-	sync.RegisterEventType(catalog.EventCategorySnapshotV1, ValidateCatalogCategoryPayload)
-	sync.RegisterEventType(catalog.EventCategorySnapshotV2, ValidateCatalogCategoryV2Payload)
-	sync.RegisterEventType(catalog.EventTagSnapshotV1, ValidateCatalogTagPayload)
-	sync.RegisterEventType(catalog.EventProductSnapshotV1, ValidateCatalogProductPayload)
-	sync.RegisterEventType(catalog.EventProductSnapshotV2, ValidateCatalogProductV2Payload)
-	sync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, ValidateCatalogProductSalesPolicyPayload)
-	sync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, ValidateCatalogProductInventoryPayload)
-	sync.RegisterEventType(catalog.EventProductConfigurationSnapshotV1, ValidateCatalogProductConfigurationsPayload)
-	sync.RegisterEventType(catalog.EventProductVariantSnapshotV1, ValidateCatalogProductVariantPayload)
-	sync.RegisterEventType(catalog.EventProductTypeSnapshotV1, ValidateCatalogProductTypePayload)
-	sync.RegisterEventType(catalog.EventInventoryProductVariantSnapshotV1, ValidateCatalogProductVariantInventoryPayload)
+	a.Sync = sync.NewService(store, clock.System{}, syncEventRegistry())
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store
@@ -159,7 +143,6 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
 	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
 	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
-	a.InventoryProjector = catalog.NewProductInventoryProjector(store, clock.System{}, log)
 	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(store, clock.System{}, log)
 	a.ProductVariantProjector = catalog.NewProductVariantProjector(store, clock.System{}, log)
 	a.ProductTypeProjector = catalog.NewProductTypeProjector(store, clock.System{}, log)
@@ -187,31 +170,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(store, log)
-	a.CommerceRegistry = commerce.NewRegistry()
+	a.CommerceRegistry, err = NewCommerceRegistry(cfg, store)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
 	var commerceWebhooks *adapterhttp.CommerceWebhookHandlers
 	var shopifyWebhooks *adapterhttp.ShopifyWebhookHandlers
-	if cfg.WooCommerce.Enabled {
-		provider, err := woocommerce.NewWooCommerceProvider(cfg.WooCommerce, nil)
-		if err != nil {
-			pool.Close()
-			return nil, err
-		}
-		if err := a.CommerceRegistry.Register(provider.Key(), provider); err != nil {
-			pool.Close()
-			return nil, err
-		}
-	}
-	if cfg.Shopify.Enabled {
-		provider, err := shopifyadapter.NewShopifyProvider(cfg.Shopify, nil, store)
-		if err != nil {
-			pool.Close()
-			return nil, err
-		}
-		if err := a.CommerceRegistry.Register(provider.Key(), provider); err != nil {
-			pool.Close()
-			return nil, err
-		}
-	}
 	ordersEnabled := (cfg.WooCommerce.Enabled && cfg.WooCommerce.OrdersEnabled) ||
 		(cfg.Shopify.Enabled && cfg.Shopify.OrdersEnabled)
 	if a.CommerceRegistry.Count() > 0 {
@@ -251,8 +216,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		// the exact same CommerceService the manual CLI uses. The store
 		// doubles as the durable queue; no provider I/O runs in any
 		// projection transaction.
-		a.CommerceService = commerce.NewCommerceService(a.CommerceRegistry, store,
-			commerce.NewCatalogCommerceSource(catalog.NewService(store)), log)
+		a.CommerceService = NewCommerceService(store, a.CommerceRegistry, log)
 		a.ReevaluationWorker = commerce.NewReevaluationWorker(store, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
@@ -427,19 +391,6 @@ func ValidateReturnRefundPayload(raw json.RawMessage) error {
 	return err
 }
 
-// ValidateCatalogCategoryPayload is the ingestion-time
-// catalog.category.snapshot.v1 gate: event-local validation only, before
-// durable ACK. Dependency resolution (missing parents) and DAG defense
-// belong to projection, never ingestion.
-func ValidateCatalogCategoryPayload(raw json.RawMessage) error {
-	p, err := catalog.DecodeCategorySnapshot(raw)
-	if err != nil {
-		return err
-	}
-	_, err = catalog.ValidateCategorySnapshot(p)
-	return err
-}
-
 // ValidateCatalogCategoryV2Payload is the ingestion-time validator for
 // catalog.category.snapshot.v2 (Phase 13): the v1 invariants plus the
 // required ONLINE channel policy field.
@@ -460,19 +411,6 @@ func ValidateCatalogTagPayload(raw json.RawMessage) error {
 		return err
 	}
 	_, err = catalog.ValidateTagSnapshot(p)
-	return err
-}
-
-// ValidateCatalogProductPayload is the ingestion-time
-// catalog.product.snapshot.v1 gate: event-local validation only.
-// Referenced categories/tags may not have projected yet; that wait
-// belongs to projection, never ingestion.
-func ValidateCatalogProductPayload(raw json.RawMessage) error {
-	p, err := catalog.DecodeProductSnapshot(raw)
-	if err != nil {
-		return err
-	}
-	_, err = catalog.ValidateProductSnapshot(p)
 	return err
 }
 
@@ -527,18 +465,6 @@ func ValidateCatalogProductVariantInventoryPayload(raw json.RawMessage) error {
 	return err
 }
 
-// ValidateCatalogProductInventoryPayload is the ingestion-time
-// inventory.product.snapshot.v1 gate: event-local validation only. A
-// missing core product is a projection wait, never an ingestion rejection.
-func ValidateCatalogProductInventoryPayload(raw json.RawMessage) error {
-	p, err := catalog.DecodeProductInventorySnapshot(raw)
-	if err != nil {
-		return err
-	}
-	_, err = catalog.ValidateProductInventorySnapshot(p)
-	return err
-}
-
 // ValidateCatalogProductSalesPolicyPayload is the ingestion-time
 // catalog.product.sales_policy.snapshot.v1 gate: event-local validation
 // only. A missing core product is a projection wait, never an ingestion
@@ -580,7 +506,7 @@ func (a *App) catalogProjectors() []*catalog.Projector {
 	out := make([]*catalog.Projector, 0, 9)
 	for _, p := range []*catalog.Projector{
 		a.CategoryProjector, a.TagProjector, a.ProductProjector,
-		a.PolicyProjector, a.InventoryProjector, a.ProductConfigurationProjector,
+		a.PolicyProjector, a.ProductConfigurationProjector,
 		a.ProductVariantProjector, a.VariantInventoryProjector, a.ProductTypeProjector,
 	} {
 		if p != nil {

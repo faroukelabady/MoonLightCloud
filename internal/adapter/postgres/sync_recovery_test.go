@@ -159,17 +159,14 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	all := []required{
 		{"sale.finalized.v3", "sale_projection.v3"},
 		{"sale.return_refund.finalized.v1", "return_refund_projection.v1"},
-		{"catalog.category.snapshot.v1", "catalog_category_projection.v1"},
 		{"catalog.category.snapshot.v2", "catalog_category_projection.v1"},
 		{"catalog.tag.snapshot.v1", "catalog_tag_projection.v1"},
-		{"catalog.product.snapshot.v1", "catalog_product_projection.v1"},
 		{"catalog.product.snapshot.v2", "catalog_product_projection.v1"},
 		{"catalog.product.sales_policy.snapshot.v1", "catalog_product_sales_policy_projection.v1"},
-		{"inventory.product.snapshot.v1", "inventory_product_projection.v1"},
+		{"inventory.product_variant.snapshot.v1", "inventory_product_variant_projection.v1"},
 		{"catalog.product.configuration.snapshot.v1", "catalog_product_configuration_projection.v1"},
 		{"catalog.product_variant.snapshot.v1", "catalog_product_variant_projection.v1"},
 		{"catalog.product_type.snapshot.v1", "catalog_product_type_projection.v1"},
-		{"inventory.product_variant.snapshot.v1", "inventory_product_variant_projection.v1"},
 	}
 	ids := make([]string, len(all))
 	for i, item := range all {
@@ -204,21 +201,33 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	status(0)
 	// Dependency-blocked Category and Variant inventory events remain
 	// unresolved even though unrelated projections have succeeded.
-	for _, index := range []int{2, 12} {
+	indexOf := func(event string) int {
+		t.Helper()
+		for i, item := range all {
+			if item.event == event {
+				return i
+			}
+		}
+		t.Fatalf("missing canonical fixture: %s", event)
+		return -1
+	}
+	categoryIndex := indexOf("catalog.category.snapshot.v2")
+	inventoryIndex := indexOf("inventory.product_variant.snapshot.v1")
+	for _, index := range []int{categoryIndex, inventoryIndex} {
 		if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='blocked' WHERE event_id=$1 AND processor=$2`, ids[index], all[index].processor); err != nil {
 			t.Fatal(err)
 		}
 	}
 	status(2)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[2]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[categoryIndex]); err != nil {
 		t.Fatal(err)
 	}
 	status(1)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='retry' WHERE event_id=$1`, ids[12]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='retry' WHERE event_id=$1`, ids[inventoryIndex]); err != nil {
 		t.Fatal(err)
 	}
 	status(1)
-	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[12]); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, ids[inventoryIndex]); err != nil {
 		t.Fatal(err)
 	}
 	status(0)

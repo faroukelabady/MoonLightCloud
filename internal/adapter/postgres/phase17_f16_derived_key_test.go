@@ -68,7 +68,7 @@ func f16ProjectSeedAndProduct(t *testing.T, f *scopeFixture, dev, cred, store st
 	}
 	project(catalog.EventProductTypeSnapshotV1, typePayload(sharedProductTypeID, "papyrus", 1))
 	cid, pid := uuid.NewString(), uuid.NewString()
-	project(catalog.EventCategorySnapshotV1, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+	project(catalog.EventCategorySnapshotV2, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
 	project(catalog.EventProductSnapshotV2, f16ProductPayload(t, pid, cid, sharedProductTypeID))
 	var relation string
 	if err := f.pool.QueryRow(context.Background(), `SELECT product_type_id::text FROM catalog_products WHERE product_id=$1 AND store_id=$2`, pid, store).Scan(&relation); err != nil || relation != f16StoreKey(store) {

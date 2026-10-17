@@ -66,16 +66,15 @@ func TestReturnPartialDurableAccept(t *testing.T) {
 	mustIngestReturn(t, env, eventID, returnFixture(t, "return_partial.json"))
 
 	var eventType, deviceID, occurred, received string
-	var hashVer int
-	var payload []byte
+	var payload, payloadHash []byte
 	err := env.pool.QueryRow(context.Background(), `
-		SELECT event_type, device_id::text, occurred_at::text, received_at::text, payload, payload_hash_version
-		FROM sync_events WHERE event_id=$1`, eventID).Scan(&eventType, &deviceID, &occurred, &received, &payload, &hashVer)
+		SELECT event_type, device_id::text, occurred_at::text, received_at::text, payload, payload_hash
+		FROM sync_events WHERE event_id=$1`, eventID).Scan(&eventType, &deviceID, &occurred, &received, &payload, &payloadHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eventType != returnrefund.EventReturnRefundFinalizedV1 || deviceID != env.devID || hashVer != 2 {
-		t.Fatalf("bad inbox row: %s %s v%d", eventType, deviceID, hashVer)
+	if eventType != returnrefund.EventReturnRefundFinalizedV1 || deviceID != env.devID || len(payloadHash) != 32 {
+		t.Fatalf("bad inbox row: %s %s hash bytes=%d", eventType, deviceID, len(payloadHash))
 	}
 	if occurred == "" || received == "" {
 		t.Fatal("occurred_at and received_at must persist")

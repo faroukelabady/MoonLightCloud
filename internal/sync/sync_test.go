@@ -29,7 +29,7 @@ func TestParseValidBatch(t *testing.T) {
 	body := batchJSON(eventJSON(
 		"22222222-2222-7222-8222-222222222222",
 		"system.test.v1", "2026-09-19T10:20:30.123456Z", `{"b":2,"a":1}`))
-	b, err := ParseBatch([]byte(body), testDevice, testNow)
+	b, err := DiagnosticRegistry().ParseBatch([]byte(body), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestParseValidBatch(t *testing.T) {
 	alt := batchJSON(eventJSON(
 		"22222222-2222-7222-8222-222222222222",
 		"system.test.v1", "2026-09-19T10:20:30.123456Z", `{ "a" : 1 , "b" : 2 }`))
-	b2, err := ParseBatch([]byte(alt), testDevice, testNow)
+	b2, err := DiagnosticRegistry().ParseBatch([]byte(alt), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestParseFailures(t *testing.T) {
 			`{"big":"`+strings.Repeat("x", MaxPayloadBytes)+`"}`)), apperr.TooLarge},
 	}
 	for _, tc := range cases {
-		_, err := ParseBatch([]byte(tc.body), testDevice, testNow)
+		_, err := DiagnosticRegistry().ParseBatch([]byte(tc.body), testDevice, testNow)
 		if err == nil {
 			t.Fatalf("%s: want error", tc.name)
 			continue
@@ -99,7 +99,7 @@ func TestParseFailures(t *testing.T) {
 		many = append(many, eventJSON(fmt.Sprintf("22222222-2222-7222-8222-%012d", i),
 			"system.test.v1", "2026-09-19T10:20:30Z", `{}`))
 	}
-	if _, err := ParseBatch([]byte(batchJSON(many...)), testDevice, testNow); err == nil {
+	if _, err := DiagnosticRegistry().ParseBatch([]byte(batchJSON(many...)), testDevice, testNow); err == nil {
 		t.Fatal("oversize batch must fail")
 	} else if ae, ok := asAppErr(err); !ok || ae.Kind != apperr.TooLarge {
 		t.Fatalf("want TooLarge, got %v", err)
@@ -125,7 +125,7 @@ func TestDeviceIDEchoAcceptedWhenMatching(t *testing.T) {
 	id := "22222222-2222-7222-8222-222222222222"
 	body := batchJSON(`{"event_id":"` + id + `","event_type":"system.test.v1","device_id":"` +
 		testDevice + `","occurred_at":"2026-09-19T10:20:30Z","payload":{}}`)
-	b, err := ParseBatch([]byte(body), testDevice, testNow)
+	b, err := DiagnosticRegistry().ParseBatch([]byte(body), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestDeviceIDEchoAcceptedWhenMatching(t *testing.T) {
 }
 
 func TestCapabilitiesShape(t *testing.T) {
-	svc := NewService(nil, clock.Fixed{T: testNow})
+	svc := NewService(nil, clock.Fixed{T: testNow}, DiagnosticRegistry())
 	caps := svc.Capabilities()
 	if caps.APIVersion != "v1" || caps.MaxBatchEvents != MaxBatchEvents ||
 		caps.MaxPayloadBytes != MaxPayloadBytes || len(caps.SupportedEvents) == 0 ||

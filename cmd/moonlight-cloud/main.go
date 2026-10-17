@@ -136,11 +136,6 @@ func serve(args []string) error {
 		return err
 	}
 	defer a.Close()
-	commerceRegistry, err := newCommerceRegistry(cfg)
-	if err != nil {
-		return err
-	}
-	a.Log.Info("commerce providers", "count", commerceRegistry.Count())
 	srv := adapterhttp.Server(cfg.HTTPAddr, a.Handler, adapterhttp.Config{})
 	a.Log.Info("listening", "addr", cfg.HTTPAddr, "env", cfg.Environment,
 		"version", version, "commit", commit)
@@ -156,7 +151,6 @@ func serve(args []string) error {
 	go a.TagProjector.Run(projCtx)
 	go a.ProductProjector.Run(projCtx)
 	go a.PolicyProjector.Run(projCtx)
-	go a.InventoryProjector.Run(projCtx)
 	if a.ProductConfigurationProjector != nil {
 		go a.ProductConfigurationProjector.Run(projCtx)
 	}
@@ -275,7 +269,6 @@ func allProjectionProcessors() []string {
 		catalog.ProcessorTagProjectionV1,
 		catalog.ProcessorProductProjectionV1,
 		catalog.ProcessorProductSalesPolicyProjectionV1,
-		catalog.ProcessorProductInventoryProjectionV1,
 		catalog.ProcessorProductConfigurationProjectionV1,
 		catalog.ProcessorProductVariantProjectionV1,
 		catalog.ProcessorProductVariantInventoryProjectionV1,
@@ -475,7 +468,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 		return nil, err
 	}
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
-	registry, err := newCommerceRegistry(cfg)
+	registry, err := app.NewCommerceRegistry(cfg, store)
 	if err != nil {
 		pool.Close()
 		return nil, err
@@ -484,7 +477,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 	return &commerceEnv{
 		pool:           pool,
 		store:          store,
-		productService: newCommerceService(store, registry, logger),
+		productService: app.NewCommerceService(store, registry, logger),
 		registry:       registry,
 		orderService:   orders.NewOrderService(registry, store, logger),
 	}, nil

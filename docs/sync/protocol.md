@@ -1,8 +1,8 @@
-# Sync Protocol Contract (Phase 1B transport + Phase 2B/4A business events)
+# Sync protocol contract
 
 This is the contract MoonLightRetail's transactional outbox implements
 against: generic envelope and ingestion semantics plus the business events
-`sale.finalized.v1` — validated before ACK, projected asynchronously
+`sale.finalized.v3` — validated before ACK, projected asynchronously
 (see docs/operations/projection.md and ADR-0016) — and
 `sale.return_refund.finalized.v1` — validated before ACK, durably accepted,
 then projected by `return_refund_projection.v1` (see docs/sync/returns.md,
@@ -50,39 +50,21 @@ Field rules:
   server accepts any well-formed UUID so future clients are never pointlessly
   rejected). Same logical event keeps its ID across retries — this is the
   foundation of idempotency.
-- `event_type`: `name.version` (`sale.finalized.v1` shape, `sale.finalized.v2`
-  adds per-line historical tag snapshots), immutable once
-  released. The suffix carries payload semantics; no separate global protocol
-  integer (`/api/v1` = envelope semantics, suffix = payload semantics).
-  Supported business events: `sale.finalized.v1`, `sale.finalized.v2`
-  (v1 stays accepted with unknown tag capture; v2 projects historical
-  tags idempotently under a separate processor with shared sale-id
-  arbitration) and `sale.finalized.v3` (v2 shape plus per-line frozen
-  ProductVariant snapshots: `variant_sku`, sale-time attribute labels,
-  nullable sale-time price override — sourced ONLY from the event; see
-  `docs/operations/product-variants.md`. Phase 17-R2: v3 lines also carry
-  the frozen sale-time ProductType snapshot (`product_type_id/code/labels`,
-  all-or-nothing; absent for pre-R2 lines),
-  `sale.return_refund.finalized.v1` (one immutable event per finalized
-  Retail return/refund transaction; see `docs/sync/returns.md`),
-  `catalog.category.snapshot.v1`/`v2` and `catalog.tag.snapshot.v1`
-  (current Catalog state; v2 adds `online_enabled`),
-  `catalog.product.snapshot.v1`/`v2` (Phase 17-R0: v2 carries NO
-  SKU-bearing field at all — Product has no SKU authority anywhere;
-  SKU authority lives on the variant. For one release Cloud
-  tolerates-and-ignores a leftover `primary_variant_sku` mirror; v1's
-  historical `sku` field still validates, then is discarded. Phase 17-R2:
-  v2 also carries `product_type_id` — structural type identity, never
-  inferred from Category; empty is tolerated for legacy rows only),
+- `event_type`: `name.version`. During the accepted pre-production window
+  (ADR-0055), Retail and Cloud change together and exactly one version per
+  stream is accepted. Current events are:
+  `sale.finalized.v3` (frozen Variant/ProductType/classification/Tag history),
+  `sale.return_refund.finalized.v1`, `catalog.category.snapshot.v2`
+  (explicit `online_enabled`), `catalog.tag.snapshot.v1`,
+  `catalog.product.snapshot.v2` (no Product SKU authority),
   `catalog.product.sales_policy.snapshot.v1`,
-  `inventory.product.snapshot.v1`,
-  `catalog.product.configuration.snapshot.v1` (Phase 15 frame options),
-  `catalog.product_variant.snapshot.v1` and
-  `inventory.product_variant.snapshot.v1` (Phase 17 physical variants:
-  SKU/stock/attributes; see `docs/operations/product-variants.md`),
-  `catalog.product_type.snapshot.v1` (Phase 17-R2 structural types:
-  identity, code, translations, status, position, type_revision, allowed
-  dimensions and capabilities; Retail authority, ADR-0050).
+  `catalog.product.configuration.snapshot.v1`,
+  `catalog.product_variant.snapshot.v1`, `catalog.product_type.snapshot.v1`,
+  and `inventory.product_variant.snapshot.v1`.
+  Retired Sale v1/v2, Category/Product v1 and Product-level inventory events
+  are rejected before ACK. Product stock is the sum of active Variant stock;
+  there is no independent Product inventory revision or event.
+  Internal processor names are durable identifiers, not wire-version aliases.
 - `occurred_at`: RFC3339 business timestamp. Recorded, never authority for
   auth/dedup/ordering. Bounds: not before 2020-01-01, not more than 24h in
   the future, else `422`. Desktop clocks are untrusted.
@@ -99,7 +81,7 @@ Field rules:
 
 Accepted events persist in `sync_events` (`event_id` PK globally unique,
 `device_id`, `credential_id` audit, `event_type`, `occurred_at`,
-`received_at`, `payload` JSONB, `payload_hash`, `payload_hash_version`).
+`received_at`, `payload` JSONB, `payload_hash`).
 Events are immutable and never deleted; corrections are new events
 (`sale.corrected.v1`, never rewrites).
 
@@ -116,9 +98,8 @@ Events are immutable and never deleted; corrections are new events
   compares `device_id`, `event_type`, `occurred_at` (normalized UTC instant —
   `2026-09-21T10:00:00Z` and `2026-09-21T13:00:00+03:00` are the same
   instant; sub-microsecond digits normalize to microsecond storage
-  resolution), and the exact canonical payload. For pre-fix v1 rows the
-  stored immutable payload itself is re-canonicalized exactly (fail-closed);
-  the v1 hash alone never proves equality (ADR-0019). Credential identity
+  resolution), and the exact canonical payload hash. There is no legacy
+  float-based hash path in the current baseline (ADR-0055). Credential identity
   and `batch_id` are never part of event identity: rotation and re-batching
   still deduplicate.
 

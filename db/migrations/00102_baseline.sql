@@ -114,7 +114,6 @@ CREATE TABLE sales_projection (
     total_minor        BIGINT NOT NULL CHECK (total_minor >= 0),
     fx_base            TEXT,
     fx_quote           TEXT,
-    fx_rate            TEXT,
     fx_rate_microrate  BIGINT CHECK (fx_rate_microrate IS NULL OR fx_rate_microrate > 0),
     received_at        TIMESTAMPTZ NOT NULL,
     projected_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -194,18 +193,8 @@ CREATE TABLE sync_event_processing (
 CREATE INDEX idx_processing_due ON sync_event_processing (processor, status, next_attempt_at);
 
 -- ==== 00006_sync_event_hash_version ====
--- Phase 2D HIGH-03: payload hash canonicalizer version. Pre-fix rows were
--- hashed with the float64 canonicalizer (v1); all new rows use the exact
--- decimal canonicalizer (v2). The version lets ingestion retry-compare with
--- the matching algorithm so legitimate pre-fix events still deduplicate
--- after upgrade without perpetuating float weakness for new events.
-ALTER TABLE sync_events
-    ADD COLUMN payload_hash_version INT NOT NULL DEFAULT 1
-        CHECK (payload_hash_version IN (1, 2));
--- Existing rows keep v1 (their stored hash is a v1 hash). Duplicate
--- verification compares the stored immutable payload with the exact
--- canonicalizer (fail-closed); v1 hashes are version metadata only
--- (see ADR-0017 and its Phase 2E successor).
+-- ADR-0055: payload_hash_version and the float64 v1 canonicalizer were
+-- removed; every payload_hash is the exact canonical hash.
 
 -- ==== 00007_sale_event_ownership ====
 -- Phase 2E: durable Sale ownership arbitration (P2D-HIGH-02). The live
@@ -271,7 +260,6 @@ CREATE TABLE return_refund_projection (
     refund_total_minor      BIGINT NOT NULL CHECK (refund_total_minor >= 0),
     fx_base            TEXT,
     fx_quote           TEXT,
-    fx_rate            TEXT,
     fx_rate_microrate  BIGINT CHECK (fx_rate_microrate IS NULL OR fx_rate_microrate > 0),
     shop_name_ar       TEXT NOT NULL,
     shop_name_en       TEXT NOT NULL,
@@ -449,26 +437,6 @@ CREATE TABLE catalog_product_sales_policies (
     CHECK (sell_online OR online_allocation_limit IS NULL)
 );
 CREATE INDEX idx_catalog_policies_online ON catalog_product_sales_policies (sell_online) WHERE sell_online;
-
--- ==== 00011_product_inventory ====
--- Phase 5C: product inventory projection (ADR in docs/decisions).
--- Retail owns physical stock; Cloud converges to the highest valid
--- per-product revision as last-known inventory. No movements, no
--- reservations, no availability writes, no provider identity anywhere in
--- this projection. Rebuild: clear this table and reset the inventory
--- processor; inbox history replays deterministically (highest valid
--- revision wins regardless of order).
-
-CREATE TABLE catalog_product_inventory (
-    product_id              UUID PRIMARY KEY REFERENCES catalog_products(product_id) ON DELETE CASCADE,
-    stock_quantity          BIGINT NOT NULL CHECK (stock_quantity >= 0),
-    source_revision         BIGINT NOT NULL CHECK (source_revision >= 1),
-    source_event_id         UUID NOT NULL REFERENCES sync_events(event_id),
-    source_device_id        UUID NOT NULL REFERENCES devices(id),
-    source_payload_hash     BYTEA NOT NULL,
-    source_received_at      TIMESTAMPTZ NOT NULL,
-    projected_at            TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 
 -- ==== 00012_commerce_product_mappings ====
 -- Phase 6A: durable Cloud-only provider product mappings (ADR in
@@ -1028,9 +996,8 @@ CREATE INDEX idx_operations_incidents_resolve ON operational_incidents (rule_key
 -- to catalog_tags (renames, hides, and terminal deletes must never touch
 -- history). sale_lines_projection rows are append-only under ownership
 -- arbitration, so CASCADE there mirrors the classification precedent.
--- sales_projection.tag_capture distinguishes capture states: NULL means
--- the sale projected from v1 (unknown, never backfilled), TRUE means a
--- v2 projection captured tags (possibly zero rows for untagged lines).
+-- Every accepted sale (sale.finalized.v3) captures tags, so no capture
+-- marker exists (ADR-0055).
 CREATE TABLE sale_item_tag_snapshots (
     sale_id      UUID NOT NULL REFERENCES sales_projection(sale_id) ON DELETE CASCADE,
     sale_item_id UUID NOT NULL,
@@ -1043,7 +1010,6 @@ CREATE TABLE sale_item_tag_snapshots (
 CREATE INDEX idx_sale_item_tag_snapshots_tag ON sale_item_tag_snapshots (tag_id, sale_id, sale_item_id);
 CREATE INDEX idx_sale_item_tag_snapshots_item ON sale_item_tag_snapshots (sale_id, sale_item_id);
 
-ALTER TABLE sales_projection ADD COLUMN tag_capture BOOLEAN;
 
 -- ==== 00022_store_identity ====
 -- Phase 9A store identity foundation. Retail owns its Store ID; Cloud
@@ -1111,8 +1077,6 @@ ALTER TABLE catalog_products ADD CONSTRAINT catalog_products_store_sku_unique UN
 ALTER TABLE catalog_product_sales_policies ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
 CREATE INDEX idx_catalog_product_sales_policies_store ON catalog_product_sales_policies (store_id) WHERE store_id IS NOT NULL;
 
-ALTER TABLE catalog_product_inventory ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_catalog_product_inventory_store ON catalog_product_inventory (store_id) WHERE store_id IS NOT NULL;
 
 -- Historical roots: immutable once written; NULL stays NULL for legacy.
 ALTER TABLE sales_projection ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
@@ -1512,7 +1476,7 @@ CREATE INDEX idx_catalog_admin_targets_command ON catalog_admin_command_targets(
 -- Money is BIGINT minor units; no floats; no provider identity in
 -- projection tables. The catalog stream (variant_revision) and the
 -- inventory stream (inventory_revision) stay independent revisions,
--- exactly like catalog_products vs catalog_product_inventory.
+-- independent from the Variant catalog revision stream.
 
 CREATE TABLE catalog_product_variants (
     variant_id          UUID PRIMARY KEY,
@@ -2287,7 +2251,27 @@ CREATE INDEX idx_sync_recovery_required ON sync_recovery_state(required) WHERE r
 ALTER TABLE sync_recovery_state
     ADD COLUMN verify_missing BIGINT NOT NULL DEFAULT 0 CHECK (verify_missing >= 0);
 
+-- Product stock is a read-only aggregate. Independent Variant revisions are
+-- never collapsed into an invented Product inventory revision. Incomplete or
+-- contradictory inventory cannot expose partial positive availability.
+CREATE VIEW catalog_product_stock AS
+SELECT p.product_id, p.store_id,
+    CASE WHEN count(v.variant_id) > 0
+          AND count(i.variant_id) FILTER (WHERE i.ready) = count(v.variant_id)
+         THEN sum(i.stock_quantity)::bigint
+         ELSE NULL::bigint END AS stock_quantity
+FROM catalog_products p
+LEFT JOIN catalog_product_variants v
+  ON v.product_id = p.product_id AND v.is_active AND NOT v.deleted
+LEFT JOIN catalog_product_variant_inventory i
+  ON i.variant_id = v.variant_id AND i.product_id = v.product_id
+ AND i.sku = v.sku
+ AND (v.store_id IS NULL OR v.store_id = p.store_id)
+ AND (i.store_id IS NULL OR i.store_id = p.store_id)
+GROUP BY p.product_id, p.store_id;
+
 -- +goose Down
+DROP VIEW IF EXISTS catalog_product_stock;
 -- Dev/test only: removes every baseline object.
 DROP VIEW IF EXISTS catalog_product_online_state;
 DROP TABLE IF EXISTS admin_activation_tokens CASCADE;
@@ -2310,7 +2294,6 @@ DROP TABLE IF EXISTS catalog_admin_device_capabilities CASCADE;
 DROP TABLE IF EXISTS catalog_categories CASCADE;
 DROP TABLE IF EXISTS catalog_category_edges CASCADE;
 DROP TABLE IF EXISTS catalog_product_configurations CASCADE;
-DROP TABLE IF EXISTS catalog_product_inventory CASCADE;
 DROP TABLE IF EXISTS catalog_product_prices CASCADE;
 DROP TABLE IF EXISTS catalog_product_sales_policies CASCADE;
 DROP TABLE IF EXISTS catalog_product_subcategories CASCADE;

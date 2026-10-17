@@ -65,12 +65,12 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 			_, e = catalog.ValidateCategorySnapshot(p)
 			return e
 		},
-		catalog.EventProductSnapshotV1: func(raw json.RawMessage) error {
-			p, e := catalog.DecodeProductSnapshot(raw)
+		catalog.EventProductSnapshotV2: func(raw json.RawMessage) error {
+			p, e := catalog.DecodeProductSnapshotV2(raw)
 			if e != nil {
 				return e
 			}
-			_, e = catalog.ValidateProductSnapshot(p)
+			_, e = catalog.ValidateProductSnapshotV2(p)
 			return e
 		},
 		catalog.EventProductSalesPolicySnapshotV1: func(raw json.RawMessage) error {
@@ -81,12 +81,28 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 			_, e = catalog.ValidateProductSalesPolicySnapshot(p)
 			return e
 		},
-		catalog.EventInventoryProductSnapshotV1: func(raw json.RawMessage) error {
-			p, e := catalog.DecodeProductInventorySnapshot(raw)
+		catalog.EventInventoryProductVariantSnapshotV1: func(raw json.RawMessage) error {
+			p, e := catalog.DecodeProductVariantInventorySnapshot(raw)
 			if e != nil {
 				return e
 			}
-			_, e = catalog.ValidateProductInventorySnapshot(p)
+			_, e = catalog.ValidateProductVariantInventorySnapshot(p)
+			return e
+		},
+		catalog.EventProductVariantSnapshotV1: func(raw json.RawMessage) error {
+			p, e := catalog.DecodeProductVariantSnapshot(raw)
+			if e != nil {
+				return e
+			}
+			_, e = catalog.ValidateProductVariantSnapshot(p)
+			return e
+		},
+		catalog.EventProductTypeSnapshotV1: func(raw json.RawMessage) error {
+			p, e := catalog.DecodeProductTypeSnapshot(raw)
+			if e != nil {
+				return e
+			}
+			_, e = catalog.ValidateProductTypeSnapshot(p)
 			return e
 		},
 		catalog.EventProductConfigurationSnapshotV1: func(raw json.RawMessage) error {
@@ -98,11 +114,8 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 			return e
 		},
 	}
-	for typ, validator := range validators {
-		syncmodel.RegisterEventType(typ, validator)
-	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/sync/batches", httpadapter.DeviceAuth(authentication)(httpadapter.SyncBatch(syncmodel.NewService(d, clock.System{}), nil)))
+	mux.Handle("POST /api/v1/sync/batches", httpadapter.DeviceAuth(authentication)(httpadapter.SyncBatch(syncmodel.NewService(d, clock.System{}, syncmodel.NewRegistry(validators)), nil)))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	token := device.Device.ID + "." + device.Credential.ID + "." + device.RawSecret
@@ -148,7 +161,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 				t.Fatalf("authenticated durable ingestion: %d", response.StatusCode)
 			}
 		}
-		priority := map[string]int{catalog.EventCategorySnapshotV2: 0, catalog.EventProductSnapshotV1: 1, catalog.EventProductSalesPolicySnapshotV1: 2, catalog.EventInventoryProductSnapshotV1: 3, catalog.EventProductConfigurationSnapshotV1: 4}
+		priority := map[string]int{catalog.EventProductTypeSnapshotV1: -1, catalog.EventProductVariantSnapshotV1: 3, catalog.EventCategorySnapshotV2: 0, catalog.EventProductSnapshotV2: 1, catalog.EventProductSalesPolicySnapshotV1: 2, catalog.EventInventoryProductVariantSnapshotV1: 3, catalog.EventProductConfigurationSnapshotV1: 4}
 		sort.SliceStable(export.Events, func(i, j int) bool { return priority[export.Events[i].Type] < priority[export.Events[j].Type] })
 		for _, item := range export.Events {
 			record, found, e := d.LoadCatalogEvent(ctx, item.ID)
@@ -159,12 +172,16 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 			switch item.Type {
 			case catalog.EventCategorySnapshotV2:
 				result, e = d.ProjectCategory(ctx, record, time.Now())
-			case catalog.EventProductSnapshotV1:
+			case catalog.EventProductTypeSnapshotV1:
+				result, e = d.ProjectProductType(ctx, record, time.Now())
+			case catalog.EventProductVariantSnapshotV1:
+				result, e = d.ProjectProductVariant(ctx, record, time.Now())
+			case catalog.EventProductSnapshotV2:
 				result, e = d.ProjectProduct(ctx, record, time.Now())
 			case catalog.EventProductSalesPolicySnapshotV1:
 				result, e = d.ProjectProductSalesPolicy(ctx, record, time.Now())
-			case catalog.EventInventoryProductSnapshotV1:
-				result, e = d.ProjectProductInventory(ctx, record, time.Now())
+			case catalog.EventInventoryProductVariantSnapshotV1:
+				result, e = d.ProjectProductVariantInventory(ctx, record, time.Now())
 			case catalog.EventProductConfigurationSnapshotV1:
 				result, e = d.ProjectProductConfigurations(ctx, record, time.Now())
 			default:

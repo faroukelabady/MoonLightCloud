@@ -45,7 +45,7 @@ func TestStoreEnrollmentAuthenticatedPostgres(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/sync/store-registration", DeviceAuth(authSvc)(StoreRegistration(repo)))
-	mux.Handle("POST /api/v1/sync/batch", DeviceAuth(authSvc)(SyncBatch(isync.NewService(repo, clock.System{}), nil)))
+	mux.Handle("POST /api/v1/sync/batch", DeviceAuth(authSvc)(SyncBatch(isync.NewService(repo, clock.System{}, isync.DiagnosticRegistry()), nil)))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	post := func(token, path, body string) int {

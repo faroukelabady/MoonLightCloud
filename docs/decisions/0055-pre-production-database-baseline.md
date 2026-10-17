@@ -59,7 +59,8 @@ carries compatibility for data that never existed:
 Shared with Retail ADR-049: localized names use `name_ar` / `name_en` columns
 (`catalog_product_translations` is removed); frame options become relational
 rows with stable per-product configuration IDs; Retail keeps delivered outbox
-rows for ever. The currency rule is still open.
+rows for ever. Currency Option A is accepted: migration-owned currency rows with foreign keys
+on all money-bearing documents.
 
 ## Consequences
 
@@ -69,3 +70,20 @@ rows for ever. The currency rule is still open.
   the migrated schema equals the reviewed target.
 - After the first production install, ADR-0012 append-only migrations and
   versioned events apply again without exception.
+
+## Implementation checkpoints
+
+- Baseline 00100 replaced the historical chain with an equivalent schema.
+- Baseline 00101 removes payload hash-version metadata, duplicate decimal FX
+  text and Tag capture markers. Every accepted Sale is v3 and has captured
+  Tags (including an empty list). Exact integer microrates remain the FX
+  authority; decimal text is derived for display.
+- Category v2 and Product v2 are the only accepted versions of those streams.
+  Internal `catalog_*_projection.v1` processor identities remain unchanged.
+- Baseline 00102 removes the Product inventory table/event/projector. A read-only
+  view sums active, non-deleted canonical Variants only when every such Variant
+  has matching ready inventory. No Variant revision/event is presented as aggregate
+  Product provenance. Variant-aware commerce waits for at least one Variant; it
+  never falls back to publishing an aggregate stock pool.
+- Remaining model steps are tracked in the paired Retail baseline plan;
+  this checkpoint does not claim that the whole plan is complete.

@@ -18,113 +18,90 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestMain(m *testing.M) {
-	// Mirror app wiring: sale validation runs before ACK in this binary.
-	isync.RegisterEventType(sale.EventSaleFinalizedV3, func(raw json.RawMessage) error {
-		p, err := sale.DecodeV3(raw)
-		if err != nil {
+func testEventRegistry() isync.Registry {
+	return isync.NewRegistry(map[string]isync.Validator{
+		isync.DiagnosticEventType: nil,
+		sale.EventSaleFinalizedV3: func(raw json.RawMessage) error {
+			p, err := sale.DecodeV3(raw)
+			if err != nil {
+				return err
+			}
+			_, err = sale.ValidateV3(p)
 			return err
-		}
-		_, err = sale.ValidateV3(p)
-		return err
-	})
-	isync.RegisterEventType(returnrefund.EventReturnRefundFinalizedV1, func(raw json.RawMessage) error {
-		p, err := returnrefund.Decode(raw)
-		if err != nil {
+		},
+		returnrefund.EventReturnRefundFinalizedV1: func(raw json.RawMessage) error {
+			p, err := returnrefund.Decode(raw)
+			if err != nil {
+				return err
+			}
+			_, err = returnrefund.Validate(p)
 			return err
-		}
-		_, err = returnrefund.Validate(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventCategorySnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeCategorySnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventCategorySnapshotV2: func(raw json.RawMessage) error {
+			decoded, err := catalog.DecodeCategorySnapshotV2(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateCategorySnapshot(decoded)
 			return err
-		}
-		_, err = catalog.ValidateCategorySnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventCategorySnapshotV2, func(raw json.RawMessage) error {
-		decoded, err := catalog.DecodeCategorySnapshotV2(raw)
-		if err != nil {
+		},
+		catalog.EventTagSnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeTagSnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateTagSnapshot(p)
 			return err
-		}
-		_, err = catalog.ValidateCategorySnapshot(decoded)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventTagSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeTagSnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventProductSnapshotV2: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductSnapshotV2(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductSnapshotV2(p)
 			return err
-		}
-		_, err = catalog.ValidateTagSnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventProductSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductSnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventProductSalesPolicySnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductSalesPolicySnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductSalesPolicySnapshot(p)
 			return err
-		}
-		_, err = catalog.ValidateProductSnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventProductSalesPolicySnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductSalesPolicySnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventProductConfigurationSnapshotV1: func(raw json.RawMessage) error {
+			decoded, err := catalog.DecodeProductConfigurationsSnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductConfigurationsSnapshot(decoded)
 			return err
-		}
-		_, err = catalog.ValidateProductSalesPolicySnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventProductConfigurationSnapshotV1, func(raw json.RawMessage) error {
-		decoded, err := catalog.DecodeProductConfigurationsSnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventProductVariantSnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductVariantSnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductVariantSnapshot(p)
 			return err
-		}
-		_, err = catalog.ValidateProductConfigurationsSnapshot(decoded)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventInventoryProductSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductInventorySnapshot(raw)
-		if err != nil {
+		},
+		catalog.EventInventoryProductVariantSnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductVariantInventorySnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductVariantInventorySnapshot(p)
 			return err
-		}
-		_, err = catalog.ValidateProductInventorySnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventProductSnapshotV2, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductSnapshotV2(raw)
-		if err != nil {
+		},
+		catalog.EventProductTypeSnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductTypeSnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductTypeSnapshot(p)
 			return err
-		}
-		_, err = catalog.ValidateProductSnapshotV2(p)
-		return err
+		},
 	})
-	isync.RegisterEventType(catalog.EventProductVariantSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductVariantSnapshot(raw)
-		if err != nil {
-			return err
-		}
-		_, err = catalog.ValidateProductVariantSnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventInventoryProductVariantSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductVariantInventorySnapshot(raw)
-		if err != nil {
-			return err
-		}
-		_, err = catalog.ValidateProductVariantInventorySnapshot(p)
-		return err
-	})
-	isync.RegisterEventType(catalog.EventProductTypeSnapshotV1, func(raw json.RawMessage) error {
-		p, err := catalog.DecodeProductTypeSnapshot(raw)
-		if err != nil {
-			return err
-		}
-		_, err = catalog.ValidateProductTypeSnapshot(p)
-		return err
-	})
-	os.Exit(m.Run())
 }
 
 // saleEnv provisions a device and returns sync service, projector wiring,
@@ -147,7 +124,7 @@ func openSaleEnv(t *testing.T) *saleEnv {
 	store := NewDevices(pool, 5*time.Second)
 	return &saleEnv{
 		pool:    pool,
-		syncSvc: isync.NewService(store, clock.System{}),
+		syncSvc: isync.NewService(store, clock.System{}, testEventRegistry()),
 		proj: sale.NewProjector(store, clock.System{},
 			nilLogger()),
 		devID: p.Device.ID, credID: p.Credential.ID,

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -101,13 +102,14 @@ func (d Devices) DashboardLatestFx(ctx context.Context, startUTC, endUTC time.Ti
 		return dashboard.LatestFxRow{}, reportErr("dashboard latest fx", err)
 	}
 	out := dashboard.LatestFxRow{DistinctRates: r.DistinctRates, USDSales: r.UsdSales}
-	if r.LatestRate.Valid {
-		s := r.LatestRate.String
-		out.Rate = &s
-	}
 	if r.LatestMicrorate.Valid {
 		v := r.LatestMicrorate.Int64
 		out.Microrate = &v
+		// The decimal text is derived from the exact microrate (ADR-0055
+		// dropped the duplicate fx_rate column); it matches the validated
+		// event's fx.rate spelling.
+		s := formatMicrorate(v)
+		out.Rate = &s
 	}
 	if r.LatestOccurred.Valid {
 		t := r.LatestOccurred.Time
@@ -139,13 +141,14 @@ func (d Devices) DashboardLatestFxForStore(ctx context.Context, storeID string, 
 		return dashboard.LatestFxRow{}, reportErr("dashboard latest fx", err)
 	}
 	out := dashboard.LatestFxRow{DistinctRates: r.DistinctRates, USDSales: r.UsdSales}
-	if r.LatestRate.Valid {
-		s := r.LatestRate.String
-		out.Rate = &s
-	}
 	if r.LatestMicrorate.Valid {
 		v := r.LatestMicrorate.Int64
 		out.Microrate = &v
+		// The decimal text is derived from the exact microrate (ADR-0055
+		// dropped the duplicate fx_rate column); it matches the validated
+		// event's fx.rate spelling.
+		s := formatMicrorate(v)
+		out.Rate = &s
 	}
 	if r.LatestOccurred.Valid {
 		t := r.LatestOccurred.Time
@@ -661,4 +664,10 @@ func (d Devices) DashboardReturnBranchesForStore(ctx context.Context, storeID st
 		})
 	}
 	return out, nil
+}
+
+// formatMicrorate renders an exact microrate as the six-decimal rate text
+// sale events carry (52000000 → "52.000000").
+func formatMicrorate(v int64) string {
+	return fmt.Sprintf("%d.%06d", v/1_000_000, v%1_000_000)
 }

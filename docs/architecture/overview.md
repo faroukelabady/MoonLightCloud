@@ -1,89 +1,84 @@
-# MoonLightCloud — Architecture Overview
+# MoonLightCloud — architecture overview
 
-Modular monolith in Go. PostgreSQL is the only state. HTTP is the only
-ingress. Everything else is a documented future boundary, not code.
+Go modular monolith with PostgreSQL 18 as its durable state. Retail and Cloud
+have separate domain models and exchange authenticated HTTPS contracts.
 
-Modular monolith in Go. PostgreSQL is the only state. HTTP is the only
-ingress. Everything else is a documented future boundary, not code.
-
-```
-                    MoonLightRetail (desktop, separate repo)
-                         SQLite, offline-first
-                               │ HTTPS (versioned /api/v1)
-                               ▼
-                        MoonLightCloud (this repo)
-                    ┌──────────────────────────────┐
-                    │ Go modular monolith          │
-                    │  internal/app      wiring    │
-                    │  internal/auth     devices   │
-                    │  internal/sync     (future)  │
-                    │  internal/commerce (future)  │
-                    │  internal/notifications (f.) │
-                    │  adapter/http      ingress   │
-                    │  adapter/postgres  storage   │
-                    └──────────────┬───────────────┘
-                                   │ private connection only
-                                   ▼
-                              PostgreSQL 18
-                    CommerceProvider ──► future (Shopify/WooCommerce)
-                    NotificationProvider ──► future (WhatsApp/Twilio/email)
+```text
+Retail: ProductType → Product → physical Variant (SKU and stock)
+  canonical Sales/Returns/history + retained transactional outbox
+                  │ Retail-initiated HTTPS sync and polling
+                  ▼
+Cloud: ingestion → durable inbox → projections → reports/dashboard
+       human auth → Store-scoped Admin intent → Retail receipts/convergence
+       commerce adapters → Shopify/WooCommerce
+       notification adapters, device control, signed releases/fleet recovery
+                  │
+                  ▼
+              PostgreSQL 18
 ```
 
-## Boundaries
+## Ownership and boundaries
 
-- `internal/auth` defines repository contracts; `internal/adapter/postgres`
-  implements them. Domain packages never import pgx or net/http.
-- `internal/commerce` and `internal/notifications` are interfaces + docs.
-  The core never imports a vendor SDK (ADR-0007/0008).
-- `internal/sync` owns the versioned ingestion protocol: envelope parsing,
-  exact canonical JSON (no float64), and durable `sync_events` acceptance.
-- `internal/sale` owns the `sale.finalized.v1` DTO, strict pre-ACK
-  validation (payment aggregate, classifications, FX pair, integer money),
-  and the async projector with atomic sale ownership.
-- Desktop and cloud share no domain package (ADR-0009). The versioned HTTPS
-  contract (`api/openapi.yaml`) is the boundary; model duplication is intended.
+Retail owns ProductTypes, Products, Variants, exact SKU/inventory, Sales,
+Returns and frozen business snapshots. Cloud projects those events and never
+repairs history by inventing Retail transactions. Product stock is derived from complete active Variant inventory;
+FrameConfigurations have no SKU or stock. Cloud owns provider mappings,
+online-order integration, human authentication, commands and operational state.
 
-## Runtime
+Core packages define contracts and policy; HTTP and PostgreSQL adapters own
+I/O. Provider-specific HTTP belongs in adapters, not core business services.
+`internal/app` composes the process; CLI entry points must preserve the same
+Store, mutation-barrier and timeout contracts. Known boundary exceptions and
+incremental extraction work are tracked in the architecture refactoring plan.
+There is no common Retail/Cloud business-model module.
 
-- Local: Podman Compose (`deploy/compose.yaml`), services `cloud` + `postgres`.
-- Production: any OCI host (Railway first, replaceable). The app needs only
-  `PORT`/`HTTP_ADDR`, `DATABASE_URL`, stdout logs, SIGTERM handling.
-- Stateless app; PostgreSQL holds all authority. No Redis, no broker, no K8s.
+## Ingestion, projection and recovery
 
-## Data
+`internal/sync` validates envelopes and exact canonical JSON, commits immutable
+`sync_events` and ACKs durable acceptance. Projection is separate: processing
+state records pending/retry/blocked/processed outcomes. Durable Sale ownership
+survives projection rebuilds; current catalog revisions and historical Sale
+snapshots have different lifecycles. ACK is never proof of projection completion.
 
-- Fresh MoonLightCloud migration history (goose, embedded, applied
-  explicitly). Current schema: `devices`, `device_credentials`,
-  `sync_events` (durable inbox with `payload_hash_version`),
-  `sale_event_ownership` (durable Sale conflict arbitration, never deleted
-  on rebuild), sale projection tables (`sales_projection` + lines/payments/
-  classifications, disposable derived state), `sync_event_processing`
-  (pending/retry/blocked/processed).
-- UUIDv7 domain identities (app-generated), `TIMESTAMPTZ` UTC timestamps.
-- Device secrets: 256-bit random, stored as salted keyed hash
-  (SHA-256(salt||secret) or HMAC-SHA256 with `DEVICE_SECRET_PEPPER`).
-  Raw secret shown once at provisioning, never logged, never returned.
+The current Sale stream is `sale.finalized.v3`; Category and Product snapshots
+use v2. Other supported streams and their limits are defined by
+`api/openapi.yaml` and `docs/sync/protocol.md`. During the accepted ADR-0055
+pre-production window, paired contracts change in place and obsolete versions
+are removed. After the first production install, normal compatibility and
+append-only migration rules resume.
 
-## HTTP
+Recovery verifies retained Retail event identity and missing-event replay,
+then requires projection convergence before reporting reconciliation. Cloud
+backup artifacts require the documented external confidentiality controls.
+Operational DR and Retail updater rollback remain separate mechanisms.
 
-- Public: `GET /health/live`, `GET /health/ready`, `GET /version`.
-- Versioned: device ping, sync capabilities, `POST /api/v1/sync/batches`.
-- Stable error envelope `{"error":{"code","message"}}`; no SQL/traces/paths.
+## Security and HTTP
 
-## Ingestion vs projection
+Public health/version endpoints do not grant business access. The Dashboard
+uses OWNER/ADMIN human sessions, mandatory MFA, Secure/HttpOnly/Strict cookies,
+CSRF/Origin checks, named permissions and Store membership. Device endpoints
+use existing device credentials and server-derived Store binding; human and
+device credentials are not interchangeable. Release-signing private keys stay
+outside Cloud. Logs and bounded public errors must exclude secrets and SQL.
 
-HTTP commits immutable events to `sync_events` and ACKs; a PostgreSQL-backed
-in-process projector derives `sales_projection` (+ lines, payments,
-classifications) asynchronously with durable `sync_event_processing` state
-(ADR-0016). Sale identity arbitration persists separately in
-`sale_event_ownership` (ADR-0018) so rebuilds reproduce the same winner.
-ACK never waits for projection; restarts recover from the inbox.
-- Request IDs assigned/propagated (`X-Request-ID`), bounded client values.
-- Timeouts + 1 MiB body/header caps. CORS disabled (no browser client yet).
+Exact minor units use checked integers; currencies remain separate and FX
+reporting uses the frozen integer microrate. Current labels never supply
+historical Sale attribution. Domain IDs are UUIDs and timestamps are UTC.
 
-## Configuration
+## Runtime and schema
 
-One typed system (`internal/config`), env-authoritative in production,
-fail-fast validation. Production refuses dev DB markers and requires a
-secret pepper. See also: docs/operations/railway.md, docs/security/threat-model.md,
-docs/sync/protocol.md, docs/operations/backup.md, docs/testing/strategy.md.
+Local development uses the committed compose/scripts. Deployment uses the OCI
+image with PostgreSQL, stdout logs and bounded shutdown. No Redis, broker or
+microservices are required. Startup verifies the schema; migrations are an
+explicit operational action.
+
+ADR-0055 replaces the old development migration chain with a guarded baseline.
+Each model checkpoint raises its file/version and refuses an older development
+database. `internal/migrate.TargetVersion` is authoritative for the current
+checkpoint. The paired Retail `plan/database-baseline-plan.md` records remaining
+work: normalized names/prices/frames, mandatory Store scope and other projection
+cleanup are not all implemented yet. Cloud now derives Product stock from the
+complete active Variant inventory set and has no Product-level inventory writer.
+
+See `docs/operations/disaster-recovery.md`, `docs/security/threat-model.md`,
+`docs/operations/railway.md`, and the accepted ADRs for deployment requirements.

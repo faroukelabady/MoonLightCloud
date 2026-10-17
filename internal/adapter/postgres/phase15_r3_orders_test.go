@@ -15,7 +15,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	root, sub, tag := catalogProductFixture(t, env, 8100, "review-frame")
 	p, c := "c001beef-0000-4000-8000-000000001111", "c001beef-0000-4000-8000-000000002222"
 	event := "d001beef-0000-4000-8000-000000003333"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-10-05T10:00:00Z", productPayload(p, "ML-REVIEW-001", "بردي", root, []string{sub}, []string{tag}, 1))
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-10-05T10:00:00Z", productPayload(p, "ML-REVIEW-001", "بردي", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, event)
 	_, e := env.pool.Exec(ctx, `INSERT INTO catalog_product_configurations(configuration_id,product_id,kind,style_code,style_name_ar,style_name_en,color_code,color_name_ar,color_name_en,price_delta_egp_minor,price_delta_usd_minor,configuration_revision,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at) VALUES($1,$2,'frame','classic','قديم','Original','black','أسود','Black',30000,2500,1,1,$3,$4,'\x00',now())`, c, p, event, env.devID)
 	if e != nil {

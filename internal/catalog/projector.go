@@ -28,7 +28,6 @@ const (
 	// Phase 5B: independent policy stream with its own processing identity.
 	ProcessorProductSalesPolicyProjectionV1 = "catalog_product_sales_policy_projection.v1"
 	// Phase 5C: independent inventory stream with its own processing identity.
-	ProcessorProductInventoryProjectionV1 = "inventory_product_projection.v1"
 	// Phase 15: independent ONLINE product-option (frame configuration)
 	// stream with its own processing identity.
 	ProcessorProductConfigurationProjectionV1 = "catalog_product_configuration_projection.v1"
@@ -94,7 +93,6 @@ type Store interface {
 	ProjectTag(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProduct(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductSalesPolicy(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
-	ProjectProductInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductConfigurations(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductVariant(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductVariantInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
@@ -149,9 +147,9 @@ func (p *Projector) WakeOnProgress(fn func()) {
 }
 
 // NewCategoryProjector wires one canonical Category stream. Pending discovery
-// includes the explicitly supported v1/v2 versions under the same processor.
+// reads the current wire version under its durable processor identity.
 func NewCategoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
-	return newProjector(s, ProcessorCategoryProjectionV1, EventCategorySnapshotV1, s.ProjectCategory, c, log)
+	return newProjector(s, ProcessorCategoryProjectionV1, EventCategorySnapshotV2, s.ProjectCategory, c, log)
 }
 
 // NewTagProjector wires the tag worker.
@@ -164,7 +162,7 @@ func NewTagProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 // CATALOG_INVALID_RELATION blocks even if the post-commit reset failed,
 // was lost to a crash, or never ran.
 func NewProductProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
-	p := newProjector(s, ProcessorProductProjectionV1, EventProductSnapshotV1, s.ProjectProduct, c, log)
+	p := newProjector(s, ProcessorProductProjectionV1, EventProductSnapshotV2, s.ProjectProduct, c, log)
 	p.rearmBlocked = true
 	return p
 }
@@ -174,13 +172,6 @@ func NewProductProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 // stale/conflict/out-of-order cases resolve through revision semantics.
 func NewProductSalesPolicyProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductSalesPolicyProjectionV1, EventProductSalesPolicySnapshotV1, s.ProjectProductSalesPolicy, c, log)
-}
-
-// NewProductInventoryProjector wires the Phase 5C inventory worker.
-// Inventory blocks are terminal-deterministic (product dependency is the
-// only wait); no re-arm hook.
-func NewProductInventoryProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
-	return newProjector(s, ProcessorProductInventoryProjectionV1, EventInventoryProductSnapshotV1, s.ProjectProductInventory, c, log)
 }
 
 // NewProductConfigurationsProjector projects the Phase 15 ONLINE

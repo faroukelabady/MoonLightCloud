@@ -9,18 +9,6 @@ import (
 
 func raw(payload string) json.RawMessage { return json.RawMessage(payload) }
 
-// §28/§30: v1 is immutable history and normalizes to online_enabled=true
-// (exact pre-Phase13 semantics).
-func TestCategorySnapshotV1NormalizesOnlineEnabled(t *testing.T) {
-	decoded, err := DecodeCategorySnapshot(raw(`{"category_id":"aaaaaaaa-0000-4000-8000-000000000001","status":"active","names":[{"locale":"en","name":"A"}],"parent_ids":[],"catalog_revision":5}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !decoded.OnlineEnabled {
-		t.Fatal("v1 must normalize to online_enabled = true")
-	}
-}
-
 // §132: v2 carries the policy explicitly; missing required field and
 // malformed types fail closed.
 func TestCategorySnapshotV2PolicyRequired(t *testing.T) {

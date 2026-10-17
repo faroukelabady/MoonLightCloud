@@ -129,7 +129,7 @@ func TestCatalogDependencyChainConvergesAtBoundedDurableDeadlines(t *testing.T) 
 		typ, processor, payload string
 		project                 func(context.Context, catalog.EventRecord, time.Time) (catalog.ProjectResult, error)
 	}{
-		{catalog.EventCategorySnapshotV1, catalog.ProcessorCategoryProjectionV1, categoryPayload(ids["child"], "active", map[string]string{"ar": "فرع"}, []string{ids["root"]}, 1), d.ProjectCategory},
+		{catalog.EventCategorySnapshotV2, catalog.ProcessorCategoryProjectionV1, categoryPayload(ids["child"], "active", map[string]string{"ar": "فرع"}, []string{ids["root"]}, 1), d.ProjectCategory},
 		{catalog.EventProductSnapshotV2, catalog.ProcessorProductProjectionV1, string(productRaw), d.ProjectProduct},
 		{catalog.EventProductVariantSnapshotV1, catalog.ProcessorProductVariantProjectionV1, variantPayload(ids["variant"], ids["product"], "ML-CHAIN-V", true, false, "color=blue", nil, 1), d.ProjectProductVariant},
 		{catalog.EventInventoryProductVariantSnapshotV1, catalog.ProcessorProductVariantInventoryProjectionV1, variantInventoryPayload(ids["variant"], ids["product"], "ML-CHAIN-V", 4, 1, true, nil), d.ProjectProductVariantInventory},
@@ -155,7 +155,7 @@ func TestCatalogDependencyChainConvergesAtBoundedDurableDeadlines(t *testing.T) 
 		due[i] = now
 	}
 	rootEvent, typeEvent := variantEventID(47200), variantEventID(47201)
-	ingestCatalog(t, env, rootEvent, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z", categoryPayload(ids["root"], "active", map[string]string{"ar": "قسم"}, nil, 1))
+	ingestCatalog(t, env, rootEvent, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z", categoryPayload(ids["root"], "active", map[string]string{"ar": "قسم"}, nil, 1))
 	ingestCatalog(t, env, typeEvent, catalog.EventProductTypeSnapshotV1, "2026-09-20T10:00:00Z", typePayload(ids["type"], "book", 1))
 	for _, event := range []string{rootEvent, typeEvent} {
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {

@@ -116,7 +116,7 @@ func fixedDesired(productID, sku string) commerce.DesiredProduct {
 			IsActive:  true, SellOnline: true,
 		},
 		Published:         true,
-		Availability:      catalog.ProductAvailability{ProductID: productID, Ready: true, OnlineAvailable: 12, InventoryRevision: 5},
+		Availability:      catalog.ProductAvailability{ProductID: productID, Ready: true, OnlineAvailable: 12},
 		CatalogRevision:   3,
 		PolicyRevision:    2,
 		InventoryRevision: 5,

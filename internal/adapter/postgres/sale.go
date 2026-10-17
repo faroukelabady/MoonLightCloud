@@ -234,12 +234,11 @@ func (d Devices) persistRetry(ctx context.Context, processor string, euid pgtype
 
 // projectionHeaderParams builds the ownership-claim header insert.
 func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRecord, v sale.Validated) sqlcgen.InsertSaleProjectionParams {
-	var fxBase, fxQuote, fxRate pgtype.Text
+	var fxBase, fxQuote pgtype.Text
 	var fxMicro pgtype.Int8
 	if v.Fx != nil {
 		fxBase = pgText(v.Fx.Base)
 		fxQuote = pgText(v.Fx.Quote)
-		fxRate = pgText(v.Fx.Rate)
 		fxMicro = pgtype.Int8{Int64: v.Fx.RateMicrorate, Valid: true}
 	}
 	return sqlcgen.InsertSaleProjectionParams{
@@ -255,7 +254,7 @@ func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRec
 		Currency:      v.Currency,
 		SubtotalMinor: v.Totals.Subtotal.AmountMinor, DiscountMinor: v.Totals.Discount.AmountMinor,
 		TaxMinor: v.Totals.Tax.AmountMinor, TotalMinor: v.Totals.Total.AmountMinor,
-		FxBase: fxBase, FxQuote: fxQuote, FxRate: fxRate, FxRateMicrorate: fxMicro,
+		FxBase: fxBase, FxQuote: fxQuote, FxRateMicrorate: fxMicro,
 		ReceivedAt: pgTime(event.ReceivedAt),
 	}
 }

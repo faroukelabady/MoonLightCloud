@@ -21,11 +21,8 @@ import (
 // → already_accepted; same ID with different device, type, instant, or
 // payload → deterministic EVENT_ID_REUSE conflict. Credential identity and
 // batch correlation are never part of event identity (rotation-safe).
-// Duplicate proof for pre-fix v1 rows re-canonicalizes the stored immutable
-// payload with the exact canonicalizer (fail-closed): the v1 hash alone is
-// never proof of equality. Exact v1 matches opportunistically upgrade the
-// stored hash to v2 without mutating the payload. ACK is returned only
-// after commit.
+// Payload hashes use the exact canonical representation. ACK is returned
+// only after commit; retries never mutate the stored event.
 func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string, events []sync.Event, receivedAt time.Time) ([]sync.EventResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -67,8 +64,7 @@ func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string,
 			EventType:  ev.EventType,
 			OccurredAt: pgTime(ev.OccurredAt), ReceivedAt: pgTime(receivedAt),
 			Payload: ev.Payload, PayloadHash: ev.Hash,
-			PayloadHashVersion: sync.HashVersionExact,
-			StoreID:            batchStore,
+			StoreID: batchStore,
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -81,7 +77,7 @@ func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string,
 					}
 					return nil, apperr.Wrap(apperr.Unavailable, "ingestion temporarily unavailable", redact(ferr))
 				}
-				if !sameImmutableIdentity(ctx, q, existing, deviceID, ev) {
+				if !sameImmutableIdentity(existing, deviceID, ev) {
 					return nil, apperr.New(apperr.Conflict,
 						fmt.Sprintf("EVENT_ID_REUSE: event %s already accepted with different immutable identity", ev.EventID))
 				}
@@ -103,14 +99,7 @@ func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string,
 // UTC instant equality — equivalent RFC3339 textual spellings of the same
 // instant match), and the exact canonical payload. Credential identity and
 // batch ID are excluded by design.
-//
-// Fail-closed legacy rule (P2D-MED-01): for v1 rows the stored immutable
-// payload is re-canonicalized with the exact v2 canonicalizer and compared
-// byte-for-byte with the incoming canonical payload. Equal → identical
-// (the stored hash opportunistically upgrades to v2 in the same
-// transaction; payload never mutates). Different → EVENT_ID_REUSE, even
-// when the lossy v1 hashes collide. The v1 hash is version metadata only.
-func sameImmutableIdentity(ctx context.Context, q *sqlcgen.Queries, existing sqlcgen.SyncEventByIDRow, deviceID string, ev sync.Event) bool {
+func sameImmutableIdentity(existing sqlcgen.SyncEventByIDRow, deviceID string, ev sync.Event) bool {
 	if uuidString(existing.DeviceID) != deviceID {
 		return false
 	}
@@ -120,24 +109,5 @@ func sameImmutableIdentity(ctx context.Context, q *sqlcgen.Queries, existing sql
 	if !existing.OccurredAt.Time.UTC().Equal(ev.OccurredAt.UTC()) {
 		return false
 	}
-	if existing.PayloadHashVersion == sync.HashVersionExact {
-		return bytes.Equal(existing.PayloadHash, ev.Hash)
-	}
-	storedCanonical, err := sync.Canonicalize(existing.Payload)
-	if err != nil {
-		// Stored bytes predate exact bounds and cannot be re-canonicalized
-		// (absurd exponents only): fall back to hash equality rather than
-		// strand a legitimate retry. No new state is created either way.
-		return bytes.Equal(existing.PayloadHash, ev.Hash)
-	}
-	if !bytes.Equal(storedCanonical, ev.Payload) {
-		return false
-	}
-	// Exact legacy match: converge hash metadata to v2 (concurrency-safe,
-	// idempotent, guarded to v1 rows). A failed upgrade must not fail the
-	// dedup itself.
-	_ = q.UpgradeSyncEventHash(ctx, sqlcgen.UpgradeSyncEventHashParams{
-		EventID: existing.EventID, PayloadHash: ev.Hash,
-	})
-	return true
+	return bytes.Equal(existing.PayloadHash, ev.Hash)
 }

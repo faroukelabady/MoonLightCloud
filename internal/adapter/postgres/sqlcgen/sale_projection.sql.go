@@ -243,11 +243,11 @@ INSERT INTO sales_projection (
     shop_receipt_footer_ar, shop_receipt_footer_en,
     cashier_id, cashier_name, currency,
     subtotal_minor, discount_minor, tax_minor, total_minor,
-    fx_base, fx_quote, fx_rate, fx_rate_microrate,
+    fx_base, fx_quote, fx_rate_microrate,
     received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
 )
 ON CONFLICT (sale_id) DO NOTHING
 RETURNING sale_id, source_event_id
@@ -277,7 +277,6 @@ type InsertSaleProjectionParams struct {
 	TotalMinor          int64              `json:"total_minor"`
 	FxBase              pgtype.Text        `json:"fx_base"`
 	FxQuote             pgtype.Text        `json:"fx_quote"`
-	FxRate              pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate     pgtype.Int8        `json:"fx_rate_microrate"`
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 	StoreID             pgtype.UUID        `json:"store_id"`
@@ -317,7 +316,6 @@ func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjec
 		arg.TotalMinor,
 		arg.FxBase,
 		arg.FxQuote,
-		arg.FxRate,
 		arg.FxRateMicrorate,
 		arg.ReceivedAt,
 		arg.StoreID,
@@ -325,15 +323,6 @@ func (q *Queries) InsertSaleProjection(ctx context.Context, arg InsertSaleProjec
 	var i InsertSaleProjectionRow
 	err := row.Scan(&i.SaleID, &i.SourceEventID)
 	return i, err
-}
-
-const markSaleTagCaptured = `-- name: MarkSaleTagCaptured :exec
-UPDATE sales_projection SET tag_capture = TRUE WHERE sale_id = $1
-`
-
-func (q *Queries) MarkSaleTagCaptured(ctx context.Context, saleID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markSaleTagCaptured, saleID)
-	return err
 }
 
 const saleProjectionByEventID = `-- name: SaleProjectionByEventID :one

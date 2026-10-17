@@ -67,7 +67,7 @@ func openScopeFixture(t *testing.T) *scopeFixture {
 		t.Fatalf("bind B: %v", err)
 	}
 	return &scopeFixture{
-		pool: pool, syncSvc: isync.NewService(devices, clock.System{}),
+		pool: pool, syncSvc: isync.NewService(devices, clock.System{}, testEventRegistry()),
 		devA: devA, credA: credA, devB: devB, credB: credB, devC: devC, credC: credC,
 	}
 }
@@ -233,19 +233,19 @@ func (f *scopeFixture) scopeGraph(t *testing.T, base int, prefix string) (rootA,
 	rootA, tagA, rootB, tagB = ids[prefix+"-root-a"], ids[prefix+"-tag-a"], ids[prefix+"-root-b"], ids[prefix+"-tag-b"]
 	names := func(n string) map[string]string { return map[string]string{"ar": n} }
 	f.ingest(t, f.devA, f.credA, fmt.Sprintf("e%07x-0000-4000-8000-000000000001", base),
-		catalog.EventCategorySnapshotV1, categoryPayload(rootA, "active", names("root A"), nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootA, "active", names("root A"), nil, 1))
 	f.ingest(t, f.devA, f.credA, fmt.Sprintf("e%07x-0000-4000-8000-000000000002", base),
 		catalog.EventTagSnapshotV1, tagPayload(tagA, prefix+"-shared", true, names("tag A"), 1))
 	f.ingest(t, f.devB, f.credB, fmt.Sprintf("e%07x-0000-4000-8000-000000000003", base),
-		catalog.EventCategorySnapshotV1, categoryPayload(rootB, "active", names("root B"), nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootB, "active", names("root B"), nil, 1))
 	f.ingest(t, f.devB, f.credB, fmt.Sprintf("e%07x-0000-4000-8000-000000000004", base),
 		catalog.EventTagSnapshotV1, tagPayload(tagB, prefix+"-shared", true, names("tag B"), 1))
 	for i, tc := range []struct {
 		event, typ string
 	}{
-		{fmt.Sprintf("e%07x-0000-4000-8000-000000000001", base), catalog.EventCategorySnapshotV1},
+		{fmt.Sprintf("e%07x-0000-4000-8000-000000000001", base), catalog.EventCategorySnapshotV2},
 		{fmt.Sprintf("e%07x-0000-4000-8000-000000000002", base), catalog.EventTagSnapshotV1},
-		{fmt.Sprintf("e%07x-0000-4000-8000-000000000003", base), catalog.EventCategorySnapshotV1},
+		{fmt.Sprintf("e%07x-0000-4000-8000-000000000003", base), catalog.EventCategorySnapshotV2},
 		{fmt.Sprintf("e%07x-0000-4000-8000-000000000004", base), catalog.EventTagSnapshotV1},
 	} {
 		res := f.projectCatalog(t, tc.event, tc.typ)
@@ -264,11 +264,11 @@ func TestScope_SameSKUCoexists(t *testing.T) {
 	ids := catalogIDs(t, 110, "prod-a", "prod-b")
 	prodA, prodB := ids["prod-a"], ids["prod-b"]
 	f.ingest(t, f.devA, f.credA, "e0000110-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "ML-001", "Horse A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodA, "ML-001", "Horse A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000110-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodB, "ML-001", "Horse B", rootB, nil, []string{tagB}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000110-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
-	requireOutcome(t, f.projectCatalog(t, "e0000110-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodB, "ML-001", "Horse B", rootB, nil, []string{tagB}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000110-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000110-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodA); got == nil || *got != scopeStoreA {
 		t.Fatalf("prodA store: %v", got)
 	}
@@ -288,11 +288,11 @@ func TestScope_ProductSKURetired(t *testing.T) {
 	rootA, tagA, _, _ := f.scopeGraph(t, 120, "dup")
 	ids := catalogIDs(t, 130, "first", "second")
 	f.ingest(t, f.devA, f.credA, "e0000130-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(ids["first"], "DUP-1", "First", rootA, nil, []string{tagA}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(ids["first"], "DUP-1", "First", rootA, nil, []string{tagA}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	f.ingest(t, f.devA, f.credA, "e0000130-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(ids["second"], "DUP-1", "Second", rootA, nil, []string{tagA}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(ids["second"], "DUP-1", "Second", rootA, nil, []string{tagA}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000130-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	// Both products project and stay Store-owned; the retired wire sku
 	// (still frozen on v1) is validated then discarded — never stored.
 	for _, id := range []string{ids["first"], ids["second"]} {
@@ -323,15 +323,15 @@ func TestScope_ProductAdoptionAndConflict(t *testing.T) {
 	names := map[string]string{"ar": "c"}
 	// Legacy NULL baseline via the unbound device.
 	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootC, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootC, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagC, "adopt-tag", true, names, 1))
 	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodC, "ADOPT-1", "Adopt", rootC, nil, []string{tagC}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt", rootC, nil, []string{tagC}, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000140-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1},
+		{"e0000140-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
 		{"e0000140-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000140-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1},
+		{"e0000140-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
@@ -340,15 +340,15 @@ func TestScope_ProductAdoptionAndConflict(t *testing.T) {
 	}
 	// Store A continues the aggregate: safe adoption.
 	f.ingest(t, f.devA, f.credA, "e0000140-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodC, "ADOPT-1", "Adopt A", rootC, nil, []string{tagC}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000140-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt A", rootC, nil, []string{tagC}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000140-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodC); got == nil || *got != scopeStoreA {
 		t.Fatalf("adopted to A: %v", got)
 	}
 	// Store B attempts the same aggregate: permanent conflict, A intact.
 	f.ingest(t, f.devB, f.credB, "e0000140-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV1, productPayload(prodC, "ADOPT-1", "Adopt B", rootC, nil, []string{tagC}, 3))
-	res := f.projectCatalog(t, "e0000140-0000-4000-8000-000000000005", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt B", rootC, nil, []string{tagC}, 3))
+	res := f.projectCatalog(t, "e0000140-0000-4000-8000-000000000005", catalog.EventProductSnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if got := f.rowStore(t, "catalog_products", "product_id", prodC); got == nil || *got != scopeStoreA {
 		t.Fatalf("A ownership intact: %v", got)
@@ -373,27 +373,27 @@ func TestScope_CategoryDAGIsolation(t *testing.T) {
 	shared, aOnly, bOnly, bChild := ids["shared"], ids["a-only"], ids["b-only"], ids["b-child"]
 	names := func(n string) map[string]string { return map[string]string{"ar": n} }
 	f.ingest(t, f.devA, f.credA, "e0000150-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(shared, "active", names("Shared"), nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(shared, "active", names("Shared"), nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	// Same category ID from Store B: conflict, A graph untouched.
 	f.ingest(t, f.devB, f.credB, "e0000150-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(shared, "active", names("Shared B"), nil, 1))
-	res := f.projectCatalog(t, "e0000150-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1)
+		catalog.EventCategorySnapshotV2, categoryPayload(shared, "active", names("Shared B"), nil, 1))
+	res := f.projectCatalog(t, "e0000150-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if got := f.rowStore(t, "catalog_categories", "category_id", shared); got == nil || *got != scopeStoreA {
 		t.Fatalf("shared node stays A: %v", got)
 	}
 	// Independent same-name categories coexist.
 	f.ingest(t, f.devA, f.credA, "e0000150-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(aOnly, "active", names("Cats"), []string{shared}, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(aOnly, "active", names("Cats"), []string{shared}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000150-0000-4000-8000-000000000004",
-		catalog.EventCategorySnapshotV1, categoryPayload(bOnly, "active", names("Cats"), nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
-	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000004", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(bOnly, "active", names("Cats"), nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000150-0000-4000-8000-000000000004", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	// Cross-Store edge (B child under A parent) is impossible.
 	f.ingest(t, f.devB, f.credB, "e0000150-0000-4000-8000-000000000005",
-		catalog.EventCategorySnapshotV1, categoryPayload(bChild, "active", names("B child"), []string{shared}, 1))
-	res = f.projectCatalog(t, "e0000150-0000-4000-8000-000000000005", catalog.EventCategorySnapshotV1)
+		catalog.EventCategorySnapshotV2, categoryPayload(bChild, "active", names("B child"), []string{shared}, 1))
+	res = f.projectCatalog(t, "e0000150-0000-4000-8000-000000000005", catalog.EventCategorySnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	var edges int
 	if err := f.pool.QueryRow(context.Background(),
@@ -409,8 +409,8 @@ func TestScope_ProductTagIsolation(t *testing.T) {
 	rootA, tagA, _, tagB := f.scopeGraph(t, 160, "pt")
 	ids := catalogIDs(t, 170, "prod-x")
 	f.ingest(t, f.devA, f.credA, "e0000170-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(ids["prod-x"], "PT-1", "X", rootA, nil, []string{tagA, tagB}, 1))
-	res := f.projectCatalog(t, "e0000170-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(ids["prod-x"], "PT-1", "X", rootA, nil, []string{tagA, tagB}, 1))
+	res := f.projectCatalog(t, "e0000170-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	var count int
 	if err := f.pool.QueryRow(context.Background(),
@@ -428,21 +428,21 @@ func TestScope_LegacyEventKeepsAdoptedStore(t *testing.T) {
 	rootL, tagL, prodL := ids["root-l"], ids["tag-l"], ids["prod-l"]
 	names := map[string]string{"ar": "l"}
 	for i, tc := range []struct{ event, typ, payload string }{
-		{"e0000180-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, categoryPayload(rootL, "active", names, nil, 1)},
+		{"e0000180-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, categoryPayload(rootL, "active", names, nil, 1)},
 		{"e0000180-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1, tagPayload(tagL, "keep-tag", true, names, 1)},
-		{"e0000180-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 1)},
+		{"e0000180-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 1)},
 	} {
 		f.ingest(t, f.devC, f.credC, tc.event, tc.typ, tc.payload)
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 		_ = i
 	}
 	f.ingest(t, f.devA, f.credA, "e0000180-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	// Legacy higher revision: business data advances, Store stays A.
 	f.ingest(t, f.devC, f.credC, "e0000180-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV1, productPayload(prodL, "KEEP-1", "Keep legacy", rootL, nil, []string{tagL}, 3))
-	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000005", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep legacy", rootL, nil, []string{tagL}, 3))
+	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000005", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodL); got == nil || *got != scopeStoreA {
 		t.Fatalf("adopted store preserved: %v", got)
 	}
@@ -461,19 +461,19 @@ func TestScope_RevisionRulesPreserved(t *testing.T) {
 	ids := catalogIDs(t, 195, "prod-r")
 	prodR := ids["prod-r"]
 	f.ingest(t, f.devA, f.credA, "e0000195-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "REV-1", "R2", rootA, nil, []string{tagA}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000195-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodR, "REV-1", "R2", rootA, nil, []string{tagA}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000195-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	// Same Store stale revision: frozen stale no-op.
 	f.ingest(t, f.devA, f.credA, "e0000195-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "REV-1", "R1", rootA, nil, []string{tagA}, 1))
-	res := f.projectCatalog(t, "e0000195-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(prodR, "REV-1", "R1", rootA, nil, []string{tagA}, 1))
+	res := f.projectCatalog(t, "e0000195-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2)
 	if res.Outcome != catalog.OutcomeProcessed && res.Outcome != catalog.OutcomeAlready {
 		t.Fatalf("stale no-op: %+v", res)
 	}
 	// Same Store equal revision, divergent state: frozen conflict verdict.
 	f.ingest(t, f.devA, f.credA, "e0000195-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodR, "REV-1", "R2-divergent", rootA, nil, []string{tagA}, 2))
-	res = f.projectCatalog(t, "e0000195-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(prodR, "REV-1", "R2-divergent", rootA, nil, []string{tagA}, 2))
+	res = f.projectCatalog(t, "e0000195-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrCatalogRevisionConflict)
 	var name string
 	if err := f.pool.QueryRow(context.Background(),

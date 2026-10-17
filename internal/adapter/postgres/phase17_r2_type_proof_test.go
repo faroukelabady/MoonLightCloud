@@ -105,7 +105,7 @@ func TestProductTypeHealthAndReports(t *testing.T) {
 		}
 	}
 	exec(fmt.Sprintf(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash)
-		VALUES ('f1000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v1', now(), '{}', '\x00')`, devID))
+		VALUES ('f1000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v2', now(), '{}', '\x00')`, devID))
 	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, online_enabled, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ('f1000000-0000-4000-8000-000000000002', 'active', 'cat', true, 1, 'f1000000-0000-4000-8000-000000000001', '` + devID + `', '\x00', now())`)
 	// p1: no type (PRODUCT_TYPE_MISSING). p2: dangling type (PROJECTION_MISSING).

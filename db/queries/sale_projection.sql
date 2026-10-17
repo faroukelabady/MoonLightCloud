@@ -10,11 +10,11 @@ INSERT INTO sales_projection (
     shop_receipt_footer_ar, shop_receipt_footer_en,
     cashier_id, cashier_name, currency,
     subtotal_minor, discount_minor, tax_minor, total_minor,
-    fx_base, fx_quote, fx_rate, fx_rate_microrate,
+    fx_base, fx_quote, fx_rate_microrate,
     received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
 )
 ON CONFLICT (sale_id) DO NOTHING
 RETURNING sale_id, source_event_id;
@@ -78,6 +78,3 @@ INSERT INTO sale_item_tag_snapshots (
     $1, $2, $3, $4, $5, $6
 )
 ON CONFLICT DO NOTHING;
-
--- name: MarkSaleTagCaptured :exec
-UPDATE sales_projection SET tag_capture = TRUE WHERE sale_id = $1;

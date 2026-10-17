@@ -129,13 +129,10 @@ WHERE device_id = sqlc.arg(device_id)::uuid
 WITH required_processor(event_type, processor) AS (VALUES
     ('sale.finalized.v3', 'sale_projection.v3'),
     ('sale.return_refund.finalized.v1', 'return_refund_projection.v1'),
-    ('catalog.category.snapshot.v1', 'catalog_category_projection.v1'),
     ('catalog.category.snapshot.v2', 'catalog_category_projection.v1'),
     ('catalog.tag.snapshot.v1', 'catalog_tag_projection.v1'),
-    ('catalog.product.snapshot.v1', 'catalog_product_projection.v1'),
     ('catalog.product.snapshot.v2', 'catalog_product_projection.v1'),
     ('catalog.product.sales_policy.snapshot.v1', 'catalog_product_sales_policy_projection.v1'),
-    ('inventory.product.snapshot.v1', 'inventory_product_projection.v1'),
     ('catalog.product.configuration.snapshot.v1', 'catalog_product_configuration_projection.v1'),
     ('catalog.product_variant.snapshot.v1', 'catalog_product_variant_projection.v1'),
     ('catalog.product_type.snapshot.v1', 'catalog_product_type_projection.v1'),

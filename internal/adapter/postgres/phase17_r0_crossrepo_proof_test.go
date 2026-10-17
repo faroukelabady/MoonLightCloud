@@ -102,7 +102,7 @@ func TestPhase17R0CrossRepoVariantConvergence(t *testing.T) {
 
 	// Category root at the fixture's exact identity.
 	catEvent := variantEventID(900)
-	ingestCatalog(t, env, catEvent, catalog.EventCategorySnapshotV1, "2026-10-06T10:00:00Z",
+	ingestCatalog(t, env, catEvent, catalog.EventCategorySnapshotV2, "2026-10-06T10:00:00Z",
 		categoryPayload(proofRootCatID, "active", map[string]string{"ar": "المتحف المصري", "en": "Egyptian Museum"}, nil, 1))
 	if res := proofProject(t, env, catEvent); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("category: %+v", res)

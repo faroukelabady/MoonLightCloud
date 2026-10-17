@@ -47,10 +47,10 @@ func TestScope_SharedDefaultCatalogCoexists(t *testing.T) {
 	tagNames := map[string]string{"ar": "ذهب", "en": "Gold"}
 	// Store A projects the seeded default category/tag.
 	f.ingest(t, f.devA, f.credA, "e0000800-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", names, nil, 1))
 	f.ingest(t, f.devA, f.credA, "e0000800-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, tagNames, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
 	// The default ID is projected under A's own Store-scoped identity.
 	catA := scopedCatID(t, sharedCatIslamic, scopeStoreA)
@@ -65,10 +65,10 @@ func TestScope_SharedDefaultCatalogCoexists(t *testing.T) {
 	// Store B projects the same seeded identities: no conflict and its own
 	// independent rows.
 	f.ingest(t, f.devB, f.credB, "e0000800-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", names, nil, 1))
 	f.ingest(t, f.devB, f.credB, "e0000800-0000-4000-8000-000000000004",
 		catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, tagNames, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000800-0000-4000-8000-000000000004", catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
 	catB := scopedCatID(t, sharedCatIslamic, scopeStoreB)
 	tagB := scopedTagID(t, sharedTagGold, scopeStoreB)
@@ -83,11 +83,11 @@ func TestScope_SharedDefaultCatalogCoexists(t *testing.T) {
 	ids := catalogIDs(t, 810, "prod-a", "prod-b")
 	prodA, prodB := ids["prod-a"], ids["prod-b"]
 	f.ingest(t, f.devA, f.credA, "e0000810-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "SHARED-1", "A", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodA, "SHARED-1", "A", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000810-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodB, "SHARED-1", "B", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000810-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
-	requireOutcome(t, f.projectCatalog(t, "e0000810-0000-4000-8000-000000000002", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodB, "SHARED-1", "B", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000810-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000810-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodA); got == nil || *got != scopeStoreA {
 		t.Fatalf("A product ownership: %v", got)
 	}
@@ -131,11 +131,11 @@ func TestScope_DefaultCategoryChildUnderLocalRoot(t *testing.T) {
 	names := map[string]string{"en": "Nature"}
 	// Store A creates a local root and moves default Nature beneath it.
 	f.ingest(t, f.devA, f.credA, "e0000820-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(localRoot, "active", map[string]string{"en": "Local root"}, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(localRoot, "active", map[string]string{"en": "Local root"}, nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	f.ingest(t, f.devA, f.credA, "e0000820-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatNature, "active", names, []string{localRoot}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatNature, "active", names, []string{localRoot}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 
 	catNatureA := scopedCatID(t, sharedCatNature, scopeStoreA)
 	var parent string
@@ -145,8 +145,8 @@ func TestScope_DefaultCategoryChildUnderLocalRoot(t *testing.T) {
 	}
 	// Store B's independent default Nature stays a root.
 	f.ingest(t, f.devB, f.credB, "e0000820-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatNature, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatNature, "active", names, nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000820-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	catNatureB := scopedCatID(t, sharedCatNature, scopeStoreB)
 	var edges int
 	if err := f.pool.QueryRow(context.Background(),
@@ -167,18 +167,18 @@ func TestScope_DefaultChildAdditiveReparent(t *testing.T) {
 	// A creates a local root; product references default Pharaonic (top)
 	// and Nature (subcategory).
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(localRoot, "active", map[string]string{"en": "Local root"}, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(localRoot, "active", map[string]string{"en": "Local root"}, nil, 1))
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1))
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatNature, "active", map[string]string{"en": "Nature"}, []string{sharedCatIslamic}, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatNature, "active", map[string]string{"en": "Nature"}, []string{sharedCatIslamic}, 1))
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000004",
 		catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1))
 	for _, e := range []string{
 		"e0000850-0000-4000-8000-000000000001", "e0000850-0000-4000-8000-000000000002",
 		"e0000850-0000-4000-8000-000000000003", "e0000850-0000-4000-8000-000000000004",
 	} {
-		typ := catalog.EventCategorySnapshotV1
+		typ := catalog.EventCategorySnapshotV2
 		if e == "e0000850-0000-4000-8000-000000000004" {
 			typ = catalog.EventTagSnapshotV1
 		}
@@ -186,13 +186,13 @@ func TestScope_DefaultChildAdditiveReparent(t *testing.T) {
 	}
 	prodA := "e0000850-1111-4111-8111-000000000001"
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "F09-REPARENT", "P", sharedCatIslamic, []string{sharedCatNature}, []string{sharedTagGold}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000850-0000-4000-8000-000000000005", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodA, "F09-REPARENT", "P", sharedCatIslamic, []string{sharedCatNature}, []string{sharedTagGold}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000850-0000-4000-8000-000000000005", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 
 	// Additive reparent: Nature gains localRoot while keeping Islamic.
 	f.ingest(t, f.devA, f.credA, "e0000850-0000-4000-8000-000000000006",
-		catalog.EventCategorySnapshotV1, categoryPayload(sharedCatNature, "active", map[string]string{"en": "Nature"}, []string{sharedCatIslamic, localRoot}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000850-0000-4000-8000-000000000006", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(sharedCatNature, "active", map[string]string{"en": "Nature"}, []string{sharedCatIslamic, localRoot}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000850-0000-4000-8000-000000000006", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 
 	natA := scopedCatID(t, sharedCatNature, scopeStoreA)
 	var parents string
@@ -221,26 +221,26 @@ func TestScope_CategoryLabelRevisionWithProductsProjects(t *testing.T) {
 	rootA, childA, tagA, prodA := ids["root-a"], ids["child-a"], ids["tag-a"], ids["prod-a"]
 	names := map[string]string{"ar": "قديم", "en": "Old"}
 	f.ingest(t, f.devA, f.credA, "e0000840-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootA, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootA, "active", names, nil, 1))
 	f.ingest(t, f.devA, f.credA, "e0000840-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(childA, "active", names, []string{rootA}, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(childA, "active", names, []string{rootA}, 1))
 	f.ingest(t, f.devA, f.credA, "e0000840-0000-4000-8000-000000000003",
 		catalog.EventTagSnapshotV1, tagPayload(tagA, "f04-label", true, names, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000840-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1},
-		{"e0000840-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1},
+		{"e0000840-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
+		{"e0000840-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2},
 		{"e0000840-0000-4000-8000-000000000003", catalog.EventTagSnapshotV1},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
 	f.ingest(t, f.devA, f.credA, "e0000840-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "F04-LABEL-SKU", "P", rootA, []string{childA}, []string{tagA}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000840-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodA, "F04-LABEL-SKU", "P", rootA, []string{childA}, []string{tagA}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000840-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 
 	// Label-only revision of the referenced root: must project.
 	f.ingest(t, f.devA, f.credA, "e0000840-0000-4000-8000-000000000005",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootA, "active", map[string]string{"ar": "جديد", "en": "New"}, nil, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000840-0000-4000-8000-000000000005", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(rootA, "active", map[string]string{"ar": "جديد", "en": "New"}, nil, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000840-0000-4000-8000-000000000005", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	var label string
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT name_en FROM catalog_categories WHERE category_id=$1`, rootA).Scan(&label); err != nil || label != "New" {
@@ -264,17 +264,17 @@ func TestScope_SharedCatalogDoesNotWeakenOwnership(t *testing.T) {
 
 	// Store-created same ID across Stores still conflicts.
 	f.ingest(t, f.devA, f.credA, "e0000830-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(ownedA, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(ownedA, "active", names, nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	f.ingest(t, f.devB, f.credB, "e0000830-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(ownedA, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		catalog.EventCategorySnapshotV2, categoryPayload(ownedA, "active", names, nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
 
 	// A Store-created child under a Store-created parent is still isolated:
 	// B's own root does not admit A's node, and vice versa.
 	f.ingest(t, f.devB, f.credB, "e0000830-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(ownedB, "active", names, []string{ownedA}, 1))
-	res := f.projectCatalog(t, "e0000830-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV1)
+		catalog.EventCategorySnapshotV2, categoryPayload(ownedB, "active", names, []string{ownedA}, 1))
+	res := f.projectCatalog(t, "e0000830-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrStoreScopeConflict {
 		t.Fatalf("cross-store owned edge must be rejected: %+v", res)
 	}

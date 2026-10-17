@@ -273,18 +273,6 @@ type CatalogProductConfiguration struct {
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
 }
 
-type CatalogProductInventory struct {
-	ProductID         pgtype.UUID        `json:"product_id"`
-	StockQuantity     int64              `json:"stock_quantity"`
-	SourceRevision    int64              `json:"source_revision"`
-	SourceEventID     pgtype.UUID        `json:"source_event_id"`
-	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
-	SourcePayloadHash []byte             `json:"source_payload_hash"`
-	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
-	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
-	StoreID           pgtype.UUID        `json:"store_id"`
-}
-
 type CatalogProductOnlineState struct {
 	ProductID            pgtype.UUID `json:"product_id"`
 	StoreID              pgtype.UUID `json:"store_id"`
@@ -314,6 +302,12 @@ type CatalogProductSalesPolicy struct {
 	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
 	StoreID               pgtype.UUID        `json:"store_id"`
+}
+
+type CatalogProductStock struct {
+	ProductID     pgtype.UUID `json:"product_id"`
+	StoreID       pgtype.UUID `json:"store_id"`
+	StockQuantity int64       `json:"stock_quantity"`
 }
 
 type CatalogProductSubcategory struct {
@@ -881,7 +875,6 @@ type ReturnRefundProjection struct {
 	RefundTotalMinor      int64              `json:"refund_total_minor"`
 	FxBase                pgtype.Text        `json:"fx_base"`
 	FxQuote               pgtype.Text        `json:"fx_quote"`
-	FxRate                pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate       pgtype.Int8        `json:"fx_rate_microrate"`
 	ShopNameAr            string             `json:"shop_name_ar"`
 	ShopNameEn            string             `json:"shop_name_en"`
@@ -985,11 +978,9 @@ type SalesProjection struct {
 	TotalMinor          int64              `json:"total_minor"`
 	FxBase              pgtype.Text        `json:"fx_base"`
 	FxQuote             pgtype.Text        `json:"fx_quote"`
-	FxRate              pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate     pgtype.Int8        `json:"fx_rate_microrate"`
 	ReceivedAt          pgtype.Timestamptz `json:"received_at"`
 	ProjectedAt         pgtype.Timestamptz `json:"projected_at"`
-	TagCapture          pgtype.Bool        `json:"tag_capture"`
 	StoreID             pgtype.UUID        `json:"store_id"`
 }
 
@@ -1003,16 +994,15 @@ type Store struct {
 }
 
 type SyncEvent struct {
-	EventID            pgtype.UUID        `json:"event_id"`
-	DeviceID           pgtype.UUID        `json:"device_id"`
-	CredentialID       pgtype.UUID        `json:"credential_id"`
-	EventType          string             `json:"event_type"`
-	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
-	ReceivedAt         pgtype.Timestamptz `json:"received_at"`
-	Payload            []byte             `json:"payload"`
-	PayloadHash        []byte             `json:"payload_hash"`
-	PayloadHashVersion int32              `json:"payload_hash_version"`
-	StoreID            pgtype.UUID        `json:"store_id"`
+	EventID      pgtype.UUID        `json:"event_id"`
+	DeviceID     pgtype.UUID        `json:"device_id"`
+	CredentialID pgtype.UUID        `json:"credential_id"`
+	EventType    string             `json:"event_type"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
+	Payload      []byte             `json:"payload"`
+	PayloadHash  []byte             `json:"payload_hash"`
+	StoreID      pgtype.UUID        `json:"store_id"`
 }
 
 type SyncEventProcessing struct {

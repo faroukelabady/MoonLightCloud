@@ -355,7 +355,7 @@ func TestReportRebuildIsolation(t *testing.T) {
 	protected := map[string]bool{
 		"catalog_products": true, "catalog_categories": true,
 		"sales_projection": true, "return_refund_projection": true,
-		"catalog_product_inventory": true, "commerce_online_orders": true,
+		"catalog_product_variant_inventory": true, "commerce_online_orders": true,
 		"commerce_product_mappings": true, "notification_messages": true,
 	}
 	for rows.Next() {

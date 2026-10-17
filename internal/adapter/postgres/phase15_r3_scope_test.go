@@ -20,12 +20,12 @@ func TestR3UnusedConfigurationIDTwoStoreRace(t *testing.T) {
 			categoryEvent = "e5c015a0-0000-4000-8000-000000000202"
 			productEvent = "e5c015a0-0000-4000-8000-000000000302"
 		}
-		f.ingest(t, c.dev, c.cred, categoryEvent, catalog.EventCategorySnapshotV1, categoryPayload(c.category, "active", map[string]string{"en": "Root"}, nil, 1))
-		if r := projectCatalogTerminal(t, f, categoryEvent, catalog.EventCategorySnapshotV1); r.Outcome != catalog.OutcomeProcessed {
+		f.ingest(t, c.dev, c.cred, categoryEvent, catalog.EventCategorySnapshotV2, categoryPayload(c.category, "active", map[string]string{"en": "Root"}, nil, 1))
+		if r := projectCatalogTerminal(t, f, categoryEvent, catalog.EventCategorySnapshotV2); r.Outcome != catalog.OutcomeProcessed {
 			t.Fatal(r)
 		}
-		f.ingest(t, c.dev, c.cred, productEvent, catalog.EventProductSnapshotV1, productPayload(c.product, "R3-SCOPE", "Product", c.category, nil, nil, 1))
-		if r := projectCatalogTerminal(t, f, productEvent, catalog.EventProductSnapshotV1); r.Outcome != catalog.OutcomeProcessed {
+		f.ingest(t, c.dev, c.cred, productEvent, catalog.EventProductSnapshotV2, productPayload(c.product, "R3-SCOPE", "Product", c.category, nil, nil, 1))
+		if r := projectCatalogTerminal(t, f, productEvent, catalog.EventProductSnapshotV2); r.Outcome != catalog.OutcomeProcessed {
 			t.Fatal(r)
 		}
 		f.ingest(t, c.dev, c.cred, c.event, catalog.EventProductConfigurationSnapshotV1, configPayload(c.product, 1, []map[string]any{configEntry(config, "classic", "black", 30000, 0)}))
@@ -73,12 +73,12 @@ func TestR3ConfigurationUsesIngressStoreAfterRebind(t *testing.T) {
 	f := openScopeFixture(t)
 	ctx := context.Background()
 	category, product, event := "aaaaaaaa-0000-4000-8000-0000000000a1", "22222222-0000-4000-8000-0000000000a1", "e5c015a0-0000-4000-8000-000000000401"
-	f.ingest(t, f.devA, f.credA, "e5c015a0-0000-4000-8000-000000000402", catalog.EventCategorySnapshotV1, categoryPayload(category, "active", map[string]string{"en": "Root"}, nil, 1))
-	if r := projectCatalogTerminal(t, f, "e5c015a0-0000-4000-8000-000000000402", catalog.EventCategorySnapshotV1); r.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devA, f.credA, "e5c015a0-0000-4000-8000-000000000402", catalog.EventCategorySnapshotV2, categoryPayload(category, "active", map[string]string{"en": "Root"}, nil, 1))
+	if r := projectCatalogTerminal(t, f, "e5c015a0-0000-4000-8000-000000000402", catalog.EventCategorySnapshotV2); r.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(r)
 	}
-	f.ingest(t, f.devA, f.credA, "e5c015a0-0000-4000-8000-000000000403", catalog.EventProductSnapshotV1, productPayload(product, "R3-REBIND", "Product", category, nil, nil, 1))
-	if r := projectCatalogTerminal(t, f, "e5c015a0-0000-4000-8000-000000000403", catalog.EventProductSnapshotV1); r.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devA, f.credA, "e5c015a0-0000-4000-8000-000000000403", catalog.EventProductSnapshotV2, productPayload(product, "R3-REBIND", "Product", category, nil, nil, 1))
+	if r := projectCatalogTerminal(t, f, "e5c015a0-0000-4000-8000-000000000403", catalog.EventProductSnapshotV2); r.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(r)
 	}
 	f.ingest(t, f.devA, f.credA, event, catalog.EventProductConfigurationSnapshotV1, configPayload(product, 1, []map[string]any{configEntry("11111111-0000-4000-8000-0000000000fe", "classic", "black", 30000, 0)}))

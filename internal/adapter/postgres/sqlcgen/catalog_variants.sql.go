@@ -261,7 +261,8 @@ LEFT JOIN catalog_product_sales_policies pol
   ON pol.product_id = v.product_id
  AND (pol.store_id IS NULL OR pol.store_id = v.store_id)
 LEFT JOIN catalog_product_variant_inventory inv
-  ON inv.variant_id = v.variant_id
+  ON inv.variant_id = v.variant_id AND inv.product_id = v.product_id
+ AND inv.sku = v.sku
  AND (inv.store_id IS NULL OR inv.store_id = v.store_id)
 WHERE v.variant_id = $1
 `

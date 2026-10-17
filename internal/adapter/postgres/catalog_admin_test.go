@@ -54,7 +54,7 @@ func TestCatalogAdminChainEndToEnd(t *testing.T) {
 	productID := uuid.NewString()
 	eventID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash, store_id)
-		VALUES ($1, $2, 'catalog.product.snapshot.v1', now(), '{}', '\x00', $3)`, eventID, deviceID, storeID); err != nil {
+		VALUES ($1, $2, 'catalog.product.snapshot.v2', now(), '{}', '\x00', $3)`, eventID, deviceID, storeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO catalog_categories (category_id, status, name_ar, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)

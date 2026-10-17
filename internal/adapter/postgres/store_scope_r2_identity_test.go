@@ -77,11 +77,11 @@ func TestR2_IndependentDefaultMutations(t *testing.T) {
 
 	// Independent Category renames + status, independent of Tag streams.
 	catInit := categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1)
-	requireOutcome(t, project(f.devA, f.credA, catalog.EventCategorySnapshotV1, sharedCatIslamic, catInit), catalog.OutcomeProcessed, "")
-	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV1, sharedCatIslamic, catInit), catalog.OutcomeProcessed, "")
-	requireOutcome(t, project(f.devA, f.credA, catalog.EventCategorySnapshotV1, sharedCatIslamic,
+	requireOutcome(t, project(f.devA, f.credA, catalog.EventCategorySnapshotV2, sharedCatIslamic, catInit), catalog.OutcomeProcessed, "")
+	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV2, sharedCatIslamic, catInit), catalog.OutcomeProcessed, "")
+	requireOutcome(t, project(f.devA, f.credA, catalog.EventCategorySnapshotV2, sharedCatIslamic,
 		categoryPayload(sharedCatIslamic, "hidden", map[string]string{"en": "A Islamic"}, nil, 2)), catalog.OutcomeProcessed, "")
-	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV1, sharedCatIslamic,
+	requireOutcome(t, project(f.devB, f.credB, catalog.EventCategorySnapshotV2, sharedCatIslamic,
 		categoryPayload(sharedCatIslamic, "archived", map[string]string{"en": "B Islamic"}, nil, 2)), catalog.OutcomeProcessed, "")
 	cA := scopedCatID(t, sharedCatIslamic, scopeStoreA)
 	cB := scopedCatID(t, sharedCatIslamic, scopeStoreB)
@@ -186,7 +186,7 @@ func TestR2_PreFixBlockedRecovery(t *testing.T) {
 		return e
 	}
 	e1 := mk(300, catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1), "")
-	e2 := mk(301, catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1), "")
+	e2 := mk(301, catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1), "")
 	e3 := mk(302, catalog.EventTagSnapshotV1, tagPayload("10000000-0000-0000-0000-000000000003", "popular", true, map[string]string{"en": "Pop"}, 1), "")
 	// Force durable blocked rows with the exact codes under test.
 	set := func(event, processor, code string) {

@@ -340,7 +340,7 @@ func desiredState(productID string, active, sellOnline bool, online int, ready b
 		Availability: catalog.ProductAvailability{
 			ProductID: productID, ProductActive: active, SellOnline: sellOnline,
 			OnlineAvailable: online, Ready: ready,
-			StockQuantity: &stock, InventoryRevision: 27,
+			StockQuantity: &stock,
 		},
 		CatalogRevision: 12, PolicyRevision: 4, InventoryRevision: 27,
 	}

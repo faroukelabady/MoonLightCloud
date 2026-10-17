@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/faroukelabady/MoonLightCloud/internal/app"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,7 @@ func cliDesiredState(published bool, online int, ready bool) commerce.DesiredPro
 			ProductID:     "11111111-1111-4111-8111-111111111111",
 			ProductActive: true, SellOnline: published,
 			OnlineAvailable: online, Ready: ready,
-			StockQuantity: &stock, InventoryRevision: 27,
+			StockQuantity: &stock,
 		},
 		CatalogRevision: 12, PolicyRevision: 4, InventoryRevision: 27,
 	}
@@ -227,7 +228,7 @@ func TestRunCommerceSyncUnknownProvider(t *testing.T) {
 }
 
 func TestNewCommerceRegistry(t *testing.T) {
-	registry, err := newCommerceRegistry(config.Config{})
+	registry, err := app.NewCommerceRegistry(config.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestNewCommerceRegistry(t *testing.T) {
 		Currency: config.WooCurrencyEGP, DimensionUnit: config.WooDimensionCM,
 		HTTPTimeout: 15 * time.Second,
 	}}
-	registry, err = newCommerceRegistry(enabled)
+	registry, err = app.NewCommerceRegistry(enabled, nil)
 	if err != nil {
 		t.Fatalf("enabled: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestNewCommerceRegistry(t *testing.T) {
 	// Invalid enabled configuration fails before any registration.
 	broken := enabled
 	broken.WooCommerce.BaseURL = "http://insecure.example.com"
-	if _, err := newCommerceRegistry(broken); err == nil {
+	if _, err := app.NewCommerceRegistry(broken, nil); err == nil {
 		t.Fatal("insecure URL must fail")
 	}
 }

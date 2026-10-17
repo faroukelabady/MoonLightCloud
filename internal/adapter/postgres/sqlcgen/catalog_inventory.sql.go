@@ -20,15 +20,12 @@ SELECT
     pol.sell_online AS sell_online,
     pol.online_allocation_limit AS online_allocation_limit,
     pol.source_revision AS policy_revision,
-    inv.stock_quantity AS stock_quantity,
-    inv.source_revision AS inventory_revision,
-    inv.source_event_id AS inventory_event_id,
-    inv.projected_at AS inventory_projected_at
+    inv.stock_quantity AS stock_quantity
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies pol
   ON pol.product_id = p.product_id
  AND (pol.store_id IS NULL OR pol.store_id = p.store_id)
-LEFT JOIN catalog_product_inventory inv
+LEFT JOIN catalog_product_stock inv
   ON inv.product_id = p.product_id
  AND (inv.store_id IS NULL OR inv.store_id = p.store_id)
 WHERE p.product_id = $1
@@ -49,19 +46,17 @@ WHERE p.product_id = $1
 `
 
 type CatalogAvailabilityByProductIDRow struct {
-	ProductID             pgtype.UUID        `json:"product_id"`
-	ProductActive         bool               `json:"product_active"`
-	ProductRevision       int64              `json:"product_revision"`
-	SellOffline           pgtype.Bool        `json:"sell_offline"`
-	SellOnline            pgtype.Bool        `json:"sell_online"`
-	OnlineAllocationLimit pgtype.Int8        `json:"online_allocation_limit"`
-	PolicyRevision        pgtype.Int8        `json:"policy_revision"`
-	StockQuantity         pgtype.Int8        `json:"stock_quantity"`
-	InventoryRevision     pgtype.Int8        `json:"inventory_revision"`
-	InventoryEventID      pgtype.UUID        `json:"inventory_event_id"`
-	InventoryProjectedAt  pgtype.Timestamptz `json:"inventory_projected_at"`
+	ProductID             pgtype.UUID `json:"product_id"`
+	ProductActive         bool        `json:"product_active"`
+	ProductRevision       int64       `json:"product_revision"`
+	SellOffline           pgtype.Bool `json:"sell_offline"`
+	SellOnline            pgtype.Bool `json:"sell_online"`
+	OnlineAllocationLimit pgtype.Int8 `json:"online_allocation_limit"`
+	PolicyRevision        pgtype.Int8 `json:"policy_revision"`
+	StockQuantity         pgtype.Int8 `json:"stock_quantity"`
 }
 
+// Product availability reads the complete active Variant inventory sum.
 // Phase 9-R1 F02: a dependency may back the product only when it is
 // either unscoped legacy (NULL) or owned by the product's exact proven
 // Store. A proven dependency from any other Store is excluded, so a
@@ -81,79 +76,6 @@ func (q *Queries) CatalogAvailabilityByProductID(ctx context.Context, productID 
 		&i.OnlineAllocationLimit,
 		&i.PolicyRevision,
 		&i.StockQuantity,
-		&i.InventoryRevision,
-		&i.InventoryEventID,
-		&i.InventoryProjectedAt,
 	)
 	return i, err
-}
-
-const catalogProductInventoryByID = `-- name: CatalogProductInventoryByID :one
-SELECT product_id, stock_quantity,
-    source_revision, source_event_id, source_device_id, source_payload_hash,
-    source_received_at, projected_at, store_id
-FROM catalog_product_inventory WHERE product_id = $1
-`
-
-func (q *Queries) CatalogProductInventoryByID(ctx context.Context, productID pgtype.UUID) (CatalogProductInventory, error) {
-	row := q.db.QueryRow(ctx, catalogProductInventoryByID, productID)
-	var i CatalogProductInventory
-	err := row.Scan(
-		&i.ProductID,
-		&i.StockQuantity,
-		&i.SourceRevision,
-		&i.SourceEventID,
-		&i.SourceDeviceID,
-		&i.SourcePayloadHash,
-		&i.SourceReceivedAt,
-		&i.ProjectedAt,
-		&i.StoreID,
-	)
-	return i, err
-}
-
-const upsertCatalogProductInventory = `-- name: UpsertCatalogProductInventory :exec
-
-INSERT INTO catalog_product_inventory (
-    product_id, stock_quantity,
-    source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (product_id) DO UPDATE SET
-    stock_quantity = excluded.stock_quantity,
-    source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
-    source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
-    source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_product_inventory.store_id),
-    projected_at = now()
-`
-
-type UpsertCatalogProductInventoryParams struct {
-	ProductID         pgtype.UUID        `json:"product_id"`
-	StockQuantity     int64              `json:"stock_quantity"`
-	SourceRevision    int64              `json:"source_revision"`
-	SourceEventID     pgtype.UUID        `json:"source_event_id"`
-	SourceDeviceID    pgtype.UUID        `json:"source_device_id"`
-	SourcePayloadHash []byte             `json:"source_payload_hash"`
-	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
-	StoreID           pgtype.UUID        `json:"store_id"`
-}
-
-// Phase 5C product inventory projection. Current-state replace semantics
-// per product: one row carrying the highest valid revision. Depends on the
-// core product projection (dependency wait, never terminal for missing
-// products); inactive products and sell_online=false still project rows.
-// Phase 9B store ownership: see UpsertCatalogCategory.
-func (q *Queries) UpsertCatalogProductInventory(ctx context.Context, arg UpsertCatalogProductInventoryParams) error {
-	_, err := q.db.Exec(ctx, upsertCatalogProductInventory,
-		arg.ProductID,
-		arg.StockQuantity,
-		arg.SourceRevision,
-		arg.SourceEventID,
-		arg.SourceDeviceID,
-		arg.SourcePayloadHash,
-		arg.SourceReceivedAt,
-		arg.StoreID,
-	)
-	return err
 }

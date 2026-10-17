@@ -44,8 +44,8 @@ VALUES($1,'custom','مخصص','Custom',true,0,1,$2,$3,'\x00',now(),$4)`, alias, 
 	}
 	cid, pid := uuid.NewString(), uuid.NewString()
 	ce := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, ce, catalog.EventCategorySnapshotV1, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if result := projectCatalogTerminal(t, f, ce, catalog.EventCategorySnapshotV1); result.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devA, f.credA, ce, catalog.EventCategorySnapshotV2, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+	if result := projectCatalogTerminal(t, f, ce, catalog.EventCategorySnapshotV2); result.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(result)
 	}
 	var payload map[string]any
@@ -160,8 +160,8 @@ func TestSharedProductTypeUnscopedAliasCannotOverwriteSeed(t *testing.T) {
 		t.Fatalf("unscoped raw alias changed seeded projection: result=%+v code=%q revision=%d source=%q owner=%q", result, code, revision, source, owner)
 	}
 	cid, pid, categoryEvent, productEvent := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	f.ingest(t, f.devC, f.credC, categoryEvent, catalog.EventCategorySnapshotV1, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if result := projectCatalogTerminal(t, f, categoryEvent, catalog.EventCategorySnapshotV1); result.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devC, f.credC, categoryEvent, catalog.EventCategorySnapshotV2, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+	if result := projectCatalogTerminal(t, f, categoryEvent, catalog.EventCategorySnapshotV2); result.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(result)
 	}
 	var payload map[string]any

@@ -18,30 +18,12 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog/slug"
 )
 
-// Registered event types (wired in internal/app).
+// Registered event types: one emitted version per stream (ADR-0055).
 const (
-	EventCategorySnapshotV1 = "catalog.category.snapshot.v1"
-	// EventCategorySnapshotV2 (Phase 13) carries the provider-neutral
-	// ONLINE channel policy (online_enabled). v1 stays semantically
-	// immutable and is normalized as online_enabled = true.
-	EventCategorySnapshotV2 = "catalog.category.snapshot.v2"
-	EventTagSnapshotV1      = "catalog.tag.snapshot.v1"
-	EventProductSnapshotV1  = "catalog.product.snapshot.v1"
-	// EventProductSnapshotV2 (Phase 17, revised by 17-R0 per ADR-0049)
-	// removes `sku` from the product aggregate: the v2 payload carries NO
-	// SKU-bearing field at all — Product has no SKU authority anywhere.
-	// SKU/stock identity lives on ProductVariant. v1 stays semantically
-	// immutable (its frozen `sku` wire field still validates and is then
-	// discarded at projection: catalog_products.sku was retired by
-	// 00035). Both versions share one catalog_revision stream.
-	EventProductSnapshotV2 = "catalog.product.snapshot.v2"
-	// Phase 5B: per-product channel/allocation policy at an independent
-	// revision (never overlapping catalog_revision).
+	EventCategorySnapshotV2           = "catalog.category.snapshot.v2"
+	EventTagSnapshotV1                = "catalog.tag.snapshot.v1"
+	EventProductSnapshotV2            = "catalog.product.snapshot.v2"
 	EventProductSalesPolicySnapshotV1 = "catalog.product.sales_policy.snapshot.v1"
-	// Phase 5C: per-product authoritative stock at an independent
-	// revision (never overlapping catalog_revision or
-	// sales_policy_revision). Current state, never a delta.
-	EventInventoryProductSnapshotV1 = "inventory.product.snapshot.v1"
 )
 
 // Valid category lifecycle states (desktop-enforced).
@@ -184,18 +166,6 @@ func decodePayload(eventType string, raw json.RawMessage, out any) error {
 	return nil
 }
 
-// DecodeCategorySnapshot parses canonical v1 payload bytes. v1 carries
-// no online policy: it normalizes to online_enabled = true (the exact
-// pre-Phase13 behavior, §28).
-func DecodeCategorySnapshot(raw json.RawMessage) (CategorySnapshot, error) {
-	var p CategorySnapshot
-	if err := decodePayload(EventCategorySnapshotV1, raw, &p); err != nil {
-		return CategorySnapshot{}, err
-	}
-	p.OnlineEnabled = true
-	return p, nil
-}
-
 // DecodeCategorySnapshotV2 parses canonical v2 payload bytes and
 // normalizes to the shared CategorySnapshot shape. online_enabled must
 // be present and boolean: missing or malformed policy fails closed.
@@ -224,7 +194,7 @@ func DecodeCategorySnapshotV2(raw json.RawMessage) (CategorySnapshot, error) {
 // projection-time checks against current state, never ingestion blocks.
 func ValidateCategorySnapshot(p CategorySnapshot) (CategorySnapshot, error) {
 	fail := func(format string, args ...any) (CategorySnapshot, error) {
-		return CategorySnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventCategorySnapshotV1+": "+fmt.Sprintf(format, args...))
+		return CategorySnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventCategorySnapshotV2+": "+fmt.Sprintf(format, args...))
 	}
 	if !isUUID(p.CategoryID) {
 		return fail("category_id must be a UUID")
@@ -303,16 +273,6 @@ func ValidateTagSnapshot(p TagSnapshot) (TagSnapshot, error) {
 	return p, nil
 }
 
-// DecodeProductSnapshot parses the canonical payload bytes. Decoding into
-// int64 rejects float JSON money and overflow at parse time.
-func DecodeProductSnapshot(raw json.RawMessage) (ProductSnapshot, error) {
-	var p ProductSnapshot
-	if err := decodePayload(EventProductSnapshotV1, raw, &p); err != nil {
-		return ProductSnapshot{}, err
-	}
-	return p, nil
-}
-
 // ProductSnapshotV2 is the Phase 17-R0 wire shape: identical to v1 except
 // the product carries NO SKU-bearing field at all (ADR-0049: Product has
 // no SKU authority anywhere; ProductVariant owns SKU/stock).
@@ -379,36 +339,16 @@ func ValidateProductSnapshotV2(p ProductSnapshot) (ProductSnapshot, error) {
 	if IsDerivedStorageIdentity(p.ProductTypeID) {
 		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventProductSnapshotV2+": product_type_id must not be a derived storage identity")
 	}
-	return validateProductSnapshot(p, EventProductSnapshotV2, false)
+	return validateProductSnapshot(p, EventProductSnapshotV2)
 }
 
-// ValidateProductSnapshot enforces every invariant the desktop product path
-// guarantees: UUID identity, SKU bounds, bilingual-capable names, nonneg
-// integer money per EGP|USD row, positive whole-centimeter dimensions when
-// present, UUID relations without duplicates, and a positive revision.
-// Legacy NULL dimensions and empty prices synchronize as unknown rather
-// than failing: storage permits them, so ingestion must too. Reachability
-// and root rules are projection-time checks, never ingestion blocks.
-func ValidateProductSnapshot(p ProductSnapshot) (ProductSnapshot, error) {
-	return validateProductSnapshot(p, EventProductSnapshotV1, true)
-}
-
-// validateProductSnapshot is the shared strict product validator.
-// requireSKU keeps the frozen v1 SKU contract (1..64 chars) for v1
-// events only; v2 has NO sku field (17-R0) and skips the retired check
-// entirely — its normalized SKU is always blank and never stored.
-func validateProductSnapshot(p ProductSnapshot, event string, requireSKU bool) (ProductSnapshot, error) {
+// validateProductSnapshot checks the current product shape. SKU belongs to variants.
+func validateProductSnapshot(p ProductSnapshot, event string) (ProductSnapshot, error) {
 	fail := func(format string, args ...any) (ProductSnapshot, error) {
 		return ProductSnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+event+": "+fmt.Sprintf(format, args...))
 	}
 	if !isUUID(p.ProductID) {
 		return fail("product_id must be a UUID")
-	}
-	if requireSKU {
-		sku := strings.TrimSpace(p.SKU)
-		if sku == "" || len(sku) > 64 || strings.ContainsAny(sku, "\r\n\t") {
-			return fail("sku must be 1..64 chars without control whitespace")
-		}
 	}
 	if !validName(p.Name) {
 		return fail("name must be 1..200 runes")
@@ -517,45 +457,6 @@ func ValidateProductSalesPolicySnapshot(p ProductSalesPolicySnapshot) (ProductSa
 		if !p.SellOnline {
 			return fail("online_allocation_limit requires sell_online")
 		}
-	}
-	return p, nil
-}
-
-// ProductInventorySnapshot is the authoritative inventory state at a
-// revision (Phase 5C): product identity, monotonic inventory_revision,
-// and resulting whole-unit stock_quantity only. No names, prices,
-// relations, policy, movements, or provider data. Mirrors the Retail
-// ledger constraint exactly: 0..MaxInt32, never negative.
-type ProductInventorySnapshot struct {
-	ProductID         string `json:"product_id"`
-	InventoryRevision int64  `json:"inventory_revision"`
-	StockQuantity     int    `json:"stock_quantity"`
-}
-
-// DecodeProductInventorySnapshot parses the canonical payload bytes.
-func DecodeProductInventorySnapshot(raw json.RawMessage) (ProductInventorySnapshot, error) {
-	var p ProductInventorySnapshot
-	if err := decodePayload(EventInventoryProductSnapshotV1, raw, &p); err != nil {
-		return ProductInventorySnapshot{}, err
-	}
-	return p, nil
-}
-
-// ValidateProductInventorySnapshot enforces the desktop inventory
-// contract: UUID identity, positive revision, whole-unit quantity in
-// 0..MaxInt32 (the exact Retail ledger domain).
-func ValidateProductInventorySnapshot(p ProductInventorySnapshot) (ProductInventorySnapshot, error) {
-	fail := func(format string, args ...any) (ProductInventorySnapshot, error) {
-		return ProductInventorySnapshot{}, apperr.New(apperr.Unprocessable, "invalid "+EventInventoryProductSnapshotV1+": "+fmt.Sprintf(format, args...))
-	}
-	if !isUUID(p.ProductID) {
-		return fail("product_id must be a UUID")
-	}
-	if !validRevision(p.InventoryRevision) {
-		return fail("inventory_revision must be >= 1")
-	}
-	if p.StockQuantity < 0 || p.StockQuantity > math.MaxInt32 {
-		return fail("stock_quantity must be 0..MaxInt32")
 	}
 	return p, nil
 }

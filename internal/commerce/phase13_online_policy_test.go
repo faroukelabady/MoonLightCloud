@@ -80,7 +80,7 @@ func TestEffectiveOnlinePublicationFormula(t *testing.T) {
 				product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: tc.active, Revision: 7}},
 				policy:       catalog.ProductSalesPolicy{SellOnline: tc.sellOnline, Revision: 3},
 				policyFound:  true,
-				availability: catalog.ProductAvailability{OnlineAvailable: 10, Ready: true, InventoryRevision: 5},
+				availability: catalog.ProductAvailability{OnlineAvailable: 10, Ready: true},
 				online: catalog.ProductOnlinePolicy{
 					Allowed: tc.categories, Reason: reason,
 					PolicyFingerprint: "fp", PolicyVersion: "ver",
@@ -308,7 +308,7 @@ func reevaluationFixture(t *testing.T, failing ProviderKey) (*ReevaluationWorker
 	desired := DesiredProduct{
 		Product:         CommerceProduct{ProductID: "prod-1", SKU: "S", IsActive: true, CatalogRevision: 2, PolicyRevision: 1},
 		Published:       true,
-		Availability:    catalog.ProductAvailability{OnlineAvailable: 5, Ready: true, InventoryRevision: 1},
+		Availability:    catalog.ProductAvailability{OnlineAvailable: 5, Ready: true},
 		CatalogRevision: 2, PolicyRevision: 1, InventoryRevision: 1,
 		CategoryPolicyFingerprint: "fp", CategoryPolicyVersion: "v1",
 	}

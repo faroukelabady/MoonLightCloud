@@ -47,7 +47,7 @@ func TestM01AtomicRoundingBoundary(t *testing.T) {
 	projectDashSale(t, env, "66666666-6666-4666-8666-666666666666", "2026-09-21T10:00:00Z", withSale(t, fixture(t, "sale_egp.json"), "22222222-2222-4222-8222-222222222222", "2026-09-21T10:00:00Z", "2026-09-21T10:05:00Z"))
 	ctx := context.Background()
 	// Rewrite to USD 49 @ 0.01 each: per-sale 0.49 -> 0 atomically.
-	if _, err := env.pool.Exec(ctx, `UPDATE sales_projection SET currency='USD', subtotal_minor=49, discount_minor=0, tax_minor=0, total_minor=49, fx_base='USD', fx_quote='EGP', fx_rate='0.010000', fx_rate_microrate=10000`); err != nil {
+	if _, err := env.pool.Exec(ctx, `UPDATE sales_projection SET currency='USD', subtotal_minor=49, discount_minor=0, tax_minor=0, total_minor=49, fx_base='USD', fx_quote='EGP', fx_rate_microrate=10000`); err != nil {
 		t.Fatalf("seed update: %v", err)
 	}
 	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-21")
@@ -85,7 +85,7 @@ func TestM01HalfAwayBoundary(t *testing.T) {
 	projectDashSale(t, env, "55555555-5555-4555-8555-555555555555", "2026-09-20T10:00:00Z", withSaleID(t, fixture(t, "sale_egp.json"), "11111111-1111-4111-8111-111111111111"))
 	ctx := context.Background()
 	// 150 minor USD @ 0.01 = 1.50 -> rounds to 2 (half away from zero).
-	if _, err := env.pool.Exec(ctx, `UPDATE sales_projection SET currency='USD', subtotal_minor=150, total_minor=150, fx_base='USD', fx_quote='EGP', fx_rate='0.010000', fx_rate_microrate=10000`); err != nil {
+	if _, err := env.pool.Exec(ctx, `UPDATE sales_projection SET currency='USD', subtotal_minor=150, total_minor=150, fx_base='USD', fx_quote='EGP', fx_rate_microrate=10000`); err != nil {
 		t.Fatal(err)
 	}
 	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")

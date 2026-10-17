@@ -444,10 +444,6 @@ func (q *Queries) DashboardCategoriesNormalizedRefundsForStore(ctx context.Conte
 
 const dashboardLatestFx = `-- name: DashboardLatestFx :one
 SELECT
-    (SELECT s.fx_rate FROM sales_projection s
-        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
-          AND s.occurred_at >= $1 AND s.occurred_at < $2
-        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_rate,
     (SELECT s.fx_rate_microrate FROM sales_projection s
         WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
           AND s.occurred_at >= $1 AND s.occurred_at < $2
@@ -476,7 +472,6 @@ type DashboardLatestFxParams struct {
 }
 
 type DashboardLatestFxRow struct {
-	LatestRate      pgtype.Text        `json:"latest_rate"`
 	LatestMicrorate pgtype.Int8        `json:"latest_microrate"`
 	LatestOccurred  pgtype.Timestamptz `json:"latest_occurred"`
 	DistinctRates   int64              `json:"distinct_rates"`
@@ -489,7 +484,6 @@ func (q *Queries) DashboardLatestFx(ctx context.Context, arg DashboardLatestFxPa
 	row := q.db.QueryRow(ctx, dashboardLatestFx, arg.StartUtc, arg.EndUtc)
 	var i DashboardLatestFxRow
 	err := row.Scan(
-		&i.LatestRate,
 		&i.LatestMicrorate,
 		&i.LatestOccurred,
 		&i.DistinctRates,
@@ -502,11 +496,6 @@ func (q *Queries) DashboardLatestFx(ctx context.Context, arg DashboardLatestFxPa
 
 const dashboardLatestFxForStore = `-- name: DashboardLatestFxForStore :one
 SELECT
-    (SELECT s.fx_rate FROM sales_projection s
-        WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
-          AND s.occurred_at >= $1 AND s.occurred_at < $2
-          AND s.store_id = $3::uuid
-        ORDER BY s.occurred_at DESC, s.sale_id DESC LIMIT 1) AS latest_rate,
     (SELECT s.fx_rate_microrate FROM sales_projection s
         WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL
           AND s.occurred_at >= $1 AND s.occurred_at < $2
@@ -542,7 +531,6 @@ type DashboardLatestFxForStoreParams struct {
 }
 
 type DashboardLatestFxForStoreRow struct {
-	LatestRate      pgtype.Text        `json:"latest_rate"`
 	LatestMicrorate pgtype.Int8        `json:"latest_microrate"`
 	LatestOccurred  pgtype.Timestamptz `json:"latest_occurred"`
 	DistinctRates   int64              `json:"distinct_rates"`
@@ -555,7 +543,6 @@ func (q *Queries) DashboardLatestFxForStore(ctx context.Context, arg DashboardLa
 	row := q.db.QueryRow(ctx, dashboardLatestFxForStore, arg.StartUtc, arg.EndUtc, arg.StoreID)
 	var i DashboardLatestFxForStoreRow
 	err := row.Scan(
-		&i.LatestRate,
 		&i.LatestMicrorate,
 		&i.LatestOccurred,
 		&i.DistinctRates,

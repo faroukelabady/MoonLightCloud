@@ -29,7 +29,7 @@ func TestSharedProductTypeIndependentStores(t *testing.T) {
 	for _, actor := range []struct{ dev, cred, store, name string }{{f.devA, f.credA, scopeStoreA, "A"}, {f.devB, f.credB, scopeStoreB, "B"}} {
 		project(actor.dev, actor.cred, catalog.EventProductTypeSnapshotV1, typePayload(sharedProductTypeID, "papyrus", 1))
 		cid, pid := uuid.NewString(), uuid.NewString()
-		project(actor.dev, actor.cred, catalog.EventCategorySnapshotV1, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+		project(actor.dev, actor.cred, catalog.EventCategorySnapshotV2, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(proofFixture(t, "../../catalog/testdata/wire_product_v2.json")), &payload); err != nil {
 			t.Fatal(err)
@@ -139,8 +139,8 @@ func TestSharedProductTypePreservesOwnedRawAndRecoversCollision(t *testing.T) {
 	// An existing Store's Product references remain the original source ID.
 	acid, apid, apeid := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	ace := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, ace, catalog.EventCategorySnapshotV1, categoryPayload(acid, "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if res := projectCatalogTerminal(t, f, ace, catalog.EventCategorySnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devA, f.credA, ace, catalog.EventCategorySnapshotV2, categoryPayload(acid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+	if res := projectCatalogTerminal(t, f, ace, catalog.EventCategorySnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(res)
 	}
 	var oldProduct map[string]any
@@ -161,8 +161,8 @@ func TestSharedProductTypePreservesOwnedRawAndRecoversCollision(t *testing.T) {
 	// A Product blocked by the same dependency collision must recover too.
 	cid, pid, peid := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	ce := uuid.NewString()
-	f.ingest(t, f.devB, f.credB, ce, catalog.EventCategorySnapshotV1, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if res := projectCatalogTerminal(t, f, ce, catalog.EventCategorySnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	f.ingest(t, f.devB, f.credB, ce, catalog.EventCategorySnapshotV2, categoryPayload(cid, "active", map[string]string{"ar": "قسم"}, nil, 1))
+	if res := projectCatalogTerminal(t, f, ce, catalog.EventCategorySnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatal(res)
 	}
 	var productPayload map[string]any

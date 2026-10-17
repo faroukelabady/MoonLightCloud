@@ -519,7 +519,7 @@ func (d Devices) persistReturnRetry(ctx context.Context, euid pgtype.UUID, now t
 // projection snapshot: both absent, or all four fields exactly equal.
 // Historical snapshots only — never a live rate on either side.
 func fxAgrees(sale sqlcgen.LockSaleProjectionForReturnRow, v returnrefund.Validated) bool {
-	saleHas := sale.FxBase.Valid || sale.FxQuote.Valid || sale.FxRate.Valid || sale.FxRateMicrorate.Valid
+	saleHas := sale.FxBase.Valid || sale.FxQuote.Valid || sale.FxRateMicrorate.Valid
 	if v.Fx == nil {
 		return !saleHas
 	}
@@ -528,7 +528,6 @@ func fxAgrees(sale sqlcgen.LockSaleProjectionForReturnRow, v returnrefund.Valida
 	}
 	return sale.FxBase.String == v.Fx.Base &&
 		sale.FxQuote.String == v.Fx.Quote &&
-		sale.FxRate.String == v.Fx.Rate &&
 		sale.FxRateMicrorate.Int64 == v.Fx.RateMicrorate
 }
 
@@ -536,12 +535,11 @@ func fxAgrees(sale sqlcgen.LockSaleProjectionForReturnRow, v returnrefund.Valida
 // event. Shop/actor snapshots come from the event (historical); the sale
 // linkage was resolved before the call.
 func returnHeaderParams(rid, euid, duid pgtype.UUID, event returnrefund.EventRecord, v returnrefund.Validated) sqlcgen.InsertReturnProjectionParams {
-	var fxBase, fxQuote, fxRate pgtype.Text
+	var fxBase, fxQuote pgtype.Text
 	var fxMicro pgtype.Int8
 	if v.Fx != nil {
 		fxBase = pgText(v.Fx.Base)
 		fxQuote = pgText(v.Fx.Quote)
-		fxRate = pgText(v.Fx.Rate)
 		fxMicro = pgtype.Int8{Int64: v.Fx.RateMicrorate, Valid: true}
 	}
 	var saleEvent pgtype.UUID
@@ -570,7 +568,7 @@ func returnHeaderParams(rid, euid, duid pgtype.UUID, event returnrefund.EventRec
 		Currency:           v.Currency,
 		GrossRefundedMinor: v.Totals.Gross.AmountMinor, DiscountRefundedMinor: v.Totals.Discount.AmountMinor,
 		TaxRefundedMinor: v.Totals.Tax.AmountMinor, RefundTotalMinor: v.Totals.RefundTotal.AmountMinor,
-		FxBase: fxBase, FxQuote: fxQuote, FxRate: fxRate, FxRateMicrorate: fxMicro,
+		FxBase: fxBase, FxQuote: fxQuote, FxRateMicrorate: fxMicro,
 		ShopNameAr: v.Shop.NameAR, ShopNameEn: v.Shop.NameEN,
 		ShopAddressAr: v.Shop.AddressAR, ShopAddressEn: v.Shop.AddressEN,
 		ShopPhone:           v.Shop.Phone,

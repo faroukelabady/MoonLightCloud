@@ -5,18 +5,6 @@ import (
 	"time"
 )
 
-// ProductInventory is the projected last-known synchronized Retail stock
-// for one product. It is inventory truth, never availability: eligibility
-// and caps apply at the availability layer below.
-type ProductInventory struct {
-	ProductID        string
-	StockQuantity    int
-	Revision         int64
-	SourceEventID    string
-	SourceReceivedAt time.Time
-	ProjectedAt      time.Time
-}
-
 // ProductAvailability is the provider-neutral ONLINE availability derived
 // from current product lifecycle, sales policy, and last-known inventory.
 // It is a deterministic read: computing it never reserves, decrements,
@@ -36,9 +24,6 @@ type ProductAvailability struct {
 	Ready                 bool
 	MissingPolicy         bool
 	MissingInventory      bool
-	InventoryRevision     int64
-	InventoryProjectedAt  *time.Time
-	InventoryEventID      string
 }
 
 // ComputeProductAvailability derives ONLINE availability from current
@@ -70,11 +55,6 @@ func ComputeProductAvailability(
 		sellable = *allocationLimit
 	}
 	return sellable, true
-}
-
-// GetProductInventory returns the projected last-known inventory.
-func (s Service) GetProductInventory(ctx context.Context, id string) (ProductInventory, error) {
-	return s.repo.CatalogProductInventory(ctx, id)
 }
 
 // GetProductAvailability returns the derived provider-neutral ONLINE

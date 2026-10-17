@@ -59,13 +59,13 @@ func TestConfigurationStoreOwnershipBoundary(t *testing.T) {
 
 	// Store A owns Product A; Store B owns Product B (same SKU pattern,
 	// distinct identities — existing same-SKU Store separation).
-	requireOutcome(project(f.devA, f.credA, catalog.EventCategorySnapshotV1,
+	requireOutcome(project(f.devA, f.credA, catalog.EventCategorySnapshotV2,
 		categoryPayload(catA, "active", map[string]string{"en": "RootA"}, nil, 1)), catalog.OutcomeProcessed)
-	requireOutcome(project(f.devB, f.credB, catalog.EventCategorySnapshotV1,
+	requireOutcome(project(f.devB, f.credB, catalog.EventCategorySnapshotV2,
 		categoryPayload(catB, "active", map[string]string{"en": "RootB"}, nil, 1)), catalog.OutcomeProcessed)
-	requireOutcome(project(f.devA, f.credA, catalog.EventProductSnapshotV1,
+	requireOutcome(project(f.devA, f.credA, catalog.EventProductSnapshotV2,
 		productPayload(productA, "ML-SHARED-SKU", "A", catA, nil, nil, 1)), catalog.OutcomeProcessed)
-	requireOutcome(project(f.devB, f.credB, catalog.EventProductSnapshotV1,
+	requireOutcome(project(f.devB, f.credB, catalog.EventProductSnapshotV2,
 		productPayload(productB, "ML-SHARED-SKU", "B", catB, nil, nil, 1)), catalog.OutcomeProcessed)
 
 	configIDA := "11111111-0000-4000-8000-0000000000c1"

@@ -31,7 +31,7 @@ func (m *memSyncRepo) IngestBatch(_ context.Context, _, _ string, events []sync.
 	return out, nil
 }
 
-func syncTestSetup(t *testing.T) (http.Handler, string) {
+func syncTestSetup(t *testing.T, registries ...sync.Registry) (http.Handler, string) {
 	t.Helper()
 	authSvc := deviceSvcForTest(newMemRepo())
 	p, err := authSvc.Create(context.Background(), "shop-dev")
@@ -39,8 +39,12 @@ func syncTestSetup(t *testing.T) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	token := p.Device.ID + "." + p.Credential.ID + "." + p.RawSecret
+	registry := sync.DiagnosticRegistry()
+	if len(registries) > 0 {
+		registry = registries[0]
+	}
 	syncSvc := sync.NewService(&memSyncRepo{committed: map[string]bool{}},
-		clock.Fixed{T: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)})
+		clock.Fixed{T: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)}, registry)
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/sync/batches", DeviceAuth(authSvc)(SyncBatch(syncSvc, nil)))
 	mux.Handle("GET /api/v1/sync/capabilities", DeviceAuth(authSvc)(SyncCapabilities(syncSvc)))
@@ -130,8 +134,8 @@ func TestSyncBodyTooLarge(t *testing.T) {
 
 func TestSyncCapabilitiesAdvertisesSale(t *testing.T) {
 	// Mirror app wiring: registration advertises the type + limits.
-	sync.RegisterEventType("sale.finalized.v3", func(json.RawMessage) error { return nil })
-	h, token := syncTestSetup(t)
+	registry := sync.NewRegistry(map[string]sync.Validator{sync.DiagnosticEventType: nil, "sale.finalized.v3": func(json.RawMessage) error { return nil }})
+	h, token := syncTestSetup(t, registry)
 	req := httptest.NewRequest("GET", "/api/v1/sync/capabilities", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()

@@ -369,15 +369,15 @@ func TestPublish_SyncProductAdoptsMapping(t *testing.T) {
 	rootS, tagS, prodS := ids["root-s"], ids["tag-s"], ids["prod-s"]
 	names := map[string]string{"ar": "s"}
 	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootS, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootS, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagS, "adopt-pub-tag", true, names, 1))
 	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 1))
 	for _, tc := range []struct{ event, typ string }{
-		{"e0000760-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1},
+		{"e0000760-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
 		{"e0000760-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000760-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1},
+		{"e0000760-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
@@ -398,8 +398,8 @@ func TestPublish_SyncProductAdoptsMapping(t *testing.T) {
 	}
 	// Product adopts Store A; next sync adopts the mapping in place.
 	f.ingest(t, f.devA, f.credA, "e0000760-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000760-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000760-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	scoped := desiredFor(prodS, "ADOPT-PUB", scopeStoreA, true, 5)
 	source.states[prodS] = scoped
 	res2, err := service.SyncProduct(ctx, "website", prodS)

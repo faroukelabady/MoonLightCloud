@@ -162,10 +162,6 @@ func (d Devices) ProjectSaleV3(ctx context.Context, event sale.EventRecord, now 
 				_ = tx.Rollback(ctx)
 				return d.persistRetry(ctx, sale.ProcessorSaleProjectionV3, euid, now, ErrProjection, "replay tag insert failed")
 			}
-			if err := q.MarkSaleTagCaptured(ctx, saleUID); err != nil {
-				_ = tx.Rollback(ctx)
-				return d.persistRetry(ctx, sale.ProcessorSaleProjectionV3, euid, now, ErrProjection, "replay capture mark failed")
-			}
 			return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 		}
 		_ = tx.Rollback(ctx)
@@ -178,10 +174,6 @@ func (d Devices) ProjectSaleV3(ctx context.Context, event sale.EventRecord, now 
 	if err := insertProjectionTagsV3(ctx, q, saleUID, valid); err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV3, euid, now, ErrProjection, "tag insert failed")
-	}
-	if err := q.MarkSaleTagCaptured(ctx, saleUID); err != nil {
-		_ = tx.Rollback(ctx)
-		return d.persistRetry(ctx, sale.ProcessorSaleProjectionV3, euid, now, ErrProjection, "capture mark failed")
 	}
 	return mark(sale.ProcProcessed, claim.AttemptCount+1, nil, timePtr(now), "", "")
 }

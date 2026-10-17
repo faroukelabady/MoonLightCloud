@@ -90,17 +90,9 @@ func TestSaleV3ProjectsVariantSnapshots(t *testing.T) {
 		parsed[0]["name_ar"] != "أزرق" || parsed[0]["definition_name_en"] != "Color" {
 		t.Fatalf("attributes verbatim: %s", attrs)
 	}
-	// v2 tag contract still rides along.
+	// Tag snapshots are mandatory for the canonical Sale contract.
 	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 2 {
 		t.Fatalf("tag snapshots: %d", n)
-	}
-	var capture *bool
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT tag_capture FROM sales_projection`).Scan(&capture); err != nil {
-		t.Fatal(err)
-	}
-	if capture == nil || !*capture {
-		t.Fatal("v3 marks tag capture like v2")
 	}
 
 	// Same-event replay is idempotent: row counts never grow.

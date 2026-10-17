@@ -15,7 +15,7 @@ Tool-neutral. Applies to any engineer or agent working in this repo.
 ## 2. Financial/data safety
 
 - SQL stays visible: sqlc queries reviewed like code. No ORM, ever.
-- Migrations are append-only, small, reversible. Never edit applied history.
+- After the first production install, migrations are append-only, small and reversible. During accepted ADR-0055 pre-production work only, reshape and renumber the single baseline; refuse older development schemas. Never apply this exception to production history.
 - Production config refuses dev credentials and insecure defaults. Fail fast.
 - Destructive scripts (`dev-reset.sh`) run in development only, against the
   known local DB, with explicit guards. Never improvise drops.
@@ -34,8 +34,10 @@ Tool-neutral. Applies to any engineer or agent working in this repo.
   never logged/returned. Constant-time verify. Pepper required in prod.
 - Auth failures are enumeration-safe 401s. Revocation is immediate.
 - Error envelope only: no SQL, traces, paths, secrets, or driver errors.
-- Request IDs bounded; body/header caps and timeouts kept; CORS closed until
-  a browser client exists. Threat model updated with behavior changes.
+- Request IDs bounded; body/header caps and timeouts kept. Dashboard
+  requests use same-origin human sessions, permissions and CSRF checks;
+  device routes use separate device credentials. Update the threat model
+  when behavior changes.
 
 ## 5. Testing
 

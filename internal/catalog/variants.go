@@ -19,7 +19,7 @@ import (
 //     combination_key, gated by variant_revision (inside the product's
 //     catalog_revision context).
 //   - inventory.product_variant.snapshot.v1 — variant-scoped stock gated
-//     by inventory_revision, mirroring inventory.product.snapshot.v1
+//     by its own independent inventory_revision
 //     semantics plus the policy/catalog context Retail sends alongside.
 //
 // Mirror fields carried by both payloads (stock on the catalog stream,

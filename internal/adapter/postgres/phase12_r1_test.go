@@ -174,8 +174,9 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 		projectCatalogTerminal(t, f, id, catalog.EventProductSalesPolicySnapshotV1)
 	}
 	inv := uuidEvent(t, 0xface, 20)
-	f.ingest(t, f.devA, f.credA, inv, catalog.EventInventoryProductSnapshotV1, inventoryPayload(pA, 1, 0))
-	projectCatalogTerminal(t, f, inv, catalog.EventInventoryProductSnapshotV1)
+	seedScopeInventoryVariant(t, f, pA)
+	f.ingest(t, f.devA, f.credA, inv, catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(pA, 1, 0))
+	projectCatalogTerminal(t, f, inv, catalog.EventInventoryProductVariantSnapshotV1)
 	createMapping(t, f, "other", pB, "702")
 	exec := func(q string, args ...any) {
 		t.Helper()
@@ -272,7 +273,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 	t.Log("resolved barrier excluded and NULL mapping owner not a Store conflict; read-only session PASS")
 	exec(`ALTER TABLE catalog_products ALTER COLUMN top_category_id DROP NOT NULL`)
 	exec(`UPDATE catalog_products SET top_category_id=NULL WHERE product_id=$1`, pA)
-	exec(`DELETE FROM catalog_product_inventory WHERE product_id=$1`, pA)
+	exec(`DELETE FROM catalog_product_variant_inventory WHERE product_id=$1`, pA)
 	positive, e := s.CatalogHealth(ctx, req, "", "", 100)
 	if e != nil {
 		t.Fatal(e)
@@ -323,11 +324,14 @@ func TestPhase12R1ProviderChoicesBeyondDetailPage(t *testing.T) {
 	for i := 0; i < 51; i++ {
 		product := fmt.Sprintf("aa120000-0000-4000-8000-%012d", i)
 		for j, entry := range []struct{ typ, payload string }{
-			{catalog.EventProductSnapshotV1, productPayload(product, fmt.Sprintf("P12-%d", i), "ready", root, nil, nil, 1)},
+			{catalog.EventProductSnapshotV2, productPayload(product, fmt.Sprintf("P12-%d", i), "ready", root, nil, nil, 1)},
 			{catalog.EventProductSalesPolicySnapshotV1, policyPayload(product, 1, true, true, nil)},
-			{catalog.EventInventoryProductSnapshotV1, inventoryPayload(product, 1, 0)},
+			{catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(product, 1, 0)},
 		} {
 			id := uuidEvent(t, 0xab12, 1000+i*3+j)
+			if entry.typ == catalog.EventInventoryProductVariantSnapshotV1 {
+				seedScopeInventoryVariant(t, f, product)
+			}
 			f.ingest(t, f.devA, f.credA, id, entry.typ, entry.payload)
 			requireOutcome(t, projectCatalogTerminal(t, f, id, entry.typ), catalog.OutcomeProcessed, "")
 		}

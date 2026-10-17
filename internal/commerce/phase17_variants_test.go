@@ -385,6 +385,28 @@ func TestPhase17AvailabilityVariantAwarePublish(t *testing.T) {
 
 func intPtr(value int) *int { return &value }
 
+func TestVariantAwareSourceNeverPublishesAggregateWithoutVariants(t *testing.T) {
+	reader := &p17Reader{
+		product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: true}},
+		policy:       catalog.ProductSalesPolicy{SellOnline: true},
+		onlinePolicy: catalog.ProductOnlinePolicy{Allowed: true},
+		// A stale or misleading aggregate must not become provider inventory.
+		availability: catalog.ProductAvailability{Ready: true, OnlineAvailable: 20},
+	}
+	provider := NewFakeProvider("primary")
+	registry := NewRegistry()
+	if err := registry.Register(provider.Key(), provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewCommerceService(registry, &stubMappings{}, NewCatalogCommerceSource(reader), nil)
+	if _, err := service.SyncProduct(context.Background(), string(provider.Key()), "p1"); err == nil {
+		t.Fatal("missing physical Variants must wait, never publish aggregate stock")
+	}
+	if len(provider.Upserts()) != 0 || len(provider.Inventories()) != 0 || len(provider.VariantInventories()) != 0 {
+		t.Fatal("incomplete Variant catalog reached provider writes")
+	}
+}
+
 // p17Reader is a CatalogReader + VariantCatalogReader stub for source
 // assembly tests.
 type p17Reader struct {

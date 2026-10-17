@@ -104,7 +104,7 @@ func buildPolicyFixture(t *testing.T) *policyFixture {
 		if err := json.Unmarshal([]byte(spec), &shape); err != nil {
 			t.Fatal(err)
 		}
-		project(catalog.EventProductSnapshotV1,
+		project(catalog.EventProductSnapshotV2,
 			productPayload(shape.ProductID, "PAP-"+label, label, shape.Top, shape.Subs, nil, 1))
 	}
 	return pf
@@ -261,7 +261,7 @@ func TestCategoryOnlineFanOutExactness(t *testing.T) {
 		if i < 3 {
 			top = root
 		}
-		project(catalog.EventProductSnapshotV1,
+		project(catalog.EventProductSnapshotV2,
 			productPayload(id, fmt.Sprintf("PAP-%d", i), "P", top, nil, nil, 1))
 	}
 	// Drain the product-classification enqueue noise before measuring.
@@ -315,7 +315,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 	project(catalog.EventCategorySnapshotV2, categoryV2Payload(rootOn, "active", map[string]string{"en": "On"}, nil, 1, true))
 	project(catalog.EventCategorySnapshotV2, categoryV2Payload(sub, "active", map[string]string{"en": "Sub"}, []string{rootOn}, 1, true))
 	productID := "33333333-0000-4000-8000-000000000001"
-	project(catalog.EventProductSnapshotV1,
+	project(catalog.EventProductSnapshotV2,
 		productPayload(productID, "PAP-MOVE", "Move", rootOn, []string{sub}, nil, 1))
 
 	devices := NewDevices(f.pool, 5*time.Second)
@@ -395,9 +395,9 @@ func TestCategoryOnlineSyncContractVersions(t *testing.T) {
 
 	// §30: historical v1 replay projects online_enabled = true.
 	v1Event := "e5c013a1-0000-4000-8000-000000000001"
-	pf.ingest(t, pf.devA, pf.credA, v1Event, catalog.EventCategorySnapshotV1,
+	pf.ingest(t, pf.devA, pf.credA, v1Event, catalog.EventCategorySnapshotV2,
 		categoryPayload(cat, "active", map[string]string{"en": "A"}, nil, 12))
-	if result := projectCatalogTerminal(t, pf.scopeFixture, v1Event, catalog.EventCategorySnapshotV1); result.Outcome != catalog.OutcomeProcessed {
+	if result := projectCatalogTerminal(t, pf.scopeFixture, v1Event, catalog.EventCategorySnapshotV2); result.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("v1 replay not applied: %+v", result)
 	}
 	if policy := pf.eligible(t, prodP1); !policy.Allowed {
@@ -418,9 +418,9 @@ func TestCategoryOnlineSyncContractVersions(t *testing.T) {
 	// §32: stale v1 rev12 after v2 rev13 -> rejected as superseded; the
 	// newer policy remains durable.
 	stale := "e5c013a1-0000-4000-8000-000000000003"
-	pf.ingest(t, pf.devA, pf.credA, stale, catalog.EventCategorySnapshotV1,
+	pf.ingest(t, pf.devA, pf.credA, stale, catalog.EventCategorySnapshotV2,
 		categoryPayload(cat, "active", map[string]string{"en": "A"}, nil, 12))
-	if result := projectCatalogTerminal(t, pf.scopeFixture, stale, catalog.EventCategorySnapshotV1); result.Outcome != catalog.OutcomeProcessed {
+	if result := projectCatalogTerminal(t, pf.scopeFixture, stale, catalog.EventCategorySnapshotV2); result.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("stale event handling changed: %+v", result)
 	}
 	if policy := pf.eligible(t, prodP1); policy.Allowed {
@@ -462,7 +462,7 @@ func TestReevaluationQueueRecoversAbandonedWork(t *testing.T) {
 	project(catalog.EventCategorySnapshotV2, categoryV2Payload(root, "active", map[string]string{"en": "R"}, nil, 1, true))
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("44444444-0000-4000-8000-%012d", i)
-		project(catalog.EventProductSnapshotV1, productPayload(id, fmt.Sprintf("PAP-R%d", i), "P", root, nil, nil, 1))
+		project(catalog.EventProductSnapshotV2, productPayload(id, fmt.Sprintf("PAP-R%d", i), "P", root, nil, nil, 1))
 	}
 	devices := NewDevices(f.pool, 5*time.Second)
 	drainReevaluations(t, devices)

@@ -578,14 +578,13 @@ func TestReturnUSDProjectsWithHistoricalFx(t *testing.T) {
 	if status, _ := returnStatus(t, env, retEvent); status != "processed" {
 		t.Fatalf("usd return: %q", status)
 	}
-	var fxRate string
 	var micro int64
 	if err := env.pool.QueryRow(context.Background(), `
-		SELECT fx_rate, fx_rate_microrate FROM return_refund_projection`).Scan(&fxRate, &micro); err != nil {
+		SELECT fx_rate_microrate FROM return_refund_projection`).Scan(&micro); err != nil {
 		t.Fatal(err)
 	}
-	if fxRate != "52.000000" || micro != 52000000 {
-		t.Fatalf("historical fx: %q %d", fxRate, micro)
+	if micro != 52000000 {
+		t.Fatalf("historical fx: %d", micro)
 	}
 }
 
@@ -819,7 +818,7 @@ func dumpReturns(t *testing.T, env *saleEnv) string {
 	dump(`SELECT return_refund_id::text, source_event_id::text, source_device_id::text, return_number, kind,
 		reason, sale_id::text, sale_number, channel, occurred_at::text, currency,
 		gross_refunded_minor, discount_refunded_minor, tax_refunded_minor, refund_total_minor,
-		fx_base, fx_quote, fx_rate, fx_rate_microrate, received_at::text
+		fx_base, fx_quote, fx_rate_microrate, received_at::text
 		FROM return_refund_projection ORDER BY return_refund_id::text`)
 	dump(`SELECT return_refund_id::text, original_sale_line_id::text, position, product_id::text, quantity, restocked,
 		gross_minor, discount_minor, tax_minor, refund_minor, cost_minor

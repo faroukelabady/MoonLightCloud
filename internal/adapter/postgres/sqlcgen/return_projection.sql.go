@@ -140,15 +140,15 @@ INSERT INTO return_refund_projection (
     reason, note, sale_id, sale_number, sale_event_id, channel,
     occurred_at, currency,
     gross_refunded_minor, discount_refunded_minor, tax_refunded_minor, refund_total_minor,
-    fx_base, fx_quote, fx_rate, fx_rate_microrate,
+    fx_base, fx_quote, fx_rate_microrate,
     shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone,
     shop_receipt_footer_ar, shop_receipt_footer_en,
     actor_user_id, actor_user_name,
     received_at, store_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-    $26, $27, $28, $29, $30, $31, $32
+    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+    $25, $26, $27, $28, $29, $30, $31
 )
 ON CONFLICT (return_refund_id) DO NOTHING
 RETURNING return_refund_id, source_event_id
@@ -174,7 +174,6 @@ type InsertReturnProjectionParams struct {
 	RefundTotalMinor      int64              `json:"refund_total_minor"`
 	FxBase                pgtype.Text        `json:"fx_base"`
 	FxQuote               pgtype.Text        `json:"fx_quote"`
-	FxRate                pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate       pgtype.Int8        `json:"fx_rate_microrate"`
 	ShopNameAr            string             `json:"shop_name_ar"`
 	ShopNameEn            string             `json:"shop_name_en"`
@@ -215,7 +214,6 @@ func (q *Queries) InsertReturnProjection(ctx context.Context, arg InsertReturnPr
 		arg.RefundTotalMinor,
 		arg.FxBase,
 		arg.FxQuote,
-		arg.FxRate,
 		arg.FxRateMicrorate,
 		arg.ShopNameAr,
 		arg.ShopNameEn,
@@ -237,7 +235,7 @@ func (q *Queries) InsertReturnProjection(ctx context.Context, arg InsertReturnPr
 const lockSaleProjectionForReturn = `-- name: LockSaleProjectionForReturn :one
 SELECT sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at,
     currency, subtotal_minor, discount_minor, tax_minor, total_minor,
-    fx_base, fx_quote, fx_rate, fx_rate_microrate, store_id
+    fx_base, fx_quote, fx_rate_microrate, store_id
 FROM sales_projection WHERE sale_id = $1
 FOR UPDATE
 `
@@ -257,7 +255,6 @@ type LockSaleProjectionForReturnRow struct {
 	TotalMinor      int64              `json:"total_minor"`
 	FxBase          pgtype.Text        `json:"fx_base"`
 	FxQuote         pgtype.Text        `json:"fx_quote"`
-	FxRate          pgtype.Text        `json:"fx_rate"`
 	FxRateMicrorate pgtype.Int8        `json:"fx_rate_microrate"`
 	StoreID         pgtype.UUID        `json:"store_id"`
 }
@@ -283,7 +280,6 @@ func (q *Queries) LockSaleProjectionForReturn(ctx context.Context, saleID pgtype
 		&i.TotalMinor,
 		&i.FxBase,
 		&i.FxQuote,
-		&i.FxRate,
 		&i.FxRateMicrorate,
 		&i.StoreID,
 	)

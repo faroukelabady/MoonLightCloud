@@ -2,15 +2,14 @@ package catalog
 
 import (
 	"encoding/json"
-	"math"
 	"testing"
 )
 
 func TestValidateCategorySnapshotRoundTrip(t *testing.T) {
 	raw := json.RawMessage(`{"category_id":"11111111-1111-4111-8111-111111111111","status":"active",` +
 		`"names":[{"locale":"ar","name":"إسلامي"},{"locale":"en","name":"Islamic"}],` +
-		`"parent_ids":["22222222-2222-4222-8222-222222222222"],"catalog_revision":3}`)
-	decoded, err := DecodeCategorySnapshot(raw)
+		`"parent_ids":["22222222-2222-4222-8222-222222222222"],"online_enabled":true,"catalog_revision":3}`)
+	decoded, err := DecodeCategorySnapshotV2(raw)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -97,11 +96,11 @@ func TestValidateProductSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := DecodeProductSnapshot(encoded)
+	decoded, err := DecodeProductSnapshotV2(encoded)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	valid, err := ValidateProductSnapshot(decoded)
+	valid, err := ValidateProductSnapshotV2(decoded)
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -109,12 +108,12 @@ func TestValidateProductSnapshotRoundTrip(t *testing.T) {
 		t.Fatalf("snapshot: %+v", valid)
 	}
 	// Float money must fail at parse time, never silently convert.
-	if _, err := DecodeProductSnapshot(json.RawMessage(`{"product_id":"11111111-1111-4111-8111-111111111111"}`)); err != nil {
+	if _, err := DecodeProductSnapshotV2(json.RawMessage(`{"product_id":"11111111-1111-4111-8111-111111111111"}`)); err != nil {
 		t.Fatalf("minimal shape decodes (validation is separate): %v", err)
 	}
 	floatPrice := `{"product_id":"11111111-1111-4111-8111-111111111111","sku":"X","name":"Y",` +
 		`"prices":[{"currency":"EGP","price_cents":65.5}],"top_category_id":"22222222-2222-4222-8222-222222222222","catalog_revision":1}`
-	if _, err := DecodeProductSnapshot(json.RawMessage(floatPrice)); err == nil {
+	if _, err := DecodeProductSnapshotV2(json.RawMessage(floatPrice)); err == nil {
 		t.Fatal("float money must fail decode")
 	}
 }
@@ -138,7 +137,6 @@ func TestValidateProductSnapshotRejects(t *testing.T) {
 		mutate func(*ProductSnapshot)
 	}{
 		{"bad id", func(p *ProductSnapshot) { p.ProductID = "x" }},
-		{"blank sku", func(p *ProductSnapshot) { p.SKU = "  " }},
 		{"negative price", func(p *ProductSnapshot) { p.Prices[0].PriceCents = -1 }},
 		{"negative cost", func(p *ProductSnapshot) { p.Prices[0].CostCents = &neg }},
 		{"bad currency", func(p *ProductSnapshot) { p.Prices[0].Currency = "EUR" }},
@@ -150,7 +148,7 @@ func TestValidateProductSnapshotRejects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := base
 			tc.mutate(&p)
-			if _, err := ValidateProductSnapshot(p); err == nil {
+			if _, err := ValidateProductSnapshotV2(p); err == nil {
 				t.Fatalf("%s must fail", tc.name)
 			}
 		})
@@ -158,7 +156,7 @@ func TestValidateProductSnapshotRejects(t *testing.T) {
 	dup := "33333333-3333-4333-8333-333333333333"
 	p := base
 	p.SubcategoryIDs = []string{dup, dup}
-	if _, err := ValidateProductSnapshot(p); err == nil {
+	if _, err := ValidateProductSnapshotV2(p); err == nil {
 		t.Fatal("duplicate subcategories must fail")
 	}
 }
@@ -210,44 +208,5 @@ func TestValidateProductSalesPolicySnapshot(t *testing.T) {
 	})
 	if FingerprintProductSalesPolicy(a) != FingerprintProductSalesPolicy(b) {
 		t.Fatal("identical policy must share fingerprint")
-	}
-}
-
-func TestValidateProductInventorySnapshot(t *testing.T) {
-	valid, err := ValidateProductInventorySnapshot(ProductInventorySnapshot{
-		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 27, StockQuantity: 17,
-	})
-	if err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if valid.InventoryRevision != 27 || valid.StockQuantity != 17 {
-		t.Fatalf("snapshot: %+v", valid)
-	}
-	// Zero stock is valid state.
-	if _, err := ValidateProductInventorySnapshot(ProductInventorySnapshot{
-		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1,
-	}); err != nil {
-		t.Fatalf("zero stock: %v", err)
-	}
-	cases := []ProductInventorySnapshot{
-		{ProductID: "nope", InventoryRevision: 1, StockQuantity: 5},
-		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 0, StockQuantity: 5},
-		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1, StockQuantity: -1},
-		{ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 1, StockQuantity: math.MaxInt32 + 1},
-	}
-	for i, tc := range cases {
-		if _, err := ValidateProductInventorySnapshot(tc); err == nil {
-			t.Fatalf("case %d must fail: %+v", i, tc)
-		}
-	}
-	// Fingerprint is semantic: equal state, one canonical hash.
-	a, _ := ValidateProductInventorySnapshot(ProductInventorySnapshot{
-		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 2, StockQuantity: 9,
-	})
-	b, _ := ValidateProductInventorySnapshot(ProductInventorySnapshot{
-		ProductID: "88888888-8888-4888-8888-888888888888", InventoryRevision: 2, StockQuantity: 9,
-	})
-	if FingerprintProductInventory(a) != FingerprintProductInventory(b) {
-		t.Fatal("identical inventory must share fingerprint")
 	}
 }

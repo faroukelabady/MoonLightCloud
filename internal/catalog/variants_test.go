@@ -374,19 +374,6 @@ func TestProductSnapshotV2Contract(t *testing.T) {
 	if _, err := ValidateProductSnapshotV2(raw); err == nil {
 		t.Fatal("v2 must enforce product_id UUID")
 	}
-	// v1 still requires its sku (frozen contract).
-	v1 := map[string]any{}
-	for k, v := range wire {
-		v1[k] = v
-	}
-	v1["sku"] = ""
-	rawV1, err := DecodeProductSnapshot(mustJSON(t, v1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ValidateProductSnapshot(rawV1); err == nil {
-		t.Fatal("v1 must keep requiring sku")
-	}
 }
 
 // Variant availability formula: eligibility + activity gate, then clamp

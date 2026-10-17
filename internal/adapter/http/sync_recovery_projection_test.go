@@ -55,15 +55,15 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	if err := recovery.MarkRestoreRequired(ctx, []string{created.Device.ID}, "restore regression"); err != nil {
 		t.Fatal(err)
 	}
-	syncsvc.RegisterEventType(sale.EventSaleFinalizedV3, func(raw json.RawMessage) error {
+	registry := syncsvc.NewRegistry(map[string]syncsvc.Validator{sale.EventSaleFinalizedV3: func(raw json.RawMessage) error {
 		payload, err := sale.Decode(raw)
 		if err != nil {
 			return err
 		}
 		_, err = sale.Validate(payload)
 		return err
-	})
-	batchService := syncsvc.NewService(devices, clock.System{})
+	}})
+	batchService := syncsvc.NewService(devices, clock.System{}, registry)
 	recoveryHandler := &SyncRecoveryHandlers{Svc: recovery, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/device-control/recovery/status", DeviceAuth(authService)(http.HandlerFunc(recoveryHandler.RecoveryStatus)))

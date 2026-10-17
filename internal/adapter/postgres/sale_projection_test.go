@@ -24,17 +24,17 @@ func TestSaleEndToEndUSD(t *testing.T) {
 	var (
 		saleNumber, channel, currency, shopEN, cashier string
 		subtotal, discount, tax, total, micro          int64
-		fxBase, fxQuote, fxRate                        string
+		fxBase, fxQuote                                string
 		srcEvent, srcDevice                            string
 	)
 	err := env.pool.QueryRow(context.Background(), `
 		SELECT sale_number, channel, currency, shop_name_en, cashier_name,
 			subtotal_minor, discount_minor, tax_minor, total_minor,
-			fx_base, fx_quote, fx_rate, fx_rate_microrate,
+			fx_base, fx_quote, fx_rate_microrate,
 			source_event_id::text, source_device_id::text
 		FROM sales_projection WHERE sale_id = '11111111-1111-4111-8111-111111111111'`).Scan(
 		&saleNumber, &channel, &currency, &shopEN, &cashier,
-		&subtotal, &discount, &tax, &total, &fxBase, &fxQuote, &fxRate, &micro,
+		&subtotal, &discount, &tax, &total, &fxBase, &fxQuote, &micro,
 		&srcEvent, &srcDevice)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestSaleEndToEndUSD(t *testing.T) {
 	if saleNumber != "MLR-20260920-11111111" || channel != "STORE" || currency != "USD" ||
 		shopEN != "Papyrus Shop" || cashier != "Amal" ||
 		subtotal != 1300 || discount != 100 || tax != 50 || total != 1250 ||
-		fxBase != "USD" || fxQuote != "EGP" || fxRate != "52.000000" || micro != 52000000 ||
+		fxBase != "USD" || fxQuote != "EGP" || micro != 52000000 ||
 		srcEvent != eventID || srcDevice != env.devID {
 		t.Fatal("sale header mismatch")
 	}

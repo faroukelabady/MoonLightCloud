@@ -91,7 +91,7 @@ func dumpProjections(t *testing.T, env *saleEnv) string {
 	dump(`SELECT sale_id::text, source_event_id::text, source_device_id::text, sale_number, channel,
 		occurred_at::text, paid_at::text, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en,
 		shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, cashier_id, cashier_name, currency,
-		subtotal_minor, discount_minor, tax_minor, total_minor, fx_base, fx_quote, fx_rate, fx_rate_microrate,
+		subtotal_minor, discount_minor, tax_minor, total_minor, fx_base, fx_quote, fx_rate_microrate,
 		received_at::text FROM sales_projection ORDER BY sale_id::text`)
 	dump(`SELECT sale_id::text, sale_item_id::text, position, product_id::text, variant_id::text, sku, product_name,
 		width_cm, height_cm, quantity, unit_price_minor, unit_currency, cost_minor, cost_currency,

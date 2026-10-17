@@ -58,13 +58,13 @@ func seedCatalogProduct(t *testing.T, env *saleEnv, base int, sku string) (strin
 	t.Helper()
 	ids := catalogIDs(t, base, "cat", "prod")
 	catEvent := variantEventID(base + 1)
-	ingestCatalog(t, env, catEvent, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, catEvent, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["cat"], "active", map[string]string{"ar": "قسم"}, nil, 1))
 	if res := projectCatalogOnce(t, env, catEvent); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("category: %+v", res)
 	}
 	prodEvent := variantEventID(base + 2)
-	ingestCatalog(t, env, prodEvent, catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, prodEvent, catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(ids["prod"], sku, "منتج", ids["cat"], nil, nil, 1))
 	if res := projectCatalogOnce(t, env, prodEvent); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("product: %+v", res)
@@ -155,15 +155,15 @@ func TestCatalogVariantStoreIsolation(t *testing.T) {
 
 	// Store A product graph.
 	catEvent := variantEventID(610)
-	f.ingest(t, f.devA, f.credA, catEvent, catalog.EventCategorySnapshotV1,
+	f.ingest(t, f.devA, f.credA, catEvent, catalog.EventCategorySnapshotV2,
 		categoryPayload(ids["catA"], "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if res := projectCatalogTerminal(t, f, catEvent, catalog.EventCategorySnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	if res := projectCatalogTerminal(t, f, catEvent, catalog.EventCategorySnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("category A: %+v", res)
 	}
 	prodEvent := variantEventID(611)
-	f.ingest(t, f.devA, f.credA, prodEvent, catalog.EventProductSnapshotV1,
+	f.ingest(t, f.devA, f.credA, prodEvent, catalog.EventProductSnapshotV2,
 		productPayload(ids["prodA"], "ML-A-1", "منتج", ids["catA"], nil, nil, 1))
-	if res := projectCatalogTerminal(t, f, prodEvent, catalog.EventProductSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	if res := projectCatalogTerminal(t, f, prodEvent, catalog.EventProductSnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("product A: %+v", res)
 	}
 
@@ -232,15 +232,15 @@ func TestCatalogVariantStoreIsolation(t *testing.T) {
 	// hold variant rows of one legacy (unscoped) product, so the fixture
 	// product here is projected legacy.
 	catL := variantEventID(617)
-	f.ingest(t, f.devC, f.credC, catL, catalog.EventCategorySnapshotV1,
+	f.ingest(t, f.devC, f.credC, catL, catalog.EventCategorySnapshotV2,
 		categoryPayload(ids["catL"], "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if res := projectCatalogTerminal(t, f, catL, catalog.EventCategorySnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	if res := projectCatalogTerminal(t, f, catL, catalog.EventCategorySnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("legacy category: %+v", res)
 	}
 	prodL := variantEventID(618)
-	f.ingest(t, f.devC, f.credC, prodL, catalog.EventProductSnapshotV1,
+	f.ingest(t, f.devC, f.credC, prodL, catalog.EventProductSnapshotV2,
 		productPayload(ids["prodL"], "ML-L-1", "منتج", ids["catL"], nil, nil, 1))
-	if res := projectCatalogTerminal(t, f, prodL, catalog.EventProductSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
+	if res := projectCatalogTerminal(t, f, prodL, catalog.EventProductSnapshotV2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("legacy product: %+v", res)
 	}
 
@@ -324,13 +324,13 @@ func TestCatalogVariantDuplicateCombinationTolerated(t *testing.T) {
 	f := openScopeFixture(t)
 	ids2 := catalogIDs(t, 860, "catA", "prodA", "w1", "w2")
 	catEvent := variantEventID(870)
-	f.ingest(t, f.devA, f.credA, catEvent, catalog.EventCategorySnapshotV1,
+	f.ingest(t, f.devA, f.credA, catEvent, catalog.EventCategorySnapshotV2,
 		categoryPayload(ids2["catA"], "active", map[string]string{"ar": "قسم"}, nil, 1))
-	projectCatalogTerminal(t, f, catEvent, catalog.EventCategorySnapshotV1)
+	projectCatalogTerminal(t, f, catEvent, catalog.EventCategorySnapshotV2)
 	prodEvent := variantEventID(871)
-	f.ingest(t, f.devA, f.credA, prodEvent, catalog.EventProductSnapshotV1,
+	f.ingest(t, f.devA, f.credA, prodEvent, catalog.EventProductSnapshotV2,
 		productPayload(ids2["prodA"], "ML-A-8", "منتج", ids2["catA"], nil, nil, 1))
-	projectCatalogTerminal(t, f, prodEvent, catalog.EventProductSnapshotV1)
+	projectCatalogTerminal(t, f, prodEvent, catalog.EventProductSnapshotV2)
 
 	w1 := variantEventID(872)
 	f.ingest(t, f.devA, f.credA, w1, catalog.EventProductVariantSnapshotV1,
@@ -485,7 +485,7 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 		}
 	}
 	exec(fmt.Sprintf(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash)
-		VALUES ('f0000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v1', now(), '{}', '\x00')`, devID))
+		VALUES ('f0000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v2', now(), '{}', '\x00')`, devID))
 	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, online_enabled, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
 		VALUES ('f0000000-0000-4000-8000-000000000002', 'active', 'cat', true, 1, 'f0000000-0000-4000-8000-000000000001', '` + devID + `', '\x00', now())`)
 	// p1: active product, no variants at all.

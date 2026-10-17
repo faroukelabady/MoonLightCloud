@@ -49,9 +49,9 @@ func TestCatalogMixedBootstrapConvergesWithoutDeadlineReset(t *testing.T) {
 		}
 		add(catalog.EventProductSalesPolicySnapshotV1, policyPayload(entity["product"], 1, true, true, nil))
 	}
-	add(catalog.EventCategorySnapshotV1, categoryPayload(ids["leaf"], "active", map[string]string{"ar": "فرع"}, []string{ids["child"]}, 1))
-	add(catalog.EventCategorySnapshotV1, categoryPayload(ids["child"], "active", map[string]string{"ar": "فرع"}, []string{ids["root"]}, 1))
-	add(catalog.EventCategorySnapshotV1, categoryPayload(ids["root"], "active", map[string]string{"ar": "قسم"}, nil, 1))
+	add(catalog.EventCategorySnapshotV2, categoryPayload(ids["leaf"], "active", map[string]string{"ar": "فرع"}, []string{ids["child"]}, 1))
+	add(catalog.EventCategorySnapshotV2, categoryPayload(ids["child"], "active", map[string]string{"ar": "فرع"}, []string{ids["root"]}, 1))
+	add(catalog.EventCategorySnapshotV2, categoryPayload(ids["root"], "active", map[string]string{"ar": "قسم"}, nil, 1))
 	for i := 1; i <= 3; i++ {
 		add(catalog.EventTagSnapshotV1, tagPayload(ids[fmt.Sprintf("tag%d", i)], fmt.Sprintf("mixed-%d", i), true, map[string]string{"ar": "وسم"}, 1))
 	}

@@ -75,7 +75,7 @@ FROM (
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
     WHERE p.is_active AND pol.sell_online
       AND s.block_reason <> 'CATEGORY_ONLINE_DISABLED'
-      AND NOT EXISTS (SELECT 1 FROM catalog_product_inventory i WHERE i.product_id = p.product_id)
+      AND NOT EXISTS (SELECT 1 FROM catalog_product_stock i WHERE i.product_id = p.product_id AND i.stock_quantity IS NOT NULL)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_MAPPING_MISSING'
@@ -268,7 +268,7 @@ FROM (
     JOIN catalog_product_online_state s ON s.product_id = p.product_id
     WHERE p.is_active AND pol.sell_online
       AND s.block_reason <> 'CATEGORY_ONLINE_DISABLED'
-      AND NOT EXISTS (SELECT 1 FROM catalog_product_inventory i WHERE i.product_id = p.product_id)
+      AND NOT EXISTS (SELECT 1 FROM catalog_product_stock i WHERE i.product_id = p.product_id AND i.stock_quantity IS NOT NULL)
       AND (@store_id::text = '' OR p.store_id = @store_id::uuid)
     UNION ALL
     SELECT 'COMMERCE_MAPPING_MISSING', u.provider_key,

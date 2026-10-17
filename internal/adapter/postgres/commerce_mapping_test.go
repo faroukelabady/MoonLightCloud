@@ -194,17 +194,13 @@ func commerceFixture(t *testing.T, env *saleEnv, base int, prefix, sku string, s
 	root, sub, tag := catalogProductFixture(t, env, base, prefix)
 	productID := commerceProductID(base)
 	pe := commerceIDs(t, base, "product")["product"]
-	ingestCatalog(t, env, pe, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, pe, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, sku, "متجر", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, pe)
 	oe := commerceIDs(t, base+1000, "policy")["policy"]
 	ingestCatalog(t, env, oe, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
 		policyPayload(productID, 1, true, true, nil))
 	projectCatalogOnce(t, env, oe)
-	ie := commerceIDs(t, base+2000, "inventory")["inventory"]
-	ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
-		inventoryPayload(productID, 1, stock))
-	projectCatalogOnce(t, env, ie)
 	// Phase 17-R0 (ADR-0049): SKU authority lives on ProductVariant —
 	// one live variant carrying the SKU proves the provider-facing
 	// product SKU is DERIVED from variant SKU ownership (the product
@@ -315,7 +311,7 @@ func TestCommerceAvailabilityFidelity(t *testing.T) {
 	root, sub, tag := catalogProductFixture(t, env, 0xF0, "cav")
 	productID := commerceProductID(0xF0)
 	pe := commerceIDs(t, 0xF0, "product")["product"]
-	ingestCatalog(t, env, pe, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, pe, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-CAV", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, pe)
 	oe := commerceIDs(t, 0x1F0, "policy")["policy"]
@@ -324,7 +320,8 @@ func TestCommerceAvailabilityFidelity(t *testing.T) {
 		policyPayload(productID, 1, true, true, &three))
 	projectCatalogOnce(t, env, oe)
 	ie := commerceIDs(t, 0x2F0, "inventory")["inventory"]
-	ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, ie, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:02:00Z",
 		inventoryPayload(productID, 1, 10))
 	projectCatalogOnce(t, env, ie)
 
@@ -338,7 +335,7 @@ func TestCommerceAvailabilityFidelity(t *testing.T) {
 	if _, err := service.SyncProduct(ctx, "primary", productID); err != nil {
 		t.Fatal(err)
 	}
-	inventories := provider.Inventories()
+	inventories := provider.VariantInventories()
 	if len(inventories) != 1 || inventories[0].AvailableQuantity != 3 {
 		t.Fatalf("capped availability: %+v", inventories)
 	}
@@ -360,14 +357,15 @@ func TestCommerceMoneyExact(t *testing.T) {
 	m["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": 9007199254740993}}
 	raw, _ := json.Marshal(m)
 	event := commerceIDs(t, 0x1A0, "product")["product"]
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", string(raw))
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(raw))
 	projectCatalogOnce(t, env, event)
 	oe := commerceIDs(t, 0x2A0, "policy")["policy"]
 	ingestCatalog(t, env, oe, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
 		policyPayload(productID, 1, true, true, nil))
 	projectCatalogOnce(t, env, oe)
 	ie := commerceIDs(t, 0x3A0, "inventory")["inventory"]
-	ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, ie, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:02:00Z",
 		inventoryPayload(productID, 1, 5))
 	projectCatalogOnce(t, env, ie)
 
@@ -407,14 +405,15 @@ func TestCommerceTranslationFidelity(t *testing.T) {
 	}
 	raw, _ := json.Marshal(m)
 	event := commerceIDs(t, 0x1B0, "product")["product"]
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", string(raw))
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(raw))
 	projectCatalogOnce(t, env, event)
 	oe := commerceIDs(t, 0x2B0, "policy")["policy"]
 	ingestCatalog(t, env, oe, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
 		policyPayload(productID, 1, true, true, nil))
 	projectCatalogOnce(t, env, oe)
 	ie := commerceIDs(t, 0x3B0, "inventory")["inventory"]
-	ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, ie, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:02:00Z",
 		inventoryPayload(productID, 1, 5))
 	projectCatalogOnce(t, env, ie)
 
@@ -469,7 +468,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	// Reset all derived catalog/policy/inventory projection state using
 	// the documented rebuild path; inbox stays authoritative.
 	for _, table := range []string{
-		"catalog_product_inventory",
+		"catalog_product_variant_inventory",
 		"catalog_product_sales_policies",
 		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
@@ -482,7 +481,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	if _, err := env.pool.Exec(ctx,
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
 		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-		 WHERE processor LIKE 'catalog_%' OR processor = 'inventory_product_projection.v1'`); err != nil {
+		 WHERE processor LIKE 'catalog_%' OR processor = 'inventory_product_variant_projection.v1'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -525,9 +524,8 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	rank := map[string]int{
-		catalog.EventCategorySnapshotV1: 0, catalog.EventTagSnapshotV1: 1,
-		catalog.EventProductSnapshotV1: 2, catalog.EventProductSalesPolicySnapshotV1: 3,
-		catalog.EventInventoryProductSnapshotV1:        4,
+		catalog.EventCategorySnapshotV2: 0, catalog.EventTagSnapshotV1: 1,
+		catalog.EventProductSnapshotV2: 2, catalog.EventProductSalesPolicySnapshotV1: 3,
 		catalog.EventProductVariantSnapshotV1:          5,
 		catalog.EventInventoryProductVariantSnapshotV1: 6,
 	}
@@ -539,14 +537,12 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 		}
 		var res catalog.ProjectResult
 		switch entry.typ {
-		case catalog.EventCategorySnapshotV1:
+		case catalog.EventCategorySnapshotV2:
 			res, err = store.ProjectCategory(ctx, rec, time.Now())
 		case catalog.EventTagSnapshotV1:
 			res, err = store.ProjectTag(ctx, rec, time.Now())
 		case catalog.EventProductSalesPolicySnapshotV1:
 			res, err = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
-		case catalog.EventInventoryProductSnapshotV1:
-			res, err = store.ProjectProductInventory(ctx, rec, time.Now())
 		case catalog.EventProductVariantSnapshotV1:
 			res, err = store.ProjectProductVariant(ctx, rec, time.Now())
 		case catalog.EventInventoryProductVariantSnapshotV1:

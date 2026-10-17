@@ -67,16 +67,15 @@ func TestRunServerCleanShutdown(t *testing.T) {
 }
 
 // TestProjectionProcessorRegistry proves the canonical registry covers
-// every registered projector (three frozen sale versions, return, 5
-// catalog, inventory) and that retry validation accepts exactly those:
+// every current registered projector and that retry validation accepts exactly those:
 // the Phase 5B Low where the policy processor was visible in status but
 // rejected by retry can never recur for policy, inventory, configuration,
 // or future processors. (Phase 17-R0 closes the same gap for the v2/v3
 // sale processors, which were missing from the registry.)
 func TestProjectionProcessorRegistry(t *testing.T) {
 	processors := allProjectionProcessors()
-	if len(processors) != 11 {
-		t.Fatalf("want 11 processors, got %d: %v", len(processors), processors)
+	if len(processors) != 10 {
+		t.Fatalf("want 10 processors, got %d: %v", len(processors), processors)
 	}
 	seen := map[string]bool{}
 	for _, processor := range processors {
@@ -91,7 +90,6 @@ func TestProjectionProcessorRegistry(t *testing.T) {
 	for _, want := range []string{
 		"sale_projection.v3",
 		"catalog_product_sales_policy_projection.v1",
-		"inventory_product_projection.v1",
 		"catalog_product_configuration_projection.v1",
 		"catalog_product_variant_projection.v1",
 		"inventory_product_variant_projection.v1",

@@ -34,24 +34,6 @@ const (
 	StatusAlreadyAccepted = "already_accepted"
 )
 
-// SupportedEvents is the registry of ingestible event types. Unknown-
-// but-well-formed types are rejected (422) so clients fail fast instead
-// of assuming durability. Entries are added at startup once their
-// validator, projection schema, projector, and migrations exist.
-var SupportedEvents = map[string]bool{
-	"system.test.v1": true,
-}
-
-// RegisterEventType advertises a business event with its payload validator.
-// The validator runs before durable ACK (invalid payloads reject the whole
-// batch); the projector consumes accepted events asynchronously.
-func RegisterEventType(eventType string, validate func(json.RawMessage) error) {
-	SupportedEvents[eventType] = true
-	validators[eventType] = validate
-}
-
-var validators = map[string]func(json.RawMessage) error{}
-
 var eventTypeFormat = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.v[0-9]+$`)
 
 // Clock-skew policy: occurred_at is business metadata, never authority.
@@ -60,16 +42,6 @@ var eventTypeFormat = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.
 var (
 	minOccurredAt = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	maxFutureSkew = 24 * time.Hour
-)
-
-// Canonical payload-hash versions. v1 marks rows stored with the pre-2D
-// float64 canonicalizer; v2 is the exact decimal canonicalizer used for all
-// new events. v1 hashes are version metadata only — never proof of payload
-// equality (duplicate verification re-canonicalizes the stored immutable
-// payload with the exact canonicalizer, fail-closed).
-const (
-	HashVersionLegacy = 1
-	HashVersionExact  = 2
 )
 
 // Event is one validated sync event ready for durable ingestion.
@@ -107,12 +79,15 @@ type Repository interface {
 
 // Service validates and ingests sync batches.
 type Service struct {
-	repo  Repository
-	clock clock.Clock
+	repo     Repository
+	clock    clock.Clock
+	registry Registry
 }
 
 // NewService wires the sync service.
-func NewService(r Repository, c clock.Clock) Service { return Service{repo: r, clock: c} }
+func NewService(r Repository, c clock.Clock, registry Registry) Service {
+	return Service{repo: r, clock: c, registry: registry}
+}
 
 // Capabilities describes server sync support for future desktop compat.
 type Capabilities struct {
@@ -129,10 +104,7 @@ type Capabilities struct {
 
 // Capabilities builds the capabilities response.
 func (s Service) Capabilities() Capabilities {
-	events := make([]string, 0, len(SupportedEvents))
-	for e := range SupportedEvents {
-		events = append(events, e)
-	}
+	events := s.registry.eventTypes()
 	return Capabilities{
 		APIVersion: APIVersion, SupportedEvents: events,
 		MaxBatchEvents: MaxBatchEvents, MaxPayloadBytes: MaxPayloadBytes,
@@ -146,14 +118,14 @@ func (s Service) Capabilities() Capabilities {
 // already_accepted; any malformed/conflicting batch fails whole (no partial
 // commit) so client retry stays straightforward.
 func (s Service) Ingest(ctx context.Context, deviceID, credentialID string, body []byte) (BatchResult, error) {
-	b, err := ParseBatch(body, deviceID, s.clock.Now())
+	b, err := s.registry.ParseBatch(body, deviceID, s.clock.Now())
 	if err != nil {
 		return BatchResult{}, err
 	}
 	// Event-specific validation before durable ACK: a structurally invalid
 	// business payload rejects the entire batch; nothing commits.
 	for i := range b.Events {
-		if validate, ok := validators[b.Events[i].EventType]; ok {
+		if validate := s.registry.validators[b.Events[i].EventType]; validate != nil {
 			if err := validate(b.Events[i].Payload); err != nil {
 				return BatchResult{}, fmt.Errorf("event %d: %w", i, err)
 			}
@@ -184,7 +156,7 @@ type rawEvent struct {
 // ParseBatch validates the wire batch for the authenticated device.
 // Unknown additive envelope fields are tolerated for forward compatibility;
 // duplicate JSON keys are rejected as client construction errors.
-func ParseBatch(body []byte, authedDeviceID string, now time.Time) (Batch, error) {
+func (r Registry) ParseBatch(body []byte, authedDeviceID string, now time.Time) (Batch, error) {
 	if err := rejectDuplicateKeys(body); err != nil {
 		return Batch{}, apperr.New(apperr.InvalidInput, "malformed batch: duplicate JSON keys")
 	}
@@ -212,7 +184,7 @@ func ParseBatch(body []byte, authedDeviceID string, now time.Time) (Batch, error
 	}
 	seen := make(map[string]bool, len(rb.Events))
 	for i, raw := range rb.Events {
-		ev, err := parseEvent(raw, authedDeviceID, now)
+		ev, err := r.parseEvent(raw, authedDeviceID, now)
 		if err != nil {
 			return Batch{}, fmt.Errorf("event %d: %w", i, err)
 		}
@@ -226,7 +198,7 @@ func ParseBatch(body []byte, authedDeviceID string, now time.Time) (Batch, error
 	return out, nil
 }
 
-func parseEvent(raw json.RawMessage, authedDeviceID string, now time.Time) (Event, error) {
+func (r Registry) parseEvent(raw json.RawMessage, authedDeviceID string, now time.Time) (Event, error) {
 	if err := rejectDuplicateKeys(raw); err != nil {
 		return Event{}, apperr.New(apperr.InvalidInput, "malformed event: duplicate JSON keys")
 	}
@@ -240,7 +212,7 @@ func parseEvent(raw json.RawMessage, authedDeviceID string, now time.Time) (Even
 	if re.EventType == nil || !eventTypeFormat.MatchString(*re.EventType) {
 		return Event{}, apperr.New(apperr.InvalidInput, "malformed event: invalid event_type")
 	}
-	if !SupportedEvents[*re.EventType] {
+	if _, supported := r.validators[*re.EventType]; !supported {
 		return Event{}, apperr.New(apperr.Unprocessable,
 			fmt.Sprintf("unsupported event type %q", *re.EventType))
 	}

@@ -119,11 +119,11 @@ func TestOccurredAtMicrosecondNormalization(t *testing.T) {
 	id := "22222222-2222-7222-8222-222222222222"
 	full := batchJSON(eventJSON(id, "system.test.v1", "2026-09-19T10:20:30.123456789Z", `{"a":1}`))
 	trunc := batchJSON(eventJSON(id, "system.test.v1", "2026-09-19T10:20:30.123456Z", `{"a":1}`))
-	b1, err := ParseBatch([]byte(full), testDevice, testNow)
+	b1, err := DiagnosticRegistry().ParseBatch([]byte(full), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, err := ParseBatch([]byte(trunc), testDevice, testNow)
+	b2, err := DiagnosticRegistry().ParseBatch([]byte(trunc), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func hashOf(t *testing.T, payload string) string {
 	body := batchJSON(eventJSON(
 		"22222222-2222-7222-8222-222222222222",
 		"system.test.v1", "2026-09-19T10:20:30Z", payload))
-	b, err := ParseBatch([]byte(body), testDevice, testNow)
+	b, err := DiagnosticRegistry().ParseBatch([]byte(body), testDevice, testNow)
 	if err != nil {
 		t.Fatal(err)
 	}

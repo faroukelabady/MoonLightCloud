@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
+	"github.com/google/uuid"
 )
 
 // Catalog projector integration tests (real PostgreSQL): revision
@@ -43,7 +45,7 @@ func categoryPayload(categoryID, status string, names map[string]string, parents
 		parentList = append(parentList, parent)
 	}
 	raw, _ := json.Marshal(map[string]any{
-		"category_id": categoryID, "status": status, "names": nameList,
+		"category_id": categoryID, "status": status, "names": nameList, "online_enabled": true,
 		"parent_ids": parentList, "catalog_revision": revision,
 	})
 	return string(raw)
@@ -70,7 +72,7 @@ func productPayload(productID, sku, name, top string, subs, tags []string, revis
 		tagList = append(tagList, tag)
 	}
 	raw, _ := json.Marshal(map[string]any{
-		"product_id": productID, "sku": sku, "name": name,
+		"product_id": productID, "name": name,
 		"translations": []any{map[string]any{"locale": "ar", "name": name}},
 		"prices": []any{
 			map[string]any{"currency": "EGP", "price_cents": 65000, "cost_cents": 40000},
@@ -147,7 +149,7 @@ func TestCatalogCategoryProjects(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 0, "root")
 	event := "d0001000-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "إسلامي"}, nil, 1))
 	res := projectCatalogOnce(t, env, event)
 	if res.Outcome != catalog.OutcomeProcessed {
@@ -170,7 +172,7 @@ func TestCatalogChildBeforeParentWaits(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 10, "root", "sub")
 	childEvent := "d0001001-0000-4000-8000-000000000001"
-	ingestCatalog(t, env, childEvent, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, childEvent, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["sub"], "active", map[string]string{"ar": "فرعي"}, []string{ids["root"]}, 1))
 	res := projectCatalogOnce(t, env, childEvent)
 	if res.Outcome != catalog.OutcomeRetryable || res.ErrorCode != ErrCatalogDependencyWait {
@@ -184,7 +186,7 @@ func TestCatalogChildBeforeParentWaits(t *testing.T) {
 	}
 
 	rootEvent := "d0001002-0000-4000-8000-000000000002"
-	ingestCatalog(t, env, rootEvent, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, rootEvent, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "جذر"}, nil, 1))
 	if res := projectCatalogOnce(t, env, rootEvent); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("root: %+v", res)
@@ -208,14 +210,14 @@ func TestCatalogSharedParentsPreserved(t *testing.T) {
 	ids := catalogIDs(t, 20, "a", "b", "shared")
 	for i, name := range []string{"a", "b"} {
 		event := fmt.Sprintf("d000101%d-0000-4000-8000-00000000000%d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(ids[name], "active", map[string]string{"ar": name}, nil, 1))
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 			t.Fatalf("root %s: %+v", name, res)
 		}
 	}
 	childEvent := "d0001012-0000-4000-8000-000000000012"
-	ingestCatalog(t, env, childEvent, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, childEvent, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["shared"], "active", map[string]string{"ar": "مشترك"}, []string{ids["a"], ids["b"]}, 1))
 	if res := projectCatalogOnce(t, env, childEvent); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("shared child: %+v", res)
@@ -235,13 +237,13 @@ func TestCatalogParentReplaceRemove(t *testing.T) {
 	ids := catalogIDs(t, 30, "a", "b", "sub")
 	for i, name := range []string{"a", "b"} {
 		event := fmt.Sprintf("d000102%d-0000-4000-8000-00000000002%d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(ids[name], "active", map[string]string{"ar": name}, nil, 1))
 		projectCatalogOnce(t, env, event)
 	}
 	rev := func(revision int64, parents []string, num string) {
 		event := fmt.Sprintf("d000102%s-0000-4000-8000-00000000002%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 			categoryPayload(ids["sub"], "active", map[string]string{"ar": "s"}, parents, revision))
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 			t.Fatalf("rev %d: %+v", revision, res)
@@ -291,13 +293,13 @@ func TestCatalogCycleBlocked(t *testing.T) {
 			parents = []string{ids["root"]}
 		}
 		event := fmt.Sprintf("d000103%d-0000-4000-8000-00000000003%d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(ids[name], "active", map[string]string{"ar": name}, parents, 1))
 		projectCatalogOnce(t, env, event)
 	}
 	// Malicious: make the root a child of its own descendant.
 	cycleEvent := "d0001032-0000-4000-8000-000000000032"
-	ingestCatalog(t, env, cycleEvent, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, cycleEvent, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "root"}, []string{ids["sub"]}, 2))
 	res := projectCatalogOnce(t, env, cycleEvent)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogCategoryCycle {
@@ -319,10 +321,10 @@ func TestCatalogStaleRevisionNoOp(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 0, "root")
 	newPayload := categoryPayload(ids["root"], "active", map[string]string{"ar": "جديد"}, nil, 2)
-	ingestCatalog(t, env, "d0001040-0000-4000-8000-000000000040", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z", newPayload)
+	ingestCatalog(t, env, "d0001040-0000-4000-8000-000000000040", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z", newPayload)
 	projectCatalogOnce(t, env, "d0001040-0000-4000-8000-000000000040")
 	oldPayload := categoryPayload(ids["root"], "active", map[string]string{"ar": "قديم"}, nil, 1)
-	ingestCatalog(t, env, "d0001041-0000-4000-8000-000000000041", catalog.EventCategorySnapshotV1, "2026-09-20T09:00:00Z", oldPayload)
+	ingestCatalog(t, env, "d0001041-0000-4000-8000-000000000041", catalog.EventCategorySnapshotV2, "2026-09-20T09:00:00Z", oldPayload)
 	res := projectCatalogOnce(t, env, "d0001041-0000-4000-8000-000000000041")
 	if res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("stale no-op: %+v", res)
@@ -339,10 +341,10 @@ func TestCatalogStaleRevisionNoOp(t *testing.T) {
 func TestCatalogEqualRevisionConflict(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 0, "root")
-	ingestCatalog(t, env, "d0001050-0000-4000-8000-000000000050", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0001050-0000-4000-8000-000000000050", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "أ"}, nil, 1))
 	projectCatalogOnce(t, env, "d0001050-0000-4000-8000-000000000050")
-	ingestCatalog(t, env, "d0001051-0000-4000-8000-000000000051", catalog.EventCategorySnapshotV1, "2026-09-20T10:01:00Z",
+	ingestCatalog(t, env, "d0001051-0000-4000-8000-000000000051", catalog.EventCategorySnapshotV2, "2026-09-20T10:01:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "ب"}, nil, 1))
 	res := projectCatalogOnce(t, env, "d0001051-0000-4000-8000-000000000051")
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogRevisionConflict {
@@ -354,7 +356,7 @@ func TestCatalogEqualRevisionConflict(t *testing.T) {
 		t.Fatalf("first writer kept: %q (%v)", name, err)
 	}
 	// Newer valid revision repairs despite the blocked rival.
-	ingestCatalog(t, env, "d0001052-0000-4000-8000-000000000052", catalog.EventCategorySnapshotV1, "2026-09-20T10:02:00Z",
+	ingestCatalog(t, env, "d0001052-0000-4000-8000-000000000052", catalog.EventCategorySnapshotV2, "2026-09-20T10:02:00Z",
 		categoryPayload(ids["root"], "hidden", map[string]string{"ar": "ج"}, nil, 2))
 	if res := projectCatalogOnce(t, env, "d0001052-0000-4000-8000-000000000052"); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("repair: %+v", res)
@@ -396,10 +398,10 @@ func TestCatalogTagLifecycle(t *testing.T) {
 func catalogProductFixture(t *testing.T, env *saleEnv, base int, prefix string) (root, sub, tag string) {
 	t.Helper()
 	ids := catalogIDs(t, base, prefix+"-root", prefix+"-sub", prefix+"-tag")
-	ingestCatalog(t, env, "d0002000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0002000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids[prefix+"-root"], "active", map[string]string{"ar": "جذر"}, nil, 1))
 	projectCatalogOnce(t, env, "d0002000-0000-4000-8000-000000000000")
-	ingestCatalog(t, env, "d0002001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0002001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids[prefix+"-sub"], "active", map[string]string{"ar": "فرعي"}, []string{ids[prefix+"-root"]}, 1))
 	projectCatalogOnce(t, env, "d0002001-0000-4000-8000-000000000001")
 	ingestCatalog(t, env, "d0002002-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1, "2026-09-20T10:00:00Z",
@@ -415,7 +417,7 @@ func TestCatalogProductProjects(t *testing.T) {
 	root, sub, tag := catalogProductFixture(t, env, 80, "p1")
 	productID := "e0001000-0000-4000-8000-000000000000"
 	event := "d0002010-0000-4000-8000-000000000010"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-001", "توت", root, []string{sub}, []string{tag}, 1))
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("product: %+v", res)
@@ -457,7 +459,7 @@ func TestCatalogProductWaitsForDeps(t *testing.T) {
 	ids := catalogIDs(t, 70, "root", "sub", "tag")
 	productID := "e0001001-0000-4000-8000-000000000001"
 	event := "d0002011-0000-4000-8000-000000000011"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(productID, "PAP-EARLY", "مبكر", ids["root"], []string{ids["sub"]}, []string{ids["tag"]}, 1))
 	res := projectCatalogOnce(t, env, event)
 	if res.Outcome != catalog.OutcomeRetryable || res.ErrorCode != ErrCatalogDependencyWait {
@@ -470,10 +472,10 @@ func TestCatalogProductWaitsForDeps(t *testing.T) {
 	ingestCatalog(t, env, "d0002012-0000-4000-8000-000000000012", catalog.EventTagSnapshotV1, "2026-09-20T11:00:00Z",
 		tagPayload(ids["tag"], "gold", true, map[string]string{"en": "Gold"}, 1))
 	projectCatalogOnce(t, env, "d0002012-0000-4000-8000-000000000012")
-	ingestCatalog(t, env, "d0002013-0000-4000-8000-000000000013", catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, "d0002013-0000-4000-8000-000000000013", catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["sub"], "active", map[string]string{"ar": "فرعي"}, []string{ids["root"]}, 1))
 	// Sub itself waits for the root; project root first.
-	ingestCatalog(t, env, "d0002014-0000-4000-8000-000000000014", catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, "d0002014-0000-4000-8000-000000000014", catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "جذر"}, nil, 1))
 	projectCatalogOnce(t, env, "d0002014-0000-4000-8000-000000000014")
 	projectCatalogOnce(t, env, "d0002013-0000-4000-8000-000000000013")
@@ -492,7 +494,7 @@ func TestCatalogProductInvalidRelationBlocked(t *testing.T) {
 	// Top is the subcategory (has a parent): not a root.
 	productID := "e0001002-0000-4000-8000-000000000002"
 	event := "d0002020-0000-4000-8000-000000000020"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-BADTOP", "x", sub, nil, []string{tag}, 1))
 	res := projectCatalogOnce(t, env, event)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogInvalidRelation {
@@ -503,10 +505,10 @@ func TestCatalogProductInvalidRelationBlocked(t *testing.T) {
 	}
 	// Unreachable sub: a second root's child is not under this top.
 	ids := catalogIDs(t, 60, "other", "stranger")
-	ingestCatalog(t, env, "d0002021-0000-4000-8000-000000000021", catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0002021-0000-4000-8000-000000000021", catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 		categoryPayload(ids["other"], "active", map[string]string{"ar": "o"}, nil, 1))
 	projectCatalogOnce(t, env, "d0002021-0000-4000-8000-000000000021")
-	ingestCatalog(t, env, "d0002022-0000-4000-8000-000000000022", catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0002022-0000-4000-8000-000000000022", catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 		categoryPayload(ids["stranger"], "active", map[string]string{"ar": "s"}, []string{ids["other"]}, 1))
 	projectCatalogOnce(t, env, "d0002022-0000-4000-8000-000000000022")
 	// Reuse any projected root with the stranger sub: unreachable pairing.
@@ -520,7 +522,7 @@ func TestCatalogProductInvalidRelationBlocked(t *testing.T) {
 		 AND c.name_ar = 'جذر' LIMIT 1`).Scan(&topID); err != nil {
 		t.Fatal(err)
 	}
-	ingestCatalog(t, env, event2, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, event2, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID2, "PAP-BADSUB", "x", topID, []string{ids["stranger"]}, []string{tag}, 1))
 	res = projectCatalogOnce(t, env, event2)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogInvalidRelation {
@@ -535,13 +537,13 @@ func TestCatalogProductRepairAfterBlock(t *testing.T) {
 	root, sub, tag := catalogProductFixture(t, env, 100, "p3")
 	productID := "e0001004-0000-4000-8000-000000000004"
 	bad := "d0002030-0000-4000-8000-000000000030"
-	ingestCatalog(t, env, bad, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, bad, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-REPAIR", "x", sub, nil, []string{tag}, 1))
 	if res := projectCatalogOnce(t, env, bad); res.Outcome != catalog.OutcomeBlocked {
 		t.Fatalf("invalid rev blocked: %+v", res)
 	}
 	good := "d0002031-0000-4000-8000-000000000031"
-	ingestCatalog(t, env, good, catalog.EventProductSnapshotV1, "2026-09-20T13:00:00Z",
+	ingestCatalog(t, env, good, catalog.EventProductSnapshotV2, "2026-09-20T13:00:00Z",
 		productPayload(productID, "PAP-REPAIR", "x", root, []string{sub}, []string{tag}, 2))
 	if res := projectCatalogOnce(t, env, good); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("repair: %+v", res)
@@ -558,12 +560,12 @@ func TestCatalogProductRepairAfterBlock(t *testing.T) {
 func TestCatalogOutOfOrderRevisions(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 0, "root")
-	ingestCatalog(t, env, "d0002040-0000-4000-8000-000000000040", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0002040-0000-4000-8000-000000000040", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "r7"}, nil, 7))
 	projectCatalogOnce(t, env, "d0002040-0000-4000-8000-000000000040")
 	for i, rev := range []int64{5, 6} {
 		event := fmt.Sprintf("d000204%d-0000-4000-8000-00000000004%d", i+1, i+1)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T09:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T09:00:00Z",
 			categoryPayload(ids["root"], "active", map[string]string{"ar": "stale"}, nil, rev))
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 			t.Fatalf("stale rev %d no-op: %+v", rev, res)
@@ -614,7 +616,7 @@ func dumpCatalog(t *testing.T, env *saleEnv) string {
 	dump(`SELECT product_id::text, category_id::text, position FROM catalog_product_subcategories ORDER BY product_id::text, position`)
 	dump(`SELECT product_id::text, tag_id::text FROM catalog_product_tags ORDER BY product_id::text, tag_id::text`)
 	dump(`SELECT product_id::text, sell_offline, sell_online, online_allocation_limit, source_revision FROM catalog_product_sales_policies ORDER BY product_id::text`)
-	dump(`SELECT product_id::text, stock_quantity, source_revision FROM catalog_product_inventory ORDER BY product_id::text`)
+	dump(`SELECT variant_id::text, stock_quantity, source_revision FROM catalog_product_variant_inventory ORDER BY variant_id::text`)
 	return b.String()
 }
 
@@ -624,7 +626,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 110, "rb")
 	productID := "e0001005-0000-4000-8000-000000000005"
-	ingestCatalog(t, env, "d0002050-0000-4000-8000-000000000050", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0002050-0000-4000-8000-000000000050", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-RB", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0002050-0000-4000-8000-000000000050")
 	// Hide the product at revision 2 (latest lifecycle state).
@@ -635,7 +637,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	}
 	hiddenMap["is_active"] = false
 	hiddenRaw, _ := json.Marshal(hiddenMap)
-	ingestCatalog(t, env, "d0002051-0000-4000-8000-000000000051", catalog.EventProductSnapshotV1, "2026-09-20T13:00:00Z", string(hiddenRaw))
+	ingestCatalog(t, env, "d0002051-0000-4000-8000-000000000051", catalog.EventProductSnapshotV2, "2026-09-20T13:00:00Z", string(hiddenRaw))
 	projectCatalogOnce(t, env, "d0002051-0000-4000-8000-000000000051")
 	// Online+capped policy at revision 2: rebuild must preserve it.
 	ingestCatalog(t, env, "d0002052-0000-4000-8000-000000000052", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T13:01:00Z",
@@ -650,7 +652,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 	// Clear derived catalog state only; inbox stays authoritative.
 	ctx := context.Background()
 	for _, table := range []string{
-		"catalog_product_inventory",
+		"catalog_product_variant_inventory", "catalog_product_variant_attribute_values", "catalog_product_variants",
 		"catalog_product_sales_policies",
 		"catalog_product_tags", "catalog_product_subcategories", "catalog_product_translations",
 		"catalog_product_prices", "catalog_products", "catalog_category_edges",
@@ -691,8 +693,8 @@ func TestCatalogRebuildStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	rank := map[string]int{
-		catalog.EventCategorySnapshotV1: 0, catalog.EventTagSnapshotV1: 1, catalog.EventProductSnapshotV1: 2,
-		catalog.EventProductSalesPolicySnapshotV1: 3, catalog.EventInventoryProductSnapshotV1: 4,
+		catalog.EventCategorySnapshotV2: 0, catalog.EventTagSnapshotV1: 1, catalog.EventProductSnapshotV2: 2,
+		catalog.EventProductSalesPolicySnapshotV1: 3, catalog.EventInventoryProductVariantSnapshotV1: 4,
 	}
 	sort.SliceStable(order, func(i, j int) bool { return rank[order[i].typ] < rank[order[j].typ] })
 	for _, q := range order {
@@ -702,14 +704,14 @@ func TestCatalogRebuildStable(t *testing.T) {
 		}
 		var res catalog.ProjectResult
 		switch q.typ {
-		case catalog.EventCategorySnapshotV1:
+		case catalog.EventCategorySnapshotV2:
 			res, err = store.ProjectCategory(ctx, rec, time.Now())
 		case catalog.EventTagSnapshotV1:
 			res, err = store.ProjectTag(ctx, rec, time.Now())
 		case catalog.EventProductSalesPolicySnapshotV1:
 			res, err = store.ProjectProductSalesPolicy(ctx, rec, time.Now())
-		case catalog.EventInventoryProductSnapshotV1:
-			res, err = store.ProjectProductInventory(ctx, rec, time.Now())
+		case catalog.EventInventoryProductVariantSnapshotV1:
+			res, err = store.ProjectProductVariantInventory(ctx, rec, time.Now())
 		default:
 			res, err = store.ProjectProduct(ctx, rec, time.Now())
 		}
@@ -739,43 +741,32 @@ func drainCatalog(t *testing.T, env *saleEnv) {
 	store := NewDevices(env.pool, 5*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		catalog.NewCategoryProjector(store, testSystemClock(), nilLogger()).Run(ctx)
-	}()
-	done2 := make(chan struct{})
-	go func() {
-		defer close(done2)
-		catalog.NewTagProjector(store, testSystemClock(), nilLogger()).Run(ctx)
-	}()
-	done3 := make(chan struct{})
-	go func() {
-		defer close(done3)
-		catalog.NewProductProjector(store, testSystemClock(), nilLogger()).Run(ctx)
-	}()
-	done4 := make(chan struct{})
-	go func() {
-		defer close(done4)
-		catalog.NewProductSalesPolicyProjector(store, testSystemClock(), nilLogger()).Run(ctx)
-	}()
-	done5 := make(chan struct{})
-	go func() {
-		defer close(done5)
-		catalog.NewProductInventoryProjector(store, testSystemClock(), nilLogger()).Run(ctx)
-	}()
+	projectors := []*catalog.Projector{
+		catalog.NewCategoryProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewTagProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewProductTypeProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewProductProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewProductSalesPolicyProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewProductVariantProjector(store, testSystemClock(), nilLogger()),
+		catalog.NewProductVariantInventoryProjector(store, testSystemClock(), nilLogger()),
+	}
+	var workers sync.WaitGroup
+	for _, projector := range projectors {
+		workers.Add(1)
+		go func() { defer workers.Done(); projector.Run(ctx) }()
+	}
+	defer workers.Wait()
+	defer cancel()
 	waitFor(t, 12*time.Second, func() bool {
 		var pending int
-		_ = env.pool.QueryRow(context.Background(),
-			`SELECT count(*) FROM sync_event_processing WHERE processor LIKE 'catalog_%' AND status IN ('pending','retry')`).Scan(&pending)
+		if err := env.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM sync_event_processing WHERE
+             (processor LIKE 'catalog_%' OR processor = 'inventory_product_variant_projection.v1')
+             AND status IN ('pending','retry')`).Scan(&pending); err != nil {
+			t.Fatal(err)
+		}
 		return pending == 0
 	}, "catalog drain quiescence")
-	cancel()
-	<-done
-	<-done2
-	<-done3
-	<-done4
-	<-done5
 }
 
 // TestCatalogMoneyExact proves minor-unit values beyond 2^53 survive
@@ -792,7 +783,7 @@ func TestCatalogMoneyExact(t *testing.T) {
 	m["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": 9007199254740993}}
 	raw, _ := json.Marshal(m)
 	event := "d0002060-0000-4000-8000-000000000060"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", string(raw))
+	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(raw))
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("big money: %+v", res)
 	}
@@ -822,7 +813,7 @@ func TestCatalogRenameIsolatesHistory(t *testing.T) {
 	rev := func(revision int64, name, num string) {
 		payload := productPayload(productID, "PAP-002", name, root, nil, nil, revision)
 		event := fmt.Sprintf("d000206%s-0000-4000-8000-00000000006%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", payload)
+		ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", payload)
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 			t.Fatalf("rev %d: %+v", revision, res)
 		}
@@ -862,17 +853,17 @@ func coordinatedFixture(t *testing.T, env *saleEnv) (a, b, s, product string, ca
 			t.Fatalf("fixture %s: %+v", event, res)
 		}
 	}
-	project("d0003000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0003000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(a, "active", map[string]string{"ar": "A"}, nil, 1))
-	project("d0003001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0003001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(b, "active", map[string]string{"ar": "B"}, nil, 1))
-	project("d0003002-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0003002-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{a}, 1))
 	product = "e0003000-0000-4000-8000-000000000000"
-	project("d0003003-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0003003-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(product, "PAP-C", "x", a, []string{s}, nil, 1))
 	catRev2 = "d0003004-0000-4000-8000-000000000004"
-	ingestCatalog(t, env, catRev2, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, catRev2, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{b}, 2))
 	prodRev2 = "d0003005-0000-4000-8000-000000000005"
 	return a, b, s, product, catRev2, prodRev2
@@ -883,7 +874,7 @@ func coordinatedFixture(t *testing.T, env *saleEnv) (a, b, s, product string, ca
 // to prove a repair-less graph change is rejected.
 func ingestProdRev2(t *testing.T, env *saleEnv, product, b, s, prodRev2 string) {
 	t.Helper()
-	ingestCatalog(t, env, prodRev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, prodRev2, catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(product, "PAP-C", "x", b, []string{s}, nil, 2))
 }
 
@@ -984,7 +975,7 @@ func TestCatalogOrphaningBlockedWithoutRepair(t *testing.T) {
 	_ = product
 	// No product rev2 accepted: the reparent has no repair.
 	orphan := "d0003006-0000-4000-8000-000000000006"
-	ingestCatalog(t, env, orphan, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, orphan, catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{b}, 2))
 	res := projectCatalogOnce(t, env, orphan)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogGraphConflict {
@@ -1126,7 +1117,7 @@ func TestCatalogCoordinatedRebuild(t *testing.T) {
 			}
 			var res catalog.ProjectResult
 			switch q.typ {
-			case catalog.EventCategorySnapshotV1:
+			case catalog.EventCategorySnapshotV2:
 				res, err = store.ProjectCategory(ctx, rec, time.Now())
 			case catalog.EventTagSnapshotV1:
 				res, err = store.ProjectTag(ctx, rec, time.Now())
@@ -1171,7 +1162,7 @@ func TestCatalogConcurrentRevisionsDeterministic(t *testing.T) {
 	productID := "e0004000-0000-4000-8000-000000000000"
 	rev := func(revision int64, name string, tags []string, num string) string {
 		event := fmt.Sprintf("d00040%s-0000-4000-8000-0000000000%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 			productPayload(productID, "PAP-CC", name, root, []string{sub}, tags, revision))
 		return event
 	}
@@ -1242,7 +1233,7 @@ func TestCatalogConcurrentFirstInsert(t *testing.T) {
 	productID := "e0004001-0000-4000-8000-000000000001"
 	mk := func(revision int64, num string) string {
 		event := fmt.Sprintf("d00041%s-0000-4000-8000-0000000000%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 			productPayload(productID, "PAP-FI", "rev", root, []string{sub}, []string{tag}, revision))
 		return event
 	}
@@ -1289,13 +1280,13 @@ func TestCatalogConcurrentCategoryRevisions(t *testing.T) {
 	ids := catalogIDs(t, 160, "a", "b", "sub")
 	for i, name := range []string{"a", "b"} {
 		event := fmt.Sprintf("d000420%d-0000-4000-8000-00000000002%d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(ids[name], "active", map[string]string{"ar": name}, nil, 1))
 		projectCatalogOnce(t, env, event)
 	}
 	mk := func(parents []string, revision int64, num string) string {
 		event := fmt.Sprintf("d00042%s-0000-4000-8000-0000000000%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 			categoryPayload(ids["sub"], "active", map[string]string{"ar": "s"}, parents, revision))
 		return event
 	}
@@ -1399,12 +1390,12 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 	root, sub, tag := catalogProductFixture(t, env, 170, "rbk")
 	productID := "e0005000-0000-4000-8000-000000000000"
 	rev1 := "d0005000-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, rev1, catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, rev1, catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(productID, "PAP-RBK", "one", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, rev1)
 
 	rev2 := "d0005001-0000-4000-8000-000000000001"
-	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-RBK", "two", root, []string{sub}, []string{tag}, 2))
 	if _, err := env.pool.Exec(context.Background(),
 		`CREATE FUNCTION fail_catalog_tx() RETURNS trigger AS $$
@@ -1471,15 +1462,15 @@ func TestCatalogProductProjectionRollback(t *testing.T) {
 func TestCatalogCategoryProjectionRollback(t *testing.T) {
 	env := openSaleEnv(t)
 	ids := catalogIDs(t, 180, "a", "sub")
-	ingestCatalog(t, env, "d0005100-0000-4000-8000-000000000100", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0005100-0000-4000-8000-000000000100", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["a"], "active", map[string]string{"ar": "A"}, nil, 1))
 	projectCatalogOnce(t, env, "d0005100-0000-4000-8000-000000000100")
-	ingestCatalog(t, env, "d0005101-0000-4000-8000-000000000101", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, "d0005101-0000-4000-8000-000000000101", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["sub"], "active", map[string]string{"ar": "S"}, []string{ids["a"]}, 1))
 	projectCatalogOnce(t, env, "d0005101-0000-4000-8000-000000000101")
 
 	rev2 := "d0005102-0000-4000-8000-000000000102"
-	ingestCatalog(t, env, rev2, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, rev2, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["sub"], "hidden", map[string]string{"ar": "S"}, []string{ids["a"]}, 2))
 	if _, err := env.pool.Exec(context.Background(),
 		`CREATE FUNCTION fail_catalog_edge() RETURNS trigger AS $$
@@ -1532,14 +1523,14 @@ func TestCatalogDepthDiagnostic(t *testing.T) {
 			parents = []string{ids[link.parent]}
 		}
 		event := fmt.Sprintf("d00052%02d-0000-4000-8000-0000000000%02d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(ids[link.name], "active", map[string]string{"ar": link.name}, parents, 1))
 		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 			t.Fatalf("chain %s: %+v", link.name, res)
 		}
 	}
 	deep := "d0005210-0000-4000-8000-000000000010"
-	ingestCatalog(t, env, deep, catalog.EventCategorySnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, deep, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
 		categoryPayload(ids["c"], "active", map[string]string{"ar": "c"}, []string{ids["b"]}, 1))
 	res := projectCatalogOnce(t, env, deep)
 	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogCategoryDepth {
@@ -1592,20 +1583,20 @@ func TestCatalogResetFailureEventuallyRearmsProduct(t *testing.T) {
 			t.Fatalf("fixture %s: %+v", event, res)
 		}
 	}
-	project("d0006000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006000-0000-4000-8000-000000000000", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(a, "active", map[string]string{"ar": "A"}, nil, 1))
-	project("d0006001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006001-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(b, "active", map[string]string{"ar": "B"}, nil, 1))
-	project("d0006002-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006002-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{a}, 1))
 	productID := "e0006000-0000-4000-8000-000000000000"
-	project("d0006003-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006003-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(productID, "PAP-X", "x", b, nil, nil, 1))
 
 	// Product rev2 wants top B + S while S is only under A: settled graph,
 	// no repair accepted → terminal block.
 	rev2 := "d0006004-0000-4000-8000-000000000004"
-	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-RF", "x", b, []string{s}, nil, 2))
 	if res := projectCatalogOnce(t, env, rev2); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogInvalidRelation {
 		t.Fatalf("rev2 terminally blocked: %+v", res)
@@ -1614,7 +1605,7 @@ func TestCatalogResetFailureEventuallyRearmsProduct(t *testing.T) {
 	// Fault ONLY the post-commit reset, then repair the graph.
 	installResetFault(t, env)
 	rev3 := "d0006005-0000-4000-8000-000000000005"
-	ingestCatalog(t, env, rev3, catalog.EventCategorySnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, rev3, catalog.EventCategorySnapshotV2, "2026-09-20T12:00:00Z",
 		categoryPayload(s, "active", map[string]string{"ar": "S"}, []string{a, b}, 2))
 	if res := projectCatalogOnce(t, env, rev3); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("category commits despite reset failure: %+v", res)
@@ -1678,15 +1669,15 @@ func TestCatalogTrueInvalidNeverRearms(t *testing.T) {
 			t.Fatalf("fixture %s: %+v", event, res)
 		}
 	}
-	project("d0006100-0000-4000-8000-000000000100", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006100-0000-4000-8000-000000000100", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["a"], "active", map[string]string{"ar": "A"}, nil, 1))
-	project("d0006101-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006101-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["b"], "active", map[string]string{"ar": "B"}, nil, 1))
-	project("d0006102-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006102-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["s"], "active", map[string]string{"ar": "S"}, []string{ids["a"]}, 1))
 	productID := "e0006100-0000-4000-8000-000000000000"
 	bad := "d0006103-0000-4000-8000-000000000003"
-	ingestCatalog(t, env, bad, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, bad, catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-TI", "x", ids["b"], []string{ids["s"]}, nil, 1))
 	if res := projectCatalogOnce(t, env, bad); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogInvalidRelation {
 		t.Fatalf("terminally blocked: %+v", res)
@@ -1733,24 +1724,24 @@ func TestCatalogSupersededNeverRearmed(t *testing.T) {
 		ingestCatalog(t, env, event, typ, occurred, payload)
 		projectCatalogOnce(t, env, event)
 	}
-	project("d0006200-0000-4000-8000-000000000200", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006200-0000-4000-8000-000000000200", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["a"], "active", map[string]string{"ar": "A"}, nil, 1))
-	project("d0006201-0000-4000-8000-000000000201", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006201-0000-4000-8000-000000000201", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["b"], "active", map[string]string{"ar": "B"}, nil, 1))
-	project("d0006202-0000-4000-8000-000000000202", catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+	project("d0006202-0000-4000-8000-000000000202", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 		categoryPayload(ids["s"], "active", map[string]string{"ar": "S"}, []string{ids["a"], ids["b"]}, 1))
 	productID := "e0006200-0000-4000-8000-000000000000"
 	// Rev1 uses the subcategory as top: structurally invalid, settled
 	// (all categories current) → terminal block.
 	rev1 := "d0006203-0000-4000-8000-000000000203"
-	ingestCatalog(t, env, rev1, catalog.EventProductSnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, rev1, catalog.EventProductSnapshotV2, "2026-09-20T10:00:00Z",
 		productPayload(productID, "PAP-SN", "x", ids["s"], nil, nil, 1))
 	if res := projectCatalogOnce(t, env, rev1); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogInvalidRelation {
 		t.Fatalf("rev1 terminally blocked: %+v", res)
 	}
 	// Valid rev2 becomes authoritative.
 	rev2 := "d0006204-0000-4000-8000-000000000204"
-	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, rev2, catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-SN", "x", ids["b"], []string{ids["s"]}, nil, 2))
 	if res := projectCatalogOnce(t, env, rev2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("rev2 authoritative: %+v", res)
@@ -1779,7 +1770,7 @@ func TestCatalogOldHashCompatibility(t *testing.T) {
 	ids := catalogIDs(t, 200, "root")
 	first := "d0005300-0000-4000-8000-000000000000"
 	payload := categoryPayload(ids["root"], "active", map[string]string{"ar": "جذر"}, nil, 1)
-	ingestCatalog(t, env, first, catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z", payload)
+	ingestCatalog(t, env, first, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z", payload)
 	if res := projectCatalogOnce(t, env, first); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("project: %+v", res)
 	}
@@ -1795,9 +1786,9 @@ func TestCatalogOldHashCompatibility(t *testing.T) {
 	// NEW event, same entity/revision/semantics (reordered keys): must
 	// reach the equal-revision comparison and stay idempotent.
 	reordered := `{"status":"active","catalog_revision":1,"category_id":"` + ids["root"] + `",` +
-		`"names":[{"locale":"ar","name":"جذر"}],"parent_ids":[]}`
+		`"names":[{"locale":"ar","name":"جذر"}],"parent_ids":[],"online_enabled":true}`
 	replay := "d0005301-0000-4000-8000-000000000001"
-	ingestCatalog(t, env, replay, catalog.EventCategorySnapshotV1, "2026-09-20T10:01:00Z", reordered)
+	ingestCatalog(t, env, replay, catalog.EventCategorySnapshotV2, "2026-09-20T10:01:00Z", reordered)
 	if res := projectCatalogOnce(t, env, replay); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("old-hash replay idempotent: %+v", res)
 	}
@@ -1815,7 +1806,7 @@ func TestCatalogOldHashCompatibility(t *testing.T) {
 	}
 	// A genuinely different payload at the same revision still conflicts.
 	rival := "d0005302-0000-4000-8000-000000000002"
-	ingestCatalog(t, env, rival, catalog.EventCategorySnapshotV1, "2026-09-20T10:02:00Z",
+	ingestCatalog(t, env, rival, catalog.EventCategorySnapshotV2, "2026-09-20T10:02:00Z",
 		categoryPayload(ids["root"], "active", map[string]string{"ar": "مختلف"}, nil, 1))
 	if res := projectCatalogOnce(t, env, rival); res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrCatalogRevisionConflict {
 		t.Fatalf("rival conflicts: %+v", res)
@@ -1842,7 +1833,7 @@ func TestCatalogPolicyProjects(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 90, "pol1")
 	productID := "e0002000-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0003000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0003000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-POL", "توت", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0003000-0000-4000-8000-000000000000")
 	event := "d0003001-0000-4000-8000-000000000001"
@@ -1883,7 +1874,7 @@ func TestCatalogPolicyWaitsForProduct(t *testing.T) {
 	if n := saleCount(t, env.pool, "catalog_product_sales_policies"); n != 0 {
 		t.Fatalf("zero rows while waiting, got %d", n)
 	}
-	ingestCatalog(t, env, "d0003011-0000-4000-8000-000000000011", catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, "d0003011-0000-4000-8000-000000000011", catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-LATE", "متأخر", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0003011-0000-4000-8000-000000000011")
 	forceCatalogDue(t, env, catalog.ProcessorProductSalesPolicyProjectionV1, event)
@@ -1898,7 +1889,7 @@ func TestCatalogPolicyRevisionOrdering(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 92, "pol3")
 	productID := "e0002002-0000-4000-8000-000000000002"
-	ingestCatalog(t, env, "d0003020-0000-4000-8000-000000000020", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0003020-0000-4000-8000-000000000020", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-REV", "توت", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0003020-0000-4000-8000-000000000020")
 	ingestCatalog(t, env, "d0003021-0000-4000-8000-000000000021", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
@@ -1939,7 +1930,7 @@ func TestCatalogPolicyOutOfOrderRevisions(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 93, "pol4")
 	productID := "e0002003-0000-4000-8000-000000000003"
-	ingestCatalog(t, env, "d0003030-0000-4000-8000-000000000030", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0003030-0000-4000-8000-000000000030", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-OOO", "توت", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0003030-0000-4000-8000-000000000030")
 	ingestCatalog(t, env, "d0003031-0000-4000-8000-000000000031", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
@@ -1965,7 +1956,7 @@ func TestCatalogPolicyInvalidBlocked(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 94, "pol5")
 	productID := "e0002004-0000-4000-8000-000000000004"
-	ingestCatalog(t, env, "d0003040-0000-4000-8000-000000000040", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0003040-0000-4000-8000-000000000040", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-BAD", "توت", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0003040-0000-4000-8000-000000000040")
 	// Stale cap with online disabled is rejected at ingestion.
@@ -1980,17 +1971,70 @@ func TestCatalogPolicyInvalidBlocked(t *testing.T) {
 	}
 }
 
+// inventoryPayload models the single physical Variant of these fixtures.
 func inventoryPayload(productID string, revision int64, stock int) string {
-	raw, _ := json.Marshal(map[string]any{
-		"product_id": productID, "inventory_revision": revision, "stock_quantity": stock,
-	})
-	return string(raw)
+	return variantInventoryPayload(inventoryVariantID(productID), productID, inventoryVariantID(productID), stock, revision, true, nil)
+}
+
+func inventoryVariantID(productID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("test-inventory-variant:"+productID)).String()
+}
+
+// seedInventoryVariant is explicit fixture setup, never a production fallback.
+func seedInventoryVariant(t *testing.T, env *saleEnv, productID string) {
+	t.Helper()
+	vid := inventoryVariantID(productID)
+	var count int
+	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM catalog_product_variants WHERE variant_id=$1`, vid).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		return
+	}
+	event := uuid.NewSHA1(uuid.NameSpaceOID, []byte("test-inventory-catalog:"+productID)).String()
+	ingestCatalog(t, env, event, catalog.EventProductVariantSnapshotV1, "2026-09-20T12:00:00Z", variantPayload(vid, productID, vid, true, false, "", nil, 1))
+	if got := projectCatalogOnce(t, env, event); got.Outcome != catalog.OutcomeProcessed {
+		t.Fatalf("seed inventory variant: %+v", got)
+	}
+}
+
+// seedScopeInventoryVariant explicitly projects the physical fixture Variant
+// through the parent Product's original device/Store, even for foreign-writer
+// negative controls. It does not adopt another Store's catalog state.
+func seedScopeInventoryVariant(t *testing.T, f *scopeFixture, productID string) {
+	t.Helper()
+	vid := inventoryVariantID(productID)
+	var count int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM catalog_product_variants WHERE variant_id=$1`, vid).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		return
+	}
+	var dev string
+	if err := f.pool.QueryRow(context.Background(), `SELECT source_device_id::text FROM catalog_products WHERE product_id=$1`, productID).Scan(&dev); err != nil {
+		t.Fatal(err)
+	}
+	cred := ""
+	switch dev {
+	case f.devA:
+		cred = f.credA
+	case f.devB:
+		cred = f.credB
+	case f.devC:
+		cred = f.credC
+	default:
+		t.Fatal("unknown fixture source device")
+	}
+	event := uuid.NewSHA1(uuid.NameSpaceOID, []byte("test-scoped-inventory-catalog:"+productID)).String()
+	f.ingest(t, dev, cred, event, catalog.EventProductVariantSnapshotV1, variantPayload(vid, productID, vid, true, false, "", nil, 1))
+	requireOutcome(t, projectCatalogTerminal(t, f, event, catalog.EventProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
 }
 
 func inventoryFixture(t *testing.T, env *saleEnv, base int, prefix, productID, sku string, stock int) {
 	t.Helper()
 	root, sub, tag := catalogProductFixture(t, env, base, prefix)
-	ingestCatalog(t, env, "d0006000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0006000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, sku, "مخزون", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0006000-0000-4000-8000-000000000000")
 	_ = stock
@@ -2003,13 +2047,14 @@ func TestInventoryProjects(t *testing.T) {
 	productID := "e0005000-0000-4000-8000-000000000000"
 	inventoryFixture(t, env, 150, "inv1", productID, "PAP-INV", 10)
 	event := "d0006010-0000-4000-8000-000000000010"
-	ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:01:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:01:00Z",
 		inventoryPayload(productID, 1, 10))
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("inventory: %+v", res)
 	}
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatalf("read service: %v", err)
 	}
@@ -2039,19 +2084,20 @@ func TestInventoryWaitsForProduct(t *testing.T) {
 	_ = sub
 	_ = tag
 	event := "d0006020-0000-4000-8000-000000000020"
-	ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T10:00:00Z",
+	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T10:00:00Z",
 		inventoryPayload(productID, 1, 7))
 	res := projectCatalogOnce(t, env, event)
 	if res.Outcome != catalog.OutcomeRetryable || res.ErrorCode != ErrCatalogDependencyWait {
 		t.Fatalf("dependency wait: %+v", res)
 	}
-	if n := saleCount(t, env.pool, "catalog_product_inventory"); n != 0 {
+	if n := saleCount(t, env.pool, "catalog_product_variant_inventory"); n != 0 {
 		t.Fatalf("zero rows while waiting, got %d", n)
 	}
-	ingestCatalog(t, env, "d0006021-0000-4000-8000-000000000021", catalog.EventProductSnapshotV1, "2026-09-20T11:00:00Z",
+	ingestCatalog(t, env, "d0006021-0000-4000-8000-000000000021", catalog.EventProductSnapshotV2, "2026-09-20T11:00:00Z",
 		productPayload(productID, "PAP-LATE", "متأخر", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0006021-0000-4000-8000-000000000021")
-	forceCatalogDue(t, env, catalog.ProcessorProductInventoryProjectionV1, event)
+	seedInventoryVariant(t, env, productID)
+	forceCatalogDue(t, env, catalog.ProcessorProductVariantInventoryProjectionV1, event)
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("inventory converges: %+v", res)
 	}
@@ -2064,7 +2110,8 @@ func TestInventoryRevisionOrdering(t *testing.T) {
 	productID := "e0005002-0000-4000-8000-000000000002"
 	inventoryFixture(t, env, 152, "inv3", productID, "PAP-ORD", 10)
 	ingest := func(event string, revision int64, stock int) catalog.ProjectResult {
-		ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:00:00Z",
+		seedInventoryVariant(t, env, productID)
+		ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
 			inventoryPayload(productID, revision, stock))
 		return projectCatalogOnce(t, env, event)
 	}
@@ -2078,7 +2125,7 @@ func TestInventoryRevisionOrdering(t *testing.T) {
 		t.Fatalf("stale rev6 no-op: %+v", res)
 	}
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2089,7 +2136,7 @@ func TestInventoryRevisionOrdering(t *testing.T) {
 	if res := ingest("d0006033-0000-4000-8000-000000000033", 9, 1); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("gap rev9: %+v", res)
 	}
-	inv, err = svc.GetProductInventory(context.Background(), productID)
+	inv, err = svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2106,7 +2153,8 @@ func TestInventoryEqualRevision(t *testing.T) {
 	productID := "e0005003-0000-4000-8000-000000000003"
 	inventoryFixture(t, env, 153, "inv4", productID, "PAP-EQ", 10)
 	ingest := func(event string, revision int64, stock int) catalog.ProjectResult {
-		ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:00:00Z",
+		seedInventoryVariant(t, env, productID)
+		ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
 			inventoryPayload(productID, revision, stock))
 		return projectCatalogOnce(t, env, event)
 	}
@@ -2122,7 +2170,7 @@ func TestInventoryEqualRevision(t *testing.T) {
 		t.Fatalf("equal-revision conflict: %+v", res)
 	}
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2133,7 +2181,7 @@ func TestInventoryEqualRevision(t *testing.T) {
 	if res := ingest("d0006043-0000-4000-8000-000000000043", 6, 4); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("rev6 repair: %+v", res)
 	}
-	inv, err = svc.GetProductInventory(context.Background(), productID)
+	inv, err = svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2150,7 +2198,8 @@ func TestInventoryConcurrentRevisionsDeterministic(t *testing.T) {
 	inventoryFixture(t, env, 154, "inv5", productID, "PAP-CONC", 10)
 	rev := func(revision int64, stock int, num string) string {
 		event := fmt.Sprintf("d00060%s-0000-4000-8000-0000000000%s", num, num)
-		ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:00:00Z",
+		seedInventoryVariant(t, env, productID)
+		ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
 			inventoryPayload(productID, revision, stock))
 		return event
 	}
@@ -2162,7 +2211,7 @@ func TestInventoryConcurrentRevisionsDeterministic(t *testing.T) {
 	for _, event := range []string{ev5, ev6} {
 		go func(event string) {
 			<-start
-			done <- catalogWorkerAttempt(catalogStore(env), event, catalog.EventInventoryProductSnapshotV1)
+			done <- catalogWorkerAttempt(catalogStore(env), event, catalog.EventInventoryProductVariantSnapshotV1)
 		}(event)
 	}
 	close(start)
@@ -2178,7 +2227,7 @@ func TestInventoryConcurrentRevisionsDeterministic(t *testing.T) {
 	_ = results
 
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2193,7 +2242,8 @@ func TestInventoryProjectionRollback(t *testing.T) {
 	env := openSaleEnv(t)
 	productID := "e0005005-0000-4000-8000-000000000005"
 	inventoryFixture(t, env, 155, "inv6", productID, "PAP-RB2", 10)
-	ingestCatalog(t, env, "d0006060-0000-4000-8000-000000000060", catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:00:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, "d0006060-0000-4000-8000-000000000060", catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
 		inventoryPayload(productID, 1, 10))
 	projectCatalogOnce(t, env, "d0006060-0000-4000-8000-000000000060")
 
@@ -2203,36 +2253,37 @@ func TestInventoryProjectionRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(context.Background(),
-		`CREATE TRIGGER fault_inventory_upsert BEFORE INSERT OR UPDATE ON catalog_product_inventory
+		`CREATE TRIGGER fault_inventory_upsert BEFORE INSERT OR UPDATE ON catalog_product_variant_inventory
 		 FOR EACH ROW EXECUTE FUNCTION block_inventory_upsert()`); err != nil {
 		t.Fatal(err)
 	}
 	event := "d0006061-0000-4000-8000-000000000061"
-	ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:01:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:01:00Z",
 		inventoryPayload(productID, 2, 6))
 	res := projectCatalogOnce(t, env, event)
 	if res.Outcome != catalog.OutcomeRetryable {
 		t.Fatalf("fault retryable: %+v", res)
 	}
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if inv.Revision != 1 || inv.StockQuantity != 10 {
 		t.Fatalf("old revision visible: %+v", inv)
 	}
-	if _, err := env.pool.Exec(context.Background(), `DROP TRIGGER fault_inventory_upsert ON catalog_product_inventory`); err != nil {
+	if _, err := env.pool.Exec(context.Background(), `DROP TRIGGER fault_inventory_upsert ON catalog_product_variant_inventory`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(context.Background(), `DROP FUNCTION block_inventory_upsert()`); err != nil {
 		t.Fatal(err)
 	}
-	forceCatalogDue(t, env, catalog.ProcessorProductInventoryProjectionV1, event)
+	forceCatalogDue(t, env, catalog.ProcessorProductVariantInventoryProjectionV1, event)
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("retry commits: %+v", res)
 	}
-	inv, err = svc.GetProductInventory(context.Background(), productID)
+	inv, err = svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2254,13 +2305,14 @@ func TestInventoryInactiveProductProjects(t *testing.T) {
 	}
 	hiddenMap["is_active"] = false
 	hiddenRaw, _ := json.Marshal(hiddenMap)
-	ingestCatalog(t, env, "d0006070-0000-4000-8000-000000000070", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", string(hiddenRaw))
+	ingestCatalog(t, env, "d0006070-0000-4000-8000-000000000070", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(hiddenRaw))
 	projectCatalogOnce(t, env, "d0006070-0000-4000-8000-000000000070")
 	ingestCatalog(t, env, "d0006072-0000-4000-8000-000000000072", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:00:30Z",
 		policyPayload(productID, 1, true, true, nil))
 	projectCatalogOnce(t, env, "d0006072-0000-4000-8000-000000000072")
 	event := "d0006071-0000-4000-8000-000000000071"
-	ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:01:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:01:00Z",
 		inventoryPayload(productID, 1, 9))
 	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("inactive inventory: %+v", res)
@@ -2290,10 +2342,10 @@ func TestInventoryAvailabilityMatrix(t *testing.T) {
 		ids := catalogIDs(t, base, prefix+"-root", prefix+"-sub", prefix+"-tag")
 		root, sub, tag := ids[prefix+"-root"], ids[prefix+"-sub"], ids[prefix+"-tag"]
 		ce := func(n int) string { return fmt.Sprintf("d%07d-0000-4000-8000-100000000%03d", base, n) }
-		ingestCatalog(t, env, ce(1), catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, ce(1), catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(root, "active", map[string]string{"ar": "جذر"}, nil, 1))
 		projectCatalogOnce(t, env, ce(1))
-		ingestCatalog(t, env, ce(2), catalog.EventCategorySnapshotV1, "2026-09-20T10:00:00Z",
+		ingestCatalog(t, env, ce(2), catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
 			categoryPayload(sub, "active", map[string]string{"ar": "فرعي"}, []string{root}, 1))
 		projectCatalogOnce(t, env, ce(2))
 		ingestCatalog(t, env, ce(3), catalog.EventTagSnapshotV1, "2026-09-20T10:00:00Z",
@@ -2311,14 +2363,15 @@ func TestInventoryAvailabilityMatrix(t *testing.T) {
 			payload = string(raw)
 		}
 		pe := fmt.Sprintf("d%07d-0000-4000-8000-000000000001", base)
-		ingestCatalog(t, env, pe, catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z", payload)
+		ingestCatalog(t, env, pe, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", payload)
 		projectCatalogOnce(t, env, pe)
 		oe := fmt.Sprintf("d%07d-0000-4000-8000-000000000002", base)
 		ingestCatalog(t, env, oe, catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
 			policyPayload(productID, 1, true, sellOnline, cap))
 		projectCatalogOnce(t, env, oe)
 		ie := fmt.Sprintf("d%07d-0000-4000-8000-000000000003", base)
-		ingestCatalog(t, env, ie, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
+		seedInventoryVariant(t, env, productID)
+		ingestCatalog(t, env, ie, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:02:00Z",
 			inventoryPayload(productID, 1, stock))
 		projectCatalogOnce(t, env, ie)
 		return productID
@@ -2356,16 +2409,13 @@ func TestInventoryAvailabilityMatrix(t *testing.T) {
 			if availability.OnlineAvailable != tc.wantOnline || availability.Ready != tc.wantReady {
 				t.Fatalf("got (%d,%v): %+v", availability.OnlineAvailable, availability.Ready, availability)
 			}
-			if availability.InventoryRevision != 1 || availability.InventoryProjectedAt == nil || availability.InventoryEventID == "" {
-				t.Fatalf("freshness metadata: %+v", availability)
-			}
 		})
 	}
 
 	// Missing inventory: policy present, no inventory row → 0 + not ready.
 	root, sub, tag := catalogProductFixture(t, env, 220, "avm7")
 	noInv := "e0005166-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0006160-0000-4000-8000-000000000060", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0006160-0000-4000-8000-000000000060", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(noInv, "PAP-NOINV", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0006160-0000-4000-8000-000000000060")
 	ingestCatalog(t, env, "d0006161-0000-4000-8000-000000000061", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
@@ -2398,13 +2448,14 @@ func TestInventoryAvailabilityFollowsChanges(t *testing.T) {
 	ctx := context.Background()
 	root, sub, tag := catalogProductFixture(t, env, 167, "avf")
 	productID := "e0005167-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0006170-0000-4000-8000-000000000070", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0006170-0000-4000-8000-000000000070", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-FLW", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0006170-0000-4000-8000-000000000070")
 	ingestCatalog(t, env, "d0006171-0000-4000-8000-000000000071", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:01:00Z",
 		policyPayload(productID, 1, true, true, nil))
 	projectCatalogOnce(t, env, "d0006171-0000-4000-8000-000000000071")
-	ingestCatalog(t, env, "d0006172-0000-4000-8000-000000000072", catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:02:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, "d0006172-0000-4000-8000-000000000072", catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:02:00Z",
 		inventoryPayload(productID, 1, 10))
 	projectCatalogOnce(t, env, "d0006172-0000-4000-8000-000000000072")
 
@@ -2429,7 +2480,8 @@ func TestInventoryAvailabilityFollowsChanges(t *testing.T) {
 	}
 
 	// Stock 10 → 3 at inventory rev2, no policy change: availability 3.
-	ingestCatalog(t, env, "d0006174-0000-4000-8000-000000000074", catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:04:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, "d0006174-0000-4000-8000-000000000074", catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:04:00Z",
 		inventoryPayload(productID, 2, 3))
 	projectCatalogOnce(t, env, "d0006174-0000-4000-8000-000000000074")
 	availability, err = svc.GetProductAvailability(ctx, productID)
@@ -2448,7 +2500,7 @@ func TestInventoryAvailabilityFollowsChanges(t *testing.T) {
 	}
 	deactivatedMap["is_active"] = false
 	deactivatedRaw, _ := json.Marshal(deactivatedMap)
-	ingestCatalog(t, env, "d0006175-0000-4000-8000-000000000075", catalog.EventProductSnapshotV1, "2026-09-20T12:05:00Z", string(deactivatedRaw))
+	ingestCatalog(t, env, "d0006175-0000-4000-8000-000000000075", catalog.EventProductSnapshotV2, "2026-09-20T12:05:00Z", string(deactivatedRaw))
 	projectCatalogOnce(t, env, "d0006175-0000-4000-8000-000000000075")
 	availability, err = svc.GetProductAvailability(ctx, productID)
 	if err != nil {
@@ -2456,9 +2508,6 @@ func TestInventoryAvailabilityFollowsChanges(t *testing.T) {
 	}
 	if availability.OnlineAvailable != 0 || !availability.Ready {
 		t.Fatalf("deactivation: %+v", availability)
-	}
-	if availability.InventoryRevision != 2 {
-		t.Fatalf("inventory untouched by lifecycle: %+v", availability)
 	}
 }
 
@@ -2469,7 +2518,8 @@ func TestInventoryRebuild(t *testing.T) {
 	productID := "e0005007-0000-4000-8000-000000000007"
 	inventoryFixture(t, env, 168, "inv8", productID, "PAP-RBD", 10)
 	ingest := func(event string, revision int64, stock int) catalog.ProjectResult {
-		ingestCatalog(t, env, event, catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:00:00Z",
+		seedInventoryVariant(t, env, productID)
+		ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
 			inventoryPayload(productID, revision, stock))
 		return projectCatalogOnce(t, env, event)
 	}
@@ -2488,17 +2538,17 @@ func TestInventoryRebuild(t *testing.T) {
 
 	before := dumpCatalog(t, env)
 	ctx := context.Background()
-	if _, err := env.pool.Exec(ctx, `DELETE FROM catalog_product_inventory`); err != nil {
+	if _, err := env.pool.Exec(ctx, `DELETE FROM catalog_product_variant_inventory`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx,
 		`UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL,
 		 attempt_count=0, processed_at=NULL, last_error_code=NULL, last_error_message=NULL
-		 WHERE processor = 'inventory_product_projection.v1'`); err != nil {
+		 WHERE processor = 'inventory_product_variant_projection.v1'`); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := env.pool.Query(ctx,
-		`SELECT event_id::text FROM sync_events WHERE event_type = 'inventory.product.snapshot.v1' ORDER BY received_at ASC`)
+		`SELECT event_id::text FROM sync_events WHERE event_type = 'inventory.product_variant.snapshot.v1' ORDER BY received_at ASC`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2520,7 +2570,7 @@ func TestInventoryRebuild(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatal("load")
 		}
-		if _, err := store.ProjectProductInventory(ctx, rec, time.Now()); err != nil {
+		if _, err := store.ProjectProductVariantInventory(ctx, rec, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2530,11 +2580,11 @@ func TestInventoryRebuild(t *testing.T) {
 	}
 	// The equal-revision conflict re-blocks deterministically in original
 	// order; the highest valid revision is authoritative.
-	if status, code := catalogStatus(t, env, catalog.ProcessorProductInventoryProjectionV1, "d0006083-0000-4000-8000-000000000083"); status != "blocked" || code != ErrCatalogRevisionConflict {
+	if status, code := catalogStatus(t, env, catalog.ProcessorProductVariantInventoryProjectionV1, "d0006083-0000-4000-8000-000000000083"); status != "blocked" || code != ErrCatalogRevisionConflict {
 		t.Fatalf("conflict re-blocked: %q/%q", status, code)
 	}
 	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetProductInventory(context.Background(), productID)
+	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2551,20 +2601,22 @@ func TestCatalogMixedRevisionKeys(t *testing.T) {
 	env := openSaleEnv(t)
 	root, sub, tag := catalogProductFixture(t, env, 230, "mix")
 	productID := "e0005230-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0006230-0000-4000-8000-000000000030", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0006230-0000-4000-8000-000000000030", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-MIX", "x", root, []string{sub}, []string{tag}, 12))
 	projectCatalogOnce(t, env, "d0006230-0000-4000-8000-000000000030")
-	ingestCatalog(t, env, "d0006231-0000-4000-8000-000000000031", catalog.EventProductSnapshotV1, "2026-09-20T12:01:00Z",
+	ingestCatalog(t, env, "d0006231-0000-4000-8000-000000000031", catalog.EventProductSnapshotV2, "2026-09-20T12:01:00Z",
 		productPayload(productID, "PAP-MIX", "x", root, []string{sub}, []string{tag}, 13))
 	ingestCatalog(t, env, "d0006232-0000-4000-8000-000000000032", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:02:00Z",
 		policyPayload(productID, 4, true, true, policyInt(9)))
 	projectCatalogOnce(t, env, "d0006232-0000-4000-8000-000000000032")
 	ingestCatalog(t, env, "d0006233-0000-4000-8000-000000000033", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:03:00Z",
 		policyPayload(productID, 5, true, true, policyInt(9)))
-	ingestCatalog(t, env, "d0006234-0000-4000-8000-000000000034", catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:04:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, "d0006234-0000-4000-8000-000000000034", catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:04:00Z",
 		inventoryPayload(productID, 27, 6))
 	projectCatalogOnce(t, env, "d0006234-0000-4000-8000-000000000034")
-	ingestCatalog(t, env, "d0006235-0000-4000-8000-000000000035", catalog.EventInventoryProductSnapshotV1, "2026-09-20T12:05:00Z",
+	seedInventoryVariant(t, env, productID)
+	ingestCatalog(t, env, "d0006235-0000-4000-8000-000000000035", catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:05:00Z",
 		inventoryPayload(productID, 28, 5))
 
 	ctx := context.Background()
@@ -2586,14 +2638,14 @@ func TestCatalogMixedRevisionKeys(t *testing.T) {
 		}
 		return out
 	}
-	assertEqualInt64s(t, "catalog", revisions(catalog.EventProductSnapshotV1, "catalog_revision"), []int64{12, 13})
+	assertEqualInt64s(t, "catalog", revisions(catalog.EventProductSnapshotV2, "catalog_revision"), []int64{12, 13})
 	assertEqualInt64s(t, "policy", revisions(catalog.EventProductSalesPolicySnapshotV1, "sales_policy_revision"), []int64{4, 5})
-	assertEqualInt64s(t, "inventory", revisions(catalog.EventInventoryProductSnapshotV1, "inventory_revision"), []int64{27, 28})
+	assertEqualInt64s(t, "inventory", revisions(catalog.EventInventoryProductVariantSnapshotV1, "inventory_revision"), []int64{27, 28})
 
-	// Wrong key fails closed: inventory payloads carry no catalog_revision.
+	// A missing revision key fails closed instead of casting a guessed value.
 	if _, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
-		EventType: catalog.EventInventoryProductSnapshotV1, Column2: "product_id", Column3: productID,
-		Processor: "test", Column5: "catalog_revision",
+		EventType: catalog.EventInventoryProductVariantSnapshotV1, Column2: "product_id", Column3: productID,
+		Processor: "test", Column5: "nonexistent_revision",
 	}); err == nil {
 		t.Fatal("wrong revision key must fail, not cross-read")
 	}

@@ -57,7 +57,7 @@ func remediationCloudSetup(t *testing.T) remediationCloud {
 	}{
 		{`INSERT INTO stores(id,display_name,timezone) VALUES($1,'Review','Africa/Cairo')`, []any{sid}},
 		{`INSERT INTO device_store_bindings(device_id,store_id) VALUES($1,$2)`, []any{did, sid}},
-		{`INSERT INTO sync_events(event_id,device_id,event_type,occurred_at,payload,payload_hash,store_id) VALUES($1,$2,'catalog.product.snapshot.v1',now(),'{}','\x00',$3)`, []any{eid, did, sid}},
+		{`INSERT INTO sync_events(event_id,device_id,event_type,occurred_at,payload,payload_hash,store_id) VALUES($1,$2,'catalog.product.snapshot.v2',now(),'{}','\x00',$3)`, []any{eid, did, sid}},
 		{`INSERT INTO catalog_categories(category_id,status,name_ar,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) VALUES($1,'active','Root',1,$2,$3,'\x00',now(),$4)`, []any{cid, eid, did, sid}},
 		{`INSERT INTO catalog_products(product_id,name,top_category_id,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) VALUES($1,'Original',$2,true,7,$3,$4,'\x00',now(),$5)`, []any{pid, cid, eid, did, sid}},
 		// Phase 17-R0: Product carries no SKU (ADR-0049) — the admin

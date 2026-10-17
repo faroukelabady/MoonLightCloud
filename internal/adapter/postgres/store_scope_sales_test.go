@@ -124,42 +124,45 @@ func TestScope_InventoryIsolation(t *testing.T) {
 	ids := catalogIDs(t, 210, "prod-a", "prod-b")
 	prodA, prodB := ids["prod-a"], ids["prod-b"]
 	f.ingest(t, f.devA, f.credA, "e0000210-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "STOCK-X", "A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodA, "STOCK-X", "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000210-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodB, "STOCK-X", "B", rootB, nil, []string{tagB}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodB, "STOCK-X", "B", rootB, nil, []string{tagB}, 1))
 	for _, event := range []string{
 		"e0000210-0000-4000-8000-000000000001", "e0000210-0000-4000-8000-000000000002",
 	} {
-		requireOutcome(t, f.projectCatalog(t, event, catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		requireOutcome(t, f.projectCatalog(t, event, catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	}
+	seedScopeInventoryVariant(t, f, prodA)
 	f.ingest(t, f.devA, f.credA, "e0000210-0000-4000-8000-000000000003",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodA, 1, 5))
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodA, 1, 5))
+	seedScopeInventoryVariant(t, f, prodB)
 	f.ingest(t, f.devB, f.credB, "e0000210-0000-4000-8000-000000000004",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodB, 1, 20))
-	requireOutcome(t, f.projectCatalog(t, "e0000210-0000-4000-8000-000000000003", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
-	requireOutcome(t, f.projectCatalog(t, "e0000210-0000-4000-8000-000000000004", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodB, 1, 20))
+	requireOutcome(t, f.projectCatalog(t, "e0000210-0000-4000-8000-000000000003", catalog.EventInventoryProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000210-0000-4000-8000-000000000004", catalog.EventInventoryProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
 	var stockA, stockB int
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT stock_quantity FROM catalog_product_inventory WHERE product_id=$1`, prodA).Scan(&stockA); err != nil || stockA != 5 {
+		`SELECT stock_quantity FROM catalog_product_variant_inventory WHERE product_id=$1`, prodA).Scan(&stockA); err != nil || stockA != 5 {
 		t.Fatalf("A stock 5: %d (%v)", stockA, err)
 	}
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT stock_quantity FROM catalog_product_inventory WHERE product_id=$1`, prodB).Scan(&stockB); err != nil || stockB != 20 {
+		`SELECT stock_quantity FROM catalog_product_variant_inventory WHERE product_id=$1`, prodB).Scan(&stockB); err != nil || stockB != 20 {
 		t.Fatalf("B stock 20: %d (%v)", stockB, err)
 	}
-	if got := f.rowStore(t, "catalog_product_inventory", "product_id", prodA); got == nil || *got != scopeStoreA {
+	if got := f.rowStore(t, "catalog_product_variant_inventory", "product_id", prodA); got == nil || *got != scopeStoreA {
 		t.Fatalf("inventory A scoped: %v", got)
 	}
-	if got := f.rowStore(t, "catalog_product_inventory", "product_id", prodB); got == nil || *got != scopeStoreB {
+	if got := f.rowStore(t, "catalog_product_variant_inventory", "product_id", prodB); got == nil || *got != scopeStoreB {
 		t.Fatalf("inventory B scoped: %v", got)
 	}
 	// Cross-Store inventory for A's product: conflict, A untouched.
+	seedScopeInventoryVariant(t, f, prodA)
 	f.ingest(t, f.devB, f.credB, "e0000210-0000-4000-8000-000000000005",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodA, 2, 99))
-	res := f.projectCatalog(t, "e0000210-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1)
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodA, 2, 99))
+	res := f.projectCatalog(t, "e0000210-0000-4000-8000-000000000005", catalog.EventInventoryProductVariantSnapshotV1)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if err := f.pool.QueryRow(context.Background(),
-		`SELECT stock_quantity FROM catalog_product_inventory WHERE product_id=$1`, prodA).Scan(&stockA); err != nil || stockA != 5 {
+		`SELECT stock_quantity FROM catalog_product_variant_inventory WHERE product_id=$1`, prodA).Scan(&stockA); err != nil || stockA != 5 {
 		t.Fatalf("A stock intact: %d (%v)", stockA, err)
 	}
 }
@@ -172,13 +175,13 @@ func TestScope_PolicyIsolation(t *testing.T) {
 	ids := catalogIDs(t, 230, "prod-a", "prod-b")
 	prodA, prodB := ids["prod-a"], ids["prod-b"]
 	f.ingest(t, f.devA, f.credA, "e0000230-0000-4000-8000-000000000001",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "POL-X", "A", rootA, nil, []string{tagA}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodA, "POL-X", "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000230-0000-4000-8000-000000000002",
-		catalog.EventProductSnapshotV1, productPayload(prodB, "POL-X", "B", rootB, nil, []string{tagB}, 1))
+		catalog.EventProductSnapshotV2, productPayload(prodB, "POL-X", "B", rootB, nil, []string{tagB}, 1))
 	for _, event := range []string{
 		"e0000230-0000-4000-8000-000000000001", "e0000230-0000-4000-8000-000000000002",
 	} {
-		requireOutcome(t, f.projectCatalog(t, event, catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		requireOutcome(t, f.projectCatalog(t, event, catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	}
 	f.ingest(t, f.devA, f.credA, "e0000230-0000-4000-8000-000000000003",
 		catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodA, 1, true, false, nil))
@@ -272,11 +275,6 @@ func TestScope_SaleV2StorePreserved(t *testing.T) {
 	}
 	if got := saleStore(t, f, saleID); got == nil || *got != scopeStoreA {
 		t.Fatalf("sale v2 scoped: %v", got)
-	}
-	var capture *bool
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT tag_capture FROM sales_projection WHERE sale_id=$1`, saleID).Scan(&capture); err != nil || capture == nil || !*capture {
-		t.Fatalf("v2 tag capture: %v (%v)", capture, err)
 	}
 	var tags int
 	if err := f.pool.QueryRow(context.Background(),
@@ -463,7 +461,7 @@ func TestScope_MixedBacklog(t *testing.T) {
 	rootM, tagM := ids["root-m"], ids["tag-m"]
 	names := map[string]string{"ar": "m"}
 	for i, tc := range []struct{ event, typ, payload string }{
-		{"e0000340-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1, categoryPayload(rootM, "active", names, nil, 1)},
+		{"e0000340-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, categoryPayload(rootM, "active", names, nil, 1)},
 		{"e0000340-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1, tagPayload(tagM, "mixed-tag", true, names, 1)},
 	} {
 		f.ingest(t, f.devC, f.credC, tc.event, tc.typ, tc.payload)
@@ -471,11 +469,11 @@ func TestScope_MixedBacklog(t *testing.T) {
 		_ = i
 	}
 	f.ingest(t, f.devC, f.credC, "e0000340-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(ids["null-p"], "MIX-1", "Null", rootM, nil, []string{tagM}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["null-p"], "MIX-1", "Null", rootM, nil, []string{tagM}, 1))
 	f.ingest(t, f.devA, f.credA, "e0000340-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(ids["a-p"], "MIX-1", "A", rootM, nil, []string{tagM}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["a-p"], "MIX-1", "A", rootM, nil, []string{tagM}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000340-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV1, productPayload(ids["b-p"], "MIX-1", "B", rootM, nil, []string{tagM}, 1))
+		catalog.EventProductSnapshotV2, productPayload(ids["b-p"], "MIX-1", "B", rootM, nil, []string{tagM}, 1))
 	type rout struct {
 		res catalog.ProjectResult
 		err error

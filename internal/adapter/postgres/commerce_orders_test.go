@@ -188,7 +188,7 @@ func TestCommerceOrderRenamePreservesHistory(t *testing.T) {
 	store := catalogStore(env)
 	root, sub, tag := catalogProductFixture(t, env, 300, "ordren")
 	productID := "e0003000-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0007000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0007000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-REN", "Old Name", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007000-0000-4000-8000-000000000000")
 	if _, err := store.CreateProductMapping(ctx, "website", productID, "500"); err != nil {
@@ -199,7 +199,7 @@ func TestCommerceOrderRenamePreservesHistory(t *testing.T) {
 		t.Fatalf("initial: %d %v", revision, changed)
 	}
 	// Rename the current product at catalog rev 2.
-	ingestCatalog(t, env, "d0007001-0000-4000-8000-000000000001", catalog.EventProductSnapshotV1, "2026-09-20T13:00:00Z",
+	ingestCatalog(t, env, "d0007001-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2, "2026-09-20T13:00:00Z",
 		productPayload(productID, "PAP-REN", "New Name", root, []string{sub}, []string{tag}, 2))
 	projectCatalogOnce(t, env, "d0007001-0000-4000-8000-000000000001")
 
@@ -225,7 +225,7 @@ func TestCommerceOrderSurvivesCatalogRebuild(t *testing.T) {
 	store := catalogStore(env)
 	root, sub, tag := catalogProductFixture(t, env, 310, "orbr")
 	productID := "e0003100-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, "d0007100-0000-4000-8000-000000000000", catalog.EventProductSnapshotV1, "2026-09-20T12:00:00Z",
+	ingestCatalog(t, env, "d0007100-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-RB", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007100-0000-4000-8000-000000000000")
 	if _, err := store.CreateProductMapping(ctx, "website", productID, "500"); err != nil {

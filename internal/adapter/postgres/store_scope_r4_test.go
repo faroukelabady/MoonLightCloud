@@ -28,7 +28,7 @@ func r4RawEvent(t *testing.T, f *scopeFixture, category bool, event string) stri
 	id, typ, proc := sharedTagGold, catalog.EventTagSnapshotV1, catalog.ProcessorTagProjectionV1
 	payload := tagPayload(id, "gold", true, map[string]string{"ar": "ذهب", "en": "Gold"}, 1)
 	if category {
-		id, typ, proc = sharedCatIslamic, catalog.EventCategorySnapshotV1, catalog.ProcessorCategoryProjectionV1
+		id, typ, proc = sharedCatIslamic, catalog.EventCategorySnapshotV2, catalog.ProcessorCategoryProjectionV1
 		payload = categoryPayload(id, "active", map[string]string{"ar": "إسلامي", "en": "Islamic"}, nil, 1)
 	}
 	f.ingest(t, f.devA, f.credA, event, typ, payload)
@@ -113,7 +113,7 @@ func TestR4_R2SlugCollision(t *testing.T) {
 func r4ProjectRearm(t *testing.T, f *scopeFixture, event, typ string) catalog.ProjectResult {
 	t.Helper()
 	proc := catalog.ProcessorTagProjectionV1
-	if typ == catalog.EventCategorySnapshotV1 {
+	if typ == catalog.EventCategorySnapshotV2 {
 		proc = catalog.ProcessorCategoryProjectionV1
 	}
 	r4Exec(t, f, 1, `UPDATE sync_event_processing SET status='pending',processed_at=NULL WHERE event_id=$1 AND processor=$2`, event, proc)
@@ -134,7 +134,7 @@ func TestR4_CanonicalRetirement(t *testing.T) {
 				revision = 3
 				e = r2EventID(9420)
 				en, ar = "New Islamic", "إسلامي جديد"
-				f.ingest(t, f.devA, f.credA, e, catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": ar, "en": en}, nil, revision))
+				f.ingest(t, f.devA, f.credA, e, catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": ar, "en": en}, nil, revision))
 				r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, e, catalog.ProcessorCategoryProjectionV1)
 			}
 			canonical := scopedCatID(t, sharedCatIslamic, scopeStoreA)
@@ -230,7 +230,7 @@ func TestR4_RetirementConflictAndInterruption(t *testing.T) {
 			if mode == "stale" {
 				revision = 3
 				e = r2EventID(9600)
-				f.ingest(t, f.devA, f.credA, e, catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": "إسلامي", "en": en}, nil, revision))
+				f.ingest(t, f.devA, f.credA, e, catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": "إسلامي", "en": en}, nil, revision))
 				r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, e, catalog.ProcessorCategoryProjectionV1)
 			}
 			r4Exec(t, f, 1, `INSERT INTO catalog_categories(category_id,status,name_ar,name_en,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id,default_algorithm) SELECT $2,'active','إسلامي',$3,$4,event_id,device_id,payload_hash,received_at,store_id,1 FROM sync_events WHERE event_id=$1`, e, canonical, en, revision)
@@ -239,7 +239,7 @@ func TestR4_RetirementConflictAndInterruption(t *testing.T) {
 				r4Exec(t, f, 0, `CREATE TRIGGER r4_retire_fail BEFORE UPDATE ON catalog_categories FOR EACH ROW EXECUTE FUNCTION r4_retire_fail()`)
 			}
 			before := r4Payloads(t, f)
-			result := r4ProjectRearm(t, f, source, catalog.EventCategorySnapshotV1)
+			result := r4ProjectRearm(t, f, source, catalog.EventCategorySnapshotV2)
 			if mode == "conflict" {
 				requireOutcome(t, result, catalog.OutcomeBlocked, ErrCatalogRevisionConflict)
 			} else if mode == "interruption" {
@@ -289,11 +289,11 @@ func TestR4_RetirementRacingProjection(t *testing.T) {
 			t.Fatalf("queue=%d %v", n, err)
 		}
 		newer := r2EventID(9700)
-		f.ingest(t, f.devA, f.credA, newer, catalog.EventCategorySnapshotV1, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": "جديد", "en": "New"}, nil, 2))
+		f.ingest(t, f.devA, f.credA, newer, catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"ar": "جديد", "en": "New"}, nil, 2))
 		var wg sync.WaitGroup
 		for _, e := range []string{source, newer} {
 			wg.Add(1)
-			go func(id string) { defer wg.Done(); r3Project(t, f, id, catalog.EventCategorySnapshotV1) }(e)
+			go func(id string) { defer wg.Done(); r3Project(t, f, id, catalog.EventCategorySnapshotV2) }(e)
 		}
 		wg.Wait()
 		r3Converge(t, f)
@@ -327,7 +327,7 @@ func TestR4_MixedBoundedRecovery(t *testing.T) {
 	// Current references from processed sources must transition alongside defaults.
 	product := "a9000000-0000-4000-8000-000000009801"
 	pe := r2EventID(9801)
-	f.ingest(t, f.devA, f.credA, pe, catalog.EventProductSnapshotV1, productPayload(product, "R4-MIXED", "Product", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
+	f.ingest(t, f.devA, f.credA, pe, catalog.EventProductSnapshotV2, productPayload(product, "R4-MIXED", "Product", sharedCatIslamic, nil, []string{sharedTagGold}, 1))
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, pe, catalog.ProcessorProductProjectionV1)
 	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'Product',$3,70,100,true,1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, pe, product, sharedCatIslamic)
 	r4Exec(t, f, 1, `INSERT INTO catalog_product_tags VALUES($1,$2)`, product, sharedTagGold)
@@ -336,7 +336,7 @@ func TestR4_MixedBoundedRecovery(t *testing.T) {
 
 	child := "a9000000-0000-4000-8000-000000009802"
 	ce := r2EventID(9802)
-	f.ingest(t, f.devA, f.credA, ce, catalog.EventCategorySnapshotV1, categoryPayload(child, "active", map[string]string{"ar": "فرع", "en": "Child"}, []string{sharedCatIslamic}, 1))
+	f.ingest(t, f.devA, f.credA, ce, catalog.EventCategorySnapshotV2, categoryPayload(child, "active", map[string]string{"ar": "فرع", "en": "Child"}, []string{sharedCatIslamic}, 1))
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, ce, catalog.ProcessorCategoryProjectionV1)
 	r4Exec(t, f, 1, `INSERT INTO catalog_categories(category_id,status,name_ar,name_en,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id) SELECT $2,'active','فرع','Child',1,event_id,device_id,payload_hash,received_at,store_id FROM sync_events WHERE event_id=$1`, ce, child)
 	r4Exec(t, f, 1, `INSERT INTO catalog_category_edges VALUES($1,$2,0)`, sharedCatIslamic, child)
@@ -345,7 +345,7 @@ func TestR4_MixedBoundedRecovery(t *testing.T) {
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,last_error_code,last_error_message) VALUES($1,$2,'blocked',1,'CATALOG_REVISION_CONFLICT','equal revision with conflicting state')`, genuine, catalog.ProcessorTagProjectionV1)
 	legacy := r2EventID(9804)
 	lp := "a9000000-0000-4000-8000-000000009804"
-	f.ingest(t, f.devC, f.credC, legacy, catalog.EventProductSnapshotV1, productPayload(lp, "R4-LEGACY", "Legacy", sharedCatIslamic, nil, nil, 1))
+	f.ingest(t, f.devC, f.credC, legacy, catalog.EventProductSnapshotV2, productPayload(lp, "R4-LEGACY", "Legacy", sharedCatIslamic, nil, nil, 1))
 	r4Exec(t, f, 1, `INSERT INTO sync_event_processing(event_id,processor,status,attempt_count,processed_at) VALUES($1,$2,'processed',1,now())`, legacy, catalog.ProcessorProductProjectionV1)
 	r4Exec(t, f, 1, `INSERT INTO catalog_products(product_id,name,top_category_id,width_cm,height_cm,is_active,source_revision,source_event_id,source_device_id,source_payload_hash,source_received_at) SELECT $2,'Legacy',$3,70,100,true,1,event_id,device_id,payload_hash,received_at FROM sync_events WHERE event_id=$1`, legacy, lp, sharedCatIslamic)
 	before := r4Payloads(t, f)

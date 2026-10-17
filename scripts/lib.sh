@@ -4,6 +4,23 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Keep Cloud's pin independent of Retail's module tool directive. A globally
+# installed generator must not silently change committed output.
+SQLC_VERSION=1.31.1
+run_sqlc() {
+  if ! command -v sqlc >/dev/null 2>&1; then
+    echo "error: sqlc v${SQLC_VERSION} required (see README prerequisites)" >&2
+    return 1
+  fi
+  local actual
+  actual="$(sqlc version)" || return 1
+  if [[ "$actual" != "v${SQLC_VERSION}" ]]; then
+    echo "error: expected sqlc v${SQLC_VERSION}, found $actual" >&2
+    return 1
+  fi
+  sqlc "$@"
+}
+
 # compose_cmd prints the container compose command (podman first, docker fallback).
 compose_cmd() {
   if command -v podman >/dev/null 2>&1; then
@@ -90,19 +107,23 @@ redact_url() {
 }
 
 # wait_db_ready polls a real PostgreSQL handshake (not just TCP accept).
-# Builds the app binary once to /tmp so loop iterations stay fast.
-wait_db_ready() {
+# Builds one private probe per invocation; simultaneous gates never replace
+# an executable another gate is using. The subshell keeps cleanup local.
+wait_db_ready() (
   local url="${1:?usage: wait_db_ready DATABASE_URL}"
-  (cd "$REPO_ROOT" && go build -o /tmp/moonlight-cloud-probe ./cmd/moonlight-cloud) >/dev/null 2>&1
+  local probe_root
+  probe_root="$(mktemp -d "${TMPDIR:-/tmp}/moonlight-db-probe.XXXXXXXX")"
+  trap 'rm -rf -- "$probe_root"' EXIT
+  (cd "$REPO_ROOT" && go build -o "$probe_root/probe" ./cmd/moonlight-cloud) >/dev/null 2>&1 || return 1
   for _ in $(seq 1 60); do
-    if DATABASE_URL="$url" ENVIRONMENT=development ALLOW_UNAUTHENTICATED_REPORTING=true /tmp/moonlight-cloud-probe dbprobe >/dev/null 2>&1; then
+    if DATABASE_URL="$url" ENVIRONMENT=development ALLOW_UNAUTHENTICATED_REPORTING=true "$probe_root/probe" dbprobe >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
   echo "postgres did not become ready: $(redact_url "$url")" >&2
   return 1
-}
+)
 
 # wait_postgres polls until postgres accepts connections (no blind sleep).
 pg_isready_check() {

@@ -227,7 +227,7 @@ func dumpSale(t *testing.T, pool *pgxpool.Pool, saleID string) string {
 	}
 	query(`SELECT sale_id::text, source_event_id::text, source_device_id::text, sale_number, channel,
 		occurred_at::text, paid_at::text, shop_name_ar, shop_name_en, currency,
-		subtotal_minor, discount_minor, tax_minor, total_minor, fx_base, fx_quote, fx_rate, fx_rate_microrate
+		subtotal_minor, discount_minor, tax_minor, total_minor, fx_base, fx_quote, fx_rate_microrate
 		FROM sales_projection WHERE sale_id=$1`, saleID)
 	query(`SELECT sale_item_id::text, position, sku, product_name, quantity, unit_price_minor, line_total_minor
 		FROM sale_lines_projection WHERE sale_id=$1 ORDER BY sale_item_id::text`, saleID)

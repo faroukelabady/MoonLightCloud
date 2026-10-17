@@ -26,9 +26,9 @@ func scopeLegacyProduct(t *testing.T, f *scopeFixture, base int, prefix string) 
 	for i, tc := range []struct {
 		event, typ, payload string
 	}{
-		{fmt.Sprintf("e%07x-0000-4000-8000-000000000001", base), catalog.EventCategorySnapshotV1, categoryPayload(root, "active", names, nil, 1)},
+		{fmt.Sprintf("e%07x-0000-4000-8000-000000000001", base), catalog.EventCategorySnapshotV2, categoryPayload(root, "active", names, nil, 1)},
 		{fmt.Sprintf("e%07x-0000-4000-8000-000000000002", base), catalog.EventTagSnapshotV1, tagPayload(tag, prefix+"-tag", true, names, 1)},
-		{fmt.Sprintf("e%07x-0000-4000-8000-000000000003", base), catalog.EventProductSnapshotV1, productPayload(product, prefix+"-SKU", prefix, root, nil, []string{tag}, 1)},
+		{fmt.Sprintf("e%07x-0000-4000-8000-000000000003", base), catalog.EventProductSnapshotV2, productPayload(product, prefix+"-SKU", prefix, root, nil, []string{tag}, 1)},
 	} {
 		f.ingest(t, f.devC, f.credC, tc.event, tc.typ, tc.payload)
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
@@ -46,23 +46,24 @@ func TestScope_ProductAdoptionBlockedByForeignDependency(t *testing.T) {
 	rootC, tagC, prodP := scopeLegacyProduct(t, f, 400, "f02prod")
 	names := map[string]string{"ar": "f02"}
 
+	seedScopeInventoryVariant(t, f, prodP)
 	f.ingest(t, f.devA, f.credA, "e0000400-0000-4000-8000-000000000004",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP, 1, 20))
 	f.ingest(t, f.devA, f.credA, "e0000400-0000-4000-8000-000000000005",
 		catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodP, 1, true, true, nil))
-	requireOutcome(t, f.projectCatalog(t, "e0000400-0000-4000-8000-000000000004", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000400-0000-4000-8000-000000000004", catalog.EventInventoryProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000400-0000-4000-8000-000000000005", catalog.EventProductSalesPolicySnapshotV1), catalog.OutcomeProcessed, "")
 
 	// Store B adopts with a higher revision: must fail, state untouched.
 	f.ingest(t, f.devB, f.credB, "e0000400-0000-4000-8000-000000000006",
-		catalog.EventProductSnapshotV1, productPayload(prodP, "f02prod-SKU", "F02 B", rootC, nil, []string{tagC}, 5))
-	res := f.projectCatalog(t, "e0000400-0000-4000-8000-000000000006", catalog.EventProductSnapshotV1)
+		catalog.EventProductSnapshotV2, productPayload(prodP, "f02prod-SKU", "F02 B", rootC, nil, []string{tagC}, 5))
+	res := f.projectCatalog(t, "e0000400-0000-4000-8000-000000000006", catalog.EventProductSnapshotV2)
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 
 	if got := f.rowStore(t, "catalog_products", "product_id", prodP); got != nil {
 		t.Fatalf("product must stay legacy NULL, got %v", got)
 	}
-	if got := f.rowStore(t, "catalog_product_inventory", "product_id", prodP); got == nil || *got != scopeStoreA {
+	if got := f.rowStore(t, "catalog_product_variant_inventory", "product_id", prodP); got == nil || *got != scopeStoreA {
 		t.Fatalf("inventory stays A: %v", got)
 	}
 	if got := f.rowStore(t, "catalog_product_sales_policies", "product_id", prodP); got == nil || *got != scopeStoreA {
@@ -93,8 +94,8 @@ func TestScope_ProductAdoptionBlockedByForeignDependency(t *testing.T) {
 
 	// Matching adoption positive control: Store A may continue the aggregate.
 	f.ingest(t, f.devA, f.credA, "e0000400-0000-4000-8000-000000000007",
-		catalog.EventProductSnapshotV1, productPayload(prodP, "f02prod-SKU", "F02 A", rootC, nil, []string{tagC}, 6))
-	requireOutcome(t, f.projectCatalog(t, "e0000400-0000-4000-8000-000000000007", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodP, "f02prod-SKU", "F02 A", rootC, nil, []string{tagC}, 6))
+	requireOutcome(t, f.projectCatalog(t, "e0000400-0000-4000-8000-000000000007", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodP); got == nil || *got != scopeStoreA {
 		t.Fatalf("matching adoption succeeds: %v", got)
 	}
@@ -119,8 +120,8 @@ func TestScope_ProductAdoptionBlockedByForeignMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.ingest(t, f.devB, f.credB, "e0000410-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodP, "f02map-SKU", "F02 Map B", rootC, nil, []string{tagC}, 3))
-	requireOutcome(t, f.projectCatalog(t, "e0000410-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		catalog.EventProductSnapshotV2, productPayload(prodP, "f02map-SKU", "F02 Map B", rootC, nil, []string{tagC}, 3))
+	requireOutcome(t, f.projectCatalog(t, "e0000410-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if got := f.rowStore(t, "catalog_products", "product_id", prodP); got != nil {
 		t.Fatalf("product must stay legacy NULL: %v", got)
 	}
@@ -144,21 +145,21 @@ func TestScope_CategoryAdoptionBlockedByChildEdge(t *testing.T) {
 	names := map[string]string{"ar": "f02cat"}
 
 	f.ingest(t, f.devC, f.credC, "e0000420-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(parentC, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(parentC, "active", names, nil, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 
 	// A child under the legacy NULL parent is allowed (NULL is a wildcard).
 	f.ingest(t, f.devA, f.credA, "e0000420-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV1, categoryPayload(childA, "active", names, []string{parentC}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventCategorySnapshotV2, categoryPayload(childA, "active", names, []string{parentC}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_categories", "category_id", childA); got == nil || *got != scopeStoreA {
 		t.Fatalf("child owned by A: %v", got)
 	}
 
 	// B adopts the parent: blocked by the A child edge.
 	f.ingest(t, f.devB, f.credB, "e0000420-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV1, categoryPayload(parentC, "active", names, nil, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		catalog.EventCategorySnapshotV2, categoryPayload(parentC, "active", names, nil, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000420-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if got := f.rowStore(t, "catalog_categories", "category_id", parentC); got != nil {
 		t.Fatalf("parent stays legacy NULL: %v", got)
 	}
@@ -178,23 +179,23 @@ func TestScope_CategoryAdoptionBlockedByReferencingProduct(t *testing.T) {
 	catC, tagC, prodA := ids["cat-c"], ids["tag-c"], ids["prod-a"]
 	names := map[string]string{"ar": "f02catp"}
 	f.ingest(t, f.devC, f.credC, "e0000440-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(catC, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(catC, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000440-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagC, "f02catp-tag", true, names, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
 
 	// A product referencing the legacy category projects under A.
 	f.ingest(t, f.devA, f.credA, "e0000440-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodA, "f02catp-SKU", "P", catC, nil, []string{tagC}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodA, "f02catp-SKU", "P", catC, nil, []string{tagC}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodA); got == nil || *got != scopeStoreA {
 		t.Fatalf("product owned by A: %v", got)
 	}
 
 	f.ingest(t, f.devB, f.credB, "e0000440-0000-4000-8000-000000000004",
-		catalog.EventCategorySnapshotV1, categoryPayload(catC, "active", names, nil, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000004", catalog.EventCategorySnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		catalog.EventCategorySnapshotV2, categoryPayload(catC, "active", names, nil, 2))
+	requireOutcome(t, f.projectCatalog(t, "e0000440-0000-4000-8000-000000000004", catalog.EventCategorySnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
 	if got := f.rowStore(t, "catalog_categories", "category_id", catC); got != nil {
 		t.Fatalf("category stays legacy NULL: %v", got)
 	}
@@ -209,15 +210,15 @@ func TestScope_TagAdoptionBlockedByAttachedProduct(t *testing.T) {
 	rootB, tagC, prodB := ids["root-b"], ids["tag-c"], ids["prod-b"]
 	names := map[string]string{"ar": "f02tag"}
 	f.ingest(t, f.devB, f.credB, "e0000460-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV1, categoryPayload(rootB, "active", names, nil, 1))
+		catalog.EventCategorySnapshotV2, categoryPayload(rootB, "active", names, nil, 1))
 	f.ingest(t, f.devC, f.credC, "e0000460-0000-4000-8000-000000000002",
 		catalog.EventTagSnapshotV1, tagPayload(tagC, "f02tag", true, names, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000460-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000460-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000460-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
 
 	f.ingest(t, f.devB, f.credB, "e0000460-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV1, productPayload(prodB, "f02tag-SKU", "P", rootB, nil, []string{tagC}, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000460-0000-4000-8000-000000000003", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
+		catalog.EventProductSnapshotV2, productPayload(prodB, "f02tag-SKU", "P", rootB, nil, []string{tagC}, 1))
+	requireOutcome(t, f.projectCatalog(t, "e0000460-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
 	if got := f.rowStore(t, "catalog_products", "product_id", prodB); got == nil || *got != scopeStoreB {
 		t.Fatalf("product owned by B: %v", got)
 	}
@@ -244,9 +245,10 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 
 	// Store B product adoption and Store A inventory creation, concurrently.
 	f.ingest(t, f.devB, f.credB, "e0000480-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV1, productPayload(prodP, "f02race-SKU", "B", rootC, nil, []string{tagC}, 2))
+		catalog.EventProductSnapshotV2, productPayload(prodP, "f02race-SKU", "B", rootC, nil, []string{tagC}, 2))
+	seedScopeInventoryVariant(t, f, prodP)
 	f.ingest(t, f.devA, f.credA, "e0000480-0000-4000-8000-000000000005",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP, 1, 20))
 
 	const productEvent = "e0000480-0000-4000-8000-000000000004"
 	const inventoryEvent = "e0000480-0000-4000-8000-000000000005"
@@ -257,8 +259,8 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 		event string
 		typ   string
 	}{
-		{productEvent, catalog.EventProductSnapshotV1},
-		{inventoryEvent, catalog.EventInventoryProductSnapshotV1},
+		{productEvent, catalog.EventProductSnapshotV2},
+		{inventoryEvent, catalog.EventInventoryProductVariantSnapshotV1},
 	} {
 		wg.Add(1)
 		go func(event, typ string) {
@@ -273,10 +275,10 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 				}
 				var res catalog.ProjectResult
 				switch typ {
-				case catalog.EventProductSnapshotV1:
+				case catalog.EventProductSnapshotV2:
 					res, err = store.ProjectProduct(context.Background(), rec, time.Now())
-				case catalog.EventInventoryProductSnapshotV1:
-					res, err = store.ProjectProductInventory(context.Background(), rec, time.Now())
+				case catalog.EventInventoryProductVariantSnapshotV1:
+					res, err = store.ProjectProductVariantInventory(context.Background(), rec, time.Now())
 				}
 				if err == nil && res.Outcome != catalog.OutcomeNotDue && res.Outcome != catalog.OutcomeRetryable {
 					mu.Lock()
@@ -296,7 +298,7 @@ func TestScope_AdoptionRacingDependencyCreation(t *testing.T) {
 	// unexpected database error still fails. The loser may have been
 	// permanently blocked.
 	product := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP)
-	inventory := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP)
+	inventory := optionalProjectionStore(t, f, "catalog_product_variant_inventory", "product_id", prodP)
 	if product != nil && *product == scopeStoreB && inventory != nil && *inventory == scopeStoreA {
 		t.Fatalf("contradiction committed: product=B inventory=A")
 	}
@@ -352,14 +354,14 @@ func TestScope_AdoptionRaceDeterministicOrder(t *testing.T) {
 				t.Fatalf("load %s: %v %v", event, ok, err)
 			}
 			switch typ {
-			case catalog.EventProductSnapshotV1:
+			case catalog.EventProductSnapshotV2:
 				res, err := store.ProjectProduct(context.Background(), rec, time.Now())
 				if err != nil {
 					t.Fatalf("project product: %v", err)
 				}
 				return res
 			default:
-				res, err := store.ProjectProductInventory(context.Background(), rec, time.Now())
+				res, err := store.ProjectProductVariantInventory(context.Background(), rec, time.Now())
 				if err != nil {
 					t.Fatalf("project inventory: %v", err)
 				}
@@ -367,16 +369,17 @@ func TestScope_AdoptionRaceDeterministicOrder(t *testing.T) {
 			}
 		}
 		f.ingest(t, f.devB, f.credB, "e0000481-0000-4000-8000-000000000004",
-			catalog.EventProductSnapshotV1, productPayload(prodP, "f02racepf-SKU", "B", rootC, nil, []string{tagC}, 2))
+			catalog.EventProductSnapshotV2, productPayload(prodP, "f02racepf-SKU", "B", rootC, nil, []string{tagC}, 2))
+		seedScopeInventoryVariant(t, f, prodP)
 		f.ingest(t, f.devA, f.credA, "e0000481-0000-4000-8000-000000000005",
-			catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
-		requireOutcome(t, project("e0000481-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeProcessed, "")
-		res := project("e0000481-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1)
+			catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP, 1, 20))
+		requireOutcome(t, project("e0000481-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
+		res := project("e0000481-0000-4000-8000-000000000005", catalog.EventInventoryProductVariantSnapshotV1)
 		requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 		if got := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP); got == nil || *got != scopeStoreB {
 			t.Fatalf("product B committed: %v", got)
 		}
-		if got := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP); got != nil {
+		if got := optionalProjectionStore(t, f, "catalog_product_variant_inventory", "product_id", prodP); got != nil {
 			t.Fatalf("foreign inventory must be absent: %v", *got)
 		}
 	})
@@ -384,12 +387,13 @@ func TestScope_AdoptionRaceDeterministicOrder(t *testing.T) {
 		f := openScopeFixture(t)
 		rootC, tagC, prodP := scopeLegacyProduct(t, f, 482, "f02raceif")
 		f.ingest(t, f.devB, f.credB, "e0000482-0000-4000-8000-000000000004",
-			catalog.EventProductSnapshotV1, productPayload(prodP, "f02raceif-SKU", "B", rootC, nil, []string{tagC}, 2))
+			catalog.EventProductSnapshotV2, productPayload(prodP, "f02raceif-SKU", "B", rootC, nil, []string{tagC}, 2))
+		seedScopeInventoryVariant(t, f, prodP)
 		f.ingest(t, f.devA, f.credA, "e0000482-0000-4000-8000-000000000005",
-			catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
-		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000005", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
-		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000004", catalog.EventProductSnapshotV1), catalog.OutcomeBlocked, ErrStoreScopeConflict)
-		if got := optionalProjectionStore(t, f, "catalog_product_inventory", "product_id", prodP); got == nil || *got != scopeStoreA {
+			catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP, 1, 20))
+		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000005", catalog.EventInventoryProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
+		requireOutcome(t, f.projectCatalog(t, "e0000482-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
+		if got := optionalProjectionStore(t, f, "catalog_product_variant_inventory", "product_id", prodP); got == nil || *got != scopeStoreA {
 			t.Fatalf("inventory A committed: %v", got)
 		}
 		if got := optionalProjectionStore(t, f, "catalog_products", "product_id", prodP); got != nil {
@@ -408,11 +412,12 @@ func TestScope_ExistingContradictionAvailability(t *testing.T) {
 	ctx := context.Background()
 	// Legacy product backed by Store A inventory/policy, then force the
 	// ownership annotation to B (simulating a pre-fix contradictory state).
+	seedScopeInventoryVariant(t, f, prodP)
 	f.ingest(t, f.devA, f.credA, "e0000500-0000-4000-8000-000000000004",
-		catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP, 1, 20))
+		catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP, 1, 20))
 	f.ingest(t, f.devA, f.credA, "e0000500-0000-4000-8000-000000000005",
 		catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodP, 1, true, true, nil))
-	requireOutcome(t, f.projectCatalog(t, "e0000500-0000-4000-8000-000000000004", catalog.EventInventoryProductSnapshotV1), catalog.OutcomeProcessed, "")
+	requireOutcome(t, f.projectCatalog(t, "e0000500-0000-4000-8000-000000000004", catalog.EventInventoryProductVariantSnapshotV1), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, "e0000500-0000-4000-8000-000000000005", catalog.EventProductSalesPolicySnapshotV1), catalog.OutcomeProcessed, "")
 	if _, err := f.pool.Exec(ctx,
 		`UPDATE catalog_products SET store_id=$1 WHERE product_id=$2`, scopeStoreB, prodP); err != nil {

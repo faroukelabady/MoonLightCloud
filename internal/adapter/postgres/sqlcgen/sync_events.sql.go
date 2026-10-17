@@ -13,23 +13,22 @@ import (
 
 const insertSyncEvent = `-- name: InsertSyncEvent :one
 INSERT INTO sync_events
-    (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, payload_hash_version, store_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    (event_id, device_id, credential_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (event_id) DO NOTHING
 RETURNING event_id
 `
 
 type InsertSyncEventParams struct {
-	EventID            pgtype.UUID        `json:"event_id"`
-	DeviceID           pgtype.UUID        `json:"device_id"`
-	CredentialID       pgtype.UUID        `json:"credential_id"`
-	EventType          string             `json:"event_type"`
-	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
-	ReceivedAt         pgtype.Timestamptz `json:"received_at"`
-	Payload            []byte             `json:"payload"`
-	PayloadHash        []byte             `json:"payload_hash"`
-	PayloadHashVersion int32              `json:"payload_hash_version"`
-	StoreID            pgtype.UUID        `json:"store_id"`
+	EventID      pgtype.UUID        `json:"event_id"`
+	DeviceID     pgtype.UUID        `json:"device_id"`
+	CredentialID pgtype.UUID        `json:"credential_id"`
+	EventType    string             `json:"event_type"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt   pgtype.Timestamptz `json:"received_at"`
+	Payload      []byte             `json:"payload"`
+	PayloadHash  []byte             `json:"payload_hash"`
+	StoreID      pgtype.UUID        `json:"store_id"`
 }
 
 func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams) (pgtype.UUID, error) {
@@ -42,7 +41,6 @@ func (q *Queries) InsertSyncEvent(ctx context.Context, arg InsertSyncEventParams
 		arg.ReceivedAt,
 		arg.Payload,
 		arg.PayloadHash,
-		arg.PayloadHashVersion,
 		arg.StoreID,
 	)
 	var event_id pgtype.UUID
@@ -85,24 +83,22 @@ func (q *Queries) SaleEventByID(ctx context.Context, eventID pgtype.UUID) (SaleE
 }
 
 const syncEventByID = `-- name: SyncEventByID :one
-SELECT event_id, device_id, event_type, occurred_at, payload, payload_hash, payload_hash_version
+SELECT event_id, device_id, event_type, occurred_at, payload, payload_hash
 FROM sync_events WHERE event_id = $1
 `
 
 type SyncEventByIDRow struct {
-	EventID            pgtype.UUID        `json:"event_id"`
-	DeviceID           pgtype.UUID        `json:"device_id"`
-	EventType          string             `json:"event_type"`
-	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
-	Payload            []byte             `json:"payload"`
-	PayloadHash        []byte             `json:"payload_hash"`
-	PayloadHashVersion int32              `json:"payload_hash_version"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	DeviceID    pgtype.UUID        `json:"device_id"`
+	EventType   string             `json:"event_type"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	Payload     []byte             `json:"payload"`
+	PayloadHash []byte             `json:"payload_hash"`
 }
 
 // Full immutable identity for idempotency: device, type, instant, payload.
 // Credential identity and batch correlation are never part of event
-// identity. The stored immutable payload (not the v1 hash) is the
-// authoritative duplicate proof for pre-fix rows (fail-closed, ADR-0017+).
+// identity. payload_hash is the exact canonical hash (ADR-0055).
 func (q *Queries) SyncEventByID(ctx context.Context, eventID pgtype.UUID) (SyncEventByIDRow, error) {
 	row := q.db.QueryRow(ctx, syncEventByID, eventID)
 	var i SyncEventByIDRow
@@ -113,26 +109,6 @@ func (q *Queries) SyncEventByID(ctx context.Context, eventID pgtype.UUID) (SyncE
 		&i.OccurredAt,
 		&i.Payload,
 		&i.PayloadHash,
-		&i.PayloadHashVersion,
 	)
 	return i, err
-}
-
-const upgradeSyncEventHash = `-- name: UpgradeSyncEventHash :exec
-UPDATE sync_events
-SET payload_hash = $2, payload_hash_version = 2
-WHERE event_id = $1 AND payload_hash_version = 1
-`
-
-type UpgradeSyncEventHashParams struct {
-	EventID     pgtype.UUID `json:"event_id"`
-	PayloadHash []byte      `json:"payload_hash"`
-}
-
-// Opportunistic v1→v2 convergence after an exact stored-payload match:
-// only hash metadata changes, never the immutable payload. Guarded to v1
-// rows so concurrent upgrades write identical values idempotently.
-func (q *Queries) UpgradeSyncEventHash(ctx context.Context, arg UpgradeSyncEventHashParams) error {
-	_, err := q.db.Exec(ctx, upgradeSyncEventHash, arg.EventID, arg.PayloadHash)
-	return err
 }

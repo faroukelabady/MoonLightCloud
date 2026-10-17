@@ -12,5 +12,6 @@
     }
   ],
   "parent_ids": [],
-  "catalog_revision": 1
+  "catalog_revision": 1,
+  "online_enabled": true
 }

@@ -164,11 +164,10 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		assembled.Tags = append(assembled.Tags, ref)
 	}
 	desired := DesiredProduct{
-		Product:           assembled,
-		StoreID:           product.StoreID,
-		Availability:      availability,
-		CatalogRevision:   product.Revision,
-		InventoryRevision: availability.InventoryRevision,
+		Product:         assembled,
+		StoreID:         product.StoreID,
+		Availability:    availability,
+		CatalogRevision: product.Revision,
 	}
 	if policyFound {
 		assembled.SellOnline = policy.SellOnline
@@ -217,6 +216,9 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		variants, err := variantReader.ListProductVariants(ctx, productID)
 		if err != nil {
 			return DesiredProduct{}, err
+		}
+		if len(variants) == 0 {
+			return DesiredProduct{}, apperr.New(apperr.NotFound, "product variants not ready")
 		}
 		desired.Product.Variants = make([]CommerceVariant, 0, len(variants))
 		for _, variant := range variants {

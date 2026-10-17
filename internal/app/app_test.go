@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -58,6 +59,66 @@ func TestNewHealthyAndReady(t *testing.T) {
 	a.Health.ServeReady(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The pre-production pair has one producer version per stream. Retired
+// versions are rejected before durable acceptance, not silently normalized.
+func TestRetiredCatalogVersionsRejected(t *testing.T) {
+	a, err := New(context.Background(), testConfig(t, testutil.Isolated(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	ctx := context.Background()
+	device, err := a.Devices.Create(ctx, "catalog-version-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"catalog.category.snapshot.v1", "catalog.product.snapshot.v1", "inventory.product.snapshot.v1"} {
+		for _, advertised := range a.Sync.Capabilities().SupportedEvents {
+			if advertised == retired {
+				t.Fatalf("retired event advertised: %s", retired)
+			}
+		}
+		body := fmt.Sprintf(`{"events":[{"event_id":"11111111-1111-4111-8111-111111111111","event_type":%q,"occurred_at":"2026-10-01T12:00:00Z","payload":{}}]}`, retired)
+		if _, err := a.Sync.Ingest(ctx, device.Device.ID, device.Credential.ID, []byte(body)); err == nil {
+			t.Fatalf("retired event accepted: %s", retired)
+		}
+	}
+	var count int
+	if err := a.Pool.QueryRow(ctx, `SELECT count(*) FROM sync_events`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rejection persisted events: %d (%v)", count, err)
+	}
+}
+
+func TestConfiguredDatabaseTimeoutAppliesToApplicationRepositories(t *testing.T) {
+	cfg := testConfig(t, testutil.Isolated(t))
+	cfg.DBQueryTimeout = 300 * time.Millisecond
+	a, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	ctx := context.Background()
+	device, err := a.Devices.Create(ctx, "timeout-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Devices.Get(ctx, device.Device.ID); err != nil {
+		t.Fatalf("positive control: %v", err)
+	}
+	// A disposable view delays the real repository query without modifying
+	// production SQL. The configured deadline must cancel it; the old
+	// hard-coded five-second default would allow the query to succeed.
+	_, err = a.Pool.Exec(ctx, `ALTER TABLE devices RENAME TO timeout_devices;
+		CREATE VIEW devices AS SELECT d.* FROM timeout_devices d
+		CROSS JOIN (SELECT pg_sleep(2)) delay`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Devices.Get(ctx, device.Device.ID); err == nil {
+		t.Fatal("configured repository timeout was ignored")
 	}
 }
 

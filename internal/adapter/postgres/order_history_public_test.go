@@ -60,7 +60,7 @@ func seedConfiguration(t *testing.T, pool *pgxpool.Pool, productID, configID, st
 		 ON CONFLICT (id) DO NOTHING`,
 		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
 		 VALUES ('22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111',
-		 'catalog.product.snapshot.v1', now(), now(), '{}'::jsonb, '\x00')
+		 'catalog.product.snapshot.v2', now(), now(), '{}'::jsonb, '\x00')
 		 ON CONFLICT (event_id) DO NOTHING`,
 		`INSERT INTO catalog_categories (category_id, status, name_ar, source_revision,
 		 source_event_id, source_device_id, source_payload_hash, source_received_at)

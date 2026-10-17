@@ -32,18 +32,18 @@ func TestNextCatalogRetryScopesProcessorAndFuture(t *testing.T) {
 		return at, ok
 	}
 
-	if _, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV1); ok {
+	if _, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV2); ok {
 		t.Fatal("empty schedule reported a retry")
 	}
 	v1, v2 := uuid.NewString(), uuid.NewString()
-	f.ingest(t, f.devA, f.credA, v1, catalog.EventCategorySnapshotV1, categoryPayload(uuid.NewString(), "active", map[string]string{"ar": "أ"}, nil, 1))
+	f.ingest(t, f.devA, f.credA, v1, catalog.EventCategorySnapshotV2, categoryPayload(uuid.NewString(), "active", map[string]string{"ar": "أ"}, nil, 1))
 	f.ingest(t, f.devA, f.credA, v2, catalog.EventCategorySnapshotV2, categoryV2Payload(uuid.NewString(), "active", map[string]string{"ar": "ب", "en": "B"}, nil, 1, true))
 	base := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)
 
 	// Category v1 and v2 share one processor stream.
 	retry(v1, catalog.ProcessorCategoryProjectionV1, base.Add(20*time.Second))
 	retry(v2, catalog.ProcessorCategoryProjectionV1, base.Add(10*time.Second))
-	if at, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV1); !ok || !at.Equal(base.Add(10*time.Second)) {
+	if at, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV2); !ok || !at.Equal(base.Add(10*time.Second)) {
 		t.Fatalf("earliest category retry = %v %v, want %v", at, ok, base.Add(10*time.Second))
 	}
 	// Another processor's schedule is invisible.
@@ -59,7 +59,7 @@ func TestNextCatalogRetryScopesProcessorAndFuture(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `UPDATE sync_event_processing SET status='blocked' WHERE event_id=$1`, v1); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV1); ok {
+	if _, ok := next(catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV2); ok {
 		t.Fatal("blocked row scheduled a wake")
 	}
 }

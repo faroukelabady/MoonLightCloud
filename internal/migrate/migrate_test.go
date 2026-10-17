@@ -54,6 +54,25 @@ func TestFreshToLatest(t *testing.T) {
 			t.Fatalf("table %s missing", table)
 		}
 	}
+	if tableExists(t, conn, "catalog_product_inventory") {
+		t.Fatal("obsolete Product inventory authority remains")
+	}
+	var derived bool
+	if err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.views WHERE table_schema='public' AND table_name='catalog_product_stock')`).Scan(&derived); err != nil || !derived {
+		t.Fatalf("derived Variant stock view missing: %v", err)
+	}
+	for _, removed := range []struct{ table, column string }{
+		{"sync_events", "payload_hash_version"},
+		{"sales_projection", "fx_rate"},
+		{"return_refund_projection", "fx_rate"},
+		{"sales_projection", "tag_capture"},
+	} {
+		var exists bool
+		err := conn.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2)`, removed.table, removed.column).Scan(&exists)
+		if err != nil || exists {
+			t.Fatalf("removed column %s.%s exists=%v: %v", removed.table, removed.column, exists, err)
+		}
+	}
 }
 
 // Down removes every baseline object and Up rebuilds it (dev/test repair).

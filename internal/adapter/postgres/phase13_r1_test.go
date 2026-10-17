@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -65,6 +66,17 @@ func (p *r1Provider) SetInventory(_ context.Context, r commerce.InventoryUpdateR
 	p.quantity = r.AvailableQuantity
 	return nil
 }
+func (p *r1Provider) UpsertProductVariants(_ context.Context, r commerce.ProductVariantsUpsertRequest) (commerce.ProductVariantsUpsertResult, error) {
+	ids := make(map[string]string, len(r.Product.Variants))
+	for _, variant := range r.Product.Variants {
+		ids[variant.VariantID] = "review-" + variant.VariantID
+	}
+	return commerce.ProductVariantsUpsertResult{Variants: ids}, nil
+}
+func (p *r1Provider) SetVariantInventory(_ context.Context, r commerce.VariantInventoryUpdateRequest) error {
+	p.quantity = r.AvailableQuantity
+	return nil
+}
 func r1Wait(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	select {
@@ -75,7 +87,8 @@ func r1Wait(t *testing.T, ch <-chan struct{}) {
 }
 func r1ReadyProduct(t *testing.T, pf *policyFixture) {
 	t.Helper()
-	for i, typ := range []string{catalog.EventProductSalesPolicySnapshotV1, catalog.EventInventoryProductSnapshotV1} {
+	seedScopeInventoryVariant(t, pf.scopeFixture, prodP1)
+	for i, typ := range []string{catalog.EventProductSalesPolicySnapshotV1, catalog.EventInventoryProductVariantSnapshotV1} {
 		event := fmt.Sprintf("98989999-0000-4000-8000-%012d", i+1)
 		body := policyPayload(prodP1, 1, true, true, nil)
 		if i == 1 {
@@ -289,7 +302,7 @@ func r1RunCategory(t *testing.T, d Devices) {
 	r1Wait(t, stopped)
 }
 func TestR1CategoryProductionDiscovery(t *testing.T) {
-	for _, scenario := range []string{"v1-then-v2", "v2-then-stale-v1", "equal-contradiction", "duplicate-v2", "bootstrap"} {
+	for _, scenario := range []string{"older-then-newer", "newer-then-stale", "equal-contradiction", "duplicate", "bootstrap"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := openScopeFixture(t)
 			ctx := context.Background()
@@ -298,27 +311,24 @@ func TestR1CategoryProductionDiscovery(t *testing.T) {
 			send := func(id, typ string, rev int64, enabled bool) {
 				t.Helper()
 				body := categoryV2Payload(catIDA, "active", map[string]string{"en": "A", "ar": "أ"}, nil, rev, enabled)
-				if typ == catalog.EventCategorySnapshotV1 {
-					body = categoryPayload(catIDA, "active", map[string]string{"en": "A", "ar": "أ"}, nil, rev)
-				}
 				f.ingest(t, f.devA, f.credA, id, typ, body)
 				r1RunCategory(t, d)
 			}
 			switch scenario {
-			case "v1-then-v2":
-				send(old, catalog.EventCategorySnapshotV1, 1, true)
+			case "older-then-newer":
+				send(old, catalog.EventCategorySnapshotV2, 1, true)
 				send(current, catalog.EventCategorySnapshotV2, 2, false)
-			case "v2-then-stale-v1":
+			case "newer-then-stale":
 				send(current, catalog.EventCategorySnapshotV2, 2, false)
-				send(old, catalog.EventCategorySnapshotV1, 1, true)
+				send(old, catalog.EventCategorySnapshotV2, 1, true)
 			case "equal-contradiction":
-				send(old, catalog.EventCategorySnapshotV1, 2, true)
+				send(old, catalog.EventCategorySnapshotV2, 2, true)
 				send(current, catalog.EventCategorySnapshotV2, 2, false)
-			case "duplicate-v2":
+			case "duplicate":
 				send(old, catalog.EventCategorySnapshotV2, 2, false)
 				send(current, catalog.EventCategorySnapshotV2, 2, false)
 			case "bootstrap":
-				f.ingest(t, f.devA, f.credA, old, catalog.EventCategorySnapshotV1, categoryPayload(catIDX, "active", map[string]string{"en": "X"}, nil, 1))
+				f.ingest(t, f.devA, f.credA, old, catalog.EventCategorySnapshotV2, categoryPayload(catIDX, "active", map[string]string{"en": "X"}, nil, 1))
 				f.ingest(t, f.devA, f.credA, current, catalog.EventCategorySnapshotV2, categoryV2Payload(catIDA, "active", map[string]string{"en": "A", "ar": "أ"}, nil, 2, false))
 				r1RunCategory(t, d)
 			}
@@ -355,14 +365,21 @@ func TestR1HealthSummaryDetailParity(t *testing.T) {
 	for i, entry := range []struct{ dev, cred, typ, body string }{
 		{pf.devA, pf.credA, catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodP2, 1, true, true, nil)},
 		{pf.devA, pf.credA, catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodP3, 1, true, true, nil)},
-		{pf.devA, pf.credA, catalog.EventInventoryProductSnapshotV1, inventoryPayload(prodP3, 1, 0)},
+		{pf.devA, pf.credA, catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload(prodP3, 1, 0)},
 		{pf.devA, pf.credA, catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodP5, 1, true, false, nil)},
 		{pf.devB, pf.credB, catalog.EventCategorySnapshotV2, categoryV2Payload("bbbbbbbb-0000-4000-8000-000000000001", "active", map[string]string{"en": "B"}, nil, 1, true)},
-		{pf.devB, pf.credB, catalog.EventProductSnapshotV1, productPayload("bbbbbbbb-0000-4000-8000-000000000002", "PAP-P1", "Foreign", "bbbbbbbb-0000-4000-8000-000000000001", nil, nil, 1)},
+		{pf.devB, pf.credB, catalog.EventProductSnapshotV2, productPayload("bbbbbbbb-0000-4000-8000-000000000002", "PAP-P1", "Foreign", "bbbbbbbb-0000-4000-8000-000000000001", nil, nil, 1)},
 		{pf.devB, pf.credB, catalog.EventProductSalesPolicySnapshotV1, policyPayload("bbbbbbbb-0000-4000-8000-000000000002", 1, true, true, nil)},
-		{pf.devB, pf.credB, catalog.EventInventoryProductSnapshotV1, inventoryPayload("bbbbbbbb-0000-4000-8000-000000000002", 1, 0)},
+		{pf.devB, pf.credB, catalog.EventInventoryProductVariantSnapshotV1, inventoryPayload("bbbbbbbb-0000-4000-8000-000000000002", 1, 0)},
 	} {
 		id := fmt.Sprintf("98981111-0000-4000-8000-%012d", i+1)
+		if entry.typ == catalog.EventInventoryProductVariantSnapshotV1 {
+			var inventory catalog.ProductVariantInventorySnapshot
+			if err := json.Unmarshal([]byte(entry.body), &inventory); err != nil {
+				t.Fatal(err)
+			}
+			seedScopeInventoryVariant(t, pf.scopeFixture, inventory.ProductID)
+		}
 		pf.ingest(t, entry.dev, entry.cred, id, entry.typ, entry.body)
 		projectCatalogTerminal(t, pf.scopeFixture, id, entry.typ)
 	}
@@ -455,7 +472,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 			run()
 			for _, p := range providers {
 				if p.Key() != failed {
-					if len(p.Inventories()) != 1 || p.Inventories()[0].AvailableQuantity != 10 {
+					if len(p.VariantInventories()) != 1 || p.VariantInventories()[0].AvailableQuantity != 10 {
 						t.Fatal("healthy provider held back")
 					}
 				}
@@ -466,7 +483,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 			}
 			run()
 			for _, p := range providers {
-				v := p.Inventories()
+				v := p.VariantInventories()
 				if len(v) == 0 || v[len(v)-1].AvailableQuantity != 10 {
 					t.Fatalf("provider not recovered %s", p.Key())
 				}
@@ -540,7 +557,7 @@ func TestR1NewPolicyBetweenProviders(t *testing.T) {
 	if first.published || first.quantity != 0 {
 		t.Fatal("older provider not corrected")
 	}
-	inv := second.Inventories()
+	inv := second.VariantInventories()
 	if len(inv) == 0 || inv[len(inv)-1].AvailableQuantity != 0 {
 		t.Fatal("second availability wrong")
 	}
