@@ -72,7 +72,7 @@ func TestSaleV3ProjectsVariantSnapshots(t *testing.T) {
 	var variantSKU, attrs string
 	var egp, usd *int64
 	if err := env.pool.QueryRow(context.Background(),
-		`SELECT variant_sku, variant_attributes::text, variant_price_egp_cents, variant_price_usd_cents
+		`SELECT variant_sku, variant_attributes::text, variant_price_egp_minor, variant_price_usd_minor
 		 FROM sale_lines_projection`).Scan(&variantSKU, &attrs, &egp, &usd); err != nil {
 		t.Fatal(err)
 	}

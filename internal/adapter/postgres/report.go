@@ -333,7 +333,7 @@ func (d Devices) RefundsByProductType(ctx context.Context, startUTC, endUTC time
 	out := make([]report.RefundProductTypeRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, report.RefundProductTypeRow{
-			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeID: uuidPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
 			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
 			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
 		})
@@ -658,7 +658,7 @@ func (d Devices) RefundsByProductTypeForStore(ctx context.Context, storeID strin
 	out := make([]report.RefundProductTypeRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, report.RefundProductTypeRow{
-			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeID: uuidPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
 			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
 			Units: r.Units, Currency: r.Currency, Refund: r.Refund, ReturnedCost: r.ReturnedCost,
 		})
@@ -971,7 +971,7 @@ func (d Devices) SalesByProductType(ctx context.Context, startUTC, endUTC time.T
 	out := make([]report.ProductTypeRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, report.ProductTypeRow{
-			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeID: uuidPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
 			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
 			Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
 		})
@@ -996,7 +996,7 @@ func (d Devices) SalesByProductTypeForStore(ctx context.Context, storeID string,
 	out := make([]report.ProductTypeRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, report.ProductTypeRow{
-			ProductTypeID: textPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
+			ProductTypeID: uuidPtr(r.ProductTypeID), ProductTypeCode: textPtr(r.ProductTypeCode),
 			ProductTypeNameAR: textPtr(r.ProductTypeNameAr), ProductTypeNameEN: textPtr(r.ProductTypeNameEn),
 			Units: r.Units, Currency: r.Currency, LineSales: r.LineSales, LineCost: r.LineCost,
 		})

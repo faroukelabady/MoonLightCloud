@@ -205,9 +205,9 @@ func insertProjectionChildrenV3(ctx context.Context, q *sqlcgen.Queries, saleUID
 			LineTotalMinor:       line.LineTotal.AmountMinor,
 			VariantSku:           pgText(line.VariantSKU),
 			VariantAttributes:    variantAttrs,
-			VariantPriceEgpCents: pgInt64Value(line.VariantPriceEGPCents),
-			VariantPriceUsdCents: pgInt64Value(line.VariantPriceUSDCents),
-			ProductTypeID:        pgTextPtr(line.ProductTypeID),
+			VariantPriceEgpMinor: pgInt64Value(line.VariantPriceEGPCents),
+			VariantPriceUsdMinor: pgInt64Value(line.VariantPriceUSDCents),
+			ProductTypeID:        pgUUIDPtr(line.ProductTypeID),
 			ProductTypeCode:      pgTextPtr(line.ProductTypeCode),
 			ProductTypeNameAr:    pgTextPtr(line.ProductTypeNameAR),
 			ProductTypeNameEn:    pgTextPtr(line.ProductTypeNameEN),
@@ -216,7 +216,7 @@ func insertProjectionChildrenV3(ctx context.Context, q *sqlcgen.Queries, saleUID
 			params.VariantSku = pgtype.Text{}
 		}
 		if line.ProductTypeID == nil {
-			params.ProductTypeID = pgtype.Text{}
+			params.ProductTypeID = pgtype.UUID{}
 			params.ProductTypeCode = pgtype.Text{}
 			params.ProductTypeNameAr = pgtype.Text{}
 			params.ProductTypeNameEn = pgtype.Text{}

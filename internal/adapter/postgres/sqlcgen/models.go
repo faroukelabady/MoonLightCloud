@@ -914,9 +914,9 @@ type SaleLinesProjection struct {
 	LineTotalMinor       int64       `json:"line_total_minor"`
 	VariantSku           pgtype.Text `json:"variant_sku"`
 	VariantAttributes    []byte      `json:"variant_attributes"`
-	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
-	VariantPriceUsdCents pgtype.Int8 `json:"variant_price_usd_cents"`
-	ProductTypeID        pgtype.Text `json:"product_type_id"`
+	VariantPriceEgpMinor pgtype.Int8 `json:"variant_price_egp_minor"`
+	VariantPriceUsdMinor pgtype.Int8 `json:"variant_price_usd_minor"`
+	ProductTypeID        pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode      pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr    pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn    pgtype.Text `json:"product_type_name_en"`

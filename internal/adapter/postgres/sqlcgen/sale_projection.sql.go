@@ -123,7 +123,7 @@ INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
     unit_price_minor, cost_minor, line_total_minor,
-    variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
+    variant_sku, variant_attributes, variant_price_egp_minor, variant_price_usd_minor,
     product_type_id, product_type_code, product_type_name_ar, product_type_name_en
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
@@ -148,9 +148,9 @@ type InsertSaleLineWithVariantSnapshotParams struct {
 	LineTotalMinor       int64       `json:"line_total_minor"`
 	VariantSku           pgtype.Text `json:"variant_sku"`
 	VariantAttributes    []byte      `json:"variant_attributes"`
-	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
-	VariantPriceUsdCents pgtype.Int8 `json:"variant_price_usd_cents"`
-	ProductTypeID        pgtype.Text `json:"product_type_id"`
+	VariantPriceEgpMinor pgtype.Int8 `json:"variant_price_egp_minor"`
+	VariantPriceUsdMinor pgtype.Int8 `json:"variant_price_usd_minor"`
+	ProductTypeID        pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode      pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr    pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn    pgtype.Text `json:"product_type_name_en"`
@@ -178,8 +178,8 @@ func (q *Queries) InsertSaleLineWithVariantSnapshot(ctx context.Context, arg Ins
 		arg.LineTotalMinor,
 		arg.VariantSku,
 		arg.VariantAttributes,
-		arg.VariantPriceEgpCents,
-		arg.VariantPriceUsdCents,
+		arg.VariantPriceEgpMinor,
+		arg.VariantPriceUsdMinor,
 		arg.ProductTypeID,
 		arg.ProductTypeCode,
 		arg.ProductTypeNameAr,

@@ -573,7 +573,7 @@ type ReportRefundsByProductTypeParams struct {
 }
 
 type ReportRefundsByProductTypeRow struct {
-	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeID     pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode   pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
@@ -640,7 +640,7 @@ type ReportRefundsByProductTypeForStoreParams struct {
 }
 
 type ReportRefundsByProductTypeForStoreRow struct {
-	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeID     pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode   pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
@@ -1676,7 +1676,7 @@ type ReportSalesByProductTypeParams struct {
 }
 
 type ReportSalesByProductTypeRow struct {
-	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeID     pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode   pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`
@@ -1743,7 +1743,7 @@ type ReportSalesByProductTypeForStoreParams struct {
 }
 
 type ReportSalesByProductTypeForStoreRow struct {
-	ProductTypeID     pgtype.Text `json:"product_type_id"`
+	ProductTypeID     pgtype.UUID `json:"product_type_id"`
 	ProductTypeCode   pgtype.Text `json:"product_type_code"`
 	ProductTypeNameAr pgtype.Text `json:"product_type_name_ar"`
 	ProductTypeNameEn pgtype.Text `json:"product_type_name_en"`

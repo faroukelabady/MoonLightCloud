@@ -1391,8 +1391,7 @@ CREATE TABLE catalog_admin_commands (
         'catalog.category.details.update.v1',
         'catalog.category.parents.update.v1',
         'catalog.category.online-policy.update.v1',
-        'catalog.tag.details.update.v1',
-        'catalog.product.configurations.update.v1'
+        'catalog.tag.details.update.v1'
     )),
     command_version INT NOT NULL CHECK (command_version = 1),
     entity_id TEXT NOT NULL CHECK (char_length(entity_id) BETWEEN 1 AND 64),
@@ -1576,7 +1575,6 @@ ALTER TABLE catalog_admin_commands ADD CONSTRAINT catalog_admin_commands_command
     'catalog.category.parents.update.v1',
     'catalog.category.online-policy.update.v1',
     'catalog.tag.details.update.v1',
-    'catalog.product.configurations.update.v1',
     'catalog.product.variants.update.v1',
     'catalog.product.variant.update.v1',
     'catalog.variant.attributes.update.v1'
@@ -1649,9 +1647,9 @@ ALTER TABLE catalog_products DROP COLUMN sku;
 --                                name_ar, name_en, definition_name_ar,
 --                                definition_name_en (labels frozen at sale
 --                                time; display data only, never identity).
---   variant_price_egp_cents    — nullable sale-time variant pricing
+--   variant_price_egp_minor    — nullable sale-time variant pricing
 --                                override (BIGINT minor units; no floats).
---   variant_price_usd_cents    — nullable sale-time variant pricing
+--   variant_price_usd_minor    — nullable sale-time variant pricing
 --                                override (BIGINT minor units; no floats).
 --
 -- No foreign keys on purpose (00021/00030 style): snapshots must survive
@@ -1659,10 +1657,10 @@ ALTER TABLE catalog_products DROP COLUMN sku;
 
 ALTER TABLE sale_lines_projection ADD COLUMN variant_sku TEXT NULL;
 ALTER TABLE sale_lines_projection ADD COLUMN variant_attributes JSONB NULL;
-ALTER TABLE sale_lines_projection ADD COLUMN variant_price_egp_cents BIGINT NULL
-    CHECK (variant_price_egp_cents IS NULL OR variant_price_egp_cents >= 0);
-ALTER TABLE sale_lines_projection ADD COLUMN variant_price_usd_cents BIGINT NULL
-    CHECK (variant_price_usd_cents IS NULL OR variant_price_usd_cents >= 0);
+ALTER TABLE sale_lines_projection ADD COLUMN variant_price_egp_minor BIGINT NULL
+    CHECK (variant_price_egp_minor IS NULL OR variant_price_egp_minor >= 0);
+ALTER TABLE sale_lines_projection ADD COLUMN variant_price_usd_minor BIGINT NULL
+    CHECK (variant_price_usd_minor IS NULL OR variant_price_usd_minor >= 0);
 ALTER TABLE sale_lines_projection ADD CONSTRAINT sale_lines_variant_attributes_bounded
     CHECK (variant_attributes IS NULL OR (
         jsonb_typeof(variant_attributes) = 'array'
@@ -1730,7 +1728,7 @@ CREATE INDEX idx_catalog_products_type ON catalog_products (product_type_id);
 -- tables to populate or refresh these columns.
 
 ALTER TABLE sale_lines_projection
-    ADD COLUMN product_type_id TEXT,
+    ADD COLUMN product_type_id UUID,
     ADD COLUMN product_type_code TEXT CHECK (product_type_code IS NULL OR char_length(product_type_code) BETWEEN 1 AND 32),
     ADD COLUMN product_type_name_ar TEXT,
     ADD COLUMN product_type_name_en TEXT;
@@ -1750,7 +1748,6 @@ ALTER TABLE catalog_admin_commands ADD CONSTRAINT catalog_admin_commands_command
     'catalog.category.parents.update.v1',
     'catalog.category.online-policy.update.v1',
     'catalog.tag.details.update.v1',
-    'catalog.product.configurations.update.v1',
     'catalog.product.variants.update.v1',
     'catalog.product.variant.update.v1',
     'catalog.variant.attributes.update.v1',
@@ -1797,7 +1794,6 @@ ALTER TABLE catalog_admin_commands ADD CONSTRAINT catalog_admin_commands_command
     'catalog.category.parents.update.v1',
     'catalog.category.online-policy.update.v1',
     'catalog.tag.details.update.v1',
-    'catalog.product.configurations.update.v1',
     'catalog.product.variants.update.v1',
     'catalog.product.variant.update.v1',
     'catalog.variant.attributes.update.v1',

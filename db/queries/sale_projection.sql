@@ -47,7 +47,7 @@ INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
     unit_price_minor, cost_minor, line_total_minor,
-    variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
+    variant_sku, variant_attributes, variant_price_egp_minor, variant_price_usd_minor,
     product_type_id, product_type_code, product_type_name_ar, product_type_name_en
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,

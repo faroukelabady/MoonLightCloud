@@ -121,5 +121,19 @@ on all money-bearing documents.
   `devices.last_seen_at` monotonically and presence/offline reads use it.
   As a result any authenticated request (a sync upload too) now counts as
   contact for offline detection, not only control-plane polls.
+- Baseline 00108 (step 2f) stores the sale-line Variant price snapshot as
+  `variant_price_egp_minor`/`variant_price_usd_minor` (the Retail wire keeps
+  its `_cents` field names), types the sale-line `product_type_id` as `uuid`,
+  and drops the removed `catalog.product.configurations.update.v1` from the
+  command-type CHECK. Identifiers stay `text` only where the value is not a
+  Cloud UUID: provider/external IDs, the Retail cashier ID, polymorphic
+  incident/recovery subjects, catalog command entity IDs (create commands
+  carry an absent marker) and the recovery verification cursor (compared in
+  `COLLATE "C"` order against client-sent IDs, `` = start).
+- Enum casing (step 2f, pending owner confirmation): every UPPER value set is
+  published vocabulary (OpenAPI, dashboard, or the Retail wire such as rollout
+  `mode` and command target statuses). They keep their spelling; codes
+  (currencies, channel, rule/reason/result codes) stay UPPER by design; new
+  value sets use lowercase, and no set mixes cases.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.
