@@ -2,10 +2,8 @@ package operations
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 )
 
@@ -128,14 +126,6 @@ func isMappingMissing(err error) bool {
 				}
 			}
 		}
-	}
-	return false
-}
-
-func isConflict(err error) bool {
-	var ae *apperr.Error
-	if errors.As(err, &ae) {
-		return ae.Kind == apperr.Conflict
 	}
 	return false
 }

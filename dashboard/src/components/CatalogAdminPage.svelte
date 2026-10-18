@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api.js';
-	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType } from '../lib/api.js';
+	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration } from '../lib/api.js';
 
 	// CatalogAdminPage: the Cloud command/control surface for catalog
 	// state. It edits nothing directly: every Save persists a typed,
@@ -78,21 +78,10 @@
 			try {
 				const cfgs = await dashboardApi.adminConfigurations(store, id);
 				if (my !== epoch || request !== requests.openProduct) return;
-				configKey = 0;
-				configRows = cfgs.configurations.map((c) => ({
-					key: ++configKey,
-					id: c.id,
-					style_code: c.style_code,
-					style_ar: c.style_name_ar,
-					color_code: c.color_code,
-					color_ar: c.color_name_ar,
-					egp: c.egp_delta_minor,
-					usd: c.usd_delta_minor ?? '',
-					enabled: c.enabled
-				}));
+				configurations = cfgs.configurations;
 			} catch {
 				if (my !== epoch || request !== requests.openProduct) return;
-				configRows = [];
+				configurations = [];
 			}
 			productState = 'loaded';
 		} catch {
@@ -203,76 +192,9 @@
 		}
 	}
 
-	interface ConfigRowState {
-		key: number;
-		id?: string;
-		style_code: string;
-		style_ar: string;
-		color_code: string;
-		color_ar: string;
-		egp: string;
-		usd: string;
-		enabled: boolean;
-	}
-	let configRows: ConfigRowState[] = $state([]);
-	let configKey = 0;
-
-	function addConfigRow() {
-		configKey++;
-		configRows.push({ key: configKey, style_code: '', style_ar: '', color_code: '', color_ar: '', egp: '0', usd: '', enabled: true });
-	}
-
-	function removeConfigRow(key: number) {
-		configRows = configRows.filter((r) => r.key !== key);
-	}
-
-	async function saveConfigurations() {
-		if (!selectedProduct || !store || saving) return;
-		const p = selectedProduct;
-		if (configRows.length > 100) return say('err', 'الحد الأقصى 100 خيار. / At most 100 options.');
-		const entries: Record<string, unknown>[] = [];
-		for (const r of configRows) {
-			if (!r.style_code.trim() || !r.style_ar.trim() || !r.color_code.trim() || !r.color_ar.trim()) {
-				return say('err', 'أكمل الأكواد والأسماء لكل خيار. / Complete codes and names for every option.');
-			}
-			if (!/^\d+$/.test(r.egp.trim())) return say('err', 'EGP يجب أن يكون أرقامًا صحيحة. / EGP must be integer minor units.');
-			const usdRaw = r.usd.trim();
-			let usd: string | null = null;
-			if (usdRaw !== '') {
-				if (!/^\d+$/.test(usdRaw)) return say('err', 'USD يجب أن يكون أرقامًا أو فارغًا. / USD must be digits or blank.');
-				usd = usdRaw;
-			}
-			entries.push({
-				...(r.id ? { id: r.id } : {}),
-				style_code: r.style_code.trim(),
-				style_name_ar: r.style_ar.trim(),
-				color_code: r.color_code.trim(),
-				color_name_ar: r.color_ar.trim(),
-				egp_delta_cents: r.egp.trim(),
-				usd_delta_cents: usd,
-				enabled: r.enabled
-			});
-		}
-		const actionEpoch = epoch;
-		saving = true;
-		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product.configurations.update.v1',
-				entity_id: p.product_id,
-				expected_revision: p.configuration_revision,
-				payload: { product_id: p.product_id, configurations: entries, expected_configuration_revision: p.configuration_revision }
-			});
-			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
-			void loadCommands();
-		} catch (err) {
-			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
-		} finally {
-			if (actionEpoch === epoch) saving = false;
-		}
-	}
+	// Frame choices are shared and edited in Retail (ADR-049 1g); Cloud
+	// shows the product's projected choices read-only.
+	let configurations: AdminConfiguration[] = $state([]);
 
 	// ---- categories ----
 	let categories: AdminCategoryRow[] = $state([]);
@@ -649,7 +571,7 @@
 		epoch++;
 		saving = false;
 		productState = 'idle';
-		configRows = [];
+		configurations = [];
 		products = [];
 		productCursor = null;
 		selectedProduct = null;
@@ -780,23 +702,15 @@
 					</fieldset>
 					<div><button type="button" disabled={saving} onclick={() => void saveProductClassification()}>إدراج تعديل التصنيف / Queue classification change</button></div>
 					<h4>خيارات الإطار / Frame options</h4>
-					<p class="muted">القيم بالوحدات الصغرى كنصوص دقيقة — فارغ USD يعني غير متاح (NULL)، وصفر يعني صفرًا صريحًا. / Minor-unit strings; blank USD is NULL, zero is explicit zero.</p>
-					{#each configRows as r (r.key)}
-						<div class="grid cfgrow">
-							<label>Style code <input type="text" bind:value={r.style_code} dir="ltr" /></label>
-							<label>اسم الستايل / Style AR <input type="text" bind:value={r.style_ar} /></label>
-							<label>Color code <input type="text" bind:value={r.color_code} dir="ltr" /></label>
-							<label>اسم اللون / Color AR <input type="text" bind:value={r.color_ar} /></label>
-							<label>EGP delta minor <input type="text" inputmode="numeric" bind:value={r.egp} dir="ltr" /></label>
-							<label>USD delta (فارغ=NULL / blank=NULL) <input type="text" inputmode="numeric" bind:value={r.usd} dir="ltr" placeholder="" /></label>
-							<label class="check"><input type="checkbox" bind:checked={r.enabled} /> مفعّل / Enabled</label>
-							<button type="button" onclick={() => removeConfigRow(r.key)} aria-label="Remove option">✕</button>
-						</div>
-					{/each}
-					<div class="row">
-						<button type="button" onclick={addConfigRow}>+ إضافة خيار / Add option</button>
-						<button type="button" disabled={saving} onclick={() => void saveConfigurations()}>إدراج تعديل الخيارات / Queue options change</button>
-					</div>
+					<p class="muted">تُدار خيارات الإطار في تطبيق الكاشير وتظهر هنا للعرض فقط. / Frame choices are managed in the Retail app and shown here read-only.</p>
+					{#if configurations.length === 0}<p class="muted">لا توجد خيارات. / No frame choices.</p>
+					{:else}
+						<ul data-testid="frame-configurations">
+							{#each configurations as c (c.id)}
+								<li>{c.style_name_ar} / {c.color_name_ar} <span class="num" dir="ltr">+{c.egp_delta_minor} EGP{c.usd_delta_minor !== null ? ` · +${c.usd_delta_minor} USD` : ''}</span>{c.enabled ? '' : ' · معطّل / disabled'}</li>
+							{/each}
+						</ul>
+					{/if}
 				</section>
 			{/if}
 		{/if}

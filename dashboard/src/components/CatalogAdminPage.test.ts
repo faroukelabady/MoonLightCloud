@@ -79,3 +79,11 @@ it('distinguishes create intent from result identity', async()=>{
  await fireEvent.click(await screen.findByRole('button',{name:'catalog.product-type.create.v1'}));
  await vi.waitFor(()=>expect(screen.queryAllByText((_,el)=>(el?.textContent?.includes('type-9') ?? false)).length).toBeGreaterThan(0));
 });
+it('shows shared frame choices read-only (edited in Retail)', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});api.adminProduct.mockResolvedValue(productDetail('ready'));
+ api.adminConfigurations.mockResolvedValue({configurations:[{id:'cfg-1',style_code:'classic',style_name_ar:'كلاسيكي',style_name_en:'Classic',color_code:'black',color_name_ar:'أسود',color_name_en:'Black',egp_delta_minor:'30000',usd_delta_minor:'600',enabled:true,position:0}]});
+ render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ const list=await screen.findByTestId('frame-configurations');
+ expect(list.textContent).toContain('كلاسيكي / أسود');expect(list.textContent).toContain('+30000 EGP · +600 USD');
+ expect(screen.queryByText(/Queue options change/)).toBeNull();expect(api.adminCreateCommand).not.toHaveBeenCalled();
+});
