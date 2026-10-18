@@ -23,7 +23,7 @@ export async function ingestSales(credentialEnv: string, events: SaleEvent[]): P
 	const ctx = await request.newContext({ baseURL: origin, extraHTTPHeaders: { Authorization: `Bearer ${credential(credentialEnv)}` } });
 	try {
 		const res = await ctx.post('/api/v1/sync/batches', {
-			data: { events: events.map((e) => ({ event_id: e.event_id, event_type: 'sale.finalized.v2', occurred_at: e.occurred_at, payload: e.payload })) }
+			data: { events: events.map((e) => ({ event_id: e.event_id, event_type: 'sale.finalized.v3', occurred_at: e.occurred_at, payload: e.payload })) }
 		});
 		if (res.status() !== 200) throw new Error(`sync batch: ${res.status()} ${await res.text()}`);
 	} finally {

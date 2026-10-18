@@ -24,6 +24,8 @@ function historicalSale(n:number,day:string,nameEn:string):SaleEvent{
   actor:{cashier_id:'e2e-cashier',cashier_name:'E2E'},currency:'EGP',
   totals:{subtotal:money(10000),discount:money(0),tax:money(0),total:money(10000)},
   lines:[{sale_item_id:id('100'),product_id:'e2e12000-0000-4000-8000-0000000000bb',sku:'E2E-RING',product_name:'E2E Ring',quantity:1,unit_price:money(10000),line_total:money(10000),
+   variant_id:'e2e12000-0000-4000-8000-0000000000dd',variant_sku:'E2E-RING',variant_attributes:[],
+   product_type_id:'e2e12000-0000-4000-8000-0000000000ee',product_type_code:'jewelry',product_type_name_ar:'مجوهرات',product_type_name_en:'Jewelry',
    classifications:{roots:[{category_id:'e2e12000-0000-4000-8000-0000000000cc',name_ar:'مجوهرات',name_en:'Jewelry'}],subcategories:[]},
    tags:[{tag_id:HIST_TAG,slug:'gold',name_ar:'ذهبي',name_en:nameEn}]}],
   payments:[{method:'cash',amount:money(10000),change_given:money(0),transaction_ref:'e2e'}]}};
