@@ -16,7 +16,7 @@ func pgIntToString(v int64) string { return strconv.FormatInt(v, 10) }
 
 // Dashboard repository implementation on Devices (shared pool + timeouts).
 
-func (d Devices) DashboardNormalizedSummary(ctx context.Context, startUTC, endUTC time.Time) (dashboard.NormalizedSummaryRow, error) {
+func (d Reporting) DashboardNormalizedSummary(ctx context.Context, startUTC, endUTC time.Time) (dashboard.NormalizedSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).DashboardNormalizedSummary(ctx, sqlcgen.DashboardNormalizedSummaryParams{
@@ -31,7 +31,7 @@ func (d Devices) DashboardNormalizedSummary(ctx context.Context, startUTC, endUT
 	}, nil
 }
 
-func (d Devices) DashboardNormalizedSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.NormalizedSummaryRow, error) {
+func (d Reporting) DashboardNormalizedSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.NormalizedSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -50,7 +50,7 @@ func (d Devices) DashboardNormalizedSummaryForStore(ctx context.Context, storeID
 	}, nil
 }
 
-func (d Devices) DashboardNormalizedDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedDailyRow, error) {
+func (d Reporting) DashboardNormalizedDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardNormalizedDaily(ctx, sqlcgen.DashboardNormalizedDailyParams{
@@ -69,7 +69,7 @@ func (d Devices) DashboardNormalizedDaily(ctx context.Context, startUTC, endUTC 
 	return out, nil
 }
 
-func (d Devices) DashboardNormalizedDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedDailyRow, error) {
+func (d Reporting) DashboardNormalizedDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -92,7 +92,7 @@ func (d Devices) DashboardNormalizedDailyForStore(ctx context.Context, storeID s
 	return out, nil
 }
 
-func (d Devices) DashboardLatestFx(ctx context.Context, startUTC, endUTC time.Time) (dashboard.LatestFxRow, error) {
+func (d Reporting) DashboardLatestFx(ctx context.Context, startUTC, endUTC time.Time) (dashboard.LatestFxRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).DashboardLatestFx(ctx, sqlcgen.DashboardLatestFxParams{
@@ -127,7 +127,7 @@ func (d Devices) DashboardLatestFx(ctx context.Context, startUTC, endUTC time.Ti
 	return out, nil
 }
 
-func (d Devices) DashboardLatestFxForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.LatestFxRow, error) {
+func (d Reporting) DashboardLatestFxForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.LatestFxRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -166,7 +166,7 @@ func (d Devices) DashboardLatestFxForStore(ctx context.Context, storeID string, 
 	return out, nil
 }
 
-func (d Devices) DashboardBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]dashboard.BranchRowRaw, error) {
+func (d Reporting) DashboardBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]dashboard.BranchRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardBranches(ctx, sqlcgen.DashboardBranchesParams{
@@ -190,7 +190,7 @@ func (d Devices) DashboardBranches(ctx context.Context, startUTC, endUTC time.Ti
 	return out, nil
 }
 
-func (d Devices) DashboardBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]dashboard.BranchRowRaw, error) {
+func (d Reporting) DashboardBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]dashboard.BranchRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -218,7 +218,7 @@ func (d Devices) DashboardBranchesForStore(ctx context.Context, storeID string, 
 	return out, nil
 }
 
-func (d Devices) DashboardProductsNormalized(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.NormalizedProductRowRaw, error) {
+func (d Reporting) DashboardProductsNormalized(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.NormalizedProductRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardProductsNormalized(ctx, sqlcgen.DashboardProductsNormalizedParams{
@@ -248,7 +248,7 @@ func (d Devices) DashboardProductsNormalized(ctx context.Context, startUTC, endU
 	return out, nil
 }
 
-func (d Devices) DashboardProductsNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.NormalizedProductRowRaw, error) {
+func (d Reporting) DashboardProductsNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.NormalizedProductRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -282,7 +282,7 @@ func (d Devices) DashboardProductsNormalizedForStore(ctx context.Context, storeI
 	return out, nil
 }
 
-func (d Devices) DashboardCategoriesNormalized(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedCategoryRowRaw, error) {
+func (d Reporting) DashboardCategoriesNormalized(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedCategoryRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardCategoriesNormalized(ctx, sqlcgen.DashboardCategoriesNormalizedParams{
@@ -301,7 +301,7 @@ func (d Devices) DashboardCategoriesNormalized(ctx context.Context, startUTC, en
 	return out, nil
 }
 
-func (d Devices) DashboardCategoriesNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedCategoryRowRaw, error) {
+func (d Reporting) DashboardCategoriesNormalizedForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedCategoryRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -324,7 +324,7 @@ func (d Devices) DashboardCategoriesNormalizedForStore(ctx context.Context, stor
 	return out, nil
 }
 
-func (d Devices) DashboardRecentActivity(ctx context.Context, limit int) ([]dashboard.ActivityItem, error) {
+func (d Reporting) DashboardRecentActivity(ctx context.Context, limit int) ([]dashboard.ActivityItem, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardRecentActivity(ctx, int32(limit))
@@ -350,7 +350,7 @@ func (d Devices) DashboardRecentActivity(ctx context.Context, limit int) ([]dash
 	return out, nil
 }
 
-func (d Devices) DashboardRecentActivityForStore(ctx context.Context, storeID string, limit int) ([]dashboard.ActivityItem, error) {
+func (d Reporting) DashboardRecentActivityForStore(ctx context.Context, storeID string, limit int) ([]dashboard.ActivityItem, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -382,7 +382,7 @@ func (d Devices) DashboardRecentActivityForStore(ctx context.Context, storeID st
 	return out, nil
 }
 
-func (d Devices) DashboardLatestSales(ctx context.Context, limit int) ([]dashboard.LatestSale, error) {
+func (d Reporting) DashboardLatestSales(ctx context.Context, limit int) ([]dashboard.LatestSale, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardLatestSales(ctx, int32(limit))
@@ -409,7 +409,7 @@ func (d Devices) DashboardLatestSales(ctx context.Context, limit int) ([]dashboa
 	return out, nil
 }
 
-func (d Devices) DashboardLatestSalesForStore(ctx context.Context, storeID string, limit int) ([]dashboard.LatestSale, error) {
+func (d Reporting) DashboardLatestSalesForStore(ctx context.Context, storeID string, limit int) ([]dashboard.LatestSale, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -442,7 +442,7 @@ func (d Devices) DashboardLatestSalesForStore(ctx context.Context, storeID strin
 	return out, nil
 }
 
-func (d Devices) DashboardNormalizedRefundsSummary(ctx context.Context, startUTC, endUTC time.Time) (dashboard.NormalizedRefundSummaryRow, error) {
+func (d Reporting) DashboardNormalizedRefundsSummary(ctx context.Context, startUTC, endUTC time.Time) (dashboard.NormalizedRefundSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).DashboardNormalizedRefundsSummary(ctx, sqlcgen.DashboardNormalizedRefundsSummaryParams{
@@ -457,7 +457,7 @@ func (d Devices) DashboardNormalizedRefundsSummary(ctx context.Context, startUTC
 	}, nil
 }
 
-func (d Devices) DashboardNormalizedRefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.NormalizedRefundSummaryRow, error) {
+func (d Reporting) DashboardNormalizedRefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (dashboard.NormalizedRefundSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -476,7 +476,7 @@ func (d Devices) DashboardNormalizedRefundsSummaryForStore(ctx context.Context, 
 	}, nil
 }
 
-func (d Devices) DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedRefundDailyRow, error) {
+func (d Reporting) DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedRefundDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardNormalizedRefundsDaily(ctx, sqlcgen.DashboardNormalizedRefundsDailyParams{
@@ -495,7 +495,7 @@ func (d Devices) DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, 
 	return out, nil
 }
 
-func (d Devices) DashboardNormalizedRefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedRefundDailyRow, error) {
+func (d Reporting) DashboardNormalizedRefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]dashboard.NormalizedRefundDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -518,7 +518,7 @@ func (d Devices) DashboardNormalizedRefundsDailyForStore(ctx context.Context, st
 	return out, nil
 }
 
-func (d Devices) DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.NormalizedRefundProductRowRaw, error) {
+func (d Reporting) DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.NormalizedRefundProductRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardProductsNormalizedRefunds(ctx, sqlcgen.DashboardProductsNormalizedRefundsParams{
@@ -543,7 +543,7 @@ func (d Devices) DashboardProductsNormalizedRefunds(ctx context.Context, startUT
 	return out, nil
 }
 
-func (d Devices) DashboardProductsNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.NormalizedRefundProductRowRaw, error) {
+func (d Reporting) DashboardProductsNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.NormalizedRefundProductRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -572,7 +572,7 @@ func (d Devices) DashboardProductsNormalizedRefundsForStore(ctx context.Context,
 	return out, nil
 }
 
-func (d Devices) DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedRefundCategoryRowRaw, error) {
+func (d Reporting) DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedRefundCategoryRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardCategoriesNormalizedRefunds(ctx, sqlcgen.DashboardCategoriesNormalizedRefundsParams{
@@ -591,7 +591,7 @@ func (d Devices) DashboardCategoriesNormalizedRefunds(ctx context.Context, start
 	return out, nil
 }
 
-func (d Devices) DashboardCategoriesNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedRefundCategoryRowRaw, error) {
+func (d Reporting) DashboardCategoriesNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]dashboard.NormalizedRefundCategoryRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -614,7 +614,7 @@ func (d Devices) DashboardCategoriesNormalizedRefundsForStore(ctx context.Contex
 	return out, nil
 }
 
-func (d Devices) DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]dashboard.ReturnBranchRowRaw, error) {
+func (d Reporting) DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]dashboard.ReturnBranchRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardReturnBranches(ctx, sqlcgen.DashboardReturnBranchesParams{
@@ -638,7 +638,7 @@ func (d Devices) DashboardReturnBranches(ctx context.Context, startUTC, endUTC t
 	return out, nil
 }
 
-func (d Devices) DashboardReturnBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]dashboard.ReturnBranchRowRaw, error) {
+func (d Reporting) DashboardReturnBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]dashboard.ReturnBranchRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)

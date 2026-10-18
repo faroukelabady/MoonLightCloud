@@ -68,7 +68,7 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 	ctx := context.Background()
 	start, end := normalizedWindow()
 
-	global, err := devices.DashboardProductsNormalized(ctx, start, end)
+	global, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalized(ctx, start, end)
 	if err != nil {
 		t.Fatalf("global products (F01 42883 regression): %v", err)
 	}
@@ -90,14 +90,14 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 		}
 	}
 
-	scopedA, err := devices.DashboardProductsNormalizedForStore(ctx, scopeStoreA, start, end)
+	scopedA, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedForStore(ctx, scopeStoreA, start, end)
 	if err != nil {
 		t.Fatalf("scoped A products: %v", err)
 	}
 	if len(scopedA) != 1 || scopedA[0].ProductID == nil || *scopedA[0].ProductID != prodA || scopedA[0].StoreID == nil || *scopedA[0].StoreID != scopeStoreA {
 		t.Fatalf("scoped A: %+v", scopedA)
 	}
-	scopedB, err := devices.DashboardProductsNormalizedForStore(ctx, scopeStoreB, start, end)
+	scopedB, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedForStore(ctx, scopeStoreB, start, end)
 	if err != nil {
 		t.Fatalf("scoped B products: %v", err)
 	}
@@ -115,14 +115,14 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 			t.Fatalf("mixed sale %s: %+v", event, res)
 		}
 	}
-	global, err = devices.DashboardProductsNormalized(ctx, start, end)
+	global, err = NewReporting(devices.pool, devices.timeout).DashboardProductsNormalized(ctx, start, end)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, ok := storeOfProduct(global, prodM); !ok || got != nil {
 		t.Fatalf("mixed-ownership badge must be null: %v (present=%v)", got, ok)
 	}
-	scopedMix, err := devices.DashboardProductsNormalizedForStore(ctx, scopeStoreA, start, end)
+	scopedMix, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedForStore(ctx, scopeStoreA, start, end)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,21 +149,21 @@ func TestDashboardNormalizedRefundsScopeIdentity(t *testing.T) {
 	devices := NewDevices(f.pool, 5*time.Second)
 	ctx := context.Background()
 	start, end := normalizedWindow()
-	global, err := devices.DashboardProductsNormalizedRefunds(ctx, start, end)
+	global, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedRefunds(ctx, start, end)
 	if err != nil {
 		t.Fatalf("global refunds (F01 42883 regression): %v", err)
 	}
 	if got, ok := storeOfProductRaw(global, prodA); !ok || got == nil || *got != scopeStoreA {
 		t.Fatalf("global refund badge: %v (present=%v)", got, ok)
 	}
-	scopedB, err := devices.DashboardProductsNormalizedRefundsForStore(ctx, scopeStoreB, start, end)
+	scopedB, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedRefundsForStore(ctx, scopeStoreB, start, end)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(scopedB) != 0 {
 		t.Fatalf("scoped B refunds must exclude A: %+v", scopedB)
 	}
-	scopedA, err := devices.DashboardProductsNormalizedRefundsForStore(ctx, scopeStoreA, start, end)
+	scopedA, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedRefundsForStore(ctx, scopeStoreA, start, end)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestDashboardNormalizedExactMoneyAbove53(t *testing.T) {
 	}
 	devices := NewDevices(f.pool, 5*time.Second)
 	start, end := normalizedWindow()
-	rows, err := devices.DashboardProductsNormalizedForStore(context.Background(), scopeStoreA, start, end)
+	rows, err := NewReporting(devices.pool, devices.timeout).DashboardProductsNormalizedForStore(context.Background(), scopeStoreA, start, end)
 	if err != nil {
 		t.Fatal(err)
 	}

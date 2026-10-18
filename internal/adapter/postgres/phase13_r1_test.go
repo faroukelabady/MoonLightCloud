@@ -395,11 +395,11 @@ func TestR1HealthSummaryDetailParity(t *testing.T) {
 		}
 		for _, store := range []string{"", scopeStoreA, scopeStoreB} {
 			for _, provider := range []string{"", "review", "second", "unknown"} {
-				summary, err := d.CatalogHealthSummaryRows(ctx, store, provider)
+				summary, err := NewReporting(d.pool, d.timeout).CatalogHealthSummaryRows(ctx, store, provider)
 				if err != nil {
 					t.Fatal(err)
 				}
-				details, err := d.CatalogHealthDetailRows(ctx, store, provider, "", 1000)
+				details, err := NewReporting(d.pool, d.timeout).CatalogHealthDetailRows(ctx, store, provider, "", 1000)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -419,7 +419,7 @@ func TestR1HealthSummaryDetailParity(t *testing.T) {
 			}
 		}
 	}
-	summary, err := d.CatalogHealthSummaryRows(ctx, scopeStoreA, "review")
+	summary, err := NewReporting(d.pool, d.timeout).CatalogHealthSummaryRows(ctx, scopeStoreA, "review")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,11 +590,11 @@ func TestR1HealthReadOnlySuppression(t *testing.T) {
 	defer ro.Close()
 	readonly := NewDevices(ro, 5*time.Second)
 	for i := 0; i < 3; i++ {
-		summary, err := readonly.CatalogHealthSummaryRows(ctx, scopeStoreA, "review")
+		summary, err := NewReporting(readonly.pool, readonly.timeout).CatalogHealthSummaryRows(ctx, scopeStoreA, "review")
 		if err != nil {
 			t.Fatal(err)
 		}
-		details, err := readonly.CatalogHealthDetailRows(ctx, scopeStoreA, "review", "", 1000)
+		details, err := NewReporting(readonly.pool, readonly.timeout).CatalogHealthDetailRows(ctx, scopeStoreA, "review", "", 1000)
 		if err != nil {
 			t.Fatal(err)
 		}

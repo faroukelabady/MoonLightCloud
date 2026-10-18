@@ -15,7 +15,7 @@ import (
 // strings (storeID "" = global ALL+legacy; providerKey "" = all durable
 // providers; reason "" = all reasons).
 
-func (d Devices) DashboardOrderAnalytics(ctx context.Context, providerKey, storeID, currency string, startUTC, endUTC time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
+func (d Reporting) DashboardOrderAnalytics(ctx context.Context, providerKey, storeID, currency string, startUTC, endUTC time.Time) ([]dashboard.OrderAnalyticsRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).DashboardOrderAnalytics(ctx, sqlcgen.DashboardOrderAnalyticsParams{
@@ -35,7 +35,7 @@ func (d Devices) DashboardOrderAnalytics(ctx context.Context, providerKey, store
 	return out, nil
 }
 
-func (d Devices) CatalogHealthSummaryRows(ctx context.Context, storeID, providerKey string) ([]dashboard.CatalogHealthCountRaw, error) {
+func (d Reporting) CatalogHealthSummaryRows(ctx context.Context, storeID, providerKey string) ([]dashboard.CatalogHealthCountRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CatalogHealthSummary(ctx, sqlcgen.CatalogHealthSummaryParams{
@@ -51,7 +51,7 @@ func (d Devices) CatalogHealthSummaryRows(ctx context.Context, storeID, provider
 	return out, nil
 }
 
-func (d Devices) CatalogHealthDetailRows(ctx context.Context, storeID, providerKey, reason string, limit int) ([]dashboard.CatalogHealthRowRaw, error) {
+func (d Reporting) CatalogHealthDetailRows(ctx context.Context, storeID, providerKey, reason string, limit int) ([]dashboard.CatalogHealthRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CatalogHealthDetail(ctx, sqlcgen.CatalogHealthDetailParams{
@@ -71,7 +71,7 @@ func (d Devices) CatalogHealthDetailRows(ctx context.Context, storeID, providerK
 	return out, nil
 }
 
-func (d Devices) CatalogHealthProviders(ctx context.Context, storeID string) ([]string, error) {
+func (d Reporting) CatalogHealthProviders(ctx context.Context, storeID string) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CatalogHealthProviders(ctx, storeID)

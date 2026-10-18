@@ -143,7 +143,7 @@ func TestSaleV3LabelRenameImmutability(t *testing.T) {
 			t.Fatal(err)
 		}
 		store := NewDevices(env.pool, 5*time.Second)
-		rows, err := store.SalesByVariant(ctx, time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
+		rows, err := NewReporting(store.pool, store.timeout).SalesByVariant(ctx, time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,12 +279,12 @@ func TestSaleV3StoreIsolation(t *testing.T) {
 	}
 	// Store-scoped variant reporting stays inside ownership.
 	devices := NewDevices(f.pool, 5*time.Second)
-	rowsA, err := devices.SalesByVariantForStore(ctx, scopeStoreA,
+	rowsA, err := NewReporting(devices.pool, devices.timeout).SalesByVariantForStore(ctx, scopeStoreA,
 		time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
 	if err != nil || len(rowsA) != 1 {
 		t.Fatalf("store A variant rows: %+v %v", rowsA, err)
 	}
-	rowsB, err := devices.SalesByVariantForStore(ctx, scopeStoreB,
+	rowsB, err := NewReporting(devices.pool, devices.timeout).SalesByVariantForStore(ctx, scopeStoreB,
 		time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
 	if err != nil || len(rowsB) != 0 {
 		t.Fatalf("store B must see nothing: %+v %v", rowsB, err)
@@ -332,7 +332,7 @@ func TestSaleV3ProjectsTypeSnapshot(t *testing.T) {
 
 	// SalesByProductType serves the frozen bucket.
 	store := NewDevices(env.pool, 5*time.Second)
-	rows, err := store.SalesByProductType(ctx, time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
+	rows, err := NewReporting(store.pool, store.timeout).SalesByProductType(ctx, time.Now().AddDate(-1, 0, 0), time.Now().Add(24*time.Hour), "")
 	if err != nil {
 		t.Fatal(err)
 	}

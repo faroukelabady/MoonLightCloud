@@ -72,7 +72,7 @@ func TestReportFreshnessAndDashboardActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh(0, 1)
-	items, err := store.DashboardRecentActivity(ctx, 20)
+	items, err := NewReporting(store.pool, store.timeout).DashboardRecentActivity(ctx, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestReportFreshnessAndDashboardActivity(t *testing.T) {
 	}
 	projectedID := projectSaleWithTags(t, env, "bbbbbbbb-bbbb-4bbb-8bbb-000000000003", "2026-09-20T10:00:00Z", nil)
 	fresh(0, 1)
-	items, err = store.DashboardRecentActivity(ctx, 20)
+	items, err = NewReporting(store.pool, store.timeout).DashboardRecentActivity(ctx, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

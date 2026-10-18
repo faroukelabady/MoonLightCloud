@@ -68,21 +68,21 @@ func TestScope_ReportIsolation(t *testing.T) {
 		return out
 	}
 	_ = sum
-	scopedA, err := devices.SalesSummaryForStore(ctx, scopeStoreA, startT, endT, "EGP")
+	scopedA, err := NewReporting(devices.pool, devices.timeout).SalesSummaryForStore(ctx, scopeStoreA, startT, endT, "EGP")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(scopedA) != 1 || scopedA[0].SalesTotal != fixtureTotal {
 		t.Fatalf("store A summary: %+v want total %d", scopedA, fixtureTotal)
 	}
-	scopedB, err := devices.SalesSummaryForStore(ctx, scopeStoreB, startT, endT, "EGP")
+	scopedB, err := NewReporting(devices.pool, devices.timeout).SalesSummaryForStore(ctx, scopeStoreB, startT, endT, "EGP")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(scopedB) != 1 || scopedB[0].SalesTotal != 2*fixtureTotal {
 		t.Fatalf("store B summary: %+v want total %d", scopedB, 2*fixtureTotal)
 	}
-	global, err := devices.SalesSummary(ctx, startT, endT, "EGP")
+	global, err := NewReporting(devices.pool, devices.timeout).SalesSummary(ctx, startT, endT, "EGP")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestScope_TagReportIsolation(t *testing.T) {
 	ctx := context.Background()
 	startT, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00Z")
 	endT, _ := time.Parse(time.RFC3339, "2027-01-01T00:00:00Z")
-	rowsA, err := devices.SalesByTagForStore(ctx, scopeStoreA, startT, endT, "")
+	rowsA, err := NewReporting(devices.pool, devices.timeout).SalesByTagForStore(ctx, scopeStoreA, startT, endT, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestScope_TagReportIsolation(t *testing.T) {
 	if !seenA[tagA] || seenA[tagB] {
 		t.Fatalf("store A tag history: %v", seenA)
 	}
-	rowsB, err := devices.SalesByTagForStore(ctx, scopeStoreB, startT, endT, "")
+	rowsB, err := NewReporting(devices.pool, devices.timeout).SalesByTagForStore(ctx, scopeStoreB, startT, endT, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,14 +171,14 @@ func TestScope_MoneyExactness(t *testing.T) {
 	ctx := context.Background()
 	startT, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00Z")
 	endT, _ := time.Parse(time.RFC3339, "2027-01-01T00:00:00Z")
-	rows, err := devices.SalesSummaryForStore(ctx, scopeStoreA, startT, endT, "EGP")
+	rows, err := NewReporting(devices.pool, devices.timeout).SalesSummaryForStore(ctx, scopeStoreA, startT, endT, "EGP")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 1 || rows[0].SalesTotal != big {
 		t.Fatalf("exact scoped total: %+v want %d", rows, big)
 	}
-	byProduct, err := devices.SalesByProductForStore(ctx, scopeStoreA, startT, endT, "EGP")
+	byProduct, err := NewReporting(devices.pool, devices.timeout).SalesByProductForStore(ctx, scopeStoreA, startT, endT, "EGP")
 	if err != nil {
 		t.Fatal(err)
 	}

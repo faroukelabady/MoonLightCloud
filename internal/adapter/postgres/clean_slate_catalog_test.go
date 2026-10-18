@@ -21,7 +21,7 @@ func TestCatalogHealthTreatsEmptyCleanShopAsHealthy(t *testing.T) {
 		}
 	}
 	store := catalogStore(env)
-	counts, err := store.CatalogHealthSummaryRows(ctx, "", "")
+	counts, err := NewReporting(store.pool, store.timeout).CatalogHealthSummaryRows(ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestCatalogHealthTreatsEmptyCleanShopAsHealthy(t *testing.T) {
 			t.Fatalf("empty shop reported health finding %s=%d", c.ReasonCode, c.Products)
 		}
 	}
-	detail, err := store.CatalogHealthDetailRows(ctx, "", "", "", 10)
+	detail, err := NewReporting(store.pool, store.timeout).CatalogHealthDetailRows(ctx, "", "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

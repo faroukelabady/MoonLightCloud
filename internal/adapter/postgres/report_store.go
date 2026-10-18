@@ -17,7 +17,7 @@ func scopedStore(op, storeID string) (pgtype.UUID, error) {
 	return uid, nil
 }
 
-func (d Devices) SalesSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.SummaryRow, error) {
+func (d Reporting) SalesSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.SummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales summary for store", storeID)
@@ -41,7 +41,7 @@ func (d Devices) SalesSummaryForStore(ctx context.Context, storeID string, start
 	return out, nil
 }
 
-func (d Devices) SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]report.DailyRowRaw, error) {
+func (d Reporting) SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]report.DailyRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales daily for store", storeID)
@@ -65,7 +65,7 @@ func (d Devices) SalesDailyForStore(ctx context.Context, storeID string, startUT
 	return out, nil
 }
 
-func (d Devices) SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ProductRow, error) {
+func (d Reporting) SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ProductRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by product for store", storeID)
@@ -93,7 +93,7 @@ func (d Devices) SalesByProductForStore(ctx context.Context, storeID string, sta
 	return out, nil
 }
 
-func scopedCategoryRows(kind, op, storeID string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func scopedCategoryRows(kind, op, storeID string, ctx context.Context, d Reporting, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	uid, err := scopedStore(op, storeID)
 	if err != nil {
 		return nil, err
@@ -114,19 +114,19 @@ func scopedCategoryRows(kind, op, storeID string, ctx context.Context, d Devices
 	return out, nil
 }
 
-func (d Devices) SalesByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func (d Reporting) SalesByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return scopedCategoryRows("root", "sales by category for store", storeID, ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func (d Reporting) SalesBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return scopedCategoryRows("subcategory", "sales by category for store", storeID, ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.TagRow, error) {
+func (d Reporting) SalesByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.TagRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by tag for store", storeID)
@@ -149,7 +149,7 @@ func (d Devices) SalesByTagForStore(ctx context.Context, storeID string, startUT
 	return out, nil
 }
 
-func (d Devices) RefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundSummaryRow, error) {
+func (d Reporting) RefundsSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds summary for store", storeID)
@@ -173,7 +173,7 @@ func (d Devices) RefundsSummaryForStore(ctx context.Context, storeID string, sta
 	return out, nil
 }
 
-func (d Devices) RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
+func (d Reporting) RefundsDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds daily for store", storeID)
@@ -196,7 +196,7 @@ func (d Devices) RefundsDailyForStore(ctx context.Context, storeID string, start
 	return out, nil
 }
 
-func (d Devices) RefundsByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundProductRow, error) {
+func (d Reporting) RefundsByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundProductRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds by product for store", storeID)
@@ -219,7 +219,7 @@ func (d Devices) RefundsByProductForStore(ctx context.Context, storeID string, s
 	return out, nil
 }
 
-func (d Devices) RefundsByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
+func (d Reporting) RefundsByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds by product type for store", storeID)
@@ -243,7 +243,7 @@ func (d Devices) RefundsByProductTypeForStore(ctx context.Context, storeID strin
 	return out, nil
 }
 
-func scopedRefundCategoryRows(kind, op, storeID string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func scopedRefundCategoryRows(kind, op, storeID string, ctx context.Context, d Reporting, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	uid, err := scopedStore(op, storeID)
 	if err != nil {
 		return nil, err
@@ -264,19 +264,19 @@ func scopedRefundCategoryRows(kind, op, storeID string, ctx context.Context, d D
 	return out, nil
 }
 
-func (d Devices) RefundsByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func (d Reporting) RefundsByRootCategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return scopedRefundCategoryRows("root", "refunds by category for store", storeID, ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) RefundsBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func (d Reporting) RefundsBySubcategoryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return scopedRefundCategoryRows("subcategory", "refunds by category for store", storeID, ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) RefundsByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundTagRow, error) {
+func (d Reporting) RefundsByTagForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundTagRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds by tag for store", storeID)
@@ -299,7 +299,7 @@ func (d Devices) RefundsByTagForStore(ctx context.Context, storeID string, start
 	return out, nil
 }
 
-func (d Devices) SalesPaymentsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.PaymentRow, error) {
+func (d Reporting) SalesPaymentsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.PaymentRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales payments for store", storeID)
@@ -321,7 +321,7 @@ func (d Devices) SalesPaymentsForStore(ctx context.Context, storeID string, star
 	return out, nil
 }
 
-func (d Devices) SalesByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
+func (d Reporting) SalesByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by cashier for store", storeID)
@@ -354,7 +354,7 @@ func (d Devices) SalesByCashierForStore(ctx context.Context, storeID string, sta
 	return out, nil
 }
 
-func (d Devices) SalesByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ChannelRow, error) {
+func (d Reporting) SalesByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ChannelRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by channel for store", storeID)
@@ -378,7 +378,7 @@ func (d Devices) SalesByChannelForStore(ctx context.Context, storeID string, sta
 	return out, nil
 }
 
-func (d Devices) RefundsByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
+func (d Reporting) RefundsByCashierForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds by cashier for store", storeID)
@@ -410,7 +410,7 @@ func (d Devices) RefundsByCashierForStore(ctx context.Context, storeID string, s
 	return out, nil
 }
 
-func (d Devices) RefundsByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
+func (d Reporting) RefundsByChannelForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("refunds by channel for store", storeID)
@@ -435,7 +435,7 @@ func (d Devices) RefundsByChannelForStore(ctx context.Context, storeID string, s
 
 // SalesByVariantForStore is SalesByVariant restricted to one proven
 // Store (Phase 9B scope semantics).
-func (d Devices) SalesByVariantForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
+func (d Reporting) SalesByVariantForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by variant for store", storeID)
@@ -461,7 +461,7 @@ func (d Devices) SalesByVariantForStore(ctx context.Context, storeID string, sta
 }
 
 // SalesByProductTypeForStore is SalesByProductType restricted to one Store.
-func (d Devices) SalesByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
+func (d Reporting) SalesByProductTypeForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := scopedStore("sales by product type for store", storeID)

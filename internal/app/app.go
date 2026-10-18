@@ -154,13 +154,14 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		p.WakeOnProgress(a.notifyCatalogProjectors)
 	}
 	a.Catalog = catalog.NewService(store)
-	a.Reports = report.NewService(store, clock.System{}, cfg.StoreLocation)
+	reportingStore := postgres.NewReporting(pool, cfg.DBQueryTimeout)
+	a.Reports = report.NewService(reportingStore, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
 		LiveCheck:  func() bool { return true },
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
-	a.Dashboard = dashboard.NewService(a.Reports, store, store, clock.System{})
+	a.Dashboard = dashboard.NewService(a.Reports, reportingStore, store, clock.System{})
 	humanAuthSvc, err := NewHumanAuthService(cfg, pool, log)
 	if err != nil {
 		pool.Close()

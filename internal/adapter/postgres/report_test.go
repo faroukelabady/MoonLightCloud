@@ -24,7 +24,7 @@ func cairoLoc(t *testing.T) *time.Location {
 }
 
 func repService(env *saleEnv) report.Service {
-	return report.NewService(NewDevices(env.pool, 5*time.Second), clock.System{}, cairoLocFor(env))
+	return report.NewService(NewReporting(env.pool, 5*time.Second), clock.System{}, cairoLocFor(env))
 }
 
 func cairoLocFor(env *saleEnv) *time.Location { return mustCairoLoc() }

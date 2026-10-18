@@ -115,7 +115,7 @@ func TestProductTypeHealthAndReports(t *testing.T) {
 		VALUES ('f1000000-0000-4000-8000-000000000012', 'dangling', 'f1000000-0000-4000-8000-000000000002', true, 'f1000000-0000-4000-8000-000000000099', 1, 'f1000000-0000-4000-8000-000000000001', '%s', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, devID, devID))
 
 	devices := catalogStore(env)
-	counts, err := devices.CatalogHealthSummaryRows(context.Background(), "", "")
+	counts, err := NewReporting(devices.pool, devices.timeout).CatalogHealthSummaryRows(context.Background(), "", "")
 	if err != nil {
 		t.Fatalf("health: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestProductTypeHealthAndReports(t *testing.T) {
 		VALUES ('f1000000-0000-4000-8000-000000000021', 'S-1', 'STORE', 'EGP', 100, 0, 0, 100, now(), now(), 'f1000000-0000-4000-8000-000000000001', '%s', now(), 'م', 'M', 'ع', 'A', 'p', 'ش', 'T', (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, devID, devID))
 	exec(`INSERT INTO sale_lines_projection (sale_id, sale_item_id, position, product_id, sku, product_name, quantity, unit_price_minor, line_total_minor, product_type_id, product_type_code, product_type_name_ar, product_type_name_en)
 		VALUES ('f1000000-0000-4000-8000-000000000021', 'f1000000-0000-4000-8000-000000000031', 0, 'f1000000-0000-4000-8000-000000000011', 'SKU-1', 'Name', 2, 50, 100, '10000000-0000-4000-8000-000000000001', 'papyrus', 'برديات', 'Papyrus')`)
-	rows, err := devices.SalesByProductType(context.Background(), time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "EGP")
+	rows, err := NewReporting(devices.pool, devices.timeout).SalesByProductType(context.Background(), time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "EGP")
 	if err != nil {
 		t.Fatalf("sales by type: %v", err)
 	}

@@ -30,10 +30,10 @@ func openDashEnv(t *testing.T) *dashEnv {
 		t.Fatal(err)
 	}
 	store := NewDevices(base.pool, 5*time.Second)
-	rep := report.NewService(store, clock.System{}, loc)
+	rep := report.NewService(NewReporting(store.pool, store.timeout), clock.System{}, loc)
 	return &dashEnv{
 		saleEnv: base,
-		dash:    dashboard.NewService(rep, store, store, clock.System{}),
+		dash:    dashboard.NewService(rep, NewReporting(store.pool, store.timeout), store, clock.System{}),
 		rep:     rep,
 		loc:     loc,
 	}

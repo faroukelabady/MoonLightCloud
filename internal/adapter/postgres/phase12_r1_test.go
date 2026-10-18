@@ -15,7 +15,7 @@ import (
 
 func reviewReq(t *testing.T, d Devices, storeID string) report.Request {
 	t.Helper()
-	r, e := report.NewService(d, clock.System{}, time.UTC).ParseRequest("custom", "2026-09-20", "2026-09-30", "")
+	r, e := report.NewService(NewReporting(d.pool, d.timeout), clock.System{}, time.UTC).ParseRequest("custom", "2026-09-20", "2026-09-30", "")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -29,7 +29,7 @@ func TestPhase12R1OnlineCurrencyScopes(t *testing.T) {
 	f, productA, _ := scopeOrderFixture(t)
 	ctx := context.Background()
 	d := NewDevices(f.pool, 5*time.Second)
-	s := dashboard.NewService(report.NewService(d, clock.System{}, time.UTC), d, nil, clock.System{})
+	s := dashboard.NewService(report.NewService(NewReporting(d.pool, d.timeout), clock.System{}, time.UTC), NewReporting(d.pool, d.timeout), nil, clock.System{})
 	for i, c := range []struct {
 		external, currency, storeline string
 		amount                        int64
@@ -112,7 +112,7 @@ func TestPhase12R1OnlineOverflow(t *testing.T) {
 		snap.Canonical = st
 		mustReconcile(t, f, snap)
 	}
-	s := dashboard.NewService(report.NewService(d, clock.System{}, time.UTC), d, nil, clock.System{})
+	s := dashboard.NewService(report.NewService(NewReporting(d.pool, d.timeout), clock.System{}, time.UTC), NewReporting(d.pool, d.timeout), nil, clock.System{})
 	out, e := s.OrderAnalytics(ctx, reviewReq(t, d, scopeStoreA), "")
 	t.Logf("two valid 5e18 buckets => %+v error=%v", out, e)
 	if e == nil {
@@ -133,7 +133,7 @@ func TestPhase12R1TagTiePlans(t *testing.T) {
 	}
 	defer p.Close()
 	d := NewDevices(p, 5*time.Second)
-	s := report.NewService(d, clock.System{}, time.UTC)
+	s := report.NewService(NewReporting(d.pool, d.timeout), clock.System{}, time.UTC)
 	r := reviewReq(t, d, "")
 	r.Currency = "EGP"
 	r.Limit = 1
@@ -195,7 +195,7 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 	}
 	defer ro.Close()
 	readonly := NewDevices(ro, 5*time.Second)
-	s := dashboard.NewService(report.NewService(readonly, clock.System{}, time.UTC), readonly, nil, clock.System{})
+	s := dashboard.NewService(report.NewService(NewReporting(readonly.pool, readonly.timeout), clock.System{}, time.UTC), NewReporting(readonly.pool, readonly.timeout), nil, clock.System{})
 	req := reviewReq(t, d, scopeStoreA)
 	before := r4Payloads(t, f)
 	h, e := s.CatalogHealth(ctx, req, "", "", 1)
@@ -344,7 +344,7 @@ func TestPhase12R1ProviderChoicesBeyondDetailPage(t *testing.T) {
 	}
 	defer ro.Close()
 	readonly := NewDevices(ro, 5*time.Second)
-	svc := dashboard.NewService(report.NewService(readonly, clock.System{}, time.UTC), readonly, nil, clock.System{})
+	svc := dashboard.NewService(report.NewService(NewReporting(readonly.pool, readonly.timeout), clock.System{}, time.UTC), NewReporting(readonly.pool, readonly.timeout), nil, clock.System{})
 	out, err := svc.CatalogHealth(ctx, reviewReq(t, d, scopeStoreA), "", "", 50)
 	if err != nil {
 		t.Fatal(err)
@@ -399,7 +399,7 @@ func TestPhase12R1TopNRepresentativePerformance(t *testing.T) {
 	}
 	ctx := context.Background()
 	d := NewDevices(env.pool, 5*time.Second)
-	s := report.NewService(d, clock.System{}, time.UTC)
+	s := report.NewService(NewReporting(d.pool, d.timeout), clock.System{}, time.UTC)
 	r := reviewReq(t, d, "")
 	r.Currency = "EGP"
 	for _, limit := range []int{1, 10, 100} {

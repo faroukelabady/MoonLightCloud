@@ -499,7 +499,7 @@ func TestReportConnectionRefusedIs503(t *testing.T) {
 	}
 	defer pool.Close()
 	store := NewDevices(pool, 5*time.Second)
-	_, err = store.SalesSummary(context.Background(), time.Now(), time.Now(), "")
+	_, err = NewReporting(store.pool, store.timeout).SalesSummary(context.Background(), time.Now(), time.Now(), "")
 	if err == nil {
 		t.Fatal("refused connection must fail")
 	}
@@ -524,7 +524,7 @@ func TestReportMissingTablesIs500(t *testing.T) {
 	}
 	defer pool.Close()
 	store := NewDevices(pool, 5*time.Second)
-	_, err = store.SalesSummary(context.Background(), time.Now(), time.Now(), "")
+	_, err = NewReporting(store.pool, store.timeout).SalesSummary(context.Background(), time.Now(), time.Now(), "")
 	if err == nil {
 		t.Fatal("missing tables must fail")
 	}

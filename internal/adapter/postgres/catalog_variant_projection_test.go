@@ -427,7 +427,7 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 	mkStock("f0000000-0000-4000-8000-000000000013", "f0000000-0000-4000-8000-000000000006", "V-4", 5)
 
 	devices := catalogStore(env)
-	counts, err := devices.CatalogHealthSummaryRows(context.Background(), "", "")
+	counts, err := NewReporting(devices.pool, devices.timeout).CatalogHealthSummaryRows(context.Background(), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,14 +455,14 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 	// Product-level detail rows carry NO sku (Phase 17-R0: product SKU
 	// retired everywhere — row identity is the product); variant-level
 	// rows keep their variant SKU.
-	detail, err := devices.CatalogHealthDetailRows(context.Background(), "", "", "PRODUCT_NO_ACTIVE_VARIANTS", 10)
+	detail, err := NewReporting(devices.pool, devices.timeout).CatalogHealthDetailRows(context.Background(), "", "", "PRODUCT_NO_ACTIVE_VARIANTS", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(detail) != 2 || detail[0].SKU != "" || detail[0].Name != "p1" {
 		t.Fatalf("detail: %+v", detail)
 	}
-	variantDetail, err := devices.CatalogHealthDetailRows(context.Background(), "", "", "VARIANT_INTENTIONALLY_OFFLINE", 10)
+	variantDetail, err := NewReporting(devices.pool, devices.timeout).CatalogHealthDetailRows(context.Background(), "", "", "VARIANT_INTENTIONALLY_OFFLINE", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

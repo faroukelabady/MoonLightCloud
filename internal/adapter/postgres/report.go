@@ -27,7 +27,7 @@ func reportErr(op string, err error) error {
 
 // Reporting implements report.Repository with static aggregate queries.
 // Currency ” means all currencies (rows stay bucketed; never summed).
-func (d Devices) SalesSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.SummaryRow, error) {
+func (d Reporting) SalesSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.SummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesSummary(ctx, sqlcgen.ReportSalesSummaryParams{
@@ -47,7 +47,7 @@ func (d Devices) SalesSummary(ctx context.Context, startUTC, endUTC time.Time, c
 	return out, nil
 }
 
-func (d Devices) SalesPayments(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.PaymentRow, error) {
+func (d Reporting) SalesPayments(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.PaymentRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesPayments(ctx, sqlcgen.ReportSalesPaymentsParams{
@@ -65,7 +65,7 @@ func (d Devices) SalesPayments(ctx context.Context, startUTC, endUTC time.Time, 
 	return out, nil
 }
 
-func (d Devices) SalesDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]report.DailyRowRaw, error) {
+func (d Reporting) SalesDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]report.DailyRowRaw, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesDaily(ctx, sqlcgen.ReportSalesDailyParams{
@@ -85,7 +85,7 @@ func (d Devices) SalesDaily(ctx context.Context, startUTC, endUTC time.Time, cur
 	return out, nil
 }
 
-func (d Devices) SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ProductRow, error) {
+func (d Reporting) SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ProductRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByProduct(ctx, sqlcgen.ReportSalesByProductParams{
@@ -109,7 +109,7 @@ func (d Devices) SalesByProduct(ctx context.Context, startUTC, endUTC time.Time,
 	return out, nil
 }
 
-func categoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func categoryRows(kind string, ctx context.Context, d Reporting, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	rows, err := sqlcgen.New(d.pool).ReportSalesByCategory(ctx, sqlcgen.ReportSalesByCategoryParams{
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind, Currency: currency,
 	})
@@ -126,19 +126,19 @@ func categoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC 
 	return out, nil
 }
 
-func (d Devices) SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func (d Reporting) SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return categoryRows("root", ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
+func (d Reporting) SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return categoryRows("subcategory", ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.TagRow, error) {
+func (d Reporting) SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.TagRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByTag(ctx, sqlcgen.ReportSalesByTagParams{
@@ -157,7 +157,7 @@ func (d Devices) SalesByTag(ctx context.Context, startUTC, endUTC time.Time, cur
 	return out, nil
 }
 
-func (d Devices) RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundTagRow, error) {
+func (d Reporting) RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundTagRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByTag(ctx, sqlcgen.ReportRefundsByTagParams{
@@ -176,7 +176,7 @@ func (d Devices) RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, c
 	return out, nil
 }
 
-func (d Devices) SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
+func (d Reporting) SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.CashierRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByCashier(ctx, sqlcgen.ReportSalesByCashierParams{
@@ -205,7 +205,7 @@ func (d Devices) SalesByCashier(ctx context.Context, startUTC, endUTC time.Time,
 	return out, nil
 }
 
-func (d Devices) SalesByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ChannelRow, error) {
+func (d Reporting) SalesByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ChannelRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByChannel(ctx, sqlcgen.ReportSalesByChannelParams{
@@ -225,7 +225,7 @@ func (d Devices) SalesByChannel(ctx context.Context, startUTC, endUTC time.Time,
 	return out, nil
 }
 
-func (d Devices) SalesProjectionFreshness(ctx context.Context) (report.FreshnessRow, error) {
+func (d Reporting) SalesProjectionFreshness(ctx context.Context) (report.FreshnessRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).ReportFreshness(ctx)
@@ -263,7 +263,7 @@ func textPtr(t pgtype.Text) *string {
 // Refunds reporting implements the additive reversal side of
 // report.Repository. Windows run on return occurred_at; native EGP/USD
 // buckets stay separate; overflow fails via the numeric casts.
-func (d Devices) RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundSummaryRow, error) {
+func (d Reporting) RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundSummaryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsSummary(ctx, sqlcgen.ReportRefundsSummaryParams{
@@ -283,7 +283,7 @@ func (d Devices) RefundsSummary(ctx context.Context, startUTC, endUTC time.Time,
 	return out, nil
 }
 
-func (d Devices) RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
+func (d Reporting) RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]report.RefundDailyRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsDaily(ctx, sqlcgen.ReportRefundsDailyParams{
@@ -302,7 +302,7 @@ func (d Devices) RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, c
 	return out, nil
 }
 
-func (d Devices) RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductRow, error) {
+func (d Reporting) RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByProduct(ctx, sqlcgen.ReportRefundsByProductParams{
@@ -321,7 +321,7 @@ func (d Devices) RefundsByProduct(ctx context.Context, startUTC, endUTC time.Tim
 	return out, nil
 }
 
-func (d Devices) RefundsByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
+func (d Reporting) RefundsByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundProductTypeRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByProductType(ctx, sqlcgen.ReportRefundsByProductTypeParams{
@@ -341,7 +341,7 @@ func (d Devices) RefundsByProductType(ctx context.Context, startUTC, endUTC time
 	return out, nil
 }
 
-func refundCategoryRows(kind string, ctx context.Context, d Devices, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func refundCategoryRows(kind string, ctx context.Context, d Reporting, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByCategory(ctx, sqlcgen.ReportRefundsByCategoryParams{
 		StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), Kind: kind, Currency: currency,
 	})
@@ -358,19 +358,19 @@ func refundCategoryRows(kind string, ctx context.Context, d Devices, startUTC, e
 	return out, nil
 }
 
-func (d Devices) RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func (d Reporting) RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return refundCategoryRows("root", ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
+func (d Reporting) RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return refundCategoryRows("subcategory", ctx, d, startUTC, endUTC, currency)
 }
 
-func (d Devices) RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
+func (d Reporting) RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundCashierRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByCashier(ctx, sqlcgen.ReportRefundsByCashierParams{
@@ -390,7 +390,7 @@ func (d Devices) RefundsByCashier(ctx context.Context, startUTC, endUTC time.Tim
 	return out, nil
 }
 
-func (d Devices) RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
+func (d Reporting) RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.RefundChannelRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportRefundsByChannel(ctx, sqlcgen.ReportRefundsByChannelParams{
@@ -409,7 +409,7 @@ func (d Devices) RefundsByChannel(ctx context.Context, startUTC, endUTC time.Tim
 	return out, nil
 }
 
-func (d Devices) ReturnProjectionFreshness(ctx context.Context) (report.ReturnFreshnessRow, error) {
+func (d Reporting) ReturnProjectionFreshness(ctx context.Context) (report.ReturnFreshnessRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	r, err := sqlcgen.New(d.pool).ReportReturnFreshness(ctx)
@@ -484,7 +484,7 @@ func variantReportToDomain(r variantReportRow) report.VariantRow {
 // identity/labels (Phase 17 + 17-R0). History never joins the
 // current-state variant projection: a later catalog label rename can
 // never move these rows.
-func (d Devices) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
+func (d Reporting) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.VariantRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByVariant(ctx, sqlcgen.ReportSalesByVariantParams{
@@ -508,7 +508,7 @@ func (d Devices) SalesByVariant(ctx context.Context, startUTC, endUTC time.Time,
 // SalesByProductType groups sale lines by their FROZEN per-line type
 // snapshot (Phase 17-R2, 00038). History never joins the current-state
 // type projection: renames/reassignments never move rows.
-func (d Devices) SalesByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
+func (d Reporting) SalesByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]report.ProductTypeRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ReportSalesByProductType(ctx, sqlcgen.ReportSalesByProductTypeParams{
