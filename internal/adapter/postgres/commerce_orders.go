@@ -208,7 +208,7 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 	// the attempt before any order/history write. Tombstones preserve
 	// the established Store and never block on mixed evidence: deletion
 	// changes lifecycle, not attribution.
-	derived, mixed := deriveOrderStore(resolved, lineStores)
+	derived, mixed := orders.DeriveOrderStore(resolved, lineStores)
 	tombstone := resolved.ProviderDeleted
 	existing, err := q.GetCommerceOrder(ctx, sqlcgen.GetCommerceOrderParams{
 		ProviderKey: snapshot.ProviderKey, ExternalOrderID: snapshot.ExternalOrderID,
@@ -218,7 +218,7 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 	}
 	if err == nil {
 		existingStore := storeString(existing.StoreID)
-		writeStore, storeChanged, scopeErr := decideOrderStore(existingStore, derived, mixed, tombstone)
+		writeStore, storeChanged, scopeErr := orders.DecideOrderStore(existingStore, derived, mixed, tombstone)
 		if scopeErr != nil {
 			_ = tx.Rollback(ctx)
 			return none, scopeErr
@@ -230,7 +230,7 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 			return orders.ReconcileOutcome{Revision: existing.Revision}, nil
 		}
 		resolvedRevision := existing.Revision + 1
-		if err := writeProjectedOrder(ctx, q, resolved, fingerprint, resolvedRevision, writeStore); err != nil {
+		if err := writeProjectedOrder(ctx, q, resolved, fingerprint, resolvedRevision, storeUUID(writeStore)); err != nil {
 			return none, err
 		}
 		if existing.ProviderStatus != resolved.ProviderStatus || existing.CanonicalStatus != string(resolved.Canonical) {
@@ -248,12 +248,12 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 		}
 		return orders.ReconcileOutcome{Revision: resolvedRevision, Changed: true}, nil
 	}
-	newStore, scopeErr := decideNewOrderStore(derived, mixed, tombstone)
+	newStore, scopeErr := orders.DecideNewOrderStore(derived, mixed, tombstone)
 	if scopeErr != nil {
 		_ = tx.Rollback(ctx)
 		return none, scopeErr
 	}
-	if err := writeProjectedOrder(ctx, q, resolved, fingerprint, 1, newStore); err != nil {
+	if err := writeProjectedOrder(ctx, q, resolved, fingerprint, 1, storeUUID(newStore)); err != nil {
 		return none, err
 	}
 	if err := q.InsertCommerceOrderStatusHistory(ctx, sqlcgen.InsertCommerceOrderStatusHistoryParams{
@@ -565,89 +565,6 @@ func snapshotConfiguration(line *orders.OrderLine, row sqlcgen.CatalogProductCon
 		delta := row.PriceDeltaEgpMinor
 		line.ConfigurationPriceDeltaMinor = &delta
 	}
-}
-
-// deriveOrderStore resolves the single proven Store for a reconciled
-// order from mapped-line evidence, or reports mixed ownership:
-//
-//   - no mapped line, or every mapped line legacy: NULL (unproven);
-//   - mapped lines unanimous on one proven Store: that Store;
-//   - mapped lines spanning proven Stores: mixed (caller blocks).
-//
-// Unmapped lines (variations, empty external IDs, missing mappings) carry
-// no evidence and never force attribution. A mapped line whose own
-// mapping is legacy makes the whole order incomplete: a sibling's proven
-// Store must not absorb it by majority.
-func deriveOrderStore(snapshot orders.OrderSnapshot, lineStores map[string]*string) (store *string, mixed bool) {
-	seen := map[string]bool{}
-	proven, incomplete := 0, false
-	for i := range snapshot.Lines {
-		line := &snapshot.Lines[i]
-		if !line.Mapped || line.MoonlightProduct == nil {
-			continue
-		}
-		mappingStore, ok := lineStores[*line.MoonlightProduct]
-		if !ok || mappingStore == nil || *mappingStore == "" {
-			incomplete = true
-			continue
-		}
-		proven++
-		seen[*mappingStore] = true
-		if len(seen) > 1 {
-			return nil, true
-		}
-	}
-	if len(seen) > 1 {
-		return nil, true
-	}
-	if incomplete || proven == 0 {
-		return nil, false
-	}
-	for store := range seen {
-		owned := store
-		return &owned, false
-	}
-	return nil, false
-}
-
-// decideOrderStore resolves the write Store for an existing order row.
-// Tombstones preserve the established Store and never block on mixed
-// evidence: deletion changes lifecycle, not attribution. Live
-// reconciliations block on mixed or contradictory ownership with zero
-// writes; NULL adoption forces a write even when the content fingerprint
-// is unchanged, so the newly proven Store becomes durable.
-func decideOrderStore(existing, derived *string, mixed, tombstone bool) (pgtype.UUID, bool, error) {
-	if tombstone {
-		if existing != nil {
-			return storeUUID(existing), false, nil
-		}
-		return storeUUID(derived), false, nil
-	}
-	if mixed {
-		return pgtype.UUID{}, false, &orders.BlockedError{Code: orders.CodeCommerceStoreScopeConflict, Message: "order lines resolve to more than one store"}
-	}
-	switch {
-	case existing == nil && derived == nil:
-		return pgtype.UUID{}, false, nil
-	case existing == nil:
-		return storeUUID(derived), true, nil
-	case derived == nil:
-		return storeUUID(existing), false, nil
-	case *existing == *derived:
-		return storeUUID(existing), false, nil
-	default:
-		return pgtype.UUID{}, false, &orders.BlockedError{Code: orders.CodeCommerceStoreScopeConflict, Message: "order owned by another store"}
-	}
-}
-
-// decideNewOrderStore resolves the write Store for a missing order row:
-// unanimous derived ownership (or tombstone evidence) writes through,
-// mixed live evidence blocks before any row exists.
-func decideNewOrderStore(derived *string, mixed, tombstone bool) (pgtype.UUID, error) {
-	if !tombstone && mixed {
-		return pgtype.UUID{}, &orders.BlockedError{Code: orders.CodeCommerceStoreScopeConflict, Message: "order lines resolve to more than one store"}
-	}
-	return storeUUID(derived), nil
 }
 
 func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot orders.OrderSnapshot, fingerprint [32]byte, revision int64, storeID pgtype.UUID) error {

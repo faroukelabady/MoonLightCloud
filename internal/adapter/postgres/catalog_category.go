@@ -290,10 +290,10 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	for _, p := range resolvedParents {
 		projectedParentIDs = append(projectedParentIDs, p.projected)
 	}
-	if err := checkCategoryGraph(allEdges, projectedID, projectedParentIDs); err != nil {
+	if err := catalog.CheckCategoryGraph(allEdges, projectedID, projectedParentIDs); err != nil {
 		_ = tx.Rollback(ctx)
 		code := ErrCatalogCategoryCycle
-		if errors.Is(err, ErrGraphDepth) {
+		if errors.Is(err, catalog.ErrGraphDepth) {
 			code = ErrCatalogCategoryDepth
 		}
 		return d.markCatalogBlocked(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, code, "category graph violates DAG invariants")
@@ -305,7 +305,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 	// Affected products (child + transitive descendants) are locked with
 	// the category key in globally sorted order, so concurrent product
 	// projections serialize instead of racing the decision.
-	descendants := categoryDescendants(allEdges, projectedID)
+	descendants := catalog.CategoryDescendants(allEdges, projectedID)
 	// A revision that keeps the same parent set cannot orphan any product:
 	// label/status-only revisions never change graph validity, so the
 	// product lock sweep and repair requirement apply only to genuine
