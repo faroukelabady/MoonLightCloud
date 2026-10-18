@@ -4242,7 +4242,7 @@ components:
           description: Authoritative Store scope. Never global.
         type:
           type: string
-          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.configurations.update.v1, catalog.product.variants.update.v1, catalog.product.variant.update.v1, catalog.variant.attributes.update.v1, catalog.product-type.create.v1, catalog.product-type.details.update.v1, catalog.product-type.dimensions.update.v1, catalog.product-type.capabilities.update.v1, catalog.product-type.status.update.v1, catalog.product.type.assign.v1]
+          enum: [catalog.product.details.update.v1, catalog.product.online-policy.update.v1, catalog.product.classification.update.v1, catalog.category.details.update.v1, catalog.category.parents.update.v1, catalog.category.online-policy.update.v1, catalog.tag.details.update.v1, catalog.product.variants.update.v1, catalog.product.variant.update.v1, catalog.variant.attributes.update.v1, catalog.product-type.create.v1, catalog.product-type.details.update.v1, catalog.product-type.dimensions.update.v1, catalog.product-type.capabilities.update.v1, catalog.product-type.status.update.v1, catalog.product.type.assign.v1]
           description: Immutable versioned command type. No generic patch exists.
         entity_id:
           type: string

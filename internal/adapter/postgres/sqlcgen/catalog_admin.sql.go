@@ -85,24 +85,6 @@ func (q *Queries) AdminCategoryOwnership(ctx context.Context, categoryID pgtype.
 	return i, err
 }
 
-const adminProductConfigurationRevision = `-- name: AdminProductConfigurationRevision :one
-SELECT product_id, configuration_revision
-FROM catalog_products
-WHERE product_id = $1::uuid
-`
-
-type AdminProductConfigurationRevisionRow struct {
-	ProductID             pgtype.UUID `json:"product_id"`
-	ConfigurationRevision int64       `json:"configuration_revision"`
-}
-
-func (q *Queries) AdminProductConfigurationRevision(ctx context.Context, productID pgtype.UUID) (AdminProductConfigurationRevisionRow, error) {
-	row := q.db.QueryRow(ctx, adminProductConfigurationRevision, productID)
-	var i AdminProductConfigurationRevisionRow
-	err := row.Scan(&i.ProductID, &i.ConfigurationRevision)
-	return i, err
-}
-
 const adminProductConfigurations = `-- name: AdminProductConfigurations :many
 SELECT configuration_id, style_code, style_name_ar, style_name_en,
     color_code, color_name_ar, color_name_en,

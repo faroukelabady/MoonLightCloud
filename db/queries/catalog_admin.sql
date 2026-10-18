@@ -121,11 +121,6 @@ SELECT product_id, source_revision
 FROM catalog_product_sales_policies
 WHERE product_id = @product_id::uuid;
 
--- name: AdminProductConfigurationRevision :one
-SELECT product_id, configuration_revision
-FROM catalog_products
-WHERE product_id = @product_id::uuid;
-
 -- name: AdminCategoryOwnership :one
 SELECT category_id, store_id, source_revision
 FROM catalog_categories

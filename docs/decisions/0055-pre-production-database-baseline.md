@@ -94,5 +94,9 @@ on all money-bearing documents.
   `description_en` columns; `catalog_product_translations` is removed and
   `catalog_tags.name_ar` is required. Category, tag and product snapshots
   carry the same fields instead of locale lists.
+- With Retail baseline r10 (ADR-049 1g) frame options are relational
+  shared choices in Retail; `catalog.product.configurations.update.v1` is
+  removed from Cloud catalog administration. The configuration snapshot
+  contract is unchanged.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

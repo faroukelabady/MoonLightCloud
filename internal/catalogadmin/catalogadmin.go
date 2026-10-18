@@ -35,7 +35,6 @@ const (
 	TypeCategoryParentsUpdateV1       = "catalog.category.parents.update.v1"
 	TypeCategoryOnlinePolicyUpdateV1  = "catalog.category.online-policy.update.v1"
 	TypeTagDetailsUpdateV1            = "catalog.tag.details.update.v1"
-	TypeProductConfigurationsUpdateV1 = "catalog.product.configurations.update.v1"
 	// Phase 17 variant commands (SKU/inventory ownership on variant).
 	TypeProductVariantsUpdateV1   = "catalog.product.variants.update.v1"
 	TypeProductVariantUpdateV1    = "catalog.product.variant.update.v1"
@@ -61,7 +60,6 @@ func KnownTypes() []string {
 		TypeCategoryParentsUpdateV1,
 		TypeCategoryOnlinePolicyUpdateV1,
 		TypeTagDetailsUpdateV1,
-		TypeProductConfigurationsUpdateV1,
 		TypeProductVariantsUpdateV1,
 		TypeProductVariantUpdateV1,
 		TypeVariantAttributesUpdateV1,
@@ -136,8 +134,7 @@ const (
 func EntityKeyOf(typ string) string {
 	switch typ {
 	case TypeProductDetailsUpdateV1, TypeProductOnlinePolicyUpdateV1,
-		TypeProductClassificationUpdateV1, TypeProductConfigurationsUpdateV1,
-		TypeProductVariantsUpdateV1:
+		TypeProductClassificationUpdateV1, TypeProductVariantsUpdateV1:
 		return "product_id"
 	case TypeCategoryDetailsUpdateV1, TypeCategoryParentsUpdateV1,
 		TypeCategoryOnlinePolicyUpdateV1:
@@ -163,8 +160,6 @@ func ExpectedRevisionKeyOf(typ string) string {
 	switch typ {
 	case TypeProductOnlinePolicyUpdateV1:
 		return "expected_sales_policy_revision"
-	case TypeProductConfigurationsUpdateV1:
-		return "expected_configuration_revision"
 	case TypeProductVariantUpdateV1, TypeVariantAttributesUpdateV1:
 		// Variant-scoped commands version on the variant catalog stream.
 		return "expected_variant_revision"
@@ -361,16 +356,6 @@ func boundPayload(typ string, payload map[string]any) error {
 	}
 	if err := idList("tag_ids", 64); err != nil {
 		return err
-	}
-	if typ == TypeProductConfigurationsUpdateV1 {
-		raw, present := payload["configurations"]
-		if !present {
-			return fmt.Errorf("missing configurations")
-		}
-		list, ok := raw.([]any)
-		if !ok || len(list) > 100 {
-			return fmt.Errorf("invalid configurations: at most 100")
-		}
 	}
 	// Phase 17-R2 type payloads: envelope bounds only (Retail owns
 	// acceptance at apply). Dimensions/capabilities are bounded string
@@ -634,11 +619,10 @@ func ValidateOutcome(cmd CommandView, status, code, entity string, pre, post int
 	switch status {
 	case TargetApplied:
 		// A no-op may retain its revision for no-op-capable commands
-		// (policy flips, configurations, Phase 17 variant updates):
+		// (policy flips, Phase 17 variant updates):
 		// convergence re-verifies the requested values in projection.
 		noopCapable := cmd.Type == TypeProductOnlinePolicyUpdateV1 ||
 			cmd.Type == TypeCategoryOnlinePolicyUpdateV1 ||
-			cmd.Type == TypeProductConfigurationsUpdateV1 ||
 			cmd.Type == TypeProductVariantsUpdateV1 ||
 			cmd.Type == TypeProductVariantUpdateV1 ||
 			cmd.Type == TypeVariantAttributesUpdateV1

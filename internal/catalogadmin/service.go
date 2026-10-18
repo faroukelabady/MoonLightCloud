@@ -906,7 +906,7 @@ func (s *Service) AdminConfigurations(ctx context.Context, storeID, productID st
 	if _, err := uuid.Parse(strings.TrimSpace(productID)); err != nil {
 		return nil, apperr.New(apperr.InvalidInput, "invalid product id")
 	}
-	owner, _, found, err := s.store.CatalogAdminOwnership(ctx, TypeProductConfigurationsUpdateV1, strings.TrimSpace(productID), storeID)
+	owner, _, found, err := s.store.CatalogAdminOwnership(ctx, TypeProductDetailsUpdateV1, strings.TrimSpace(productID), storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -974,46 +974,6 @@ func (s *Service) noopProjected(ctx context.Context, view CommandView) bool {
 				return row.OnlineEnabled == wanted
 			}
 		}
-	case TypeProductConfigurationsUpdateV1:
-		rows, err := s.store.AdminProductConfigurations(ctx, view.StoreID, view.EntityID)
-		if err != nil {
-			return false
-		}
-		desired, ok := payload["configurations"].([]any)
-		if !ok {
-			return false
-		}
-		requestedIDs := make(map[string]bool, len(desired))
-		for position, item := range desired {
-			m, ok := item.(map[string]any)
-			if !ok {
-				return false
-			}
-			id := payloadText(m, "id")
-			if parsed, err := uuid.Parse(id); err == nil {
-				id = parsed.String()
-			}
-			requestedIDs[id] = true
-			matched := false
-			for _, row := range rows {
-				if row.ID != id {
-					continue
-				}
-				enabled, valid := m["enabled"].(bool)
-				matched = valid && row.Position == position && optionalTextEqual(row.StyleNameEN, m["style_name_en"]) && optionalTextEqual(row.ColorNameEN, m["color_name_en"]) && row.StyleCode == payloadText(m, "style_code") && row.ColorCode == payloadText(m, "color_code") && row.StyleNameAR == payloadText(m, "style_name_ar") && row.ColorNameAR == payloadText(m, "color_name_ar") && minorTextEqual(row.EGPDeltaMinor, m["egp_delta_cents"]) && row.Enabled == enabled && ((row.USDDeltaMinor == nil && m["usd_delta_cents"] == nil) || (row.USDDeltaMinor != nil && minorTextEqual(*row.USDDeltaMinor, m["usd_delta_cents"])))
-				break
-			}
-			if !matched {
-				return false
-			}
-		}
-		// Omitted options must already be disabled for a genuine no-op.
-		for _, row := range rows {
-			if row.Enabled && !requestedIDs[row.ID] {
-				return false
-			}
-		}
-		return true
 	case TypeProductVariantUpdateV1:
 		row, err := s.store.AdminProductVariant(ctx, view.StoreID, view.EntityID)
 		return err == nil && variantStateMatches(row, payload)

@@ -570,22 +570,6 @@ func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityI
 			return "", 0, false, catalogAdminErr(err)
 		}
 		return uuidString(prod.StoreID), pol.SourceRevision, true, nil
-	case catalogadmin.TypeProductConfigurationsUpdateV1:
-		row, err := q.AdminProductConfigurationRevision(ctx, uid)
-		if err != nil {
-			if isNotFoundErr(err) {
-				return "", 0, false, nil
-			}
-			return "", 0, false, catalogAdminErr(err)
-		}
-		prod, err := q.AdminProductOwnership(ctx, uid)
-		if err != nil {
-			if isNotFoundErr(err) {
-				return "", 0, false, nil
-			}
-			return "", 0, false, catalogAdminErr(err)
-		}
-		return uuidString(prod.StoreID), row.ConfigurationRevision, true, nil
 	case catalogadmin.TypeCategoryDetailsUpdateV1, catalogadmin.TypeCategoryParentsUpdateV1,
 		catalogadmin.TypeCategoryOnlinePolicyUpdateV1:
 		row, err := q.AdminCategoryOwnership(ctx, uid)

@@ -71,7 +71,7 @@ func TestValidateNewCommandBounds(t *testing.T) {
 		"empty payload":     {typ: TypeProductDetailsUpdateV1, sid: store, eid: entity, rev: 1, raw: nil},
 		"oversize payload":  {typ: TypeProductDetailsUpdateV1, sid: store, eid: entity, rev: 1, raw: make([]byte, 65*1024)},
 		"non-object":        {typ: TypeProductDetailsUpdateV1, sid: store, eid: entity, rev: 1, raw: []byte(`[1,2]`)},
-		"too many configs":  {typ: TypeProductConfigurationsUpdateV1, sid: store, eid: entity, rev: 1, raw: []byte(`{"configurations":[` + strings.Repeat(`{},`, 101) + `{}]}`)},
+		"removed configs":   {typ: "catalog.product.configurations.update.v1", sid: store, eid: entity, rev: 1, raw: []byte(`{"configurations":[]}`)},
 	} {
 		_ = name
 		if _, err := ValidateNewCommand(tc.typ, tc.sid, tc.eid, tc.rev, tc.raw); err == nil {
