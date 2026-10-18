@@ -34,7 +34,7 @@ func (r remediationDirectory) DeviceName(context.Context, string) string { retur
 
 type remediationCloud struct {
 	p             *pgxpool.Pool
-	d             Devices
+	d             CatalogAdmin
 	dir           remediationDirectory
 	s             *catalogadmin.Service
 	sid, pid, did string
@@ -44,7 +44,7 @@ func remediationCloudSetup(t *testing.T) remediationCloud {
 	t.Helper()
 	p, a := openTestRepo(t)
 	ctx := context.Background()
-	d := NewDevices(p, 5*time.Second)
+	d := NewCatalogAdmin(p, 5*time.Second)
 	v, e := a.Create(ctx, "remediation")
 	if e != nil {
 		t.Fatal(e)

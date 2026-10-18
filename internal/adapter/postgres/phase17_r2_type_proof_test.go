@@ -37,7 +37,7 @@ func TestProductTypeProjectionLifecycle(t *testing.T) {
 	if res := projectCatalogOnce(t, env, e1); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("type v1: %+v", res)
 	}
-	devices := catalogStore(env)
+	devices := NewCatalogAdmin(env.pool, 5*time.Second)
 	row, err := devices.AdminProductType(context.Background(), env.storeID, typeID)
 	if err != nil {
 		t.Fatalf("admin read: %v", err)

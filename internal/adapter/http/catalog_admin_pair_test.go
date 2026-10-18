@@ -58,7 +58,7 @@ func TestRemediationExactPair(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	svc := catalogadmin.NewService(repo, pairDirectory{postgres.NewStoreRegistry(p, 5*time.Second), authentication})
+	svc := catalogadmin.NewService(postgres.NewCatalogAdmin(p, 5*time.Second), pairDirectory{postgres.NewStoreRegistry(p, 5*time.Second), authentication})
 	h := CatalogAdminHandlers{Svc: svc, Log: slog.Default()}
 	commands := make(chan catalogadmin.CommandView, 1)
 	mux := http.NewServeMux()

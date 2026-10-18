@@ -14,7 +14,7 @@ import (
 func TestSharedProductTypeIndependentStores(t *testing.T) {
 	f := openScopeFixture(t)
 	ctx := context.Background()
-	d := NewDevices(f.pool, 5*time.Second)
+	d := NewCatalogAdmin(f.pool, 5*time.Second)
 	project := func(dev, cred, typ, payload string) string {
 		t.Helper()
 		eid := uuid.NewString()

@@ -17,7 +17,7 @@ import (
 func TestSharedProductTypeLegacyCustomAliasPreserved(t *testing.T) {
 	f := openScopeFixture(t)
 	ctx := context.Background()
-	d := NewDevices(f.pool, 5*time.Second)
+	d := NewCatalogAdmin(f.pool, 5*time.Second)
 	store := storeUUID(func() *string { s := scopeStoreA; return &s }())
 	alias := canonicalDefaultProductTypeID(sharedProductTypeID, store)
 	eventID := uuid.NewString()

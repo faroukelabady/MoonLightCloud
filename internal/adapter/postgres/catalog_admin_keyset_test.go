@@ -17,7 +17,7 @@ import (
 func TestCatalogAdminHistoryKeysetStable(t *testing.T) {
 	pool, _ := openTestRepo(t)
 	ctx := context.Background()
-	store := NewDevices(pool, 5*time.Second)
+	store := NewCatalogAdmin(pool, 5*time.Second)
 	storeID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO stores (id, display_name, timezone) VALUES ($1, 'K', 'Africa/Cairo')`, storeID); err != nil {
 		t.Fatal(err)

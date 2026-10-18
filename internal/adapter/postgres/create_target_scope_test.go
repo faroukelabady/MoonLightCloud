@@ -19,7 +19,7 @@ import (
 func TestCreateCommandSingleAuthoritativeTarget(t *testing.T) {
 	pool, authSvc := openTestRepo(t)
 	ctx := context.Background()
-	d := NewDevices(pool, 5*time.Second)
+	d := NewCatalogAdmin(pool, 5*time.Second)
 
 	storeID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO stores(id,display_name,timezone) VALUES($1,'Single','Africa/Cairo')`, storeID); err != nil {

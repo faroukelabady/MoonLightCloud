@@ -12,7 +12,7 @@ import (
 
 // AdminProductList serves the operator list: Store-scoped, bounded
 // search, keyset pagination. cursor "" starts from the newest.
-func (d Devices) AdminProductList(ctx context.Context, storeID, search, cursor string, limit int) ([]catalogadmin.AdminProductRow, error) {
+func (d CatalogAdmin) AdminProductList(ctx context.Context, storeID, search, cursor string, limit int) ([]catalogadmin.AdminProductRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -47,7 +47,7 @@ func (d Devices) AdminProductList(ctx context.Context, storeID, search, cursor s
 // AdminProductDetail serves the full editor snapshot: current values,
 // all revision streams, and the derived variant rollup. Money stays
 // exact minor-unit strings (never floats).
-func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID string) (catalogadmin.AdminProductDetail, error) {
+func (d CatalogAdmin) AdminProductDetail(ctx context.Context, storeID, productID string) (catalogadmin.AdminProductDetail, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -131,7 +131,7 @@ func (d Devices) AdminProductDetail(ctx context.Context, storeID, productID stri
 }
 
 // AdminCategoryList serves the Store-scoped tree rows.
-func (d Devices) AdminCategoryList(ctx context.Context, storeID string) ([]catalogadmin.AdminCategoryRow, error) {
+func (d CatalogAdmin) AdminCategoryList(ctx context.Context, storeID string) ([]catalogadmin.AdminCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -156,7 +156,7 @@ func (d Devices) AdminCategoryList(ctx context.Context, storeID string) ([]catal
 }
 
 // AdminTagList serves the Store-scoped tag rows.
-func (d Devices) AdminTagList(ctx context.Context, storeID string) ([]catalogadmin.AdminTagRow, error) {
+func (d CatalogAdmin) AdminTagList(ctx context.Context, storeID string) ([]catalogadmin.AdminTagRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -226,7 +226,7 @@ func textOrEmpty(v pgtype.Text) string {
 // AdminProductConfigurations serves current frame options for the
 // editor: IDs ride along so edits update rows instead of duplicating
 // them (Phase 15 full-set semantics). Money stays exact strings.
-func (d Devices) AdminProductConfigurations(ctx context.Context, storeID, productID string) ([]catalogadmin.AdminConfigurationRow, error) {
+func (d CatalogAdmin) AdminProductConfigurations(ctx context.Context, storeID, productID string) ([]catalogadmin.AdminConfigurationRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := parseUUID(storeID); err != nil {
@@ -330,7 +330,7 @@ func adminVariantAttributes(ctx context.Context, q *sqlcgen.Queries, vuid pgtype
 
 // AdminProductVariants serves one Product's projected variant rows for
 // the operator UI (Store-scoped; tombstones are flagged, never hidden).
-func (d Devices) AdminProductVariants(ctx context.Context, storeID, productID string) ([]catalogadmin.AdminProductVariant, error) {
+func (d CatalogAdmin) AdminProductVariants(ctx context.Context, storeID, productID string) ([]catalogadmin.AdminProductVariant, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -371,7 +371,7 @@ func (d Devices) AdminProductVariants(ctx context.Context, storeID, productID st
 
 // AdminProductVariant serves one projected variant row by variant ID
 // (Store-scoped; unknown/foreign rows are NotFound, never a fallback).
-func (d Devices) AdminProductVariant(ctx context.Context, storeID, variantID string) (catalogadmin.AdminProductVariant, error) {
+func (d CatalogAdmin) AdminProductVariant(ctx context.Context, storeID, variantID string) (catalogadmin.AdminProductVariant, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -410,7 +410,7 @@ func (d Devices) AdminProductVariant(ctx context.Context, storeID, variantID str
 }
 
 // AdminProductTypeList serves Store-scoped projected types for the editor.
-func (d Devices) AdminProductTypeList(ctx context.Context, storeID string) ([]catalogadmin.AdminProductType, error) {
+func (d CatalogAdmin) AdminProductTypeList(ctx context.Context, storeID string) ([]catalogadmin.AdminProductType, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	q := sqlcgen.New(d.pool)
@@ -447,7 +447,7 @@ func (d Devices) AdminProductTypeList(ctx context.Context, storeID string) ([]ca
 }
 
 // AdminProductType serves one projected type with its sets.
-func (d Devices) AdminProductType(ctx context.Context, storeID, typeID string) (catalogadmin.AdminProductType, error) {
+func (d CatalogAdmin) AdminProductType(ctx context.Context, storeID, typeID string) (catalogadmin.AdminProductType, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tuid, err := parseUUID(typeID)

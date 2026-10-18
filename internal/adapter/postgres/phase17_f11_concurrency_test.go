@@ -17,7 +17,7 @@ import (
 func TestSharedProductTypeOwnedRawAndScopedConcurrentRevisions(t *testing.T) {
 	f := openScopeFixture(t)
 	ctx := context.Background()
-	d := NewDevices(f.pool, 5*time.Second)
+	d := NewCatalogAdmin(f.pool, 5*time.Second)
 	payload := func(name string, revision int64) string {
 		t.Helper()
 		var state map[string]any
@@ -80,7 +80,7 @@ func TestSharedProductTypeOwnedRawAndScopedConcurrentRevisions(t *testing.T) {
 				<-start
 				// Reuse the production-attempt test seam: only the explicit
 				// transient contract can retry, bounded by catalogRetryBudget.
-				results <- runCatalogWorker(d, eventID, catalog.EventProductTypeSnapshotV1, catalogRetryBudget)
+				results <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), eventID, catalog.EventProductTypeSnapshotV1, catalogRetryBudget)
 			}(id)
 		}
 		close(start)

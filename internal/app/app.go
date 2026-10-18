@@ -323,7 +323,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// Always wired (routes registered unconditionally): authorization
 	// is per-request via dashboard session / device credential, and
 	// commands only flow to capable bound devices.
-	catalogAdminSvc := catalogadmin.NewService(store, catalogAdminDevices{stores: storeRegistry, auth: a.Devices})
+	catalogAdminSvc := catalogadmin.NewService(postgres.NewCatalogAdmin(pool, cfg.DBQueryTimeout), catalogAdminDevices{stores: storeRegistry, auth: a.Devices})
 	catalogAdminHandlers := &adapterhttp.CatalogAdminHandlers{Svc: catalogAdminSvc, Log: log}
 	// Phase 20 R2: Cloud-restore recovery protocol. Durable state so a
 	// restored database can never silently claim full synchronization

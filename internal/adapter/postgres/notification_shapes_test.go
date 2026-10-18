@@ -53,7 +53,7 @@ func TestDeviceCapabilityRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDevices(pool, 5*time.Second)
+	d := NewCatalogAdmin(pool, 5*time.Second)
 	read := func() bool {
 		t.Helper()
 		capable, err := d.GetCatalogAdminCapability(ctx, p.Device.ID)

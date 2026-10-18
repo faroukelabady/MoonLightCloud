@@ -36,7 +36,7 @@ func (s *stubAdminDevices) DeviceName(_ context.Context, _ string) string { retu
 func TestCatalogAdminChainEndToEnd(t *testing.T) {
 	pool, authSvc := openTestRepo(t)
 	ctx := context.Background()
-	store := NewDevices(pool, 5*time.Second)
+	store := NewCatalogAdmin(pool, 5*time.Second)
 
 	prov, err := authSvc.Create(ctx, "e2e-dev")
 	if err != nil {

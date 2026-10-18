@@ -15,7 +15,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
-// Catalog admin persistence on Devices (shared pool + timeouts).
+// Catalog admin persistence on CatalogAdmin (shared pool + timeouts).
 // Commands and targets are immutable except status transitions;
 // history is never deleted.
 
@@ -27,7 +27,7 @@ func commandIdentity(kind string, requested, result pgtype.Text) (string, string
 }
 
 // CreateCatalogAdminCommand persists one immutable command.
-func (d Devices) CreateCatalogAdminCommand(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
+func (d CatalogAdmin) CreateCatalogAdminCommand(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	id, err := parseUUID(cmd.ID)
@@ -65,7 +65,7 @@ func (d Devices) CreateCatalogAdminCommand(ctx context.Context, cmd catalogadmin
 }
 
 // CreateCatalogAdminTarget snapshots one eligible device target.
-func (d Devices) CreateCatalogAdminTarget(ctx context.Context, commandID, targetID, deviceID string) (catalogadmin.TargetView, error) {
+func (d CatalogAdmin) CreateCatalogAdminTarget(ctx context.Context, commandID, targetID, deviceID string) (catalogadmin.TargetView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	cid, err := parseUUID(commandID)
@@ -90,7 +90,7 @@ func (d Devices) CreateCatalogAdminTarget(ctx context.Context, commandID, target
 }
 
 // GetCatalogAdminCommand reads one command by ID.
-func (d Devices) GetCatalogAdminCommand(ctx context.Context, id string) (catalogadmin.CommandView, error) {
+func (d CatalogAdmin) GetCatalogAdminCommand(ctx context.Context, id string) (catalogadmin.CommandView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -117,7 +117,7 @@ func (d Devices) GetCatalogAdminCommand(ctx context.Context, id string) (catalog
 // cursorTS starts from the newest row. Keyset pagination is stable under
 // concurrent inserts: new commands never shift already-returned pages,
 // so readers observe neither duplicates nor skips.
-func (d Devices) ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit int, cursorTS time.Time, cursorID string) ([]catalogadmin.CommandView, error) {
+func (d CatalogAdmin) ListCatalogAdminCommands(ctx context.Context, storeID, commandType, entityID, status string, limit int, cursorTS time.Time, cursorID string) ([]catalogadmin.CommandView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -157,7 +157,7 @@ func (d Devices) ListCatalogAdminCommands(ctx context.Context, storeID, commandT
 }
 
 // ListCatalogAdminTargets reads all targets of one command.
-func (d Devices) ListCatalogAdminTargets(ctx context.Context, commandID string) ([]catalogadmin.TargetView, error) {
+func (d CatalogAdmin) ListCatalogAdminTargets(ctx context.Context, commandID string) ([]catalogadmin.TargetView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	cid, err := parseUUID(commandID)
@@ -182,7 +182,7 @@ func (d Devices) ListCatalogAdminTargets(ctx context.Context, commandID string) 
 
 // ListCatalogAdminTargetsBatch reads targets for many commands in
 // one query (history lists must not fan out per command).
-func (d Devices) ListCatalogAdminTargetsBatch(ctx context.Context, commandIDs []string) (map[string][]catalogadmin.TargetView, error) {
+func (d CatalogAdmin) ListCatalogAdminTargetsBatch(ctx context.Context, commandIDs []string) (map[string][]catalogadmin.TargetView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	ids := make([]pgtype.UUID, 0, len(commandIDs))
@@ -206,7 +206,7 @@ func (d Devices) ListCatalogAdminTargetsBatch(ctx context.Context, commandIDs []
 }
 
 // DueCatalogAdminTargets lists deliverable targets for one device.
-func (d Devices) DueCatalogAdminTargets(ctx context.Context, deviceID string, limit int) ([]catalogadmin.DueTarget, error) {
+func (d CatalogAdmin) DueCatalogAdminTargets(ctx context.Context, deviceID string, limit int) ([]catalogadmin.DueTarget, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -235,7 +235,7 @@ func (d Devices) DueCatalogAdminTargets(ctx context.Context, deviceID string, li
 // FinishCatalogAdminTarget records one device outcome. Only
 // PENDING/DELIVERED rows move; identical terminal replays succeed,
 // contradictory terminal outcomes conflict under the command lock.
-func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceID, status, code, entityID string, pre, post int64) (bool, error) {
+func (d CatalogAdmin) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceID, status, code, entityID string, pre, post int64) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tid, err := parseUUID(targetID)
@@ -340,7 +340,7 @@ func (d Devices) FinishCatalogAdminTarget(ctx context.Context, targetID, deviceI
 }
 
 // MarkCatalogAdminTargetDelivered moves PENDING -> DELIVERED.
-func (d Devices) MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, deviceID string) error {
+func (d CatalogAdmin) MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, deviceID string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tid, err := parseUUID(targetID)
@@ -386,7 +386,7 @@ func (d Devices) MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, 
 
 // CancelCatalogAdminCommand marks a PENDING command CANCELLED plus its
 // pending targets. Applied targets are never rewritten.
-func (d Devices) CancelCatalogAdminCommand(ctx context.Context, commandID string) (bool, error) {
+func (d CatalogAdmin) CancelCatalogAdminCommand(ctx context.Context, commandID string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	cid, err := parseUUID(commandID)
@@ -427,7 +427,7 @@ func (d Devices) CancelCatalogAdminCommand(ctx context.Context, commandID string
 }
 
 // UpsertCatalogAdminCapability records Retail capability.
-func (d Devices) UpsertCatalogAdminCapability(ctx context.Context, deviceID string, capable bool) error {
+func (d CatalogAdmin) UpsertCatalogAdminCapability(ctx context.Context, deviceID string, capable bool) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -447,7 +447,7 @@ func (d Devices) UpsertCatalogAdminCapability(ctx context.Context, deviceID stri
 
 // GetCatalogAdminCapability reads Retail capability; missing means
 // incapable (old Retail never announces).
-func (d Devices) GetCatalogAdminCapability(ctx context.Context, deviceID string) (bool, error) {
+func (d CatalogAdmin) GetCatalogAdminCapability(ctx context.Context, deviceID string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -465,7 +465,7 @@ func (d Devices) GetCatalogAdminCapability(ctx context.Context, deviceID string)
 
 // ListCatalogAdminBoundDevices snapshots eligible targets: every
 // device currently bound to the Store.
-func (d Devices) ListCatalogAdminBoundDevices(ctx context.Context, storeID string) ([]catalogadmin.BoundDevice, error) {
+func (d CatalogAdmin) ListCatalogAdminBoundDevices(ctx context.Context, storeID string) ([]catalogadmin.BoundDevice, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -485,7 +485,7 @@ func (d Devices) ListCatalogAdminBoundDevices(ctx context.Context, storeID strin
 
 // CatalogAdminOwnership verifies entity projection ownership and reads
 // the convergence revision for the command stream.
-func (d Devices) CatalogAdminOwnership(ctx context.Context, commandType, entityID, requestedStoreID string) (storeID string, revision int64, found bool, err error) {
+func (d CatalogAdmin) CatalogAdminOwnership(ctx context.Context, commandType, entityID, requestedStoreID string) (storeID string, revision int64, found bool, err error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(entityID)
@@ -630,7 +630,7 @@ func storeOrEmpty(u pgtype.UUID) string {
 
 // CreateCatalogAdminCommandWithTargets atomically snapshots all currently bound
 // devices with immutable intent. Any target insertion failure rolls back all.
-func (d Devices) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
+func (d CatalogAdmin) CreateCatalogAdminCommandWithTargets(ctx context.Context, cmd catalogadmin.NewCommand) (catalogadmin.CommandView, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -712,7 +712,7 @@ func requestedKeyParam(key string) pgtype.Text {
 // SetCommandResultEntity records a command's actual resulting entity ID
 // when one of its targets reports APPLIED (Phase 17-R3 create closure).
 // First writer wins; the intent row is never rewritten.
-func (d Devices) SetCommandResultEntity(ctx context.Context, targetID, entityID string) error {
+func (d CatalogAdmin) SetCommandResultEntity(ctx context.Context, targetID, entityID string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tid, err := parseUUID(targetID)
@@ -735,7 +735,7 @@ func (d Devices) SetCommandResultEntity(ctx context.Context, targetID, entityID 
 // CatalogAdminDeviceStates is the Phase 19 batched device read: one
 // set-based lookup for many target devices replaces the per-target
 // DeviceActive/BindingStore/Capability/DeviceName round-trips.
-func (d Devices) CatalogAdminDeviceStates(ctx context.Context, deviceIDs []string) (map[string]catalogadmin.DeviceState, error) {
+func (d CatalogAdmin) CatalogAdminDeviceStates(ctx context.Context, deviceIDs []string) (map[string]catalogadmin.DeviceState, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	ids := make([]pgtype.UUID, 0, len(deviceIDs))
