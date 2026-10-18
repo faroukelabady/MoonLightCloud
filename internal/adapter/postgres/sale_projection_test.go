@@ -51,9 +51,9 @@ func TestSaleEndToEndUSD(t *testing.T) {
 	var qty, w, h int
 	var unit, ltotal, cost int64
 	err = env.pool.QueryRow(context.Background(), `
-		SELECT sku, product_name, line_currency, quantity, width_cm, height_cm,
-			unit_price_minor, line_total_minor, cost_minor
-		FROM sale_lines_projection`).Scan(&sku, &pname, &lcurr, &qty, &w, &h, &unit, &ltotal, &cost)
+		SELECT l.sku, l.product_name, s.currency, l.quantity, l.width_cm, l.height_cm,
+			l.unit_price_minor, l.line_total_minor, l.cost_minor
+		FROM sale_lines_projection l JOIN sales_projection s USING (sale_id)`).Scan(&sku, &pname, &lcurr, &qty, &w, &h, &unit, &ltotal, &cost)
 	if err != nil {
 		t.Fatal(err)
 	}

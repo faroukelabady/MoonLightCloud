@@ -31,10 +31,9 @@ SELECT sale_id FROM sales_projection WHERE source_event_id = $1;
 INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
-    unit_price_minor, unit_currency, cost_minor, cost_currency,
-    line_total_minor, line_currency
+    unit_price_minor, cost_minor, line_total_minor
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 ON CONFLICT (sale_id, sale_item_id) DO NOTHING;
 
@@ -47,21 +46,19 @@ ON CONFLICT (sale_id, sale_item_id) DO NOTHING;
 INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
-    unit_price_minor, unit_currency, cost_minor, cost_currency,
-    line_total_minor, line_currency,
+    unit_price_minor, cost_minor, line_total_minor,
     variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
     product_type_id, product_type_code, product_type_name_ar, product_type_name_en
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23, $24
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19, $20, $21
 )
 ON CONFLICT (sale_id, sale_item_id) DO NOTHING;
 
 -- name: InsertSalePayment :exec
 INSERT INTO sale_payments_projection (
-    sale_id, position, method, amount_minor, amount_currency,
-    change_minor, change_currency, transaction_ref
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    sale_id, position, method, amount_minor, change_minor, transaction_ref
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (sale_id, position) DO NOTHING;
 
 -- name: InsertSaleClassification :exec

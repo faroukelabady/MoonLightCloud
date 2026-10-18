@@ -285,9 +285,9 @@ func insertProjectionChildren(ctx context.Context, q *sqlcgen.Queries, saleUID p
 			Sku: line.SKU, ProductName: line.ProductName,
 			WidthCm: pgIntPtr(line.WidthCM), HeightCm: pgIntPtr(line.HeightCM),
 			Quantity:       int32(line.Quantity),
-			UnitPriceMinor: line.UnitPrice.AmountMinor, UnitCurrency: line.UnitPrice.Currency,
-			CostMinor: pgInt64Ptr(line.Cost), CostCurrency: pgText(pgStrPtr(line.Cost)),
-			LineTotalMinor: line.LineTotal.AmountMinor, LineCurrency: line.LineTotal.Currency,
+			UnitPriceMinor: line.UnitPrice.AmountMinor,
+			CostMinor:      pgInt64Ptr(line.Cost),
+			LineTotalMinor: line.LineTotal.AmountMinor,
 		}); err != nil {
 			return redact(err)
 		}
@@ -306,8 +306,7 @@ func insertProjectionChildren(ctx context.Context, q *sqlcgen.Queries, saleUID p
 		pay := &v.Payments[i]
 		if err := q.InsertSalePayment(ctx, sqlcgen.InsertSalePaymentParams{
 			SaleID: saleUID, Position: int32(i), Method: pay.Method,
-			AmountMinor: pay.Amount.AmountMinor, AmountCurrency: pay.Amount.Currency,
-			ChangeMinor: pay.ChangeGiven.AmountMinor, ChangeCurrency: pay.ChangeGiven.Currency,
+			AmountMinor: pay.Amount.AmountMinor, ChangeMinor: pay.ChangeGiven.AmountMinor,
 			TransactionRef: pgText(strPtr(pay.TransactionRef)),
 		}); err != nil {
 			return redact(err)
@@ -339,13 +338,6 @@ func pgTextPtr(s *string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: *s, Valid: true}
-}
-
-func pgStrPtr(m *sale.Money) string {
-	if m == nil {
-		return ""
-	}
-	return m.Currency
 }
 
 func pgInt64Ptr(m *sale.Money) pgtype.Int8 {

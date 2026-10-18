@@ -107,9 +107,9 @@ SELECT l.product_id, l.sku, l.product_name,
     (CASE WHEN COUNT(s.store_id) = COUNT(*) AND COUNT(DISTINCT s.store_id) = 1
         THEN MIN(s.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
-    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
@@ -119,9 +119,9 @@ GROUP BY l.product_id, l.sku, l.product_name;
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
-    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_line_classifications_projection c
 JOIN sale_lines_projection l
   ON l.sale_id = c.sale_id AND l.sale_item_id = c.sale_item_id
@@ -233,9 +233,9 @@ SELECT sl.product_id, sl.sku, sl.product_name,
     (CASE WHEN COUNT(r.store_id) = COUNT(*) AND COUNT(DISTINCT r.store_id) = 1
         THEN MIN(r.store_id::text)::uuid END)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
-    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM return_refund_lines_projection l
 JOIN sale_lines_projection sl
   ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
@@ -247,9 +247,9 @@ GROUP BY sl.product_id, sl.sku, sl.product_name;
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
-    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_line_classifications_projection c
 JOIN return_refund_lines_projection l
   ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id
@@ -388,9 +388,9 @@ GROUP BY s.channel,
 -- the badge is that Store and never a foreign or NULL owner.
 SELECT l.product_id, l.sku, l.product_name, MIN(s.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
-    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
@@ -401,9 +401,9 @@ GROUP BY l.product_id, l.sku, l.product_name;
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.line_currency = 'EGP' THEN l.line_total_minor::numeric
+    COALESCE(SUM(round(CASE WHEN s.currency = 'EGP' THEN l.line_total_minor::numeric
         ELSE (l.line_total_minor::numeric * s.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized,
-    COUNT(*) FILTER (WHERE l.line_currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_line_classifications_projection c
 JOIN sale_lines_projection l
   ON l.sale_id = c.sale_id AND l.sale_item_id = c.sale_item_id
@@ -513,9 +513,9 @@ ORDER BY day.day;
 -- variant); no MIN(uuid).
 SELECT sl.product_id, sl.sku, sl.product_name, MIN(r.store_id::text)::uuid AS store_id,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
-    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM return_refund_lines_projection l
 JOIN sale_lines_projection sl
   ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
@@ -528,9 +528,9 @@ GROUP BY sl.product_id, sl.sku, sl.product_name;
 SELECT c.classification_kind AS kind, c.classification_id AS id,
     c.name_ar, c.name_en,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
-    COALESCE(SUM(round(CASE WHEN l.refund_currency = 'EGP' THEN l.refund_minor::numeric
+    COALESCE(SUM(round(CASE WHEN r.currency = 'EGP' THEN l.refund_minor::numeric
         ELSE (l.refund_minor::numeric * r.fx_rate_microrate) / 1000000 END)), 0)::bigint AS normalized_refund,
-    COUNT(*) FILTER (WHERE l.refund_currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
+    COUNT(*) FILTER (WHERE r.currency = 'USD' AND r.fx_rate_microrate IS NULL)::bigint AS missing_fx
 FROM sale_line_classifications_projection c
 JOIN return_refund_lines_projection l
   ON l.sale_id = c.sale_id AND l.original_sale_line_id = c.sale_item_id

@@ -94,9 +94,9 @@ func dumpProjections(t *testing.T, env *saleEnv) string {
 		subtotal_minor, discount_minor, tax_minor, total_minor, fx_base, fx_quote, fx_rate_microrate,
 		received_at::text FROM sales_projection ORDER BY sale_id::text`)
 	dump(`SELECT sale_id::text, sale_item_id::text, position, product_id::text, variant_id::text, sku, product_name,
-		width_cm, height_cm, quantity, unit_price_minor, unit_currency, cost_minor, cost_currency,
-		line_total_minor, line_currency FROM sale_lines_projection ORDER BY sale_id::text, sale_item_id::text`)
-	dump(`SELECT sale_id::text, position, method, amount_minor, amount_currency, change_minor, change_currency,
+		width_cm, height_cm, quantity, unit_price_minor, cost_minor,
+		line_total_minor FROM sale_lines_projection ORDER BY sale_id::text, sale_item_id::text`)
+	dump(`SELECT sale_id::text, position, method, amount_minor, change_minor,
 		transaction_ref FROM sale_payments_projection ORDER BY sale_id::text, position`)
 	dump(`SELECT sale_id::text, sale_item_id::text, classification_kind, classification_id::text, name_ar, name_en, position
 		FROM sale_line_classifications_projection ORDER BY sale_id::text, sale_item_id::text, classification_kind, classification_id::text`)

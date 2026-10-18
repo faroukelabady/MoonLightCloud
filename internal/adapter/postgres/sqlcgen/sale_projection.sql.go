@@ -76,10 +76,9 @@ const insertSaleLine = `-- name: InsertSaleLine :exec
 INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
-    unit_price_minor, unit_currency, cost_minor, cost_currency,
-    line_total_minor, line_currency
+    unit_price_minor, cost_minor, line_total_minor
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 ON CONFLICT (sale_id, sale_item_id) DO NOTHING
 `
@@ -96,11 +95,8 @@ type InsertSaleLineParams struct {
 	HeightCm       pgtype.Int4 `json:"height_cm"`
 	Quantity       int32       `json:"quantity"`
 	UnitPriceMinor int64       `json:"unit_price_minor"`
-	UnitCurrency   string      `json:"unit_currency"`
 	CostMinor      pgtype.Int8 `json:"cost_minor"`
-	CostCurrency   pgtype.Text `json:"cost_currency"`
 	LineTotalMinor int64       `json:"line_total_minor"`
-	LineCurrency   string      `json:"line_currency"`
 }
 
 func (q *Queries) InsertSaleLine(ctx context.Context, arg InsertSaleLineParams) error {
@@ -116,11 +112,8 @@ func (q *Queries) InsertSaleLine(ctx context.Context, arg InsertSaleLineParams) 
 		arg.HeightCm,
 		arg.Quantity,
 		arg.UnitPriceMinor,
-		arg.UnitCurrency,
 		arg.CostMinor,
-		arg.CostCurrency,
 		arg.LineTotalMinor,
-		arg.LineCurrency,
 	)
 	return err
 }
@@ -129,13 +122,12 @@ const insertSaleLineWithVariantSnapshot = `-- name: InsertSaleLineWithVariantSna
 INSERT INTO sale_lines_projection (
     sale_id, sale_item_id, position, product_id, variant_id, sku, product_name,
     width_cm, height_cm, quantity,
-    unit_price_minor, unit_currency, cost_minor, cost_currency,
-    line_total_minor, line_currency,
+    unit_price_minor, cost_minor, line_total_minor,
     variant_sku, variant_attributes, variant_price_egp_cents, variant_price_usd_cents,
     product_type_id, product_type_code, product_type_name_ar, product_type_name_en
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23, $24
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+    $14, $15, $16, $17, $18, $19, $20, $21
 )
 ON CONFLICT (sale_id, sale_item_id) DO NOTHING
 `
@@ -152,11 +144,8 @@ type InsertSaleLineWithVariantSnapshotParams struct {
 	HeightCm             pgtype.Int4 `json:"height_cm"`
 	Quantity             int32       `json:"quantity"`
 	UnitPriceMinor       int64       `json:"unit_price_minor"`
-	UnitCurrency         string      `json:"unit_currency"`
 	CostMinor            pgtype.Int8 `json:"cost_minor"`
-	CostCurrency         pgtype.Text `json:"cost_currency"`
 	LineTotalMinor       int64       `json:"line_total_minor"`
-	LineCurrency         string      `json:"line_currency"`
 	VariantSku           pgtype.Text `json:"variant_sku"`
 	VariantAttributes    []byte      `json:"variant_attributes"`
 	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
@@ -185,11 +174,8 @@ func (q *Queries) InsertSaleLineWithVariantSnapshot(ctx context.Context, arg Ins
 		arg.HeightCm,
 		arg.Quantity,
 		arg.UnitPriceMinor,
-		arg.UnitCurrency,
 		arg.CostMinor,
-		arg.CostCurrency,
 		arg.LineTotalMinor,
-		arg.LineCurrency,
 		arg.VariantSku,
 		arg.VariantAttributes,
 		arg.VariantPriceEgpCents,
@@ -204,9 +190,8 @@ func (q *Queries) InsertSaleLineWithVariantSnapshot(ctx context.Context, arg Ins
 
 const insertSalePayment = `-- name: InsertSalePayment :exec
 INSERT INTO sale_payments_projection (
-    sale_id, position, method, amount_minor, amount_currency,
-    change_minor, change_currency, transaction_ref
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    sale_id, position, method, amount_minor, change_minor, transaction_ref
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (sale_id, position) DO NOTHING
 `
 
@@ -215,9 +200,7 @@ type InsertSalePaymentParams struct {
 	Position       int32       `json:"position"`
 	Method         string      `json:"method"`
 	AmountMinor    int64       `json:"amount_minor"`
-	AmountCurrency string      `json:"amount_currency"`
 	ChangeMinor    int64       `json:"change_minor"`
-	ChangeCurrency string      `json:"change_currency"`
 	TransactionRef pgtype.Text `json:"transaction_ref"`
 }
 
@@ -227,9 +210,7 @@ func (q *Queries) InsertSalePayment(ctx context.Context, arg InsertSalePaymentPa
 		arg.Position,
 		arg.Method,
 		arg.AmountMinor,
-		arg.AmountCurrency,
 		arg.ChangeMinor,
-		arg.ChangeCurrency,
 		arg.TransactionRef,
 	)
 	return err

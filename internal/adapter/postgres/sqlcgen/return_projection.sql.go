@@ -53,11 +53,9 @@ const insertReturnLine = `-- name: InsertReturnLine :exec
 INSERT INTO return_refund_lines_projection (
     return_refund_id, sale_id, original_sale_line_id, position, product_id,
     quantity, restocked,
-    gross_minor, gross_currency, discount_minor, discount_currency,
-    tax_minor, tax_currency, refund_minor, refund_currency,
-    cost_minor, cost_currency
+    gross_minor, discount_minor, tax_minor, refund_minor, cost_minor
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (return_refund_id, original_sale_line_id) DO NOTHING
 `
@@ -71,15 +69,10 @@ type InsertReturnLineParams struct {
 	Quantity           int32       `json:"quantity"`
 	Restocked          bool        `json:"restocked"`
 	GrossMinor         int64       `json:"gross_minor"`
-	GrossCurrency      string      `json:"gross_currency"`
 	DiscountMinor      int64       `json:"discount_minor"`
-	DiscountCurrency   string      `json:"discount_currency"`
 	TaxMinor           int64       `json:"tax_minor"`
-	TaxCurrency        string      `json:"tax_currency"`
 	RefundMinor        int64       `json:"refund_minor"`
-	RefundCurrency     string      `json:"refund_currency"`
 	CostMinor          pgtype.Int8 `json:"cost_minor"`
-	CostCurrency       pgtype.Text `json:"cost_currency"`
 }
 
 func (q *Queries) InsertReturnLine(ctx context.Context, arg InsertReturnLineParams) error {
@@ -92,24 +85,18 @@ func (q *Queries) InsertReturnLine(ctx context.Context, arg InsertReturnLinePara
 		arg.Quantity,
 		arg.Restocked,
 		arg.GrossMinor,
-		arg.GrossCurrency,
 		arg.DiscountMinor,
-		arg.DiscountCurrency,
 		arg.TaxMinor,
-		arg.TaxCurrency,
 		arg.RefundMinor,
-		arg.RefundCurrency,
 		arg.CostMinor,
-		arg.CostCurrency,
 	)
 	return err
 }
 
 const insertReturnPayment = `-- name: InsertReturnPayment :exec
 INSERT INTO return_refund_payments_projection (
-    return_refund_id, position, method, amount_minor, amount_currency,
-    transaction_ref
-) VALUES ($1, $2, $3, $4, $5, $6)
+    return_refund_id, position, method, amount_minor, transaction_ref
+) VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (return_refund_id, position) DO NOTHING
 `
 
@@ -118,7 +105,6 @@ type InsertReturnPaymentParams struct {
 	Position       int32       `json:"position"`
 	Method         string      `json:"method"`
 	AmountMinor    int64       `json:"amount_minor"`
-	AmountCurrency string      `json:"amount_currency"`
 	TransactionRef pgtype.Text `json:"transaction_ref"`
 }
 
@@ -128,7 +114,6 @@ func (q *Queries) InsertReturnPayment(ctx context.Context, arg InsertReturnPayme
 		arg.Position,
 		arg.Method,
 		arg.AmountMinor,
-		arg.AmountCurrency,
 		arg.TransactionRef,
 	)
 	return err

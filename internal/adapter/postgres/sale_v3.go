@@ -199,10 +199,10 @@ func insertProjectionChildrenV3(ctx context.Context, q *sqlcgen.Queries, saleUID
 			ProductID: pgUUIDPtr(line.ProductID), VariantID: pgUUIDPtr(line.VariantID),
 			Sku: line.SKU, ProductName: line.ProductName,
 			WidthCm: pgIntPtr(line.WidthCM), HeightCm: pgIntPtr(line.HeightCM),
-			Quantity:       int32(line.Quantity),
-			UnitPriceMinor: line.UnitPrice.AmountMinor, UnitCurrency: line.UnitPrice.Currency,
-			CostMinor: pgInt64Ptr(line.Cost), CostCurrency: pgText(pgStrPtr(line.Cost)),
-			LineTotalMinor: line.LineTotal.AmountMinor, LineCurrency: line.LineTotal.Currency,
+			Quantity:             int32(line.Quantity),
+			UnitPriceMinor:       line.UnitPrice.AmountMinor,
+			CostMinor:            pgInt64Ptr(line.Cost),
+			LineTotalMinor:       line.LineTotal.AmountMinor,
 			VariantSku:           pgText(line.VariantSKU),
 			VariantAttributes:    variantAttrs,
 			VariantPriceEgpCents: pgInt64Value(line.VariantPriceEGPCents),
@@ -239,8 +239,7 @@ func insertProjectionChildrenV3(ctx context.Context, q *sqlcgen.Queries, saleUID
 		pay := &v.Payments[i]
 		if err := q.InsertSalePayment(ctx, sqlcgen.InsertSalePaymentParams{
 			SaleID: saleUID, Position: int32(i), Method: pay.Method,
-			AmountMinor: pay.Amount.AmountMinor, AmountCurrency: pay.Amount.Currency,
-			ChangeMinor: pay.ChangeGiven.AmountMinor, ChangeCurrency: pay.ChangeGiven.Currency,
+			AmountMinor: pay.Amount.AmountMinor, ChangeMinor: pay.ChangeGiven.AmountMinor,
 			TransactionRef: pgText(strPtr(pay.TransactionRef)),
 		}); err != nil {
 			return redact(err)

@@ -108,5 +108,10 @@ on all money-bearing documents.
   `update_audit_events.store_id` (global audit) and
   `commerce_online_orders.store_id` (orders from a provider not attributed
   to a Store).
+- Baseline 00106 (step 2d) keeps one currency per document: Sale and Return
+  line, payment and refund rows store amounts only and reads use the header
+  `currency`, which is now checked to be EGP or USD. The wire payloads are
+  unchanged; validation already rejects any money whose currency differs from
+  the header.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

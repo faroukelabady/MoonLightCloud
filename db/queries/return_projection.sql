@@ -30,19 +30,16 @@ SELECT return_refund_id FROM return_refund_projection WHERE source_event_id = $1
 INSERT INTO return_refund_lines_projection (
     return_refund_id, sale_id, original_sale_line_id, position, product_id,
     quantity, restocked,
-    gross_minor, gross_currency, discount_minor, discount_currency,
-    tax_minor, tax_currency, refund_minor, refund_currency,
-    cost_minor, cost_currency
+    gross_minor, discount_minor, tax_minor, refund_minor, cost_minor
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (return_refund_id, original_sale_line_id) DO NOTHING;
 
 -- name: InsertReturnPayment :exec
 INSERT INTO return_refund_payments_projection (
-    return_refund_id, position, method, amount_minor, amount_currency,
-    transaction_ref
-) VALUES ($1, $2, $3, $4, $5, $6)
+    return_refund_id, position, method, amount_minor, transaction_ref
+) VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (return_refund_id, position) DO NOTHING;
 
 -- name: LockSaleProjectionForReturn :one

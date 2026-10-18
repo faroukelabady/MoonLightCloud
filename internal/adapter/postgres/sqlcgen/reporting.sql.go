@@ -172,7 +172,7 @@ func (q *Queries) ReportRefundsByCashierForStore(ctx context.Context, arg Report
 
 const reportRefundsByCategory = `-- name: ReportRefundsByCategory :many
 SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,
- l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ r.currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
 FROM sale_line_classifications_projection c
@@ -181,8 +181,8 @@ JOIN return_refund_lines_projection l
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
  AND c.classification_kind = $3::text
- AND ($4::text = '' OR l.refund_currency = $4::text)
-GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.refund_currency
+ AND ($4::text = '' OR r.currency = $4::text)
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, r.currency
 `
 
 type ReportRefundsByCategoryParams struct {
@@ -239,7 +239,7 @@ func (q *Queries) ReportRefundsByCategory(ctx context.Context, arg ReportRefunds
 
 const reportRefundsByCategoryForStore = `-- name: ReportRefundsByCategoryForStore :many
 SELECT c.classification_kind AS kind, c.classification_id AS id, c.name_ar, c.name_en,
- l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ r.currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
 FROM sale_line_classifications_projection c
@@ -248,9 +248,9 @@ JOIN return_refund_lines_projection l
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
  AND c.classification_kind = $3::text
- AND ($4::text = '' OR l.refund_currency = $4::text)
+ AND ($4::text = '' OR r.currency = $4::text)
  AND r.store_id = $5::uuid
-GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.refund_currency
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, r.currency
 `
 
 type ReportRefundsByCategoryForStoreParams struct {
@@ -427,7 +427,7 @@ func (q *Queries) ReportRefundsByChannelForStore(ctx context.Context, arg Report
 }
 
 const reportRefundsByProduct = `-- name: ReportRefundsByProduct :many
-SELECT sl.product_id, sl.sku, sl.product_name, l.refund_currency AS currency,
+SELECT sl.product_id, sl.sku, sl.product_name, r.currency AS currency,
  COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
@@ -436,8 +436,8 @@ JOIN sale_lines_projection sl
   ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
-GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency
+ AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY sl.product_id, sl.sku, sl.product_name, r.currency
 `
 
 type ReportRefundsByProductParams struct {
@@ -485,7 +485,7 @@ func (q *Queries) ReportRefundsByProduct(ctx context.Context, arg ReportRefundsB
 }
 
 const reportRefundsByProductForStore = `-- name: ReportRefundsByProductForStore :many
-SELECT sl.product_id, sl.sku, sl.product_name, l.refund_currency AS currency,
+SELECT sl.product_id, sl.sku, sl.product_name, r.currency AS currency,
  COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
@@ -494,9 +494,9 @@ JOIN sale_lines_projection sl
   ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
+ AND ($3::text = '' OR r.currency = $3::text)
  AND r.store_id = $4::uuid
-GROUP BY sl.product_id, sl.sku, sl.product_name, l.refund_currency
+GROUP BY sl.product_id, sl.sku, sl.product_name, r.currency
 `
 
 type ReportRefundsByProductForStoreParams struct {
@@ -552,7 +552,7 @@ func (q *Queries) ReportRefundsByProductForStore(ctx context.Context, arg Report
 const reportRefundsByProductType = `-- name: ReportRefundsByProductType :many
 SELECT sl.product_type_id, sl.product_type_code,
  sl.product_type_name_ar, sl.product_type_name_en,
- l.refund_currency AS currency,
+ r.currency AS currency,
  COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
@@ -561,9 +561,9 @@ JOIN sale_lines_projection sl
  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
+ AND ($3::text = '' OR r.currency = $3::text)
 GROUP BY sl.product_type_id, sl.product_type_code,
- sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency
+ sl.product_type_name_ar, sl.product_type_name_en, r.currency
 `
 
 type ReportRefundsByProductTypeParams struct {
@@ -617,7 +617,7 @@ func (q *Queries) ReportRefundsByProductType(ctx context.Context, arg ReportRefu
 const reportRefundsByProductTypeForStore = `-- name: ReportRefundsByProductTypeForStore :many
 SELECT sl.product_type_id, sl.product_type_code,
  sl.product_type_name_ar, sl.product_type_name_en,
- l.refund_currency AS currency,
+ r.currency AS currency,
  COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
@@ -626,10 +626,10 @@ JOIN sale_lines_projection sl
  ON sl.sale_id = l.sale_id AND sl.sale_item_id = l.original_sale_line_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
+ AND ($3::text = '' OR r.currency = $3::text)
  AND r.store_id = $4::uuid
 GROUP BY sl.product_type_id, sl.product_type_code,
- sl.product_type_name_ar, sl.product_type_name_en, l.refund_currency
+ sl.product_type_name_ar, sl.product_type_name_en, r.currency
 `
 
 type ReportRefundsByProductTypeForStoreParams struct {
@@ -686,7 +686,7 @@ func (q *Queries) ReportRefundsByProductTypeForStore(ctx context.Context, arg Re
 
 const reportRefundsByTag = `-- name: ReportRefundsByTag :many
 SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
- l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ r.currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
 FROM sale_item_tag_snapshots t
@@ -694,8 +694,8 @@ JOIN return_refund_lines_projection l
   ON l.sale_id = t.sale_id AND l.original_sale_line_id = t.sale_item_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
-GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency
+ AND ($3::text = '' OR r.currency = $3::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, r.currency
 `
 
 type ReportRefundsByTagParams struct {
@@ -746,7 +746,7 @@ func (q *Queries) ReportRefundsByTag(ctx context.Context, arg ReportRefundsByTag
 
 const reportRefundsByTagForStore = `-- name: ReportRefundsByTagForStore :many
 SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en,
- l.refund_currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
+ r.currency AS currency, COALESCE(SUM(l.quantity), 0)::bigint AS units,
  COALESCE(SUM(l.refund_minor), 0)::bigint AS refund,
  COALESCE(SUM(l.cost_minor), 0)::bigint AS returned_cost
 FROM sale_item_tag_snapshots t
@@ -754,9 +754,9 @@ JOIN return_refund_lines_projection l
   ON l.sale_id = t.sale_id AND l.original_sale_line_id = t.sale_item_id
 JOIN return_refund_projection r ON r.return_refund_id = l.return_refund_id
 WHERE r.occurred_at >= $1 AND r.occurred_at < $2
- AND ($3::text = '' OR l.refund_currency = $3::text)
+ AND ($3::text = '' OR r.currency = $3::text)
  AND r.store_id = $4::uuid
-GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.refund_currency
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, r.currency
 `
 
 type ReportRefundsByTagForStoreParams struct {
@@ -1261,7 +1261,7 @@ func (q *Queries) ReportSalesByCashierForStore(ctx context.Context, arg ReportSa
 
 const reportSalesByCategory = `-- name: ReportSalesByCategory :many
 SELECT c.classification_kind AS kind, c.classification_id AS id,
-    c.name_ar, c.name_en, l.line_currency AS currency,
+    c.name_ar, c.name_en, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
@@ -1271,8 +1271,8 @@ JOIN sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = c.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
   AND c.classification_kind = $3::text
-  AND ($4::text = '' OR l.line_currency = $4::text)
-GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.line_currency
+  AND ($4::text = '' OR s.currency = $4::text)
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, s.currency
 `
 
 type ReportSalesByCategoryParams struct {
@@ -1329,7 +1329,7 @@ func (q *Queries) ReportSalesByCategory(ctx context.Context, arg ReportSalesByCa
 
 const reportSalesByCategoryForStore = `-- name: ReportSalesByCategoryForStore :many
 SELECT c.classification_kind AS kind, c.classification_id AS id,
-    c.name_ar, c.name_en, l.line_currency AS currency,
+    c.name_ar, c.name_en, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
@@ -1339,9 +1339,9 @@ JOIN sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = c.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
   AND c.classification_kind = $3::text
-  AND ($4::text = '' OR l.line_currency = $4::text)
+  AND ($4::text = '' OR s.currency = $4::text)
   AND s.store_id = $5::uuid
-GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, l.line_currency
+GROUP BY c.classification_kind, c.classification_id, c.name_ar, c.name_en, s.currency
 `
 
 type ReportSalesByCategoryForStoreParams struct {
@@ -1536,15 +1536,15 @@ func (q *Queries) ReportSalesByChannelForStore(ctx context.Context, arg ReportSa
 }
 
 const reportSalesByProduct = `-- name: ReportSalesByProduct :many
-SELECT l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+SELECT l.product_id, l.sku, l.product_name, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
-GROUP BY l.product_id, l.sku, l.product_name, l.line_currency
+  AND ($3::text = '' OR s.currency = $3::text)
+GROUP BY l.product_id, l.sku, l.product_name, s.currency
 `
 
 type ReportSalesByProductParams struct {
@@ -1592,16 +1592,16 @@ func (q *Queries) ReportSalesByProduct(ctx context.Context, arg ReportSalesByPro
 }
 
 const reportSalesByProductForStore = `-- name: ReportSalesByProductForStore :many
-SELECT l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+SELECT l.product_id, l.sku, l.product_name, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
   AND s.store_id = $4::uuid
-GROUP BY l.product_id, l.sku, l.product_name, l.line_currency
+GROUP BY l.product_id, l.sku, l.product_name, s.currency
 `
 
 type ReportSalesByProductForStoreParams struct {
@@ -1657,16 +1657,16 @@ func (q *Queries) ReportSalesByProductForStore(ctx context.Context, arg ReportSa
 const reportSalesByProductType = `-- name: ReportSalesByProductType :many
 SELECT l.product_type_id, l.product_type_code,
     l.product_type_name_ar, l.product_type_name_en,
-    l.line_currency AS currency,
+    s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
 GROUP BY l.product_type_id, l.product_type_code,
-    l.product_type_name_ar, l.product_type_name_en, l.line_currency
+    l.product_type_name_ar, l.product_type_name_en, s.currency
 `
 
 type ReportSalesByProductTypeParams struct {
@@ -1722,17 +1722,17 @@ func (q *Queries) ReportSalesByProductType(ctx context.Context, arg ReportSalesB
 const reportSalesByProductTypeForStore = `-- name: ReportSalesByProductTypeForStore :many
 SELECT l.product_type_id, l.product_type_code,
     l.product_type_name_ar, l.product_type_name_en,
-    l.line_currency AS currency,
+    s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
   AND s.store_id = $4::uuid
 GROUP BY l.product_type_id, l.product_type_code,
-    l.product_type_name_ar, l.product_type_name_en, l.line_currency
+    l.product_type_name_ar, l.product_type_name_en, s.currency
 `
 
 type ReportSalesByProductTypeForStoreParams struct {
@@ -1788,7 +1788,7 @@ func (q *Queries) ReportSalesByProductTypeForStore(ctx context.Context, arg Repo
 }
 
 const reportSalesByTag = `-- name: ReportSalesByTag :many
-SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
@@ -1797,8 +1797,8 @@ JOIN sale_lines_projection l
   ON l.sale_id = t.sale_id AND l.sale_item_id = t.sale_item_id
 JOIN sales_projection s ON s.sale_id = t.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
-GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.line_currency
+  AND ($3::text = '' OR s.currency = $3::text)
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, s.currency
 `
 
 type ReportSalesByTagParams struct {
@@ -1848,7 +1848,7 @@ func (q *Queries) ReportSalesByTag(ctx context.Context, arg ReportSalesByTagPara
 }
 
 const reportSalesByTagForStore = `-- name: ReportSalesByTagForStore :many
-SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, l.line_currency AS currency,
+SELECT t.tag_id AS id, t.slug, t.name_ar, t.name_en, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS cost
@@ -1857,9 +1857,9 @@ JOIN sale_lines_projection l
   ON l.sale_id = t.sale_id AND l.sale_item_id = t.sale_item_id
 JOIN sales_projection s ON s.sale_id = t.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
   AND s.store_id = $4::uuid
-GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, l.line_currency
+GROUP BY t.tag_id, t.slug, t.name_ar, t.name_en, s.currency
 `
 
 type ReportSalesByTagForStoreParams struct {
@@ -1916,16 +1916,16 @@ func (q *Queries) ReportSalesByTagForStore(ctx context.Context, arg ReportSalesB
 
 const reportSalesByVariant = `-- name: ReportSalesByVariant :many
 SELECT l.variant_id, l.variant_sku, l.variant_attributes,
-    l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    l.product_id, l.sku, l.product_name, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
 GROUP BY l.variant_id, l.variant_sku, l.variant_attributes,
-    l.product_id, l.sku, l.product_name, l.line_currency
+    l.product_id, l.sku, l.product_name, s.currency
 `
 
 type ReportSalesByVariantParams struct {
@@ -1988,17 +1988,17 @@ func (q *Queries) ReportSalesByVariant(ctx context.Context, arg ReportSalesByVar
 
 const reportSalesByVariantForStore = `-- name: ReportSalesByVariantForStore :many
 SELECT l.variant_id, l.variant_sku, l.variant_attributes,
-    l.product_id, l.sku, l.product_name, l.line_currency AS currency,
+    l.product_id, l.sku, l.product_name, s.currency AS currency,
     COALESCE(SUM(l.quantity), 0)::bigint AS units,
     COALESCE(SUM(l.line_total_minor), 0)::bigint AS line_sales,
     COALESCE(SUM(l.cost_minor::numeric * l.quantity), 0)::bigint AS line_cost
 FROM sale_lines_projection l
 JOIN sales_projection s ON s.sale_id = l.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR l.line_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
   AND s.store_id = $4::uuid
 GROUP BY l.variant_id, l.variant_sku, l.variant_attributes,
-    l.product_id, l.sku, l.product_name, l.line_currency
+    l.product_id, l.sku, l.product_name, s.currency
 `
 
 type ReportSalesByVariantForStoreParams struct {
@@ -2217,15 +2217,15 @@ func (q *Queries) ReportSalesDailyForStore(ctx context.Context, arg ReportSalesD
 }
 
 const reportSalesPayments = `-- name: ReportSalesPayments :many
-SELECT p.method, p.amount_currency AS currency,
+SELECT p.method, s.currency AS currency,
     COALESCE(SUM(p.amount_minor), 0)::bigint AS amount,
     COALESCE(SUM(p.change_minor), 0)::bigint AS change
 FROM sale_payments_projection p
 JOIN sales_projection s ON s.sale_id = p.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR p.amount_currency = $3::text)
-GROUP BY p.method, p.amount_currency
-ORDER BY p.method, p.amount_currency
+  AND ($3::text = '' OR s.currency = $3::text)
+GROUP BY p.method, s.currency
+ORDER BY p.method, s.currency
 `
 
 type ReportSalesPaymentsParams struct {
@@ -2267,16 +2267,16 @@ func (q *Queries) ReportSalesPayments(ctx context.Context, arg ReportSalesPaymen
 }
 
 const reportSalesPaymentsForStore = `-- name: ReportSalesPaymentsForStore :many
-SELECT p.method, p.amount_currency AS currency,
+SELECT p.method, s.currency AS currency,
     COALESCE(SUM(p.amount_minor), 0)::bigint AS amount,
     COALESCE(SUM(p.change_minor), 0)::bigint AS change
 FROM sale_payments_projection p
 JOIN sales_projection s ON s.sale_id = p.sale_id
 WHERE s.occurred_at >= $1 AND s.occurred_at < $2
-  AND ($3::text = '' OR p.amount_currency = $3::text)
+  AND ($3::text = '' OR s.currency = $3::text)
   AND s.store_id = $4::uuid
-GROUP BY p.method, p.amount_currency
-ORDER BY p.method, p.amount_currency
+GROUP BY p.method, s.currency
+ORDER BY p.method, s.currency
 `
 
 type ReportSalesPaymentsForStoreParams struct {

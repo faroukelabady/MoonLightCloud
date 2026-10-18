@@ -133,8 +133,8 @@ func TestProductTypeHealthAndReports(t *testing.T) {
 	// Sales-by-type groups the frozen line snapshot (one line = one row).
 	exec(fmt.Sprintf(`INSERT INTO sales_projection (sale_id, sale_number, channel, currency, subtotal_minor, discount_minor, tax_minor, total_minor, occurred_at, paid_at, source_event_id, source_device_id, received_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, store_id)
 		VALUES ('f1000000-0000-4000-8000-000000000021', 'S-1', 'STORE', 'EGP', 100, 0, 0, 100, now(), now(), 'f1000000-0000-4000-8000-000000000001', '%s', now(), 'م', 'M', 'ع', 'A', 'p', 'ش', 'T', (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, devID, devID))
-	exec(`INSERT INTO sale_lines_projection (sale_id, sale_item_id, position, product_id, sku, product_name, quantity, unit_price_minor, unit_currency, line_total_minor, line_currency, product_type_id, product_type_code, product_type_name_ar, product_type_name_en)
-		VALUES ('f1000000-0000-4000-8000-000000000021', 'f1000000-0000-4000-8000-000000000031', 0, 'f1000000-0000-4000-8000-000000000011', 'SKU-1', 'Name', 2, 50, 'EGP', 100, 'EGP', '10000000-0000-4000-8000-000000000001', 'papyrus', 'برديات', 'Papyrus')`)
+	exec(`INSERT INTO sale_lines_projection (sale_id, sale_item_id, position, product_id, sku, product_name, quantity, unit_price_minor, line_total_minor, product_type_id, product_type_code, product_type_name_ar, product_type_name_en)
+		VALUES ('f1000000-0000-4000-8000-000000000021', 'f1000000-0000-4000-8000-000000000031', 0, 'f1000000-0000-4000-8000-000000000011', 'SKU-1', 'Name', 2, 50, 100, '10000000-0000-4000-8000-000000000001', 'papyrus', 'برديات', 'Papyrus')`)
 	rows, err := devices.SalesByProductType(context.Background(), time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "EGP")
 	if err != nil {
 		t.Fatalf("sales by type: %v", err)

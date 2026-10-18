@@ -826,15 +826,10 @@ type ReturnRefundLinesProjection struct {
 	Quantity           int32       `json:"quantity"`
 	Restocked          bool        `json:"restocked"`
 	GrossMinor         int64       `json:"gross_minor"`
-	GrossCurrency      string      `json:"gross_currency"`
 	DiscountMinor      int64       `json:"discount_minor"`
-	DiscountCurrency   string      `json:"discount_currency"`
 	TaxMinor           int64       `json:"tax_minor"`
-	TaxCurrency        string      `json:"tax_currency"`
 	RefundMinor        int64       `json:"refund_minor"`
-	RefundCurrency     string      `json:"refund_currency"`
 	CostMinor          pgtype.Int8 `json:"cost_minor"`
-	CostCurrency       pgtype.Text `json:"cost_currency"`
 }
 
 type ReturnRefundOwnership struct {
@@ -849,7 +844,6 @@ type ReturnRefundPaymentsProjection struct {
 	Position       int32       `json:"position"`
 	Method         string      `json:"method"`
 	AmountMinor    int64       `json:"amount_minor"`
-	AmountCurrency string      `json:"amount_currency"`
 	TransactionRef pgtype.Text `json:"transaction_ref"`
 }
 
@@ -926,11 +920,8 @@ type SaleLinesProjection struct {
 	HeightCm             pgtype.Int4 `json:"height_cm"`
 	Quantity             int32       `json:"quantity"`
 	UnitPriceMinor       int64       `json:"unit_price_minor"`
-	UnitCurrency         string      `json:"unit_currency"`
 	CostMinor            pgtype.Int8 `json:"cost_minor"`
-	CostCurrency         pgtype.Text `json:"cost_currency"`
 	LineTotalMinor       int64       `json:"line_total_minor"`
-	LineCurrency         string      `json:"line_currency"`
 	VariantSku           pgtype.Text `json:"variant_sku"`
 	VariantAttributes    []byte      `json:"variant_attributes"`
 	VariantPriceEgpCents pgtype.Int8 `json:"variant_price_egp_cents"`
@@ -946,9 +937,7 @@ type SalePaymentsProjection struct {
 	Position       int32       `json:"position"`
 	Method         string      `json:"method"`
 	AmountMinor    int64       `json:"amount_minor"`
-	AmountCurrency string      `json:"amount_currency"`
 	ChangeMinor    int64       `json:"change_minor"`
-	ChangeCurrency string      `json:"change_currency"`
 	TransactionRef pgtype.Text `json:"transaction_ref"`
 }
 

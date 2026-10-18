@@ -107,7 +107,7 @@ CREATE TABLE sales_projection (
     shop_receipt_footer_en TEXT NOT NULL,
     cashier_id         TEXT,
     cashier_name       TEXT,
-    currency           TEXT NOT NULL,
+    currency           TEXT NOT NULL CHECK (currency IN ('EGP', 'USD')),
     subtotal_minor     BIGINT NOT NULL CHECK (subtotal_minor >= 0),
     discount_minor     BIGINT NOT NULL CHECK (discount_minor >= 0),
     tax_minor          BIGINT NOT NULL CHECK (tax_minor >= 0),
@@ -122,6 +122,9 @@ CREATE INDEX idx_sales_projection_occurred ON sales_projection (occurred_at);
 CREATE INDEX idx_sales_projection_channel_occurred ON sales_projection (channel, occurred_at);
 CREATE INDEX idx_sales_projection_device_occurred ON sales_projection (source_device_id, occurred_at);
 
+-- ADR-0055 step 2d: one currency per document. Line and payment rows carry
+-- amounts only; the header `currency` applies (validators reject any
+-- money whose currency differs from the header).
 CREATE TABLE sale_lines_projection (
     sale_id          UUID NOT NULL REFERENCES sales_projection(sale_id) ON DELETE CASCADE,
     sale_item_id     UUID NOT NULL,
@@ -134,11 +137,8 @@ CREATE TABLE sale_lines_projection (
     height_cm        INT CHECK (height_cm IS NULL OR height_cm >= 1),
     quantity         INT NOT NULL CHECK (quantity >= 1),
     unit_price_minor BIGINT NOT NULL CHECK (unit_price_minor >= 0),
-    unit_currency    TEXT NOT NULL,
     cost_minor       BIGINT CHECK (cost_minor IS NULL OR cost_minor >= 0),
-    cost_currency    TEXT,
     line_total_minor BIGINT NOT NULL CHECK (line_total_minor >= 0),
-    line_currency    TEXT NOT NULL,
     PRIMARY KEY (sale_id, sale_item_id)
 );
 CREATE INDEX idx_sale_lines_product ON sale_lines_projection (product_id);
@@ -148,9 +148,7 @@ CREATE TABLE sale_payments_projection (
     position         INT NOT NULL,
     method           TEXT NOT NULL CHECK (method IN ('cash', 'card')),
     amount_minor     BIGINT NOT NULL CHECK (amount_minor >= 0),
-    amount_currency  TEXT NOT NULL,
     change_minor     BIGINT NOT NULL CHECK (change_minor >= 0),
-    change_currency  TEXT NOT NULL,
     transaction_ref  TEXT,
     PRIMARY KEY (sale_id, position)
 );
@@ -253,7 +251,7 @@ CREATE TABLE return_refund_projection (
     sale_event_id      UUID,
     channel            TEXT NOT NULL CHECK (channel = 'STORE'),
     occurred_at        TIMESTAMPTZ NOT NULL,
-    currency           TEXT NOT NULL,
+    currency           TEXT NOT NULL CHECK (currency IN ('EGP', 'USD')),
     gross_refunded_minor    BIGINT NOT NULL CHECK (gross_refunded_minor >= 0),
     discount_refunded_minor BIGINT NOT NULL CHECK (discount_refunded_minor >= 0),
     tax_refunded_minor      BIGINT NOT NULL CHECK (tax_refunded_minor >= 0),
@@ -277,6 +275,7 @@ CREATE INDEX idx_return_refund_occurred ON return_refund_projection (occurred_at
 CREATE INDEX idx_return_refund_sale ON return_refund_projection (sale_id);
 CREATE INDEX idx_return_refund_channel_occurred ON return_refund_projection (channel, occurred_at);
 
+-- One currency per document (ADR-0055 step 2d): the header currency applies.
 CREATE TABLE return_refund_lines_projection (
     return_refund_id      UUID NOT NULL REFERENCES return_refund_projection(return_refund_id) ON DELETE CASCADE,
     sale_id               UUID NOT NULL,
@@ -286,15 +285,10 @@ CREATE TABLE return_refund_lines_projection (
     quantity              INT NOT NULL CHECK (quantity >= 1),
     restocked             BOOLEAN NOT NULL,
     gross_minor           BIGINT NOT NULL CHECK (gross_minor >= 0),
-    gross_currency        TEXT NOT NULL,
     discount_minor        BIGINT NOT NULL CHECK (discount_minor >= 0),
-    discount_currency     TEXT NOT NULL,
     tax_minor             BIGINT NOT NULL CHECK (tax_minor >= 0),
-    tax_currency          TEXT NOT NULL,
     refund_minor          BIGINT NOT NULL CHECK (refund_minor >= 0),
-    refund_currency       TEXT NOT NULL,
     cost_minor            BIGINT CHECK (cost_minor IS NULL OR cost_minor >= 0),
-    cost_currency         TEXT,
     PRIMARY KEY (return_refund_id, original_sale_line_id),
     FOREIGN KEY (sale_id, original_sale_line_id)
         REFERENCES sale_lines_projection (sale_id, sale_item_id) ON DELETE CASCADE
@@ -306,7 +300,6 @@ CREATE TABLE return_refund_payments_projection (
     position         INT NOT NULL,
     method           TEXT NOT NULL CHECK (method IN ('cash', 'card', 'other')),
     amount_minor     BIGINT NOT NULL CHECK (amount_minor >= 0),
-    amount_currency  TEXT NOT NULL,
     transaction_ref  TEXT,
     PRIMARY KEY (return_refund_id, position)
 );

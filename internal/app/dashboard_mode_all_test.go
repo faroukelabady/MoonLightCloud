@@ -51,9 +51,9 @@ func TestDashboardModeAllHTTPReturns200(t *testing.T) {
 	if _, err := a.Pool.Exec(ctx, `
 		INSERT INTO sale_lines_projection
 			(sale_id, sale_item_id, position, product_id, sku, product_name,
-			 quantity, unit_price_minor, unit_currency, line_total_minor, line_currency)
+			 quantity, unit_price_minor, line_total_minor)
 		VALUES ($1, '22222222-2222-4222-8222-222222222222', 0, $2, 'MODE-ALL', 'Mode All',
-			1, 65000, 'EGP', 65000, 'EGP')`, saleID, productID); err != nil {
+			1, 65000, 65000)`, saleID, productID); err != nil {
 		t.Fatal(err)
 	}
 

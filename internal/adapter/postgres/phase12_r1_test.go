@@ -421,7 +421,7 @@ func TestPhase12R1TopNRepresentativePerformance(t *testing.T) {
 		}
 		t.Logf("6000 historical memberships, 300 Sales, limit=%d rows=%d duration=%s", limit, len(out.Rows), time.Since(start))
 	}
-	rows, err := env.pool.Query(ctx, `EXPLAIN (ANALYZE, BUFFERS) SELECT t.tag_id,t.slug,t.name_ar,t.name_en,l.line_currency,SUM(l.quantity),SUM(l.line_total_minor) FROM sale_item_tag_snapshots t JOIN sale_lines_projection l ON l.sale_id=t.sale_id AND l.sale_item_id=t.sale_item_id JOIN sales_projection s ON s.sale_id=t.sale_id WHERE s.occurred_at >= '2026-09-20' AND s.occurred_at < '2026-10-01' GROUP BY t.tag_id,t.slug,t.name_ar,t.name_en,l.line_currency`)
+	rows, err := env.pool.Query(ctx, `EXPLAIN (ANALYZE, BUFFERS) SELECT t.tag_id,t.slug,t.name_ar,t.name_en,s.currency,SUM(l.quantity),SUM(l.line_total_minor) FROM sale_item_tag_snapshots t JOIN sale_lines_projection l ON l.sale_id=t.sale_id AND l.sale_item_id=t.sale_item_id JOIN sales_projection s ON s.sale_id=t.sale_id WHERE s.occurred_at >= '2026-09-20' AND s.occurred_at < '2026-10-01' GROUP BY t.tag_id,t.slug,t.name_ar,t.name_en,s.currency`)
 	if err != nil {
 		t.Fatal(err)
 	}

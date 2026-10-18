@@ -604,20 +604,16 @@ func insertReturnChildren(ctx context.Context, q *sqlcgen.Queries, rid, saleUID 
 		line := &v.Lines[i]
 		itemUID, _ := parseUUID(line.OriginalSaleLineID)
 		var cost pgtype.Int8
-		var costCur pgtype.Text
 		if line.Cost != nil {
 			cost = pgtype.Int8{Int64: line.Cost.AmountMinor, Valid: true}
-			costCur = pgText(line.Cost.Currency)
 		}
 		if err := q.InsertReturnLine(ctx, sqlcgen.InsertReturnLineParams{
 			ReturnRefundID: rid, SaleID: saleUID, OriginalSaleLineID: itemUID, Position: int32(i),
 			ProductID: pgUUIDPtr(line.ProductID),
 			Quantity:  int32(line.Quantity), Restocked: line.Restocked,
-			GrossMinor: line.Gross.AmountMinor, GrossCurrency: line.Gross.Currency,
-			DiscountMinor: line.Discount.AmountMinor, DiscountCurrency: line.Discount.Currency,
-			TaxMinor: line.Tax.AmountMinor, TaxCurrency: line.Tax.Currency,
-			RefundMinor: line.Refund.AmountMinor, RefundCurrency: line.Refund.Currency,
-			CostMinor: cost, CostCurrency: costCur,
+			GrossMinor: line.Gross.AmountMinor, DiscountMinor: line.Discount.AmountMinor,
+			TaxMinor: line.Tax.AmountMinor, RefundMinor: line.Refund.AmountMinor,
+			CostMinor: cost,
 		}); err != nil {
 			return redact(err)
 		}
@@ -626,7 +622,7 @@ func insertReturnChildren(ctx context.Context, q *sqlcgen.Queries, rid, saleUID 
 		pay := &v.Refunds[i]
 		if err := q.InsertReturnPayment(ctx, sqlcgen.InsertReturnPaymentParams{
 			ReturnRefundID: rid, Position: int32(i), Method: pay.Method,
-			AmountMinor: pay.Amount.AmountMinor, AmountCurrency: pay.Amount.Currency,
+			AmountMinor:    pay.Amount.AmountMinor,
 			TransactionRef: pgText(strOrEmpty(pay.TransactionRef)),
 		}); err != nil {
 			return redact(err)
