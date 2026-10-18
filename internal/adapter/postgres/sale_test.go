@@ -128,7 +128,7 @@ func openSaleEnv(t *testing.T) *saleEnv {
 	storeID := bindTestStore(t, store, p.Device.ID)
 	return &saleEnv{
 		pool:    pool,
-		syncSvc: isync.NewService(store, clock.System{}, testEventRegistry()),
+		syncSvc: isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()),
 		proj: sale.NewProjector(store, clock.System{},
 			nilLogger()),
 		devID: p.Device.ID, credID: p.Credential.ID, storeID: storeID,

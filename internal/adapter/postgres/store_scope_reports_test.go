@@ -445,7 +445,7 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	syncSvc := isyncNewService(t, devices)
+	syncSvc := isyncNewService(t, NewSyncInbox(pool, 5*time.Second))
 	payload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000c1")
 	ingestScoped(t, syncSvc, p.Device.ID, p.Credential.ID, "e0000340-0000-4000-8000-000000000001", "sale.finalized.v3", payload)
 	rec, ok, err := devices.LoadSaleEvent(ctx, "e0000340-0000-4000-8000-000000000001")
@@ -480,10 +480,10 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 	}
 }
 
-// isyncNewService builds an ingest service over the given store.
-func isyncNewService(t *testing.T, devices Devices) isync.Service {
+// isyncNewService builds an ingest service over the given inbox.
+func isyncNewService(t *testing.T, inbox SyncInbox) isync.Service {
 	t.Helper()
-	return isync.NewService(devices, clock.System{}, testEventRegistry())
+	return isync.NewService(inbox, clock.System{}, testEventRegistry())
 }
 
 func ingestScoped(t *testing.T, syncSvc isync.Service, devID, credID, eventID, eventType, payload string) {

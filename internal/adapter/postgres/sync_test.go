@@ -25,7 +25,7 @@ func openSync(t *testing.T) (*pgxpool.Pool, isync.Service, string, string) {
 	}
 	store := NewDevices(pool, 5*time.Second)
 	bindTestStore(t, store, p.Device.ID)
-	return pool, isync.NewService(store, clock.System{}, testEventRegistry()), p.Device.ID, p.Credential.ID
+	return pool, isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()), p.Device.ID, p.Credential.ID
 }
 
 func ev(id string, payload string) string {
@@ -244,7 +244,7 @@ func TestCredentialRotationDuringRetry(t *testing.T) {
 	}
 	store := NewDevices(pool, 5*time.Second)
 	bindTestStore(t, store, p.Device.ID)
-	syncSvc := isync.NewService(store, clock.System{}, testEventRegistry())
+	syncSvc := isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry())
 	id := "22222222-2222-7222-8222-222222222222"
 	body := batch(ev(id, `{"a":1}`))
 	ingest(t, syncSvc, p.Device.ID, p.Credential.ID, body)

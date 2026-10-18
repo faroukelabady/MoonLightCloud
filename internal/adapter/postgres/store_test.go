@@ -357,7 +357,7 @@ func TestStoreCrossDeviceIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	syncSvc := isync.NewService(d, clock.System{}, testEventRegistry())
+	syncSvc := isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry())
 	ingestAs := func(devID, credID, eventID string) {
 		t.Helper()
 		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"system.test.v1","occurred_at":"2026-09-20T10:00:00Z","payload":{"ping":1}}]}`,

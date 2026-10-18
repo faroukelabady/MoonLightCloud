@@ -115,7 +115,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		},
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/sync/batches", httpadapter.DeviceAuth(authentication)(httpadapter.SyncBatch(syncmodel.NewService(d, clock.System{}, syncmodel.NewRegistry(validators)), nil)))
+	mux.Handle("POST /api/v1/sync/batches", httpadapter.DeviceAuth(authentication)(httpadapter.SyncBatch(syncmodel.NewService(postgres.NewSyncInbox(pool, 5*time.Second), clock.System{}, syncmodel.NewRegistry(validators)), nil)))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	token := device.Device.ID + "." + device.Credential.ID + "." + device.RawSecret

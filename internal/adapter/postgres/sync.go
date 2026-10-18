@@ -12,7 +12,27 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// SyncInbox persists accepted event batches. Projection and device lifecycle
+// operations belong to their respective adapters.
+type SyncInbox struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ sync.Repository = SyncInbox{}
+
+// NewSyncInbox shares the application's pool without owning its lifecycle.
+// timeout bounds each complete batch operation.
+func NewSyncInbox(pool *pgxpool.Pool, timeout time.Duration) SyncInbox {
+	return SyncInbox{pool: pool, timeout: timeout}
+}
+
+func (d SyncInbox) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 // IngestBatch commits a validated batch atomically (all-or-nothing).
 // Concurrency safety comes from the event_id primary key, not
@@ -23,7 +43,7 @@ import (
 // batch correlation are never part of event identity (rotation-safe).
 // Payload hashes use the exact canonical representation. ACK is returned
 // only after commit; retries never mutate the stored event.
-func (d Devices) IngestBatch(ctx context.Context, deviceID, credentialID string, events []sync.Event, receivedAt time.Time) ([]sync.EventResult, error) {
+func (d SyncInbox) IngestBatch(ctx context.Context, deviceID, credentialID string, events []sync.Event, receivedAt time.Time) ([]sync.EventResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)

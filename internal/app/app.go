@@ -133,7 +133,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		store, hasher, cfg.PepperRaw, cfg.PepperVersion,
 		clock.System{}, ids.System{},
 	)
-	a.Sync = sync.NewService(store, clock.System{}, syncEventRegistry())
+	a.Sync = sync.NewService(postgres.NewSyncInbox(pool, cfg.DBQueryTimeout), clock.System{}, syncEventRegistry())
 	a.SaleStore = store
 	a.Projector = sale.NewProjector(store, clock.System{}, log)
 	a.ReturnStore = store

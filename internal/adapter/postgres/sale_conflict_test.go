@@ -47,7 +47,7 @@ func newSaleEnvOnPool(t *testing.T, pool *pgxpool.Pool, devID, credID string) *s
 	}
 	return &saleEnv{
 		pool:    pool,
-		syncSvc: isync.NewService(store, clock.System{}, testEventRegistry()),
+		syncSvc: isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()),
 		proj: sale.NewProjector(store, clock.System{},
 			slog.New(slog.NewTextHandler(io.Discard, nil))),
 		devID: devID, credID: credID, storeID: storeID,

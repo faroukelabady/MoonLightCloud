@@ -63,7 +63,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 		_, err = sale.Validate(payload)
 		return err
 	}})
-	batchService := syncsvc.NewService(devices, clock.System{}, registry)
+	batchService := syncsvc.NewService(postgres.NewSyncInbox(pool, 5*time.Second), clock.System{}, registry)
 	recoveryHandler := &SyncRecoveryHandlers{Svc: recovery, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/v1/device-control/recovery/status", DeviceAuth(authService)(http.HandlerFunc(recoveryHandler.RecoveryStatus)))

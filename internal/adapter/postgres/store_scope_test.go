@@ -69,7 +69,7 @@ func openScopeFixture(t *testing.T) *scopeFixture {
 		t.Fatalf("bind B: %v", err)
 	}
 	return &scopeFixture{
-		pool: pool, syncSvc: isync.NewService(devices, clock.System{}, testEventRegistry()),
+		pool: pool, syncSvc: isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()),
 		devA: devA, credA: credA, devB: devB, credB: credB, devC: devC, credC: credC,
 	}
 }
