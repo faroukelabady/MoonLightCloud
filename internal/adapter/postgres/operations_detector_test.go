@@ -137,7 +137,7 @@ func TestDetectorOfflineLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dev := env.device(t, "offline-dev")
 	// Seen 4 minutes ago: below the 5m threshold → no incident (no flap).
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC().Add(-4*time.Minute), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC().Add(-4*time.Minute), true); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -146,7 +146,7 @@ func TestDetectorOfflineLifecycle(t *testing.T) {
 		t.Fatalf("flap must not open: %+v %v", active, err)
 	}
 	// Age past threshold → one open incident.
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC().Add(-10*time.Minute), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC().Add(-10*time.Minute), true); err != nil {
 		t.Fatal(err)
 	}
 	// Note: TouchSeen is monotonic GREATEST — an older touch cannot move
@@ -161,7 +161,7 @@ func TestDetectorOfflineLifecycle(t *testing.T) {
 		t.Fatalf("one open incident: %+v %v %v", first, ok, err)
 	}
 	// Reconnect → resolved; healing disabled → no recovery action.
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -377,7 +377,7 @@ func TestDetectorReconnectHealing(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("open: %v %v", ok, err)
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -425,7 +425,7 @@ func TestDetectorReconnectSatisfied(t *testing.T) {
 	if !ok {
 		t.Fatal("open")
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -457,7 +457,7 @@ func TestDetectorFailedAutoNoRecursion(t *testing.T) {
 	if !ok {
 		t.Fatal("open")
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -502,7 +502,7 @@ func TestDetectorAckResolveRace(t *testing.T) {
 	if !ok {
 		t.Fatal("open")
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})

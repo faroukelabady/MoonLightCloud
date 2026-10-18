@@ -182,7 +182,7 @@ func TestOpsHTTPResolve(t *testing.T) {
 		t.Fatalf("event resolve: %d %s", rec.Code, rec.Body.String())
 	}
 	dev := env.device(t, "still-off")
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
+	if err := postgres.NewDeviceControl(env.pool, 5*time.Second).TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
 		t.Fatal(err)
 	}
 	active := env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
@@ -245,7 +245,7 @@ func TestOpsHTTPSummary(t *testing.T) {
 	env := openOpsHTTP(t)
 	ctx := context.Background()
 	dev := env.device(t, "sum-dev")
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
+	if err := postgres.NewDeviceControl(env.pool, 5*time.Second).TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
 		t.Fatal(err)
 	}
 	env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")

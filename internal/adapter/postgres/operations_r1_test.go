@@ -53,7 +53,7 @@ func TestResolveRaceSingleDelivery(t *testing.T) {
 		t.Fatalf("open: %v %v", ok, err)
 	}
 	// Reconnect so every racer attempts the same resolution.
-	if err := store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(store.pool, store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	// Hold the incident row: every racer piles up on the resolve UPDATE.
@@ -199,7 +199,7 @@ func TestAckVsResolveRace(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("open: %v %v", ok, err)
 	}
-	if err := store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(store.pool, store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	// Hold the row so ack and auto-resolve truly overlap.
@@ -279,7 +279,7 @@ func TestFastOpenResolveSequence(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("open: %v %v", ok, err)
 	}
-	if err := store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(store.pool, store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Scan(ctx); err != nil {
@@ -385,7 +385,7 @@ func TestDetectorResolveStarvationBounded(t *testing.T) {
 		}
 	}
 	// Clear the middle device; bounded ticks must resolve exactly it.
-	if err := store.TouchSeen(ctx, devs[2], time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(store.pool, store.timeout).TouchSeen(ctx, devs[2], time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	var resolved bool
@@ -530,7 +530,7 @@ func TestRecoveryRealManualVsAutoRace(t *testing.T) {
 	ctx := context.Background()
 	svc := opsService(store)
 	dev := opsSeedDevice(t, pool, "race7c-dev")
-	dctl := devicecontrol.NewService(store, alwaysActiveDevices{}, ids.System{}.New, time.Minute, time.Now)
+	dctl := devicecontrol.NewService(NewDeviceControl(store.pool, store.timeout), alwaysActiveDevices{}, ids.System{}.New, time.Minute, time.Now)
 	manual, _, err := dctl.CreateSyncRequest(ctx, dev, "manual-key")
 	if err != nil {
 		t.Fatal(err)
@@ -571,7 +571,7 @@ func TestRecoveryRealCrashAdoption(t *testing.T) {
 	ctx := context.Background()
 	svc := opsService(store)
 	dev := opsSeedDevice(t, pool, "adopt-dev")
-	dctl := devicecontrol.NewService(store, alwaysActiveDevices{}, ids.System{}.New, time.Minute, time.Now)
+	dctl := devicecontrol.NewService(NewDeviceControl(store.pool, store.timeout), alwaysActiveDevices{}, ids.System{}.New, time.Minute, time.Now)
 	incident, _, err := svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
 	if err != nil {
 		t.Fatal(err)

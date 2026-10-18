@@ -308,7 +308,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.OperationsReader = opsReader
 	a.Log.Info("operations", "enabled", cfg.Operations.Enabled,
 		"auto_sync_on_reconnect", cfg.Operations.AutoSyncOnReconnect)
-	a.DeviceControl = devicecontrol.NewService(store, authDeviceStatus{svc: a.Devices},
+	a.DeviceControl = devicecontrol.NewService(postgres.NewDeviceControl(pool, cfg.DBQueryTimeout), authDeviceStatus{svc: a.Devices},
 		ids.System{}.New, cfg.DeviceControl.LeaseDuration, time.Now)
 	var ctlHandlers *adapterhttp.DeviceControlHandlers
 	if cfg.DeviceControl.Enabled {

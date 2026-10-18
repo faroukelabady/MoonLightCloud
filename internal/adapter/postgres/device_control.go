@@ -10,12 +10,31 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// DeviceControl persists presence and leased remote-sync commands. Device
+// identity, credentials and lifecycle authorization remain separate.
+type DeviceControl struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ devicecontrol.Store = DeviceControl{}
+
+// NewDeviceControl shares the application's pool without owning its lifecycle.
+func NewDeviceControl(pool *pgxpool.Pool, timeout time.Duration) DeviceControl {
+	return DeviceControl{pool: pool, timeout: timeout}
+}
+
+func (d DeviceControl) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 // TouchSeen refreshes last_seen monotonically (server time authority).
 // Poll contact additionally refreshes last_poll_at monotonically;
 // non-poll contact preserves it (NULL until the first poll).
-func (d Devices) TouchSeen(ctx context.Context, deviceID string, at time.Time, isPoll bool) error {
+func (d DeviceControl) TouchSeen(ctx context.Context, deviceID string, at time.Time, isPoll bool) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(deviceID)
@@ -37,7 +56,7 @@ func (d Devices) TouchSeen(ctx context.Context, deviceID string, at time.Time, i
 
 // TouchAccepted records accepted contact, creating the presence row when
 // this is the first contact (last_poll_at stays NULL until a real poll).
-func (d Devices) TouchAccepted(ctx context.Context, deviceID string, at time.Time) error {
+func (d DeviceControl) TouchAccepted(ctx context.Context, deviceID string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(deviceID)
@@ -54,7 +73,7 @@ func (d Devices) TouchAccepted(ctx context.Context, deviceID string, at time.Tim
 
 // TouchFinished records terminal contact, creating the presence row when
 // this is the first contact (last_poll_at stays NULL until a real poll).
-func (d Devices) TouchFinished(ctx context.Context, deviceID string, at time.Time) error {
+func (d DeviceControl) TouchFinished(ctx context.Context, deviceID string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(deviceID)
@@ -70,7 +89,7 @@ func (d Devices) TouchFinished(ctx context.Context, deviceID string, at time.Tim
 }
 
 // GetPresence loads one presence row.
-func (d Devices) GetPresence(ctx context.Context, deviceID string) (devicecontrol.Presence, bool, error) {
+func (d DeviceControl) GetPresence(ctx context.Context, deviceID string) (devicecontrol.Presence, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(deviceID)
@@ -88,7 +107,7 @@ func (d Devices) GetPresence(ctx context.Context, deviceID string) (devicecontro
 }
 
 // ListPresence returns all presence rows.
-func (d Devices) ListPresence(ctx context.Context) ([]devicecontrol.Presence, error) {
+func (d DeviceControl) ListPresence(ctx context.Context) ([]devicecontrol.Presence, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListPresence(ctx)
@@ -103,7 +122,7 @@ func (d Devices) ListPresence(ctx context.Context) ([]devicecontrol.Presence, er
 }
 
 // CreateCommand inserts a pending command; unique violations map to Conflict.
-func (d Devices) CreateCommand(ctx context.Context, id, deviceID, idempotencyKey string, at time.Time) (devicecontrol.Command, error) {
+func (d DeviceControl) CreateCommand(ctx context.Context, id, deviceID, idempotencyKey string, at time.Time) (devicecontrol.Command, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -126,7 +145,7 @@ func (d Devices) CreateCommand(ctx context.Context, id, deviceID, idempotencyKey
 	return toCommand(row), nil
 }
 
-func (d Devices) commandByRow(ctx context.Context, fn func(*sqlcgen.Queries) (sqlcgen.DeviceControlCommand, error)) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) commandByRow(ctx context.Context, fn func(*sqlcgen.Queries) (sqlcgen.DeviceControlCommand, error)) (devicecontrol.Command, bool, error) {
 	row, err := fn(sqlcgen.New(d.pool))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -138,7 +157,7 @@ func (d Devices) commandByRow(ctx context.Context, fn func(*sqlcgen.Queries) (sq
 }
 
 // GetCommand loads by ID across devices (internal use).
-func (d Devices) GetCommand(ctx context.Context, id string) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) GetCommand(ctx context.Context, id string) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -151,7 +170,7 @@ func (d Devices) GetCommand(ctx context.Context, id string) (devicecontrol.Comma
 }
 
 // GetCommandForDevice enforces device binding (404 on cross-device).
-func (d Devices) GetCommandForDevice(ctx context.Context, id, deviceID string) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) GetCommandForDevice(ctx context.Context, id, deviceID string) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -168,7 +187,7 @@ func (d Devices) GetCommandForDevice(ctx context.Context, id, deviceID string) (
 }
 
 // GetByIdempotency loads by (device, key).
-func (d Devices) GetByIdempotency(ctx context.Context, deviceID, key string) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) GetByIdempotency(ctx context.Context, deviceID, key string) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	did, err := parseUUID(deviceID)
@@ -181,7 +200,7 @@ func (d Devices) GetByIdempotency(ctx context.Context, deviceID, key string) (de
 }
 
 // GetActive returns the single non-terminal command, if any.
-func (d Devices) GetActive(ctx context.Context, deviceID string) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) GetActive(ctx context.Context, deviceID string) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	did, err := parseUUID(deviceID)
@@ -194,7 +213,7 @@ func (d Devices) GetActive(ctx context.Context, deviceID string) (devicecontrol.
 }
 
 // PollClaim performs SKIP LOCKED claim + lease in one short transaction.
-func (d Devices) PollClaim(ctx context.Context, deviceID string, now time.Time, lease time.Duration) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) PollClaim(ctx context.Context, deviceID string, now time.Time, lease time.Duration) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	did, err := parseUUID(deviceID)
@@ -233,7 +252,7 @@ func (d Devices) PollClaim(ctx context.Context, deviceID string, now time.Time, 
 }
 
 // Accept transitions pending/leased → accepted (idempotent).
-func (d Devices) Accept(ctx context.Context, id, deviceID string, at time.Time) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) Accept(ctx context.Context, id, deviceID string, at time.Time) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -257,7 +276,7 @@ func (d Devices) Accept(ctx context.Context, id, deviceID string, at time.Time) 
 }
 
 // MarkRunning transitions to running (idempotent).
-func (d Devices) MarkRunning(ctx context.Context, id, deviceID string, at time.Time) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) MarkRunning(ctx context.Context, id, deviceID string, at time.Time) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -281,7 +300,7 @@ func (d Devices) MarkRunning(ctx context.Context, id, deviceID string, at time.T
 }
 
 // Finish commits terminal states; only non-terminal rows match.
-func (d Devices) Finish(ctx context.Context, id, deviceID, status, resultCode string, at time.Time) (devicecontrol.Command, bool, error) {
+func (d DeviceControl) Finish(ctx context.Context, id, deviceID, status, resultCode string, at time.Time) (devicecontrol.Command, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -305,7 +324,7 @@ func (d Devices) Finish(ctx context.Context, id, deviceID, status, resultCode st
 }
 
 // Recent returns bounded history.
-func (d Devices) Recent(ctx context.Context, deviceID string, limit int) ([]devicecontrol.Command, error) {
+func (d DeviceControl) Recent(ctx context.Context, deviceID string, limit int) ([]devicecontrol.Command, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if limit <= 0 || limit > 100 {
@@ -330,7 +349,7 @@ func (d Devices) Recent(ctx context.Context, deviceID string, limit int) ([]devi
 
 // ListActiveAll returns every non-terminal command in one batched read for
 // dashboard overviews. No per-device round trips.
-func (d Devices) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, error) {
+func (d DeviceControl) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListActiveControlCommands(ctx)
@@ -346,7 +365,7 @@ func (d Devices) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, er
 
 // ListRecentBounded returns at most perDevice newest commands per device in
 // one LATERAL-join read, ordered by (device, requested_at DESC, id DESC).
-func (d Devices) ListRecentBounded(ctx context.Context, deviceIDs []string, perDevice int) ([]devicecontrol.Command, error) {
+func (d DeviceControl) ListRecentBounded(ctx context.Context, deviceIDs []string, perDevice int) ([]devicecontrol.Command, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if len(deviceIDs) == 0 {

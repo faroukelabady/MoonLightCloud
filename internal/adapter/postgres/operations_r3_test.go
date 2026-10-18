@@ -285,7 +285,7 @@ func TestR3RevocationWinsBeforeLifecycleDecision(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("offline incident: %v %v", found, err)
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	holder, err := env.pool.Begin(ctx)
@@ -333,7 +333,7 @@ func TestR3RevokedWithFreshPresenceNeverHeals(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("offline incident: %v %v", found, err)
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `UPDATE devices SET status='revoked' WHERE id=$1`, mustOpsUUID(t, dev)); err != nil {
@@ -368,7 +368,7 @@ func TestR3ReconnectDecisionPrecedesRevocation(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("offline incident: %v %v", found, err)
 	}
-	if err := env.store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
+	if err := NewDeviceControl(env.store.pool, env.store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
 		t.Fatal(err)
 	}
 	// The trigger parks only the terminal incident UPDATE. By then the

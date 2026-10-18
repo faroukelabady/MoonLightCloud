@@ -322,7 +322,7 @@ func TestDashboardSyncRequestErrorContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	store := postgres.NewDevices(pool, 5*time.Second)
+	store := postgres.NewDeviceControl(pool, 5*time.Second)
 	svc := devicecontrol.NewService(store, lifecycleStub{active: map[string]bool{"dev-A": true}}, ids.System{}.New, time.Minute, time.Now)
 	h := &DashboardDeviceHandlers{Svc: svc, Auth: stubLister{}, OnlineWindow: time.Minute}
 	post := func(path, key string) *httptest.ResponseRecorder {

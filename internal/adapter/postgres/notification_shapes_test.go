@@ -92,13 +92,13 @@ func TestControlContactAdvancesDeviceLastSeen(t *testing.T) {
 	}
 	d := NewDevices(pool, 5*time.Second)
 	later := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
-	if err := d.TouchSeen(ctx, p.Device.ID, later, true); err != nil {
+	if err := NewDeviceControl(d.pool, d.timeout).TouchSeen(ctx, p.Device.ID, later, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.TouchAccepted(ctx, p.Device.ID, later.Add(-time.Minute)); err != nil {
+	if err := NewDeviceControl(d.pool, d.timeout).TouchAccepted(ctx, p.Device.ID, later.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	presence, found, err := d.GetPresence(ctx, p.Device.ID)
+	presence, found, err := NewDeviceControl(d.pool, d.timeout).GetPresence(ctx, p.Device.ID)
 	if err != nil || !found || presence.LastSeenAt == nil || !presence.LastSeenAt.Equal(later) {
 		t.Fatalf("presence last seen: %+v found=%v %v", presence, found, err)
 	}
@@ -115,10 +115,10 @@ func TestPresenceReportsLastDataAt(t *testing.T) {
 	}
 	d := NewDevices(pool, 5*time.Second)
 	storeID := bindTestStore(t, d, p.Device.ID)
-	if err := d.TouchSeen(ctx, p.Device.ID, time.Now(), false); err != nil {
+	if err := NewDeviceControl(d.pool, d.timeout).TouchSeen(ctx, p.Device.ID, time.Now(), false); err != nil {
 		t.Fatal(err)
 	}
-	presence, _, err := d.GetPresence(ctx, p.Device.ID)
+	presence, _, err := NewDeviceControl(d.pool, d.timeout).GetPresence(ctx, p.Device.ID)
 	if err != nil || presence.LastDataAt != nil || presence.LastPollAt != nil {
 		t.Fatalf("no data or poll yet: %+v %v", presence, err)
 	}
@@ -127,7 +127,7 @@ func TestPresenceReportsLastDataAt(t *testing.T) {
 		VALUES ($1, $2, 'sale.finalized.v3', now(), $3, '{}', '\x00', $4)`, uuid.NewString(), p.Device.ID, received, storeID); err != nil {
 		t.Fatal(err)
 	}
-	presence, _, err = d.GetPresence(ctx, p.Device.ID)
+	presence, _, err = NewDeviceControl(d.pool, d.timeout).GetPresence(ctx, p.Device.ID)
 	if err != nil || presence.LastDataAt == nil || !presence.LastDataAt.Equal(received) {
 		t.Fatalf("last data: %+v %v", presence, err)
 	}

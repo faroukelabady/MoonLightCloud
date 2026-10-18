@@ -18,10 +18,10 @@ func (a activeDevices) IsActive(_ context.Context, id string) (bool, error) {
 	return a.active[id], nil
 }
 
-func ctlFixture(t *testing.T) (Devices, *devicecontrol.Service, string, string) {
+func ctlFixture(t *testing.T) (DeviceControl, *devicecontrol.Service, string, string) {
 	t.Helper()
 	pool, svc := openTestRepo(t)
-	store := NewDevices(pool, 5*time.Second)
+	store := NewDeviceControl(pool, 5*time.Second)
 	ctx := context.Background()
 	prov, err := svc.Create(ctx, "ctl-device")
 	if err != nil {
@@ -70,7 +70,7 @@ func TestControlCreateIdempotent(t *testing.T) {
 // Revoked devices cannot queue commands.
 func TestControlRevokedDevice(t *testing.T) {
 	pool, svc := openTestRepo(t)
-	store := NewDevices(pool, 5*time.Second)
+	store := NewDeviceControl(pool, 5*time.Second)
 	ctx := context.Background()
 	prov, err := svc.Create(ctx, "revoked-dev")
 	if err != nil {
@@ -366,7 +366,7 @@ func TestControlActiveUniquenessRace(t *testing.T) {
 // one DEVICE_COMMAND_CONFLICT regardless of scheduling.
 func TestControlConcurrentContradictoryTerminal(t *testing.T) {
 	pool, svc := openTestRepo(t)
-	store := NewDevices(pool, 5*time.Second)
+	store := NewDeviceControl(pool, 5*time.Second)
 	ctx := context.Background()
 	const pairs = 25
 	devs := make([]string, 0, pairs)
@@ -727,7 +727,7 @@ func TestPresenceRejectionMutatesNothing(t *testing.T) {
 
 // countingStore instruments batch-read counts around the real store.
 type countingStore struct {
-	Devices
+	DeviceControl
 	presence int
 	active   int
 	recent   int
@@ -735,27 +735,27 @@ type countingStore struct {
 
 func (c *countingStore) ListPresence(ctx context.Context) ([]devicecontrol.Presence, error) {
 	c.presence++
-	return c.Devices.ListPresence(ctx)
+	return c.DeviceControl.ListPresence(ctx)
 }
 
 func (c *countingStore) ListActiveAll(ctx context.Context) ([]devicecontrol.Command, error) {
 	c.active++
-	return c.Devices.ListActiveAll(ctx)
+	return c.DeviceControl.ListActiveAll(ctx)
 }
 
 func (c *countingStore) ListRecentBounded(ctx context.Context, ids []string, per int) ([]devicecontrol.Command, error) {
 	c.recent++
-	return c.Devices.ListRecentBounded(ctx, ids, per)
+	return c.DeviceControl.ListRecentBounded(ctx, ids, per)
 }
 
 func (c *countingStore) total() int { return c.presence + c.active + c.recent }
 
 // F11 fixture: devices spanning no presence, ONLINE, OFFLINE, every
 // command state, >5 history rows, and revoked lifecycle.
-func overviewFixture(t *testing.T, n int) (Devices, []string) {
+func overviewFixture(t *testing.T, n int) (DeviceControl, []string) {
 	t.Helper()
 	pool, svc := openTestRepo(t)
-	store := NewDevices(pool, 5*time.Second)
+	store := NewDeviceControl(pool, 5*time.Second)
 	ctx := context.Background()
 	devIDs := make([]string, 0, n)
 	for i := 0; i < n; i++ {
@@ -826,7 +826,7 @@ func TestOverviewBoundedQueries(t *testing.T) {
 	for _, n := range []int{2, 9} {
 		store, devIDs := overviewFixture(t, n)
 		ctx := context.Background()
-		counted := &countingStore{Devices: store}
+		counted := &countingStore{DeviceControl: store}
 		svc := devicecontrol.NewService(counted, activeDevices{active: map[string]bool{}}, ids.System{}.New, 60*time.Second, time.Now)
 		ov, err := svc.Overview(ctx, devIDs)
 		if err != nil {
@@ -890,7 +890,7 @@ func TestOverviewHistoryBoundAndOrder(t *testing.T) {
 // credential material.
 func TestOverviewRevokedVisible(t *testing.T) {
 	pool, svc := openTestRepo(t)
-	store := NewDevices(pool, 5*time.Second)
+	store := NewDeviceControl(pool, 5*time.Second)
 	ctx := context.Background()
 	prov, err := svc.Create(ctx, "rev-dev")
 	if err != nil {
