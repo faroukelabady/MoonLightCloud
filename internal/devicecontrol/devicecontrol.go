@@ -34,6 +34,14 @@ const (
 	ConnectivityOffline   = "offline"
 )
 
+// Derived control-channel state. Any authenticated request (a sync upload
+// too) marks a device seen; only a control poll lets Sync Now reach it.
+const (
+	ControlPolling     = "polling"
+	ControlPollStale   = "poll_stale"
+	ControlNeverPolled = "never_polled"
+)
+
 // Bounded machine result codes. Cloud never accepts free-form text.
 var allowedResultCodes = map[string]bool{
 	"SYNC_COMPLETED":       true,
@@ -61,13 +69,16 @@ type Command struct {
 	ResultCode      *string
 }
 
-// Presence is server-observed control-plane contact.
+// Presence is server-observed contact: LastSeenAt is any authenticated
+// request, LastPollAt the control channel, LastDataAt the newest uploaded
+// sync event.
 type Presence struct {
 	DeviceID       string
 	LastSeenAt     *time.Time
 	LastPollAt     *time.Time
 	LastAcceptedAt *time.Time
 	LastFinishedAt *time.Time
+	LastDataAt     *time.Time
 }
 
 // ValidateIdempotencyKey enforces bounded ASCII per existing conventions.
@@ -112,7 +123,7 @@ func IsActive(status string) bool {
 	return false
 }
 
-// DeriveConnectivity computes NEVER_SEEN/ONLINE/OFFLINE from server time.
+// DeriveConnectivity computes never_seen/online/offline from server time.
 func DeriveConnectivity(lastSeen *time.Time, now time.Time, onlineWindow time.Duration) string {
 	if lastSeen == nil || lastSeen.IsZero() {
 		return ConnectivityNeverSeen
@@ -121,6 +132,18 @@ func DeriveConnectivity(lastSeen *time.Time, now time.Time, onlineWindow time.Du
 		return ConnectivityOnline
 	}
 	return ConnectivityOffline
+}
+
+// DeriveControl reports whether the control channel polls within the
+// online window, independently of other contact such as sync uploads.
+func DeriveControl(lastPoll *time.Time, now time.Time, onlineWindow time.Duration) string {
+	if lastPoll == nil || lastPoll.IsZero() {
+		return ControlNeverPolled
+	}
+	if now.Sub(lastPoll.UTC()) <= onlineWindow {
+		return ControlPolling
+	}
+	return ControlPollStale
 }
 
 // UserFacing maps durable states to dashboard labels (no delivery semantics).

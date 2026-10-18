@@ -326,7 +326,8 @@ func (q *Queries) GetControlCommandForDevice(ctx context.Context, arg GetControl
 
 const getPresence = `-- name: GetPresence :one
 SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
-    p.last_command_finished_at, p.created_at, p.updated_at
+    p.last_command_finished_at, p.created_at, p.updated_at,
+    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = p.device_id)::timestamptz AS last_data_at
 FROM device_control_presence p
 JOIN devices d ON d.id = p.device_id
 WHERE p.device_id = $1
@@ -340,8 +341,11 @@ type GetPresenceRow struct {
 	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	LastDataAt            pgtype.Timestamptz `json:"last_data_at"`
 }
 
+// last_data_at is the newest event the device uploaded (sync data
+// freshness), read through idx_sync_events_device_received.
 func (q *Queries) GetPresence(ctx context.Context, deviceID pgtype.UUID) (GetPresenceRow, error) {
 	row := q.db.QueryRow(ctx, getPresence, deviceID)
 	var i GetPresenceRow
@@ -353,6 +357,7 @@ func (q *Queries) GetPresence(ctx context.Context, deviceID pgtype.UUID) (GetPre
 		&i.LastCommandFinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastDataAt,
 	)
 	return i, err
 }
@@ -452,7 +457,8 @@ func (q *Queries) ListActiveControlCommands(ctx context.Context) ([]DeviceContro
 
 const listPresence = `-- name: ListPresence :many
 SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
-    p.last_command_finished_at, p.created_at, p.updated_at
+    p.last_command_finished_at, p.created_at, p.updated_at,
+    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = p.device_id)::timestamptz AS last_data_at
 FROM device_control_presence p
 JOIN devices d ON d.id = p.device_id
 ORDER BY p.device_id
@@ -466,6 +472,7 @@ type ListPresenceRow struct {
 	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	LastDataAt            pgtype.Timestamptz `json:"last_data_at"`
 }
 
 func (q *Queries) ListPresence(ctx context.Context) ([]ListPresenceRow, error) {
@@ -485,6 +492,7 @@ func (q *Queries) ListPresence(ctx context.Context) ([]ListPresenceRow, error) {
 			&i.LastCommandFinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LastDataAt,
 		); err != nil {
 			return nil, err
 		}

@@ -41,6 +41,22 @@ describe('DevicesPage', () => {
 		expect(await screen.findByText('Syncing')).toBeTruthy();
 	});
 
+	it('flags an online device whose control channel is not polling', async () => {
+		api.devices.mockResolvedValue({
+			devices: [
+				{ device_id: 'd-sync', lifecycle: 'active', connectivity: 'online', control: 'never_polled', last_seen_at: '2026-09-29T10:00:00Z', last_data_at: '2026-09-29T09:58:00Z', active_command: null, recent_commands: [] },
+				{ device_id: 'd-stale', lifecycle: 'active', connectivity: 'online', control: 'poll_stale', last_poll_at: '2026-09-29T08:00:00Z', active_command: null, recent_commands: [] },
+				{ device_id: 'd-ok', lifecycle: 'active', connectivity: 'online', control: 'polling', active_command: null, recent_commands: [] }
+			]
+		});
+		render(DevicesPage);
+		const rows = await screen.findAllByTestId('device-row');
+		expect(within(rows[0]).getByTestId('control-indicator').textContent).toMatch(/not polled yet/);
+		expect(within(rows[0]).getByTestId('last-data').textContent).toMatch(/2026-09-29T09:58:00Z/);
+		expect(within(rows[1]).getByTestId('control-indicator').textContent).toMatch(/control poll stale/);
+		expect(within(rows[2]).queryByTestId('control-indicator')).toBeNull();
+	});
+
 	it('disables Sync Now while a command is active', async () => {
 		api.devices.mockResolvedValue({
 			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'online', active_command: cmd('c1', 'pending'), recent_commands: [cmd('c1', 'pending')] }]

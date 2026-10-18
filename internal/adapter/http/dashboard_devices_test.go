@@ -58,6 +58,7 @@ func TestDashboardDevicesConnectivity(t *testing.T) {
 		Devices []struct {
 			DeviceID     string `json:"device_id"`
 			Connectivity string `json:"connectivity"`
+			Control      string `json:"control"`
 			Active       *struct {
 				Status string `json:"status"`
 			} `json:"active_command"`
@@ -69,10 +70,10 @@ func TestDashboardDevicesConnectivity(t *testing.T) {
 	}
 	byID := map[string]string{}
 	for _, d := range body.Devices {
-		byID[d.DeviceID] = d.Connectivity
+		byID[d.DeviceID] = d.Connectivity + "/" + d.Control
 	}
-	if byID["dev-A"] != "online" || byID["dev-B"] != "never_seen" {
-		t.Fatalf("connectivity: %v", byID)
+	if byID["dev-A"] != "online/polling" || byID["dev-B"] != "never_seen/never_polled" {
+		t.Fatalf("connectivity/control: %v", byID)
 	}
 }
 

@@ -103,3 +103,32 @@ func TestControlContactAdvancesDeviceLastSeen(t *testing.T) {
 		t.Fatalf("presence last seen: %+v found=%v %v", presence, found, err)
 	}
 }
+
+// Presence reports the newest sync event a device uploaded, so the
+// dashboard can show data freshness next to control-channel state.
+func TestPresenceReportsLastDataAt(t *testing.T) {
+	pool, authSvc := openTestRepo(t)
+	ctx := context.Background()
+	p, err := authSvc.Create(ctx, "data-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := NewDevices(pool, 5*time.Second)
+	storeID := bindTestStore(t, d, p.Device.ID)
+	if err := d.TouchSeen(ctx, p.Device.ID, time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	presence, _, err := d.GetPresence(ctx, p.Device.ID)
+	if err != nil || presence.LastDataAt != nil || presence.LastPollAt != nil {
+		t.Fatalf("no data or poll yet: %+v %v", presence, err)
+	}
+	received := time.Date(2026, 10, 18, 9, 30, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+		VALUES ($1, $2, 'sale.finalized.v3', now(), $3, '{}', '\x00', $4)`, uuid.NewString(), p.Device.ID, received, storeID); err != nil {
+		t.Fatal(err)
+	}
+	presence, _, err = d.GetPresence(ctx, p.Device.ID)
+	if err != nil || presence.LastDataAt == nil || !presence.LastDataAt.Equal(received) {
+		t.Fatalf("last data: %+v %v", presence, err)
+	}
+}

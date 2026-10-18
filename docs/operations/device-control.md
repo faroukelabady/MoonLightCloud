@@ -39,11 +39,22 @@ accepted/running/terminal contact preserves it, and it stays NULL until
 the first poll. Dashboards derive connectivity from `last_seen_at` only;
 `last_poll_at` is auxiliary poll history.
 
-- `never_seen`: no successful control contact ever.
+- `never_seen`: no successful contact ever.
 - `online`: contact within `DEVICE_ONLINE_WINDOW`.
 - `offline`: previously seen, window elapsed.
 
-ONLINE means the Cloud control plane heard from the Retail application
+Contact is `devices.last_seen_at`: any authenticated request, a sync upload
+included. The device list therefore also shows the control channel on its
+own (`control`) and when sync data last arrived (`last data`):
+
+- `polling`: the control channel polled within `DEVICE_ONLINE_WINDOW`.
+- `poll_stale`: it polled before, but not within the window.
+- `never_polled`: no control poll yet.
+
+An `online` device that is not `polling` is flagged on the Devices page: it
+uploads data, but Sync Now reaches it only at its next poll.
+
+`online` means Cloud heard from the Retail application
 recently. It does NOT prove the PC is healthy, data is current, or every
 provider is reachable.
 

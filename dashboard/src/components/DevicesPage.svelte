@@ -105,7 +105,7 @@
 
 <section aria-label="Devices">
 	<h2>Devices</h2>
-	<p class="hint">ONLINE means the Cloud control plane heard from the Retail app recently. It does not prove data is current.</p>
+	<p class="hint">online means Cloud heard from the Retail app recently (a sync upload or a control poll). It does not prove data is current; "last data" shows when sync data last arrived.</p>
 	{#if loading}<p>Loading…</p>
 	{:else if error}<p role="alert">Failed: {error}</p>
 	{:else if devices.length === 0}<p>No devices registered.</p>
@@ -127,6 +127,14 @@
 						<span data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
 					{/if}
 					<span title="last seen">{d.last_seen_at ?? 'never'}</span>
+					<span data-testid="last-data" title="newest sync data received">last data: {d.last_data_at ?? 'none yet'}</span>
+					{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
+						<span class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
+							{d.control === 'never_polled'
+								? 'متصل بالمزامنة ولم يستعلم بعد / Syncing, not polled yet — Sync Now waits for its first poll'
+								: 'متصل بالمزامنة وقناة التحكم متأخرة / Syncing, control poll stale — Sync Now may be delayed'}
+						</span>
+					{/if}
 					{#if active}
 						<span data-testid="command-status">{userFacing(active.status)}</span>
 						<button disabled title="A sync request is already active">Sync Now</button>
@@ -170,5 +178,8 @@
 <style>
 	.hint {
 		color: var(--muted, #666);
+	}
+	.warn {
+		color: var(--warning, #a15c00);
 	}
 </style>

@@ -389,7 +389,7 @@ paths:
         - dashboardSession: []
       responses:
         '200':
-          description: Devices with NEVER_SEEN/ONLINE/OFFLINE connectivity.
+          description: Devices with never_seen/online/offline connectivity and the control-channel state.
           content:
             application/json:
               schema:
@@ -4625,7 +4625,7 @@ components:
     DashboardDevice:
       type: object
       description: Operator device row. Connectivity derives from server-observed last_seen_at; active_command is null unless a non-terminal command exists; recent_commands holds up to 5 newest commands of any state.
-      required: [device_id, lifecycle, connectivity]
+      required: [device_id, lifecycle, connectivity, control]
       properties:
         device_id:
           type: string
@@ -4638,11 +4638,25 @@ components:
         connectivity:
           type: string
           enum: [never_seen, online, offline]
-          description: ONLINE means the control plane heard from the Retail app within the freshness window; never proof of data freshness.
+          description: online means Cloud heard any authenticated request from the Retail app (sync upload or control poll) within the freshness window; never proof of data freshness.
+        control:
+          type: string
+          enum: [polling, poll_stale, never_polled]
+          description: Whether the control channel itself polled within the freshness window. An online device that is not polling uploads data but cannot receive Sync Now yet.
         last_seen_at:
           type: string
           format: date-time
           nullable: true
+        last_poll_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest control-channel poll.
+        last_data_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest sync event received from this device.
         active_command:
           $ref: '#/components/schemas/DeviceControlCommand'
           nullable: true

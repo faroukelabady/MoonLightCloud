@@ -54,6 +54,10 @@ func toPresence(row sqlcgen.GetPresenceRow) devicecontrol.Presence {
 		t := row.LastCommandAcceptedAt.Time.UTC()
 		p.LastAcceptedAt = &t
 	}
+	if row.LastDataAt.Valid {
+		t := row.LastDataAt.Time.UTC()
+		p.LastDataAt = &t
+	}
 	if row.LastCommandFinishedAt.Valid {
 		t := row.LastCommandFinishedAt.Time.UTC()
 		p.LastFinishedAt = &t

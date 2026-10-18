@@ -46,7 +46,10 @@ type deviceRow struct {
 	StoreName      string        `json:"store_name,omitempty"`
 	Lifecycle      string        `json:"lifecycle"`
 	Connectivity   string        `json:"connectivity"`
+	Control        string        `json:"control"`
 	LastSeenAt     *time.Time    `json:"last_seen_at,omitempty"`
+	LastPollAt     *time.Time    `json:"last_poll_at,omitempty"`
+	LastDataAt     *time.Time    `json:"last_data_at,omitempty"`
 	ActiveCommand  *commandWire  `json:"active_command,omitempty"`
 	RecentCommands []commandWire `json:"recent_commands,omitempty"`
 }
@@ -102,9 +105,13 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 		ov := overviews[d.ID]
 		if ov.Presence != nil {
 			row.LastSeenAt = ov.Presence.LastSeenAt
+			row.LastPollAt = ov.Presence.LastPollAt
+			row.LastDataAt = ov.Presence.LastDataAt
 			row.Connectivity = devicecontrol.DeriveConnectivity(ov.Presence.LastSeenAt, now, h.OnlineWindow)
+			row.Control = devicecontrol.DeriveControl(ov.Presence.LastPollAt, now, h.OnlineWindow)
 		} else {
 			row.Connectivity = devicecontrol.ConnectivityNeverSeen
+			row.Control = devicecontrol.ControlNeverPolled
 		}
 		if ov.Active != nil {
 			row.ActiveCommand = toWire(*ov.Active)

@@ -286,7 +286,11 @@ export interface DeviceRow {
 	name?: string;
 	lifecycle: string;
 	connectivity: string;
+	/** Control channel state: polling, poll_stale or never_polled. */
+	control?: 'polling' | 'poll_stale' | 'never_polled';
 	last_seen_at?: string | null;
+	last_poll_at?: string | null;
+	last_data_at?: string | null;
 	active_command?: DeviceCommandWire | null;
 	recent_commands?: DeviceCommandWire[];
 	store_id?: string;
