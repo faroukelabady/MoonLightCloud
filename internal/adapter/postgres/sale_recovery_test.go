@@ -120,8 +120,8 @@ func TestMalformedPersistedEvent(t *testing.T) {
 	env := openSaleEnv(t)
 	eventID := "22222222-2222-7222-8222-222222222222"
 	if _, err := env.pool.Exec(context.Background(), `
-		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00')`,
+		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`,
 		eventID, env.devID); err != nil {
 		t.Fatal(err)
 	}

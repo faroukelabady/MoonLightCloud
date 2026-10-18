@@ -51,16 +51,13 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 	f := openScopeFixture(t)
 	saleA := "aaaaaaaa-0000-4000-8000-0000000000a1"
 	saleB := "bbbbbbbb-0000-4000-8000-0000000000b1"
-	saleL := "cccccccc-0000-4000-8000-0000000000c1"
 	prodA := "aaaaaaaa-1111-4111-8111-0000000000a1"
 	prodB := "bbbbbbbb-1111-4111-8111-0000000000b1"
-	prodL := "cccccccc-1111-4111-8111-0000000000c1"
 
 	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000001", "sale.finalized.v3", saleWithProduct(t, saleA, prodA, "NR1", "NR A"))
 	f.ingest(t, f.devB, f.credB, "e0000700-0000-4000-8000-000000000002", "sale.finalized.v3", saleWithProduct(t, saleB, prodB, "NR1", "NR B"))
-	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000003", "sale.finalized.v3", saleWithProduct(t, saleL, prodL, "NRLEG", "NR Leg"))
 	for _, event := range []string{
-		"e0000700-0000-4000-8000-000000000001", "e0000700-0000-4000-8000-000000000002", "e0000700-0000-4000-8000-000000000003",
+		"e0000700-0000-4000-8000-000000000001", "e0000700-0000-4000-8000-000000000002",
 	} {
 		if res := f.projectSale(t, event); res.Outcome != 1 {
 			t.Fatalf("sale %s: %+v", event, res)
@@ -75,24 +72,20 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("global products (F01 42883 regression): %v", err)
 	}
-	if len(global) != 3 {
+	if len(global) != 2 {
 		t.Fatalf("global rows: %+v", global)
 	}
 	for _, tc := range []struct {
 		id    string
 		store *string
 	}{
-		{prodA, scopePtr(scopeStoreA)}, {prodB, scopePtr(scopeStoreB)}, {prodL, nil},
+		{prodA, scopePtr(scopeStoreA)}, {prodB, scopePtr(scopeStoreB)},
 	} {
 		got, ok := storeOfProduct(global, tc.id)
 		if !ok {
 			t.Fatalf("global missing %s: %+v", tc.id, global)
 		}
-		if tc.store == nil {
-			if got != nil {
-				t.Fatalf("legacy product badge must be null: %v", *got)
-			}
-		} else if got == nil || *got != *tc.store {
+		if got == nil || *got != *tc.store {
 			t.Fatalf("%s badge: %v want %s", tc.id, got, *tc.store)
 		}
 	}
@@ -112,10 +105,10 @@ func TestDashboardNormalizedScopeIdentity(t *testing.T) {
 		t.Fatalf("scoped B: %+v", scopedB)
 	}
 
-	// Same product ID with a legacy sale and a Store A sale: the global
+	// Same product ID with a Store B sale and a Store A sale: the global
 	// group is mixed ownership and must not claim a Store badge.
 	prodM := "dddddddd-1111-4111-8111-0000000000d1"
-	f.ingest(t, f.devC, f.credC, "e0000700-0000-4000-8000-000000000004", "sale.finalized.v3", saleWithProduct(t, "cccccccc-0000-4000-8000-0000000000d2", prodM, "NRMIX", "NR Mix"))
+	f.ingest(t, f.devB, f.credB, "e0000700-0000-4000-8000-000000000004", "sale.finalized.v3", saleWithProduct(t, "cccccccc-0000-4000-8000-0000000000d2", prodM, "NRMIX", "NR Mix"))
 	f.ingest(t, f.devA, f.credA, "e0000700-0000-4000-8000-000000000005", "sale.finalized.v3", saleWithProduct(t, "aaaaaaaa-0000-4000-8000-0000000000d3", prodM, "NRMIX", "NR Mix"))
 	for _, event := range []string{"e0000700-0000-4000-8000-000000000004", "e0000700-0000-4000-8000-000000000005"} {
 		if res := f.projectSale(t, event); res.Outcome != 1 {

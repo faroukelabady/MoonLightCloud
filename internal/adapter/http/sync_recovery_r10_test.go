@@ -124,15 +124,11 @@ func (f *recoveryHTTPFixture) request(t *testing.T, token, method, path, body st
 	return resp.StatusCode, data
 }
 
-func (f *recoveryHTTPFixture) insertEvent(t *testing.T, id, deviceID string, storeID *string, hash string) {
+func (f *recoveryHTTPFixture) insertEvent(t *testing.T, id, deviceID, storeID, hash string) {
 	t.Helper()
-	var owner any
-	if storeID != nil {
-		owner = *storeID
-	}
 	ct, err := f.pool.Exec(context.Background(), `INSERT INTO sync_events
 		(event_id,device_id,event_type,occurred_at,payload,payload_hash,store_id)
-		VALUES($1,$2,'system.recovery_test.v1',now(),'{}',decode($3,'hex'),$4)`, id, deviceID, hash, owner)
+		VALUES($1,$2,'system.recovery_test.v1',now(),'{}',decode($3,'hex'),$4)`, id, deviceID, hash, storeID)
 	if err != nil || ct.RowsAffected() != 1 {
 		t.Fatalf("insert event affected=%d err=%v", ct.RowsAffected(), err)
 	}
@@ -169,7 +165,7 @@ func TestR10StaleCompletionCannotClearNewGenerationAuthenticatedPostgres(t *test
 		t.Fatal(err)
 	}
 	existingID, missingID := "10000000-0000-4000-8000-000000000001", "20000000-0000-4000-8000-000000000002"
-	f.insertEvent(t, existingID, deviceID, &f.storeA, "aa")
+	f.insertEvent(t, existingID, deviceID, f.storeA, "aa")
 	first, body := f.verify(t, token, []syncrecovery.EventIdentity{{EventID: existingID, PayloadHash: "aa"}}, 1, true, "")
 	if first != http.StatusOK {
 		t.Fatalf("initial verification HTTP %d: %s", first, body)
@@ -316,10 +312,10 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 		"40000000-0000-4000-8000-000000000044",
 	}
 	sort.Strings(ids)
-	f.insertEvent(t, ids[0], aID, &f.storeA, "aa")
-	f.insertEvent(t, ids[1], replacementID, &f.storeA, "bb")
-	f.insertEvent(t, ids[2], aID, nil, "cc") // legacy, authorized only to its original bound device
-	f.insertEvent(t, ids[3], bID, &storeB, "dd")
+	f.insertEvent(t, ids[0], aID, f.storeA, "aa")
+	f.insertEvent(t, ids[1], replacementID, f.storeA, "bb")
+	f.insertEvent(t, ids[2], aID, f.storeA, "cc")
+	f.insertEvent(t, ids[3], bID, storeB, "dd")
 
 	identities := []syncrecovery.EventIdentity{
 		{EventID: ids[0], PayloadHash: "aa"}, {EventID: ids[1], PayloadHash: "bb"},
@@ -328,20 +324,15 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 	code, body := f.verify(t, aToken, identities, int64(len(identities)), true, "")
 	var own syncrecovery.VerifyResponse
 	if code != http.StatusOK || json.Unmarshal(body, &own) != nil || len(own.Missing) != 1 || own.Missing[0] != ids[3] {
-		t.Fatalf("Store A matches should include same-Store and own legacy events only: HTTP=%d response=%+v body=%s", code, own, body)
+		t.Fatalf("Store A matches should include same-Store events only: HTTP=%d response=%+v body=%s", code, own, body)
 	}
 
-	// A replacement device in the same Store sees event identities from
-	// the Store, but cannot claim unowned legacy history from the old device.
-	code, body = f.verify(t, replacementToken, identities[:2], 2, true, "")
+	// A replacement device in the same Store sees every event identity of
+	// the Store, including the history the old device uploaded.
+	code, body = f.verify(t, replacementToken, identities[:3], 3, true, "")
 	var replacement syncrecovery.VerifyResponse
 	if code != http.StatusOK || json.Unmarshal(body, &replacement) != nil || len(replacement.Missing) != 0 {
 		t.Fatalf("same-Store replacement must preserve scoped continuity: HTTP=%d response=%+v body=%s", code, replacement, body)
-	}
-	code, body = f.verify(t, replacementToken, identities[2:3], 1, true, "")
-	var legacy syncrecovery.VerifyResponse
-	if code != http.StatusOK || json.Unmarshal(body, &legacy) != nil || len(legacy.Missing) != 1 {
-		t.Fatalf("replacement must not adopt unauthorized NULL-Store event: HTTP=%d response=%+v body=%s", code, legacy, body)
 	}
 	aProgressBeforeForeign, _, err := f.devices.VerifyProgress(ctx, aID)
 	if err != nil {
@@ -397,7 +388,7 @@ func TestR10CompleteAndNewRecoveryMarkAreGenerationSerialized(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventID := "10000000-0000-4000-8000-000000000099"
-	f.insertEvent(t, eventID, deviceID, &f.storeA, "aa")
+	f.insertEvent(t, eventID, deviceID, f.storeA, "aa")
 	if code, body := f.verify(t, token, []syncrecovery.EventIdentity{{EventID: eventID, PayloadHash: "aa"}}, 1, true, ""); code != http.StatusOK {
 		t.Fatalf("verify HTTP %d: %s", code, body)
 	}
@@ -443,8 +434,8 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldEvent, newEvent := "10000000-0000-4000-8000-000000000101", "20000000-0000-4000-8000-000000000202"
-	f.insertEvent(t, oldEvent, deviceID, &f.storeA, "aa")
-	f.insertEvent(t, newEvent, deviceID, &f.storeA, "bb")
+	f.insertEvent(t, oldEvent, deviceID, f.storeA, "aa")
+	f.insertEvent(t, newEvent, deviceID, f.storeA, "bb")
 	start := make(chan struct{})
 	type beginResult struct {
 		generation int64

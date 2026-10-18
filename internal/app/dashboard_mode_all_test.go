@@ -28,12 +28,13 @@ func TestDashboardModeAllHTTPReturns200(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindAppTestStore(t, a, p.Device.ID)
 	eventID := "33333333-3333-7333-8333-333333333333"
 	saleID := "11111111-1111-4111-8111-111111111111"
 	productID := "aaaaaaaa-aaaa-4aaa-8aaa-111111111111"
 	if _, err := a.Pool.Exec(ctx, `
-		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00')`, eventID, p.Device.ID); err != nil {
+		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+		VALUES ($1, $2, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, eventID, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Pool.Exec(ctx, `
@@ -41,10 +42,10 @@ func TestDashboardModeAllHTTPReturns200(t *testing.T) {
 			(sale_id, source_event_id, source_device_id, sale_number, channel,
 			 occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar,
 			 shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en,
-			 currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at)
+			 currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at, store_id)
 		VALUES ($1, $2, $3, 'MLR-MA', 'STORE',
 			'2026-09-20T10:00:00Z', '2026-09-20T10:05:00Z', 'a','b','c','d','e','f','g',
-			'EGP', 65000, 0, 0, 65000, now())`, saleID, eventID, p.Device.ID); err != nil {
+			'EGP', 65000, 0, 0, 65000, now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $3))`, saleID, eventID, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Pool.Exec(ctx, `

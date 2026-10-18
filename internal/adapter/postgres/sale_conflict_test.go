@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
@@ -38,12 +39,18 @@ func openTestRepoOnURL(t *testing.T, url string) (*pgxpool.Pool, auth.Service) {
 func newSaleEnvOnPool(t *testing.T, pool *pgxpool.Pool, devID, credID string) *saleEnv {
 	t.Helper()
 	store := NewDevices(pool, 5*time.Second)
+	var storeID string
+	if binding, err := sqlcgen.New(pool).BindingByDevice(context.Background(), mustParseUUID(devID)); err == nil {
+		storeID = uuidString(binding.StoreID)
+	} else {
+		storeID = bindTestStore(t, store, devID)
+	}
 	return &saleEnv{
 		pool:    pool,
 		syncSvc: isync.NewService(store, clock.System{}, testEventRegistry()),
 		proj: sale.NewProjector(store, clock.System{},
 			slog.New(slog.NewTextHandler(io.Discard, nil))),
-		devID: devID, credID: credID,
+		devID: devID, credID: credID, storeID: storeID,
 	}
 }
 

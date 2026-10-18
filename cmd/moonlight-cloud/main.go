@@ -343,15 +343,6 @@ func projectionCmd(args []string) error {
 			return fmt.Errorf("unknown processor %q", processor)
 		}
 		return store.ResetProcessing(ctx, processor, args[1])
-	case "recover-catalog":
-		// Replay at most 100 affected current-state sources. Repeat after
-		// workers converge until zero; permanent unrelated failures remain.
-		n, err := store.RecoverDefaultCatalogBlocked(ctx)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("re-armed %d affected catalog events (batch limit 100; repeat after projection convergence until zero; inspect remaining processing errors)\n", n)
-		return nil
 	default:
 		return fmt.Errorf("unknown projection subcommand %q", args[0])
 	}

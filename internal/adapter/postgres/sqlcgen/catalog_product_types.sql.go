@@ -183,7 +183,7 @@ SELECT type_id, code, name_ar, name_en, description_ar, description_en,
     is_active, position, type_revision,
     source_event_id, source_device_id, source_payload_hash, store_id
 FROM catalog_product_types
-WHERE (NULLIF($1::text, '') IS NULL OR store_id::text = $1 OR ($1 = 'null' AND store_id IS NULL))
+WHERE (NULLIF($1::text, '') IS NULL OR store_id::text = $1)
 ORDER BY position, code
 `
 
@@ -251,60 +251,6 @@ func (q *Queries) SetCatalogProductTypeID(ctx context.Context, arg SetCatalogPro
 	return err
 }
 
-const sharedProductTypeRecoveryCandidates = `-- name: SharedProductTypeRecoveryCandidates :many
-SELECT e.event_id, p.processor
-FROM sync_events e
-JOIN sync_event_processing p ON p.event_id = e.event_id
-JOIN catalog_product_types t ON t.type_id = $1::uuid
-WHERE e.store_id IS NOT NULL AND t.store_id IS NOT NULL AND t.store_id <> e.store_id
-  AND e.payload->>'product_type_id' = $1::text
-  AND p.status = 'blocked' AND p.last_error_code = 'STORE_SCOPE_CONFLICT'
-  AND ((e.event_type = 'catalog.product_type.snapshot.v1'
-        AND p.processor = 'catalog_product_type_projection.v1'
-        AND p.last_error_message = 'product type owned by another store')
-    OR (e.event_type = 'catalog.product.snapshot.v2'
-        AND p.processor = 'catalog_product_projection.v1'
-        AND p.last_error_message = 'product type owned by another store'
-        AND NOT EXISTS (SELECT 1 FROM catalog_products product
-                        WHERE product.product_id::text = e.payload->>'product_id'
-                          AND product.store_id IS NOT NULL AND product.store_id <> e.store_id)))
-ORDER BY e.received_at, e.event_id
-LIMIT $2::int
-`
-
-type SharedProductTypeRecoveryCandidatesParams struct {
-	SeedID     pgtype.UUID `json:"seed_id"`
-	BatchLimit int32       `json:"batch_limit"`
-}
-
-type SharedProductTypeRecoveryCandidatesRow struct {
-	EventID   pgtype.UUID `json:"event_id"`
-	Processor string      `json:"processor"`
-}
-
-// Recover only the exact seeded identity collision proven by the original
-// ingress Store and a foreign-owned raw projection. Never re-arm genuine
-// same-Store contradictions, custom identities or other ownership failures.
-func (q *Queries) SharedProductTypeRecoveryCandidates(ctx context.Context, arg SharedProductTypeRecoveryCandidatesParams) ([]SharedProductTypeRecoveryCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, sharedProductTypeRecoveryCandidates, arg.SeedID, arg.BatchLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SharedProductTypeRecoveryCandidatesRow{}
-	for rows.Next() {
-		var i SharedProductTypeRecoveryCandidatesRow
-		if err := rows.Scan(&i.EventID, &i.Processor); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const upsertCatalogProductType = `-- name: UpsertCatalogProductType :exec
 
 INSERT INTO catalog_product_types (
@@ -320,7 +266,7 @@ ON CONFLICT (type_id) DO UPDATE SET
     type_revision = excluded.type_revision,
     source_event_id = excluded.source_event_id, source_device_id = excluded.source_device_id,
     source_payload_hash = excluded.source_payload_hash, source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_product_types.store_id),
+    store_id = excluded.store_id,
     projected_at = now()
 `
 

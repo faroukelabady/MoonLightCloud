@@ -188,7 +188,7 @@ func TestM06NoRawDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	secret := "password=secret postgres://user:pass@db sync_events(id=1) payload={\"x\":1} Traceback (most recent call last)"
 	// Plant a sensitive processing error directly.
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ('88888888-8888-4888-8888-888888888888', $1, 'sale.finalized.v3', now(), now(), '{}', '\x00') ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ('88888888-8888-4888-8888-888888888888', $1, 'sale.finalized.v3', now(), now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_event_processing (event_id, processor, status, attempt_count, last_error_code, last_error_message) VALUES ('88888888-8888-4888-8888-888888888888', 'sale_projection.v3', 'blocked', 1, 'SALE_ID_CONFLICT', $1) ON CONFLICT (event_id, processor) DO UPDATE SET status='blocked', last_error_code='SALE_ID_CONFLICT', last_error_message=$1`, secret); err != nil {
@@ -220,7 +220,7 @@ func TestM07QueueCountOnce(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `UPDATE sync_event_processing SET status='pending', next_attempt_at=NULL WHERE processor='sale_projection.v3'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ('99999999-9999-4999-8999-999999999999', $1, 'sale.finalized.v3', now(), now(), '{}', '\x00') ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ('99999999-9999-4999-8999-999999999999', $1, 'sale.finalized.v3', now(), now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_event_processing (event_id, processor, status, attempt_count, next_attempt_at) VALUES ('99999999-9999-4999-8999-999999999999', 'sale_projection.v3', 'retry', 1, now()) ON CONFLICT (event_id, processor) DO UPDATE SET status='retry', next_attempt_at=now()`); err != nil {
@@ -244,7 +244,7 @@ func TestL06ActivityDeterministic(t *testing.T) {
 	ctx := context.Background()
 	ts := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	for _, id := range []string{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"} {
-		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ($1, $2, 'sale.finalized.v3', $3, $3, '{}', '\x00') ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
+		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ($1, $2, 'sale.finalized.v3', $3, $3, '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2)) ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -275,7 +275,7 @@ func TestR05ActivityTopNPrefix(t *testing.T) {
 		"ffffffff-ffff-4fff-bfff-ffffffffffff",
 	}
 	for _, id := range ids {
-		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ($1, $2, 'sale.finalized.v3', $3, $3, '{}', '\x00') ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
+		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ($1, $2, 'sale.finalized.v3', $3, $3, '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2)) ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -313,10 +313,10 @@ func TestH04DailyMissingFxFails(t *testing.T) {
 	env := openDashEnv(t)
 	projectDashSale(t, env, "55555555-5555-4555-8555-555555555555", "2026-09-20T10:00:00Z", withSaleID(t, fixture(t, "sale_egp.json"), "11111111-1111-4111-8111-111111111111"))
 	ctx := context.Background()
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ('77777777-7777-4777-8777-777777777777', $1, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00') ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ('77777777-7777-4777-8777-777777777777', $1, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', '77777777-7777-4777-8777-777777777777', $1, 'MLR-X', 'STORE', '2026-09-20T10:00:00Z', '2026-09-20T10:00:00Z', 'a','b','c','d','e','f','g', 'USD', 1000, 0, 0, 1000, now()) ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at, store_id) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', '77777777-7777-4777-8777-777777777777', $1, 'MLR-X', 'STORE', '2026-09-20T10:00:00Z', '2026-09-20T10:00:00Z', 'a','b','c','d','e','f','g', 'USD', 1000, 0, 0, 1000, now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
 	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
@@ -375,10 +375,10 @@ func TestH04MissingFxAllNormalizedEndpoints(t *testing.T) {
 	projectDashSale(t, env, "55555555-5555-4555-8555-555555555555", "2026-09-20T10:00:00Z", withSale(t, fixture(t, "sale_egp.json"), "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", "2026-09-20T10:05:00Z"))
 	ctx := context.Background()
 	// One USD sale without FX (seeded; ingestion would never produce it).
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash) VALUES ('77777777-7777-4777-8777-777777777777', $1, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00') ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ('77777777-7777-4777-8777-777777777777', $1, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', '77777777-7777-4777-8777-777777777777', $1, 'MLR-X', 'STORE', '2026-09-20T10:00:00Z', '2026-09-20T10:00:00Z', 'a','b','c','d','e','f','g', 'USD', 1000, 0, 0, 1000, now()) ON CONFLICT DO NOTHING`, env.devID); err != nil {
+	if _, err := env.pool.Exec(ctx, `INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at, store_id) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', '77777777-7777-4777-8777-777777777777', $1, 'MLR-X', 'STORE', '2026-09-20T10:00:00Z', '2026-09-20T10:00:00Z', 'a','b','c','d','e','f','g', 'USD', 1000, 0, 0, 1000, now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `INSERT INTO sale_lines_projection (sale_id, sale_item_id, position, sku, product_name, quantity, unit_price_minor, unit_currency, line_total_minor, line_currency) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 0, 'SKU-X', 'X', 1, 1000, 'USD', 1000, 'USD') ON CONFLICT DO NOTHING`); err != nil {

@@ -64,8 +64,7 @@ WHERE r.required
 -- name: SyncEventHashes :many
 -- The authenticated device's binding is resolved server-side. All event
 -- rows belonging to that Store remain visible for supported replacement
--- devices. Legacy rows without a Store are matchable only by their original
--- device; unbound callers therefore receive no identity matches.
+-- devices; unbound callers receive no identity matches.
 SELECT e.event_id, e.payload_hash
 FROM sync_events e
 WHERE e.event_id = ANY(sqlc.arg(event_ids)::uuid[])
@@ -73,8 +72,7 @@ WHERE e.event_id = ANY(sqlc.arg(event_ids)::uuid[])
       SELECT 1
       FROM device_store_bindings b
       WHERE b.device_id = sqlc.arg(device_id)::uuid
-        AND (e.store_id = b.store_id
-             OR (e.store_id IS NULL AND e.device_id = b.device_id))
+        AND e.store_id = b.store_id
   );
 
 -- name: CountSyncEventsForDevice :one

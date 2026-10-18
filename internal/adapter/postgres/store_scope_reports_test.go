@@ -21,23 +21,21 @@ import (
 )
 
 // scopeSalesFixture projects one fixture sale per Store (same currency,
-// fixture amounts) plus one legacy NULL sale, returning their IDs.
-func scopeSalesFixture(t *testing.T, f *scopeFixture) (saleA, saleB, saleLegacy string) {
+// fixture amounts), returning their IDs.
+func scopeSalesFixture(t *testing.T, f *scopeFixture) (saleA, saleB string) {
 	t.Helper()
 	saleA = "aaaaaaaa-0000-4000-8000-0000000000d1"
 	saleB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbd1"
-	saleLegacy = "cccccccc-cccc-4ccc-8ccc-ccccccccccd1"
 	f.ingest(t, f.devA, f.credA, "e0000250-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleA))
 	f.ingest(t, f.devB, f.credB, "e0000250-0000-4000-8000-000000000002", "sale.finalized.v3", scaledSalePayload(t, saleB, 2))
-	f.ingest(t, f.devC, f.credC, "e0000250-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleLegacy))
 	for _, event := range []string{
-		"e0000250-0000-4000-8000-000000000001", "e0000250-0000-4000-8000-000000000002", "e0000250-0000-4000-8000-000000000003",
+		"e0000250-0000-4000-8000-000000000001", "e0000250-0000-4000-8000-000000000002",
 	} {
 		if res := f.projectSale(t, event); res.Outcome != sale.OutcomeProcessed {
 			t.Fatalf("sale %s: %+v", event, res)
 		}
 	}
-	return saleA, saleB, saleLegacy
+	return saleA, saleB
 }
 
 func reportWindow() (start, end string) {
@@ -49,7 +47,7 @@ func reportWindow() (start, end string) {
 // scope, and the unfiltered aggregate is the exact sum.
 func TestScope_ReportIsolation(t *testing.T) {
 	f := openScopeFixture(t)
-	saleA, saleB, _ := scopeSalesFixture(t, f)
+	saleA, saleB := scopeSalesFixture(t, f)
 	devices := NewDevices(f.pool, 5*time.Second)
 	ctx := context.Background()
 	start, end := reportWindow()
@@ -92,9 +90,9 @@ func TestScope_ReportIsolation(t *testing.T) {
 	for _, r := range global {
 		globalTotal += r.SalesTotal
 	}
-	// Unfiltered keeps documented global behavior: A + B + legacy.
-	if globalTotal != 4*fixtureTotal {
-		t.Fatalf("unfiltered total %d want %d", globalTotal, 4*fixtureTotal)
+	// Unfiltered is the global total: A + B.
+	if globalTotal != 3*fixtureTotal {
+		t.Fatalf("unfiltered total %d want %d", globalTotal, 3*fixtureTotal)
 	}
 	_ = saleB
 }
@@ -262,80 +260,6 @@ func TestScope_ConcurrentSameSKU(t *testing.T) {
 	}
 }
 
-// TestScope_ConcurrentAdoptionRace proves exactly one Store wins a
-// legacy adoption race; the loser blocks without a trace.
-func TestScope_ConcurrentAdoptionRace(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 280, "root-r", "tag-r", "prod-r")
-	rootR, tagR, prodR := ids["root-r"], ids["tag-r"], ids["prod-r"]
-	names := map[string]string{"ar": "r"}
-	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV2, categoryPayload(rootR, "active", names, nil, 1))
-	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000002",
-		catalog.EventTagSnapshotV1, tagPayload(tagR, "race-tag", true, names, 1))
-	f.ingest(t, f.devC, f.credC, "e0000280-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "R", rootR, nil, []string{tagR}, 1))
-	for _, tc := range []struct{ event, typ string }{
-		{"e0000280-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
-		{"e0000280-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000280-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
-	} {
-		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
-	}
-	f.ingest(t, f.devA, f.credA, "e0000280-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "RA", rootR, nil, []string{tagR}, 2))
-	f.ingest(t, f.devB, f.credB, "e0000280-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV2, productPayload(prodR, "RACE-2", "RB", rootR, nil, []string{tagR}, 2))
-	var wg sync.WaitGroup
-	results := make([]catalog.ProjectResult, 2)
-	for i, event := range []string{
-		"e0000280-0000-4000-8000-000000000004", "e0000280-0000-4000-8000-000000000005",
-	} {
-		wg.Add(1)
-		go func(i int, event string) {
-			defer wg.Done()
-			for attempt := 0; attempt < 25; attempt++ {
-				expireBackoff(t, f, event)
-				store := NewDevices(f.pool, 5*time.Second)
-				rec, _, err := store.LoadCatalogEvent(context.Background(), event)
-				if err != nil {
-					t.Errorf("load: %v", err)
-					return
-				}
-				res, err := store.ProjectProduct(context.Background(), rec, time.Now())
-				if err == nil && res.Outcome != catalog.OutcomeNotDue && res.Outcome != catalog.OutcomeRetryable {
-					results[i] = res
-					return
-				}
-				time.Sleep(time.Duration(attempt+1) * 5 * time.Millisecond)
-			}
-			t.Errorf("project %s never verdict", event)
-		}(i, event)
-	}
-	wg.Wait()
-	wins, blocks := 0, 0
-	for _, res := range results {
-		switch res.Outcome {
-		case catalog.OutcomeProcessed, catalog.OutcomeAlready:
-			wins++
-		case catalog.OutcomeBlocked:
-			if res.ErrorCode != ErrStoreScopeConflict {
-				t.Fatalf("loser code: %+v", res)
-			}
-			blocks++
-		default:
-			t.Fatalf("racy adoption: %+v", res)
-		}
-	}
-	if wins != 1 || blocks != 1 {
-		t.Fatalf("exactly one winner: wins=%d blocks=%d", wins, blocks)
-	}
-	got := f.rowStore(t, "catalog_products", "product_id", prodR)
-	if got == nil || (*got != scopeStoreA && *got != scopeStoreB) {
-		t.Fatalf("single proven owner: %v", got)
-	}
-}
-
 // TestScope_ConcurrentCrossStoreReturn proves a same-Store return and a
 // cross-Store return racing on one sale resolve exactly once: the owner
 // commits, the attacker blocks, cumulative guards stay exact.
@@ -394,7 +318,7 @@ func TestScope_ConcurrentCrossStoreReturn(t *testing.T) {
 }
 
 // TestScope_RebuildPreservesOwnership replays inbox Store context after
-// wiping derived projections: A, B, and NULL rows all return unchanged.
+// wiping derived projections: A and B rows return unchanged.
 func TestScope_RebuildPreservesOwnership(t *testing.T) {
 	f := openScopeFixture(t)
 	rootA, tagA, rootB, tagB := f.scopeGraph(t, 300, "rebuild")
@@ -403,19 +327,15 @@ func TestScope_RebuildPreservesOwnership(t *testing.T) {
 		catalog.EventProductSnapshotV2, productPayload(ids["prod-a"], "RB-1", "A", rootA, nil, []string{tagA}, 1))
 	f.ingest(t, f.devB, f.credB, "e0000310-0000-4000-8000-000000000002",
 		catalog.EventProductSnapshotV2, productPayload(ids["prod-b"], "RB-1", "B", rootB, nil, []string{tagB}, 1))
-	f.ingest(t, f.devC, f.credC, "e0000310-0000-4000-8000-000000000003",
-		catalog.EventTagSnapshotV1, tagPayload("c9999999-0000-4000-8000-000000000001", "legacy-tag", true, map[string]string{"ar": "l"}, 1))
 	for _, tc := range []struct{ event, typ string }{
 		{"e0000310-0000-4000-8000-000000000001", catalog.EventProductSnapshotV2},
 		{"e0000310-0000-4000-8000-000000000002", catalog.EventProductSnapshotV2},
-		{"e0000310-0000-4000-8000-000000000003", catalog.EventTagSnapshotV1},
 	} {
 		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
 	}
 	before := map[string]*string{
-		ids["prod-a"]:                          f.rowStore(t, "catalog_products", "product_id", ids["prod-a"]),
-		ids["prod-b"]:                          f.rowStore(t, "catalog_products", "product_id", ids["prod-b"]),
-		"c9999999-0000-4000-8000-000000000001": f.rowStore(t, "catalog_tags", "tag_id", "c9999999-0000-4000-8000-000000000001"),
+		ids["prod-a"]: f.rowStore(t, "catalog_products", "product_id", ids["prod-a"]),
+		ids["prod-b"]: f.rowStore(t, "catalog_products", "product_id", ids["prod-b"]),
 	}
 	ctx := context.Background()
 	for _, query := range []string{
@@ -459,9 +379,6 @@ func TestScope_RebuildPreservesOwnership(t *testing.T) {
 	}
 	if got := f.rowStore(t, "catalog_products", "product_id", ids["prod-b"]); !storeEq(got, before[ids["prod-b"]]) {
 		t.Fatalf("rebuild B: %v want %v", got, before[ids["prod-b"]])
-	}
-	if got := f.rowStore(t, "catalog_tags", "tag_id", "c9999999-0000-4000-8000-000000000001"); !storeEq(got, before["c9999999-0000-4000-8000-000000000001"]) {
-		t.Fatalf("rebuild legacy: %v", got)
 	}
 }
 

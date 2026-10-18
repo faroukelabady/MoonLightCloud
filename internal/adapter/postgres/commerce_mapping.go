@@ -91,12 +91,13 @@ func (d Devices) CreateProductMapping(ctx context.Context, providerKey commerce.
 	}
 	q := sqlcgen.New(d.pool)
 	// Phase 9C authority: the mapping mirrors its authoritative catalog
-	// product. A missing product yields a legacy NULL mapping (mappings
-	// may predate catalog projection); ownership is never manufactured.
+	// product and its Store (ADR-0055: a mapping always has a Store).
 	var productStore pgtype.UUID
 	if prow, err := q.CatalogProductByID(ctx, puid); err == nil {
 		productStore = prow.StoreID
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		return commerce.ProductMapping{}, apperr.New(apperr.NotFound, "catalog product not found")
+	} else {
 		return commerce.ProductMapping{}, apperr.Wrap(apperr.Internal, "commerce mapping", redact(err))
 	}
 	row, err := q.CreateCommerceProductMapping(ctx, sqlcgen.CreateCommerceProductMappingParams{
@@ -114,32 +115,9 @@ func (d Devices) CreateProductMapping(ctx context.Context, providerKey commerce.
 		ProviderKey: string(providerKey), ProductID: puid,
 	}); readErr == nil {
 		if existing.ExternalProductID == externalID {
-			// Same-pair idempotent replay. A legacy NULL mapping adopts
-			// the proven product Store atomically; an owned mapping is
-			// returned as-is (adoption is one-way and deterministic).
-			if !existing.StoreID.Valid && productStore.Valid {
-				if adopted, aerr := q.AdoptCommerceProductMappingStore(ctx, sqlcgen.AdoptCommerceProductMappingStoreParams{
-					ProviderKey: string(providerKey), ProductID: puid, StoreID: productStore,
-				}); aerr == nil {
-					return commerceMappingFromRow(adopted.ProviderKey, adopted.ProductID, adopted.ExternalProductID, adopted.StoreID, adopted.CreatedAt, adopted.UpdatedAt), nil
-				}
-				// Lost a concurrent adoption (or the row changed under
-				// us): re-read the winner instead of returning stale
-				// state; conflicts below still apply.
-				if fresh, ferr := q.GetCommerceProductMapping(ctx, sqlcgen.GetCommerceProductMappingParams{
-					ProviderKey: string(providerKey), ProductID: puid,
-				}); ferr == nil {
-					existing = fresh
-				} else if !errors.Is(ferr, pgx.ErrNoRows) {
-					return commerce.ProductMapping{}, apperr.Wrap(apperr.Internal, "commerce mapping", redact(ferr))
-				}
-				if existing.ExternalProductID != externalID {
-					return commerce.ProductMapping{}, apperr.New(apperr.Conflict,
-						"commerce mapping conflict: product already maps to a different external id")
-				}
-			}
-			if existing.StoreID.Valid && productStore.Valid &&
-				uuidString(existing.StoreID) != uuidString(productStore) {
+			// Same-pair idempotent replay: an owned mapping is returned
+			// as-is unless another Store owns it.
+			if uuidString(existing.StoreID) != uuidString(productStore) {
 				return commerce.ProductMapping{}, apperr.New(apperr.Conflict,
 					"STORE_SCOPE_CONFLICT: commerce mapping owned by another store")
 			}
@@ -243,9 +221,19 @@ func (d Devices) UpsertProductConfigurationMapping(ctx context.Context, provider
 	if err != nil {
 		return commerce.ProductConfigurationMapping{}, err
 	}
-	row, err := sqlcgen.New(d.pool).UpsertCommerceProductConfigurationMapping(ctx, sqlcgen.UpsertCommerceProductConfigurationMappingParams{
+	q := sqlcgen.New(d.pool)
+	// The mapping belongs to its Product's Store (ADR-0055).
+	product, err := q.CatalogProductByID(ctx, puid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return commerce.ProductConfigurationMapping{}, apperr.New(apperr.NotFound, "catalog product not found")
+	}
+	if err != nil {
+		return commerce.ProductConfigurationMapping{}, redact(err)
+	}
+	row, err := q.UpsertCommerceProductConfigurationMapping(ctx, sqlcgen.UpsertCommerceProductConfigurationMappingParams{
 		ProviderKey: string(providerKey), ProductID: puid, ConfigurationID: cuid,
 		ExternalProductID: externalProductID, ExternalConfigurationID: externalConfigurationID,
+		StoreID: product.StoreID,
 	})
 	if err != nil {
 		return commerce.ProductConfigurationMapping{}, redact(err)
@@ -410,26 +398,25 @@ func (d Devices) CreateProductVariantMapping(ctx context.Context, providerKey co
 	}
 	q := sqlcgen.New(d.pool)
 	// The mapping mirrors its authoritative catalog product's Store
-	// (Phase 9C authority): a missing product yields a legacy NULL
-	// mapping; ownership is never manufactured.
+	// (Phase 9C authority; ADR-0055: a mapping always has a Store).
 	var productStore pgtype.UUID
 	if prow, err := q.CatalogProductByID(ctx, puid); err == nil {
 		productStore = prow.StoreID
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		return commerce.ProductVariantMapping{}, apperr.New(apperr.NotFound, "catalog product not found")
+	} else {
 		return commerce.ProductVariantMapping{}, apperr.Wrap(apperr.Internal, "commerce variant mapping", redact(err))
 	}
 	// Remaps and cross-variant external reuse are classified BEFORE the
-	// insert: the Store-scoped unique indexes never bind legacy NULL
-	// rows (00023), so Go owns the classification in all cases and the
-	// constraints stay the concurrency backstop.
+	// insert; the Store-scoped unique indexes stay the concurrency
+	// backstop.
 	if existing, readErr := q.GetCommerceProductVariantMapping(ctx, sqlcgen.GetCommerceProductVariantMappingParams{
 		ProviderKey: string(providerKey), VariantID: vuid,
 	}); readErr == nil {
 		if existing.ExternalProductID == externalProductID && existing.ExternalVariantID == externalVariantID {
 			// Same-pair idempotent replay (mapping-loss recovery re-adopting
 			// the same remote variation).
-			if existing.StoreID.Valid && productStore.Valid &&
-				uuidString(existing.StoreID) != uuidString(productStore) {
+			if uuidString(existing.StoreID) != uuidString(productStore) {
 				return commerce.ProductVariantMapping{}, apperr.New(apperr.Conflict,
 					"STORE_SCOPE_CONFLICT: commerce variant mapping owned by another store")
 			}

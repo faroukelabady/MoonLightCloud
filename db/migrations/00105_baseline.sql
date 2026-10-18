@@ -1016,7 +1016,7 @@ CREATE INDEX idx_sale_item_tag_snapshots_item ON sale_item_tag_snapshots (sale_i
 --    (PRIMARY KEY on device_id); a Store may have many devices.
 --    Immutable after binding: no update path, conflicts stay conflicts.
 -- 3. sync_events.store_id: server-derived ingress context from the
---    authenticated device binding, NULL for legacy/unbound events.
+--    authenticated device binding; required: unbound devices cannot ingest.
 --    Never trusted from payloads; never rewritten after receipt.
 
 CREATE TABLE stores (
@@ -1035,8 +1035,8 @@ CREATE TABLE device_store_bindings (
 );
 CREATE INDEX idx_device_store_bindings_store ON device_store_bindings (store_id, device_id);
 
-ALTER TABLE sync_events ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_sync_events_store ON sync_events (store_id) WHERE store_id IS NOT NULL;
+ALTER TABLE sync_events ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_sync_events_store ON sync_events (store_id);
 
 -- ==== 00023_store_scoped_projections ====
 -- Phase 9B store-scoped projections. Copies the trusted Phase 9A ingress
@@ -1051,34 +1051,34 @@ CREATE INDEX idx_sync_events_store ON sync_events (store_id) WHERE store_id IS N
 -- rows never collide in PostgreSQL: NULL is never equal to NULL).
 
 -- Catalog roots: nullable ownership until one-time legacy adoption.
-ALTER TABLE catalog_categories ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_catalog_categories_store ON catalog_categories (store_id) WHERE store_id IS NOT NULL;
+ALTER TABLE catalog_categories ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_catalog_categories_store ON catalog_categories (store_id);
 
-ALTER TABLE catalog_tags ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_catalog_tags_store ON catalog_tags (store_id) WHERE store_id IS NOT NULL;
+ALTER TABLE catalog_tags ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_catalog_tags_store ON catalog_tags (store_id);
 -- Slug uniqueness is Store-local: same slug may coexist across Stores;
 -- duplicates within one Store stay prohibited.
 ALTER TABLE catalog_tags DROP CONSTRAINT catalog_tags_slug_key;
 ALTER TABLE catalog_tags ADD CONSTRAINT catalog_tags_store_slug_unique UNIQUE (store_id, slug);
 
-ALTER TABLE catalog_products ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_catalog_products_store ON catalog_products (store_id) WHERE store_id IS NOT NULL;
+ALTER TABLE catalog_products ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_catalog_products_store ON catalog_products (store_id);
 -- SKU uniqueness is Store-local (Retail SKU uniqueness is Store-local).
 ALTER TABLE catalog_products DROP CONSTRAINT catalog_products_sku_key;
 ALTER TABLE catalog_products ADD CONSTRAINT catalog_products_store_sku_unique UNIQUE (store_id, sku);
 
 -- Policy/inventory carry denormalized ownership alongside their product
 -- (written in the same projector decision, never looked up later).
-ALTER TABLE catalog_product_sales_policies ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_catalog_product_sales_policies_store ON catalog_product_sales_policies (store_id) WHERE store_id IS NOT NULL;
+ALTER TABLE catalog_product_sales_policies ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_catalog_product_sales_policies_store ON catalog_product_sales_policies (store_id);
 
 
 -- Historical roots: immutable once written; NULL stays NULL for legacy.
-ALTER TABLE sales_projection ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_sales_projection_store_occurred ON sales_projection (store_id, occurred_at) WHERE store_id IS NOT NULL;
+ALTER TABLE sales_projection ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_sales_projection_store_occurred ON sales_projection (store_id, occurred_at);
 
-ALTER TABLE return_refund_projection ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_return_refund_projection_store_occurred ON return_refund_projection (store_id, occurred_at) WHERE store_id IS NOT NULL;
+ALTER TABLE return_refund_projection ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_return_refund_projection_store_occurred ON return_refund_projection (store_id, occurred_at);
 
 -- ==== 00024_store_scoped_commerce ====
 -- Phase 9C store-scoped commerce ownership. Closes the integration-state
@@ -1092,33 +1092,24 @@ CREATE INDEX idx_return_refund_projection_store_occurred ON return_refund_projec
 -- Commerce product mappings: ownership mirrors the authoritative
 -- catalog product. Same-pair identity stays (provider_key, product_id);
 -- same external identity stays unique per provider.
-ALTER TABLE commerce_product_mappings ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_commerce_product_mappings_store ON commerce_product_mappings (store_id) WHERE store_id IS NOT NULL;
-CREATE INDEX idx_commerce_product_mappings_store_provider ON commerce_product_mappings (store_id, provider_key) WHERE store_id IS NOT NULL;
+ALTER TABLE commerce_product_mappings ADD COLUMN store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT;
+CREATE INDEX idx_commerce_product_mappings_store ON commerce_product_mappings (store_id);
+CREATE INDEX idx_commerce_product_mappings_store_provider ON commerce_product_mappings (store_id, provider_key);
 
 -- Online order roots: ownership derives at reconciliation from unanimous
 -- resolved mapping ownership. Children (lines, addresses, history) stay
 -- FK-owned by the root; webhook inbox, fences, and status history carry
 -- no Store (operational tokens and append-only history, never authority).
+-- Online orders arrive from Store-less providers; an order whose lines map
+-- to no Product has no provable Store, so this column alone stays nullable
+-- (unattributed, not legacy: ADR-0055 exception).
 ALTER TABLE commerce_online_orders ADD COLUMN store_id UUID REFERENCES stores(id) ON DELETE RESTRICT;
-CREATE INDEX idx_commerce_online_orders_store_created ON commerce_online_orders (store_id, created_at DESC) WHERE store_id IS NOT NULL;
-CREATE INDEX idx_commerce_online_orders_store_provider_order ON commerce_online_orders (store_id, provider_key, external_order_id) WHERE store_id IS NOT NULL;
+CREATE INDEX idx_commerce_online_orders_store_created ON commerce_online_orders (store_id, created_at DESC);
+CREATE INDEX idx_commerce_online_orders_store_provider_order ON commerce_online_orders (store_id, provider_key, external_order_id);
 
 -- ==== 00025_store_scoped_default_catalog ====
--- Phase 9-R2: fail-safe schema safety for the Store-scoped default catalog
--- identity model. Current-state category/tag roots now carry one row per
--- (identity, Store); this index enforces that safety property so a
--- regression cannot re-collapse independent Stores onto one physical row.
--- It permits the pre-existing legacy (Store NULL) rows and every raw or
--- canonical identity. default_algorithm is a non-unique marker column (no
--- index needed) recording which identity scheme last wrote a row.
-CREATE UNIQUE INDEX idx_catalog_categories_identity_store
-    ON catalog_categories (category_id, store_id);
-CREATE UNIQUE INDEX idx_catalog_tags_identity_store
-    ON catalog_tags (tag_id, store_id);
-
-ALTER TABLE catalog_categories ADD COLUMN default_algorithm SMALLINT NOT NULL DEFAULT 0;
-ALTER TABLE catalog_tags ADD COLUMN default_algorithm SMALLINT NOT NULL DEFAULT 0;
+-- Default reference catalog IDs are always stored under their per-Store
+-- canonical identity (ADR-0055: every event is Store-scoped).
 
 -- ==== 00026_notification_recipient_username_bound ====
 -- Telegram permits 32 username characters plus the @ destination prefix.
@@ -1263,7 +1254,7 @@ FROM catalog_products p;
 -- existing per-product commerce coordination lock).
 CREATE TABLE commerce_product_reevaluations (
     product_id      UUID PRIMARY KEY,
-    store_id        UUID REFERENCES stores (id),
+    store_id        UUID NOT NULL REFERENCES stores (id),
     reason          TEXT NOT NULL,
     requested_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     attempts        INTEGER NOT NULL DEFAULT 0,
@@ -1343,7 +1334,7 @@ CREATE TABLE commerce_product_configuration_mappings (
     configuration_id UUID NOT NULL,
     external_product_id TEXT NOT NULL CHECK (length(external_product_id) BETWEEN 1 AND 200),
     external_configuration_id TEXT NOT NULL CHECK (length(external_configuration_id) BETWEEN 1 AND 200),
-    store_id UUID NULL REFERENCES stores (id),
+    store_id UUID NOT NULL REFERENCES stores (id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (provider_key, product_id, configuration_id),
@@ -1456,9 +1447,7 @@ CREATE INDEX idx_catalog_admin_targets_command ON catalog_admin_command_targets(
 -- ownership moves from Product to ProductVariant (Retail authority).
 -- Retail emits catalog.product_variant.snapshot.v1 and
 -- inventory.product_variant.snapshot.v1; Cloud projects them with strict
--- Store isolation (store_id UUID NULL = unscoped legacy, never collides —
--- see 00023 conventions: NULL is never equal to NULL, so legacy rows never
--- collide in the Store-scoped UNIQUE constraints).
+-- Store isolation (store_id is required: ADR-0055).
 --
 -- catalog_product_variants is a rebuildable projection root and carries
 -- deliberately NO foreign key to catalog_products (00012 style: never tie
@@ -1493,7 +1482,7 @@ CREATE TABLE catalog_product_variants (
     source_payload_hash BYTEA NOT NULL,
     source_received_at  TIMESTAMPTZ NOT NULL,
     projected_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    store_id            UUID REFERENCES stores(id) ON DELETE RESTRICT
+    store_id            UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT
 );
 -- ADR-0055 / Retail ADR-049 1c: per-currency Variant overrides of the
 -- Product price and cost. NULL inherits catalog_product_prices; the
@@ -1515,7 +1504,7 @@ ALTER TABLE catalog_product_variants
     UNIQUE (store_id, sku);
 CREATE INDEX idx_catalog_product_variants_product ON catalog_product_variants (product_id, position, variant_id);
 CREATE INDEX idx_catalog_product_variants_sku ON catalog_product_variants (sku);
-CREATE INDEX idx_catalog_product_variants_store ON catalog_product_variants (store_id) WHERE store_id IS NOT NULL;
+CREATE INDEX idx_catalog_product_variants_store ON catalog_product_variants (store_id);
 
 -- Physical option identity with bilingual display labels (projection
 -- only; labels never participate in business identity).
@@ -1554,10 +1543,10 @@ CREATE TABLE catalog_product_variant_inventory (
     source_payload_hash     BYTEA NOT NULL,
     source_received_at      TIMESTAMPTZ NOT NULL,
     projected_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    store_id                UUID REFERENCES stores(id) ON DELETE RESTRICT
+    store_id                UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_catalog_product_variant_inventory_product ON catalog_product_variant_inventory (product_id);
-CREATE INDEX idx_catalog_product_variant_inventory_store ON catalog_product_variant_inventory (store_id) WHERE store_id IS NOT NULL;
+CREATE INDEX idx_catalog_product_variant_inventory_store ON catalog_product_variant_inventory (store_id);
 
 -- Durable Cloud-only provider variant mappings (00012/00024 style:
 -- integration state, NOT a rebuildable projection — deliberately NO
@@ -1571,7 +1560,7 @@ CREATE TABLE commerce_product_variant_mappings (
     variant_id          UUID NOT NULL,
     external_product_id TEXT NOT NULL CHECK (char_length(external_product_id) BETWEEN 1 AND 200),
     external_variant_id TEXT NOT NULL CHECK (char_length(external_variant_id) BETWEEN 1 AND 200),
-    store_id            UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    store_id            UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (provider_key, variant_id)
@@ -1581,9 +1570,9 @@ CREATE UNIQUE INDEX idx_commerce_variant_mappings_identity
 CREATE UNIQUE INDEX idx_commerce_variant_mappings_external
     ON commerce_product_variant_mappings (provider_key, store_id, external_product_id, external_variant_id);
 CREATE INDEX idx_commerce_variant_mappings_store
-    ON commerce_product_variant_mappings (store_id) WHERE store_id IS NOT NULL;
+    ON commerce_product_variant_mappings (store_id);
 CREATE INDEX idx_commerce_variant_mappings_store_provider
-    ON commerce_product_variant_mappings (store_id, provider_key) WHERE store_id IS NOT NULL;
+    ON commerce_product_variant_mappings (store_id, provider_key);
 
 -- Phase 17 Cloud-admin variant command vocabulary (00032 CHECK list).
 -- PostgreSQL: recreate the CHECK constraint with the extended list.
@@ -1715,12 +1704,12 @@ CREATE TABLE catalog_product_types (
     source_payload_hash BYTEA NOT NULL,
     source_received_at TIMESTAMPTZ NOT NULL,
     projected_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    store_id         UUID REFERENCES stores(id) ON DELETE RESTRICT
+    store_id         UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT
 );
 ALTER TABLE catalog_product_types
     ADD CONSTRAINT catalog_product_types_store_code_unique
     UNIQUE (store_id, code);
-CREATE INDEX idx_catalog_product_types_store ON catalog_product_types (store_id) WHERE store_id IS NOT NULL;
+CREATE INDEX idx_catalog_product_types_store ON catalog_product_types (store_id);
 
 CREATE TABLE catalog_product_type_variant_dimensions (
     type_id         UUID NOT NULL REFERENCES catalog_product_types(type_id) ON DELETE CASCADE,
@@ -2270,8 +2259,8 @@ LEFT JOIN catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory i
   ON i.variant_id = v.variant_id AND i.product_id = v.product_id
  AND i.sku = v.sku
- AND (v.store_id IS NULL OR v.store_id = p.store_id)
- AND (i.store_id IS NULL OR i.store_id = p.store_id)
+ AND v.store_id = p.store_id
+ AND i.store_id = p.store_id
 GROUP BY p.product_id, p.store_id;
 
 -- +goose Down

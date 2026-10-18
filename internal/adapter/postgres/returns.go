@@ -222,13 +222,9 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 		return d.persistReturnRetry(ctx, euid, now, ErrProjection, "sale lookup failed")
 	}
 	// Phase 9B ownership gate: the return resolves its sale within the
-	// SAME Store ownership context, before any cumulative guard or write.
-	// A scoped return for another proven Store's sale is rejected with
-	// zero mutation; a scoped return for an unscoped legacy sale needs
-	// device-provenance continuity (same authoring device), else it stays
-	// LEGACY_SCOPE_AMBIGUOUS rather than inventing ownership. Legacy
-	// returns keep legacy coexistence.
-	if scope := returnSaleScope(saleProj.StoreID, saleProj.SourceDeviceID, event); scope != nil {
+	// SAME Store ownership context, before any cumulative guard or write:
+	// a return for another Store's sale is rejected with zero mutation.
+	if scope := returnSaleScope(saleProj.StoreID, event); scope != nil {
 		_ = tx.Rollback(ctx)
 		return d.markReturnBlocked(ctx, euid, now, scope.ErrorCode, scope.Message)
 	}
@@ -586,29 +582,11 @@ type returnScopeVerdict struct {
 }
 
 // returnSaleScope enforces same-Store return attribution against the
-// locked parent sale row.
-//
-//   - sale scoped S, return scoped S: proceed.
-//   - sale scoped S, return scoped T (T non-empty, T != S): conflict, zero
-//     mutation.
-//   - sale scoped S, legacy return: proceed (legacy coexistence; the return
-//     row stays unscoped, money attributes via the sale join).
-//   - legacy sale, legacy return: proceed.
-//   - legacy sale, scoped return: proceed only with device-provenance
-//     continuity (same authoring device as the sale); otherwise ownership
-//     would be invented and the event stays ambiguous.
-func returnSaleScope(saleStore, saleDevice pgtype.UUID, event returnrefund.EventRecord) *returnScopeVerdict {
-	incoming := event.StoreID
-	if incoming == nil || *incoming == "" {
-		return nil
-	}
-	if !saleStore.Valid {
-		if saleDevice.Valid && uuidString(saleDevice) == event.DeviceID {
-			return nil
-		}
-		return &returnScopeVerdict{ErrorCode: ErrLegacyScopeAmbiguous, Message: "return store cannot be proven from legacy sale"}
-	}
-	if uuidString(saleStore) == *incoming {
+// locked parent sale row: the return's ingress Store must equal the sale's
+// Store (both are always present, ADR-0055); anything else is a conflict
+// with zero mutation.
+func returnSaleScope(saleStore pgtype.UUID, event returnrefund.EventRecord) *returnScopeVerdict {
+	if event.StoreID != nil && saleStore.Valid && uuidString(saleStore) == *event.StoreID {
 		return nil
 	}
 	return &returnScopeVerdict{ErrorCode: ErrStoreScopeConflict, Message: "return references a sale owned by another store"}

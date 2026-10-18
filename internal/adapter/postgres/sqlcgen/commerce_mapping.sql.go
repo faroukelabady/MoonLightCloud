@@ -11,45 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const adoptCommerceProductMappingStore = `-- name: AdoptCommerceProductMappingStore :one
-UPDATE commerce_product_mappings SET store_id = $3, updated_at = now()
-WHERE provider_key = $1 AND product_id = $2 AND store_id IS NULL
-RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at
-`
-
-type AdoptCommerceProductMappingStoreParams struct {
-	ProviderKey string      `json:"provider_key"`
-	ProductID   pgtype.UUID `json:"product_id"`
-	StoreID     pgtype.UUID `json:"store_id"`
-}
-
-type AdoptCommerceProductMappingStoreRow struct {
-	ProviderKey       string             `json:"provider_key"`
-	ProductID         pgtype.UUID        `json:"product_id"`
-	ExternalProductID string             `json:"external_product_id"`
-	StoreID           pgtype.UUID        `json:"store_id"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-}
-
-// Phase 9C one-time legacy adoption: a NULL mapping adopts the proven
-// Store of its own product. The WHERE clause makes concurrent adoption
-// deterministic (same product implies same Store); a lost race reads
-// back the winner instead of overwriting.
-func (q *Queries) AdoptCommerceProductMappingStore(ctx context.Context, arg AdoptCommerceProductMappingStoreParams) (AdoptCommerceProductMappingStoreRow, error) {
-	row := q.db.QueryRow(ctx, adoptCommerceProductMappingStore, arg.ProviderKey, arg.ProductID, arg.StoreID)
-	var i AdoptCommerceProductMappingStoreRow
-	err := row.Scan(
-		&i.ProviderKey,
-		&i.ProductID,
-		&i.ExternalProductID,
-		&i.StoreID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const createCommerceProductMapping = `-- name: CreateCommerceProductMapping :one
 INSERT INTO commerce_product_mappings (provider_key, product_id, external_product_id, store_id)
 VALUES ($1, $2, $3, $4)
@@ -412,7 +373,6 @@ SET external_variant_id = $1, updated_at = now()
 WHERE m.provider_key = $2 AND m.product_id = $3
  AND m.variant_id = $4 AND m.external_product_id = $5
  AND m.external_variant_id = $6
- AND m.store_id IS NOT NULL
  AND EXISTS (SELECT 1 FROM catalog_products p WHERE p.product_id=m.product_id AND p.store_id=m.store_id)
 RETURNING m.provider_key, m.product_id, m.variant_id, m.external_product_id, m.external_variant_id, m.store_id, m.created_at, m.updated_at
 `

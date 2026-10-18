@@ -147,7 +147,7 @@ func (d Devices) ProjectSaleV3(ctx context.Context, event sale.EventRecord, now 
 			}
 			if uuidString(existing.SourceEventID) != event.EventID {
 				_ = tx.Rollback(ctx)
-				if scope := saleScopeCheck(existing.StoreID, uuidString(existing.SourceEventID), event); scope != nil {
+				if scope := saleScopeCheck(uuidString(existing.SourceEventID), event); scope != nil {
 					return d.markBlocked(ctx, sale.ProcessorSaleProjectionV3, euid, now, scope.ErrorCode,
 						"sale owned by another store")
 				}

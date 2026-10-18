@@ -221,7 +221,6 @@ type CatalogCategory struct {
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
-	DefaultAlgorithm  int16              `json:"default_algorithm"`
 	OnlineEnabled     bool               `json:"online_enabled"`
 }
 
@@ -420,7 +419,6 @@ type CatalogTag struct {
 	SourceReceivedAt  pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt       pgtype.Timestamptz `json:"projected_at"`
 	StoreID           pgtype.UUID        `json:"store_id"`
-	DefaultAlgorithm  int16              `json:"default_algorithm"`
 }
 
 type CommerceOnlineOrder struct {

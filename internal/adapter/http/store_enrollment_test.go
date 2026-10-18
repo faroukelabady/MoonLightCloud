@@ -122,25 +122,31 @@ func TestStoreEnrollmentAuthenticatedPostgres(t *testing.T) {
 	for _, i := range []int{0, 1, 2, 3} {
 		eventID := fmt.Sprintf("99999999-9999-7999-8999-%012d", i)
 		body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"system.test.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{"message":"test"}}]}`, eventID)
-		if code := post(tokens[i], "/api/v1/sync/batch", body); code != 200 {
+		code := post(tokens[i], "/api/v1/sync/batch", body)
+		if i == 2 {
+			// An unbound device cannot upload: its events would carry no Store.
+			if code != 409 {
+				t.Fatalf("unbound ingress: %d", code)
+			}
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM sync_events WHERE event_id=$1`, eventID).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("unbound ingress persisted: %d %v", count, err)
+			}
+			continue
+		}
+		if code != 200 {
 			t.Fatalf("ingress: %d", code)
 		}
-		var actual *string
+		var actual string
 		if err := pool.QueryRow(ctx, `SELECT store_id::text FROM sync_events WHERE event_id=$1`, eventID).Scan(&actual); err != nil {
 			t.Fatal(err)
 		}
-		if i == 2 {
-			if actual != nil {
-				t.Fatal("unauthorized device acquired Store context")
-			}
-		} else {
-			expected := storeA
-			if i == 1 {
-				expected = storeB
-			}
-			if actual == nil || *actual != expected {
-				t.Fatal("device ingress context crossed Store boundary")
-			}
+		expected := storeA
+		if i == 1 {
+			expected = storeB
+		}
+		if actual != expected {
+			t.Fatal("device ingress context crossed Store boundary")
 		}
 	}
 	if err := authSvc.RevokeDevice(ctx, deviceIDs[3]); err != nil {

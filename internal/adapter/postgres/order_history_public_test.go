@@ -53,20 +53,26 @@ func seedConfiguration(t *testing.T, pool *pgxpool.Pool, productID, configID, st
 	t.Helper()
 	ctx := context.Background()
 	// Minimal durable provenance for the projected rows
-	// (device -> sync event -> category -> product -> configuration).
+	// (device -> Store -> sync event -> category -> product -> configuration).
 	seeds := []string{
 		`INSERT INTO devices (id, name, created_at)
 		 VALUES ('11111111-1111-4111-8111-111111111111','probe', now())
 		 ON CONFLICT (id) DO NOTHING`,
-		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
+		`INSERT INTO stores (id, display_name, timezone)
+		 VALUES ('44444444-4444-4444-8444-444444444444', 'Probe', 'Africa/Cairo')
+		 ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO device_store_bindings (device_id, store_id)
+		 VALUES ('11111111-1111-4111-8111-111111111111', '44444444-4444-4444-8444-444444444444')
+		 ON CONFLICT (device_id) DO NOTHING`,
+		`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
 		 VALUES ('22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111',
-		 'catalog.product.snapshot.v2', now(), now(), '{}'::jsonb, '\x00')
+		 'catalog.product.snapshot.v2', now(), now(), '{}'::jsonb, '\x00', '44444444-4444-4444-8444-444444444444')
 		 ON CONFLICT (event_id) DO NOTHING`,
 		`INSERT INTO catalog_categories (category_id, status, name_ar, source_revision,
-		 source_event_id, source_device_id, source_payload_hash, source_received_at)
+		 source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
 		 VALUES ('33333333-3333-4333-8333-333333333333','active','Root', 1,
 		 '22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111',
-		 '\x00', now())
+		 '\x00', now(), '44444444-4444-4444-8444-444444444444')
 		 ON CONFLICT (category_id) DO NOTHING`,
 	}
 	for _, stmt := range seeds {
@@ -76,17 +82,17 @@ func seedConfiguration(t *testing.T, pool *pgxpool.Pool, productID, configID, st
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO catalog_products (
 		 product_id, name_ar, top_category_id, is_active, source_revision,
-		 source_event_id, source_device_id, source_payload_hash, source_received_at)
+		 source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
 		 VALUES ($1, 'Seed', '33333333-3333-4333-8333-333333333333', true, 1,
 		 '22222222-2222-4222-8222-222222222222','11111111-1111-4111-8111-111111111111',
-		 '\x00', now())
+		 '\x00', now(), '44444444-4444-4444-8444-444444444444')
 		 ON CONFLICT (product_id) DO NOTHING`, productID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO commerce_product_configuration_mappings (
 		 provider_key, product_id, configuration_id, external_product_id,
-		 external_configuration_id, created_at, updated_at)
-		 VALUES ('website', $2, $1, '1000', 'var-0', now(), now())
+		 external_configuration_id, created_at, updated_at, store_id)
+		 VALUES ('website', $2, $1, '1000', 'var-0', now(), now(), '44444444-4444-4444-8444-444444444444')
 		 ON CONFLICT (provider_key, product_id, configuration_id) DO NOTHING`,
 		configID, productID); err != nil {
 		t.Fatal(err)

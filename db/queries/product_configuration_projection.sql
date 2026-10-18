@@ -68,7 +68,7 @@ INSERT INTO commerce_product_configuration_mappings (
 ON CONFLICT (provider_key, product_id, configuration_id) DO UPDATE SET
     external_product_id = excluded.external_product_id,
     external_configuration_id = excluded.external_configuration_id,
-    store_id = COALESCE(excluded.store_id, commerce_product_configuration_mappings.store_id),
+    store_id = excluded.store_id,
     updated_at = now()
 RETURNING provider_key, product_id, configuration_id, external_product_id,
        external_configuration_id, store_id, created_at, updated_at;

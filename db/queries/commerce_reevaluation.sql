@@ -23,8 +23,8 @@ ON CONFLICT (product_id) DO UPDATE SET
 -- name: EnqueueCategoryAffectedReevaluations :execrows
 -- Set-based descendant fan-out (§85): every Product whose classification
 -- reaches the Category or any DAG descendant of it. UNION deduplicates
--- multi-parent paths (§86/§182); Store scope matches proven ownership
--- only (legacy NULL never fans out Store-owned Products, §107).
+-- multi-parent paths (§86/§182); Store scope matches the writing Store
+-- exactly (§107).
 WITH RECURSIVE descendants (category_id) AS (
     SELECT $1::uuid
     UNION
@@ -35,7 +35,7 @@ WITH RECURSIVE descendants (category_id) AS (
 INSERT INTO commerce_product_reevaluations (product_id, store_id, reason, requested_at, next_attempt_at)
 SELECT DISTINCT p.product_id, p.store_id, $2::text, now(), now()
 FROM catalog_products p
-WHERE p.store_id IS NOT DISTINCT FROM $3::uuid
+WHERE p.store_id = $3::uuid
   AND (
     p.top_category_id = $1::uuid
     OR EXISTS (

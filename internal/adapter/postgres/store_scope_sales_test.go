@@ -7,9 +7,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
@@ -204,15 +202,15 @@ func TestScope_PolicyIsolation(t *testing.T) {
 	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
 }
 
-// TestScope_SalesOwnership proves new scoped Sales project under their
-// ingress Store, legacy Sales stay NULL (never adopted), and a second
-// event for an owned sale_id blocks without overwrite.
+// TestScope_SalesOwnership proves Sales project under their ingress
+// Store, an unbound device cannot upload, and a second event for an
+// owned sale_id blocks without overwrite.
 func TestScope_SalesOwnership(t *testing.T) {
 	f := openScopeFixture(t)
 	saleA, saleB, saleLegacy := "aaaaaaaa-0000-4000-8000-0000000000a1", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1", "cccccccc-cccc-4ccc-8ccc-ccccccccccc1"
 	f.ingest(t, f.devA, f.credA, "e0000240-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleA))
 	f.ingest(t, f.devB, f.credB, "e0000240-0000-4000-8000-000000000002", "sale.finalized.v3", scopedSalePayload(t, saleB))
-	f.ingest(t, f.devC, f.credC, "e0000240-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleLegacy))
+	f.ingestRefused(t, f.devC, f.credC, "e0000240-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleLegacy))
 	res := f.projectSale(t, "e0000240-0000-4000-8000-000000000001")
 	if res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale A: %+v", res)
@@ -221,18 +219,11 @@ func TestScope_SalesOwnership(t *testing.T) {
 	if res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale B: %+v", res)
 	}
-	res = f.projectSale(t, "e0000240-0000-4000-8000-000000000003")
-	if res.Outcome != sale.OutcomeProcessed {
-		t.Fatalf("legacy sale: %+v", res)
-	}
 	if got := saleStore(t, f, saleA); got == nil || *got != scopeStoreA {
 		t.Fatalf("sale A scoped: %v", got)
 	}
 	if got := saleStore(t, f, saleB); got == nil || *got != scopeStoreB {
 		t.Fatalf("sale B scoped: %v", got)
-	}
-	if got := saleStore(t, f, saleLegacy); got != nil {
-		t.Fatalf("legacy sale stays NULL: %v", got)
 	}
 	var lines int
 	if err := f.pool.QueryRow(context.Background(),
@@ -367,156 +358,5 @@ func TestScope_ReturnSameStoreProjects(t *testing.T) {
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT refund_total_minor FROM return_refund_projection WHERE return_refund_id='aaaaaaaa-0000-4000-8000-0000000000a5'`).Scan(&refund); err != nil || refund <= 0 {
 		t.Fatalf("refund money: %d (%v)", refund, err)
-	}
-}
-
-// TestScope_ReturnLegacyContinuity proves device-provenance continuity:
-// the same device that created a legacy NULL sale may return it once
-// bound, without rewriting the sale; a different device's scoped return
-// stays ambiguous.
-func TestScope_ReturnLegacyContinuity(t *testing.T) {
-	f := openScopeFixture(t)
-	salePayload := scopedSalePayload(t, "cccccccc-cccc-4ccc-8ccc-ccccccccccc2")
-	f.ingest(t, f.devC, f.credC, "e0000244-0000-4000-8000-000000000001", "sale.finalized.v3", salePayload)
-	if res := f.projectSale(t, "e0000244-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
-		t.Fatalf("legacy sale: %+v", res)
-	}
-	devices := NewDevices(f.pool, 5*time.Second)
-	if err := devices.EnrollStore(context.Background(), f.devC, scopeStoreA); err != nil {
-		t.Fatalf("enroll C: %v", err)
-	}
-	samePayload := alignedReturnPayload(t, salePayload, "cccccccc-cccc-4ccc-8ccc-ccccccccccc3", "RC-1", 1)
-	f.ingest(t, f.devC, f.credC, "e0000244-0000-4000-8000-000000000002", "sale.return_refund.finalized.v1", samePayload)
-	res := f.projectReturn(t, "e0000244-0000-4000-8000-000000000002")
-	if res.Outcome != returnrefund.OutcomeProcessed {
-		t.Fatalf("same-device legacy return: %+v", res)
-	}
-	if got := saleStore(t, f, "cccccccc-cccc-4ccc-8ccc-ccccccccccc2"); got != nil {
-		t.Fatalf("legacy sale untouched: %v", got)
-	}
-	var store *string
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT store_id::text FROM return_refund_projection WHERE return_refund_id='cccccccc-cccc-4ccc-8ccc-ccccccccccc3'`).Scan(&store); err != nil || store == nil || *store != scopeStoreA {
-		t.Fatalf("return scoped A: %v (%v)", store, err)
-	}
-	otherPayload := alignedReturnPayload(t, salePayload, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3", "RB-2", 1)
-	f.ingest(t, f.devB, f.credB, "e0000244-0000-4000-8000-000000000003", "sale.return_refund.finalized.v1", otherPayload)
-	res = f.projectReturn(t, "e0000244-0000-4000-8000-000000000003")
-	if res.Outcome != returnrefund.OutcomeBlocked || res.ErrorCode != ErrLegacyScopeAmbiguous {
-		t.Fatalf("different-device legacy return must stay ambiguous: %+v", res)
-	}
-}
-
-// TestScope_LegacySaleCollision proves a scoped event for a legacy NULL
-// sale with a different event stays a scope conflict: the historical row
-// is never adopted and never overwritten.
-func TestScope_LegacySaleCollision(t *testing.T) {
-	f := openScopeFixture(t)
-	saleID := "cccccccc-cccc-4ccc-8ccc-ccccccccccd2"
-	f.ingest(t, f.devC, f.credC, "e0000245-0000-4000-8000-000000000001", "sale.finalized.v3", scopedSalePayload(t, saleID))
-	if res := f.projectSale(t, "e0000245-0000-4000-8000-000000000001"); res.Outcome != sale.OutcomeProcessed {
-		t.Fatalf("legacy sale: %+v", res)
-	}
-	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000002", "sale.finalized.v3", scopedSalePayload(t, saleID))
-	res := f.projectSale(t, "e0000245-0000-4000-8000-000000000002")
-	if res.Outcome != sale.OutcomeBlocked {
-		t.Fatalf("scoped collision with legacy sale: %+v", res)
-	}
-	if res.ErrorCode != ErrSaleIDConflict && res.ErrorCode != ErrStoreScopeConflict {
-		t.Fatalf("bounded conflict code: %q", res.ErrorCode)
-	}
-	if got := saleStore(t, f, saleID); got != nil {
-		t.Fatalf("legacy sale stays NULL: %v", got)
-	}
-	// Pre-backfill edge: the durable winner is gone (as for rows that
-	// predate the ownership table), so arbitration lets the scoped event
-	// through to the write boundary, where the scope backstop fires.
-	if _, err := f.pool.Exec(context.Background(),
-		`DELETE FROM sale_event_ownership WHERE sale_id=$1`, saleID); err != nil {
-		t.Fatal(err)
-	}
-	f.ingest(t, f.devA, f.credA, "e0000245-0000-4000-8000-000000000003", "sale.finalized.v3", scopedSalePayload(t, saleID))
-	res = f.projectSale(t, "e0000245-0000-4000-8000-000000000003")
-	if res.Outcome != sale.OutcomeBlocked || res.ErrorCode != ErrStoreScopeConflict {
-		t.Fatalf("write-boundary scope backstop: %+v", res)
-	}
-	if got := saleStore(t, f, saleID); got != nil {
-		t.Fatalf("legacy sale stays NULL: %v", got)
-	}
-	var total int64
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT total_minor FROM sales_projection WHERE sale_id=$1`, saleID).Scan(&total); err != nil {
-		t.Fatal(err)
-	}
-	if total <= 0 {
-		t.Fatalf("legacy money intact: %d", total)
-	}
-}
-
-// TestScope_MixedBacklog proves legacy NULL, Store A, and Store B events
-// processed concurrently each retain their own ownership semantics.
-func TestScope_MixedBacklog(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 340, "root-m", "tag-m", "null-p", "a-p", "b-p")
-	rootM, tagM := ids["root-m"], ids["tag-m"]
-	names := map[string]string{"ar": "m"}
-	for i, tc := range []struct{ event, typ, payload string }{
-		{"e0000340-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, categoryPayload(rootM, "active", names, nil, 1)},
-		{"e0000340-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1, tagPayload(tagM, "mixed-tag", true, names, 1)},
-	} {
-		f.ingest(t, f.devC, f.credC, tc.event, tc.typ, tc.payload)
-		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
-		_ = i
-	}
-	f.ingest(t, f.devC, f.credC, "e0000340-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV2, productPayload(ids["null-p"], "MIX-1", "Null", rootM, nil, []string{tagM}, 1))
-	f.ingest(t, f.devA, f.credA, "e0000340-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV2, productPayload(ids["a-p"], "MIX-1", "A", rootM, nil, []string{tagM}, 1))
-	f.ingest(t, f.devB, f.credB, "e0000340-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV2, productPayload(ids["b-p"], "MIX-1", "B", rootM, nil, []string{tagM}, 1))
-	type rout struct {
-		res catalog.ProjectResult
-		err error
-	}
-	outs := make([]rout, 3)
-	var wg sync.WaitGroup
-	for i, event := range []string{
-		"e0000340-0000-4000-8000-000000000003", "e0000340-0000-4000-8000-000000000004", "e0000340-0000-4000-8000-000000000005",
-	} {
-		wg.Add(1)
-		go func(i int, event string) {
-			defer wg.Done()
-			for attempt := 0; attempt < 25; attempt++ {
-				expireBackoff(t, f, event)
-				store := NewDevices(f.pool, 5*time.Second)
-				rec, _, err := store.LoadCatalogEvent(context.Background(), event)
-				if err != nil {
-					t.Errorf("load: %v", err)
-					return
-				}
-				res, err := store.ProjectProduct(context.Background(), rec, time.Now())
-				if err == nil && res.Outcome != catalog.OutcomeNotDue && res.Outcome != catalog.OutcomeRetryable {
-					outs[i].res, outs[i].err = res, nil
-					return
-				}
-				time.Sleep(time.Duration(attempt+1) * 5 * time.Millisecond)
-			}
-			t.Errorf("project %s never verdict", event)
-		}(i, event)
-	}
-	wg.Wait()
-	for i, o := range outs {
-		if o.err != nil || (o.res.Outcome != catalog.OutcomeProcessed && o.res.Outcome != catalog.OutcomeAlready) {
-			t.Fatalf("mixed backlog %d: %+v %v", i, o.res, o.err)
-		}
-	}
-	if got := f.rowStore(t, "catalog_products", "product_id", ids["null-p"]); got != nil {
-		t.Fatalf("legacy product stays NULL: %v", got)
-	}
-	if got := f.rowStore(t, "catalog_products", "product_id", ids["a-p"]); got == nil || *got != scopeStoreA {
-		t.Fatalf("A product: %v", got)
-	}
-	if got := f.rowStore(t, "catalog_products", "product_id", ids["b-p"]); got == nil || *got != scopeStoreB {
-		t.Fatalf("B product: %v", got)
 	}
 }

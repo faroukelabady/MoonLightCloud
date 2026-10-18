@@ -360,60 +360,6 @@ func TestPublish_IndependentInstancesCoexist(t *testing.T) {
 	}
 }
 
-// TestPublish_SyncProductAdoptsMapping proves the orchestration-level
-// adoption: a legacy NULL mapping follows its product to Store A on the
-// next sync without republishing identity.
-func TestPublish_SyncProductAdoptsMapping(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 760, "root-s", "tag-s", "prod-s")
-	rootS, tagS, prodS := ids["root-s"], ids["tag-s"], ids["prod-s"]
-	names := map[string]string{"ar": "s"}
-	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV2, categoryPayload(rootS, "active", names, nil, 1))
-	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000002",
-		catalog.EventTagSnapshotV1, tagPayload(tagS, "adopt-pub-tag", true, names, 1))
-	f.ingest(t, f.devC, f.credC, "e0000760-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV2, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 1))
-	for _, tc := range []struct{ event, typ string }{
-		{"e0000760-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
-		{"e0000760-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000760-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
-	} {
-		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
-	}
-	fake := newFakeWoo(t)
-	provider := wooProvider(t, fake, "website")
-	legacy := desiredFor(prodS, "ADOPT-PUB", "", true, 5)
-	legacy.StoreID = nil
-	source := &stubDesiredSource{states: map[string]commerce.DesiredProduct{prodS: legacy}}
-	devices := NewDevices(f.pool, 5*time.Second)
-	service := publishService(t, provider, source, devices)
-	ctx := context.Background()
-	res, err := service.SyncProduct(ctx, "website", prodS)
-	if err != nil {
-		t.Fatalf("legacy publish: %v", err)
-	}
-	if got := mappingStore(t, f, "website", prodS); got != nil {
-		t.Fatalf("mapping starts NULL: %v", got)
-	}
-	// Product adopts Store A; next sync adopts the mapping in place.
-	f.ingest(t, f.devA, f.credA, "e0000760-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV2, productPayload(prodS, "ADOPT-PUB", "S", rootS, nil, []string{tagS}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000760-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
-	scoped := desiredFor(prodS, "ADOPT-PUB", scopeStoreA, true, 5)
-	source.states[prodS] = scoped
-	res2, err := service.SyncProduct(ctx, "website", prodS)
-	if err != nil {
-		t.Fatalf("adopting sync: %v", err)
-	}
-	if res2.ExternalProductID != res.ExternalProductID {
-		t.Fatalf("same remote identity: %q vs %q", res.ExternalProductID, res2.ExternalProductID)
-	}
-	if got := mappingStore(t, f, "website", prodS); got == nil || *got != scopeStoreA {
-		t.Fatalf("mapping adopted A: %v", got)
-	}
-}
-
 // TestPublish_AmbiguousPostRecovery proves ambiguous creation success
 // (remote created, response lost) recovers via SKU ownership lookup
 // without duplicating the remote product or losing Store ownership.

@@ -11,8 +11,8 @@ import (
 //   - sync_events.store_id is derived server-side from the authenticated
 //     device binding at ingress. It is the ONLY Store source for
 //     projections: never current bindings, never payloads, never lookups.
-//   - NULL means unscoped legacy (ownership not proven) and stays
-//     truthful: historical rows are never backfilled from membership.
+//   - It is always present (ADR-0055): unbound devices cannot ingest, and
+//     every projection row carries a Store.
 //
 // Deterministic projection-failure codes (persisted, operational).
 const (
@@ -21,10 +21,6 @@ const (
 	// Never overwrite, merge, or reassign; the losing event stays
 	// blocked without hot-looping.
 	ErrStoreScopeConflict = "STORE_SCOPE_CONFLICT"
-	// ErrLegacyScopeAmbiguous marks a scoped event whose target
-	// historical row is unscoped legacy with no device-provenance
-	// continuity: attributing it to any Store would invent ownership.
-	ErrLegacyScopeAmbiguous = "LEGACY_SCOPE_AMBIGUOUS"
 )
 
 // Phase 9-R1/R2 default reference-catalog identity.
@@ -81,9 +77,9 @@ func isSharedTagID(id string) bool {
 var defaultNamespaceUUID = uuid.MustParse("d3f4a1b2-5c6d-4e7f-8a90-123456789abc")
 
 // canonicalDefaultCategoryID returns the Store-scoped projected identity
-// for a default reference category. A bare (legacy/unbound) event keeps the
-// raw seeded ID so pre-existing global projections remain addressable;
-// every scoped Store maps the seeded ID to a deterministic per-Store UUID.
+// for a default reference category: every Store maps the seeded ID to a
+// deterministic per-Store UUID. Without a Store the raw ID is returned;
+// such an event never projects (resolveProjectionScope blocks it).
 func canonicalDefaultCategoryID(rawID string, store pgtype.UUID) string {
 	if !store.Valid || !isSharedCategoryID(rawID) {
 		return rawID
@@ -99,8 +95,8 @@ func canonicalDefaultTagID(rawID string, store pgtype.UUID) string {
 	return uuid.NewSHA1(defaultNamespaceUUID, []byte(uuidString(store)+":tag:"+rawID)).String()
 }
 
-// storeUUID converts an ingress Store UUID string (nil = legacy) to a
-// nullable database value.
+// storeUUID converts an ingress Store UUID string to a database value
+// (invalid when absent).
 func storeUUID(storeID *string) pgtype.UUID {
 	if storeID == nil || *storeID == "" {
 		return pgtype.UUID{}
@@ -112,8 +108,8 @@ func storeUUID(storeID *string) pgtype.UUID {
 	return uid
 }
 
-// storeString converts a nullable database Store back to a string pointer
-// (nil = unscoped legacy).
+// storeString converts a database Store back to a string pointer (nil when
+// absent).
 func storeString(store pgtype.UUID) *string {
 	if !store.Valid {
 		return nil
@@ -123,42 +119,27 @@ func storeString(store pgtype.UUID) *string {
 }
 
 // resolveProjectionScope decides Store ownership for one current-state
-// projection write from the event's own ingress context (incoming, nil =
-// legacy/unscoped) against the currently projected owner (existing,
-// invalid = missing row or NULL legacy row).
+// projection write from the event's own ingress Store (incoming) against
+// the currently projected owner (existing, invalid = no row yet).
 //
-//   - legacy event: no scope claim; proceed and let COALESCE upserts
-//     preserve whatever ownership exists.
-//   - scoped event with no proven owner: proceed, adopting the ingress
-//     Store (one-time legacy adoption by aggregate-ID + revision
-//     continuity under the existing arbitration model).
-//   - scoped event with the same proven owner: proceed.
-//   - scoped event with a different proven owner: STORE_SCOPE_CONFLICT.
-//     The caller must block permanently without writing.
-//
-// Historical (immutable) projections must NOT use adoption: callers pass
-// only real owners there, so any mismatch is a conflict.
+//   - event without a Store: never projects (fail closed; ingress rejects
+//     unbound devices, so this is a defensive guard).
+//   - no existing row, or the same owner: proceed with the event's Store.
+//   - a different owner: STORE_SCOPE_CONFLICT. The caller must block
+//     permanently without writing.
 func resolveProjectionScope(existing pgtype.UUID, incoming *string) (write pgtype.UUID, proceed bool) {
-	if incoming == nil || *incoming == "" {
-		return pgtype.UUID{}, true
-	}
 	write = storeUUID(incoming)
 	if !write.Valid {
-		return pgtype.UUID{}, true
+		return pgtype.UUID{}, false
 	}
-	if !existing.Valid {
-		return write, true
+	if existing.Valid && uuidString(existing) != uuidString(write) {
+		return pgtype.UUID{}, false
 	}
-	if uuidString(existing) == uuidString(write) {
-		return write, true
-	}
-	return pgtype.UUID{}, false
+	return write, true
 }
 
-// effectiveScope resolves the Store a projection would carry after a
-// write: the decided write value when valid, else the current owner,
-// else nil (fully legacy). Relation checks use it so legacy events and
-// rows stay wildcards while proven Stores must match exactly.
+// effectiveScope resolves the Store a projection carries after a write:
+// the decided write value when valid, else the current owner.
 func effectiveScope(write, existing pgtype.UUID) *string {
 	if write.Valid {
 		return storeString(write)
@@ -167,15 +148,7 @@ func effectiveScope(write, existing pgtype.UUID) *string {
 }
 
 // scopeCompatible reports whether a referenced row may back a projection
-// owned (effectively) by ownerStore. NULL on either side is the legacy
-// wildcard: unscoped rows never force and never block scope. Two proven
-// Stores must match exactly.
+// owned by ownerStore: both Stores must be known and equal.
 func scopeCompatible(ownerStore, refStore *string) bool {
-	if ownerStore == nil || *ownerStore == "" {
-		return true
-	}
-	if refStore == nil || *refStore == "" {
-		return true
-	}
-	return *ownerStore == *refStore
+	return ownerStore != nil && refStore != nil && *ownerStore != "" && *ownerStore == *refStore
 }

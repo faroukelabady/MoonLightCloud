@@ -123,10 +123,10 @@ func TestSaleV3LabelRenameImmutability(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `INSERT INTO catalog_product_variants
 		(variant_id, product_id, sku, is_active, deleted, position, combination_key,
 		 variant_revision, catalog_revision, source_event_id, source_device_id,
-		 source_payload_hash, source_received_at)
+		 source_payload_hash, source_received_at, store_id)
 		VALUES ('bbbbbbbb-0000-4000-8000-000000000001','22222222-2222-4222-8222-222222222222',
 		 'NFT-BLU-TRD', true, false, 0, 'color=blue', 1, 1,
-		 $1, $2, '\x00', now())`, eventID, env.devID); err != nil {
+		 $1, $2, '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, eventID, env.devID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `INSERT INTO catalog_product_variant_attribute_values

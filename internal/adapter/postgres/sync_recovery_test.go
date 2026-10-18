@@ -155,6 +155,7 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTestStore(t, devices, p.Device.ID)
 	type required struct{ event, processor string }
 	all := []required{
 		{"sale.finalized.v3", "sale_projection.v3"},
@@ -172,8 +173,8 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	for i, item := range all {
 		ids[i] = uuid.NewString()
 		if _, err := pool.Exec(ctx, `INSERT INTO sync_events
-			(event_id,device_id,event_type,occurred_at,payload,payload_hash)
-			VALUES ($1,$2,$3,now(),'{}',decode('aa','hex'))`, ids[i], p.Device.ID, item.event); err != nil {
+			(event_id,device_id,event_type,occurred_at,payload,payload_hash, store_id)
+			VALUES ($1,$2,$3,now(),'{}',decode('aa','hex'), (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, ids[i], p.Device.ID, item.event); err != nil {
 			t.Fatalf("insert %s: %v", item.event, err)
 		}
 	}
@@ -233,8 +234,8 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	status(0)
 	// Unsupported/non-projecting events are intentionally outside the mapping.
 	if _, err := pool.Exec(ctx, `INSERT INTO sync_events
-		(event_id,device_id,event_type,occurred_at,payload,payload_hash)
-		VALUES ($1,$2,'system.test.v1',now(),'{}',decode('aa','hex'))`, uuid.NewString(), p.Device.ID); err != nil {
+		(event_id,device_id,event_type,occurred_at,payload,payload_hash, store_id)
+		VALUES ($1,$2,'system.test.v1',now(),'{}',decode('aa','hex'), (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, uuid.NewString(), p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	status(0)

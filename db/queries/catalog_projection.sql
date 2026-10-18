@@ -37,22 +37,18 @@ WHERE p.processor = $1
 -- legacy event never wipes an adopted Store, and a scoped event adopts
 -- a NULL row or reaffirms its own Store (cross-Store writes are fenced
 -- in Go before this upsert runs).
--- Phase 9-R2: default_algorithm records which identity scheme wrote the
--- row (0 = raw seeded ID, 1 = Store-scoped canonical ID) so an existing
--- pre-R2 annotation can be detected and recovered.
 INSERT INTO catalog_categories (
     category_id, status, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id, default_algorithm,
+    source_payload_hash, source_received_at, store_id,
     online_enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (category_id) DO UPDATE SET
     status = excluded.status, name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_categories.store_id),
-    default_algorithm = excluded.default_algorithm,
+    store_id = excluded.store_id,
     online_enabled = excluded.online_enabled,
     projected_at = now();
 
@@ -72,12 +68,6 @@ ON CONFLICT (parent_id, child_id) DO UPDATE SET position = excluded.position;
 -- name: CatalogCategoryParents :many
 SELECT parent_id FROM catalog_category_edges WHERE child_id = $1 ORDER BY position, parent_id;
 
--- name: CatalogDefaultCategoryAlgorithm :one
--- Phase 9-R2 recovery: the canonical-identity algorithm version of a
--- shared default category's existing row for one Store (0 = none).
-SELECT COALESCE(default_algorithm, 0) FROM catalog_categories
-WHERE category_id = $1 AND store_id = $2;
-
 -- name: AllCatalogCategoryEdges :many
 SELECT parent_id, child_id FROM catalog_category_edges ORDER BY parent_id, child_id;
 
@@ -86,22 +76,16 @@ SELECT parent_id, child_id FROM catalog_category_edges ORDER BY parent_id, child
 INSERT INTO catalog_tags (
     tag_id, slug, is_active, name_ar, name_en,
     source_revision, source_event_id, source_device_id,
-    source_payload_hash, source_received_at, store_id, default_algorithm
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    source_payload_hash, source_received_at, store_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (tag_id) DO UPDATE SET
     slug = excluded.slug, is_active = excluded.is_active,
     name_ar = excluded.name_ar, name_en = excluded.name_en,
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_tags.store_id),
-    default_algorithm = excluded.default_algorithm,
+    store_id = excluded.store_id,
     projected_at = now();
-
--- name: CatalogDefaultTagAlgorithm :one
--- Phase 9-R2 recovery: see CatalogDefaultCategoryAlgorithm.
-SELECT COALESCE(default_algorithm, 0) FROM catalog_tags
-WHERE tag_id = $1 AND store_id = $2;
 
 -- name: CatalogTagByID :one
 SELECT tag_id, slug, is_active, name_ar, name_en, source_revision,
@@ -127,7 +111,7 @@ ON CONFLICT (product_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_products.store_id),
+    store_id = excluded.store_id,
     projected_at = now();
 
 -- name: CatalogProductByID :one
@@ -201,10 +185,8 @@ LEFT JOIN sync_event_processing p
   ON p.event_id = e.event_id AND p.processor = $4
 WHERE e.event_type = $1
   AND e.payload->>($2::text) = ($3::text)
-  AND (CASE WHEN sqlc.arg(store_scoped_default)::boolean
-       THEN e.store_id IS NOT DISTINCT FROM sqlc.narg(store_id)::uuid
-       ELSE sqlc.narg(store_id)::uuid IS NULL OR e.store_id IS NULL
-            OR e.store_id = sqlc.narg(store_id)::uuid END);
+  -- An absent scope (no projected row yet) considers every Store's events.
+  AND (sqlc.narg(store_id)::uuid IS NULL OR e.store_id = sqlc.narg(store_id)::uuid);
 
 -- name: CatalogProductsReferencingCategory :many
 -- Projected products whose top or subcategory set references a category.
@@ -229,8 +211,7 @@ WHERE processor = 'catalog_product_projection.v1'
     JOIN catalog_categories c ON c.category_id = $1::uuid
     JOIN sync_events source ON source.event_id = c.source_event_id
     WHERE e.event_type = 'catalog.product.snapshot.v2'
-      AND ((c.default_algorithm = 1 AND e.store_id = c.store_id)
-        OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+      AND e.store_id = c.store_id
       AND (e.payload->>'top_category_id' IN (c.category_id::text, source.payload->>'category_id')
            OR e.payload->'subcategory_ids' @> to_jsonb(c.category_id::text)
            OR e.payload->'subcategory_ids' @> to_jsonb(source.payload->>'category_id'))
@@ -267,13 +248,12 @@ WHERE p.event_id = e.event_id
     SELECT 1 FROM sync_events e2
     WHERE e2.event_type = 'catalog.product.snapshot.v2'
       AND e2.payload->>'product_id' = e.payload->>'product_id'
-      AND (e.store_id IS NULL OR e2.store_id IS NULL OR e2.store_id = e.store_id)
+      AND e2.store_id = e.store_id
       AND (e2.payload->>'catalog_revision')::bigint > (e.payload->>'catalog_revision')::bigint
   )
   AND EXISTS (
     SELECT 1 FROM catalog_categories c JOIN sync_events source ON source.event_id = c.source_event_id
-    WHERE ((c.default_algorithm = 1 AND e.store_id = c.store_id)
-       OR (c.default_algorithm <> 1 AND (e.store_id IS NULL OR c.store_id IS NULL OR e.store_id = c.store_id)))
+    WHERE e.store_id = c.store_id
       AND (c.category_id::text = e.payload->>'top_category_id'
            OR source.payload->>'category_id' = e.payload->>'top_category_id'
            OR c.category_id::text IN (SELECT jsonb_array_elements_text(e.payload->'subcategory_ids'))
@@ -294,173 +274,41 @@ WHERE p.event_id = e.event_id
 -- Phase 17: variant rows and their inventory/mappings are dependents of
 -- the product too (SKU/inventory ownership moved to variant).
 SELECT pol.store_id FROM catalog_product_sales_policies pol
-WHERE pol.product_id = $1 AND pol.store_id IS NOT NULL
+WHERE pol.product_id = $1
 UNION
 SELECT m.store_id FROM commerce_product_mappings m
-WHERE m.product_id = $1 AND m.store_id IS NOT NULL
+WHERE m.product_id = $1
 UNION
 SELECT v.store_id FROM catalog_product_variants v
-WHERE v.product_id = $1 AND v.store_id IS NOT NULL
+WHERE v.product_id = $1
 UNION
 SELECT vi.store_id FROM catalog_product_variant_inventory vi
-WHERE vi.product_id = $1 AND vi.store_id IS NOT NULL
+WHERE vi.product_id = $1
 UNION
 SELECT vm.store_id FROM commerce_product_variant_mappings vm
-WHERE vm.product_id = $1 AND vm.store_id IS NOT NULL;
+WHERE vm.product_id = $1;
 
 -- name: CatalogCategoryChildStores :many
 -- Proven Store ownership of a category's existing children edges.
 SELECT c.store_id
 FROM catalog_category_edges e
 JOIN catalog_categories c ON c.category_id = e.child_id
-WHERE e.parent_id = $1 AND c.store_id IS NOT NULL;
+WHERE e.parent_id = $1;
 
 -- name: CatalogCategoryProductStores :many
 -- Proven Store ownership of products referencing a category as top or
 -- subcategory.
 SELECT p.store_id FROM catalog_products p
-WHERE p.top_category_id = $1 AND p.store_id IS NOT NULL
+WHERE p.top_category_id = $1
 UNION
 SELECT p.store_id
 FROM catalog_product_subcategories s
 JOIN catalog_products p ON p.product_id = s.product_id
-WHERE s.category_id = $1 AND p.store_id IS NOT NULL;
+WHERE s.category_id = $1;
 
 -- name: CatalogTagProductStores :many
 -- Proven Store ownership of products attached to a tag.
 SELECT p.store_id
 FROM catalog_product_tags t
 JOIN catalog_products p ON p.product_id = t.product_id
-WHERE t.tag_id = $1 AND p.store_id IS NOT NULL;
-
--- name: RetireRawDefaultCategory :execrows
--- Keep the raw compatibility snapshot and its source provenance. It no
--- longer claims a Store once that Store transitions to a canonical row.
-UPDATE catalog_categories c SET store_id = NULL, default_algorithm = 2
-WHERE c.category_id = $1 AND c.default_algorithm = 0
-  AND (c.store_id = $2 OR c.store_id IS NULL)
-  AND EXISTS (SELECT 1 FROM sync_events e WHERE e.event_id=c.source_event_id
-    AND e.store_id=$2 AND e.event_type = 'catalog.category.snapshot.v2'
-    AND e.payload->>'category_id'=c.category_id::text);
-
--- name: RetireRawDefaultTag :execrows
--- Also releases the obsolete (Store, slug) claim before canonical replay.
-UPDATE catalog_tags t SET store_id = NULL, default_algorithm = 2
-WHERE t.tag_id = $1 AND t.default_algorithm = 0
-  AND (t.store_id = $2 OR t.store_id IS NULL)
-  AND EXISTS (SELECT 1 FROM sync_events e WHERE e.event_id=t.source_event_id
-    AND e.store_id=$2 AND e.event_type='catalog.tag.snapshot.v1'
-    AND e.payload->>'tag_id'=t.tag_id::text);
-
--- name: EstablishedDefaultCatalog :one
--- A no-op may retire compatibility state only for a proven canonical row.
-SELECT EXISTS (
- SELECT 1 FROM catalog_categories c JOIN sync_events e ON e.event_id=c.source_event_id
- WHERE sqlc.arg(kind)::text='category' AND c.category_id=sqlc.arg(canonical_id)::uuid
- AND c.store_id=sqlc.arg(store_id)::uuid AND e.store_id=c.store_id
- AND c.default_algorithm=1 AND e.payload->>'category_id'=sqlc.arg(raw_id)::text
-) OR EXISTS (
- SELECT 1 FROM catalog_tags t JOIN sync_events e ON e.event_id=t.source_event_id
- WHERE sqlc.arg(kind)::text='tag' AND t.tag_id=sqlc.arg(canonical_id)::uuid
- AND t.store_id=sqlc.arg(store_id)::uuid AND e.store_id=t.store_id
- AND t.default_algorithm=1 AND e.payload->>'tag_id'=sqlc.arg(raw_id)::text
-) AS established;
-
--- name: DefaultCatalogRecoveryCandidates :many
--- Only authoritative scoped events are replayed. Never reset genuine
--- equal-revision/ownership conflicts, or unbound historical processing.
-WITH defaults AS (
- SELECT DISTINCT ON (e.store_id,CASE WHEN e.event_type = 'catalog.category.snapshot.v2' THEN 'catalog.category.snapshot' ELSE e.event_type END,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'))
-        e.event_id,e.event_type,e.store_id,e.payload,p.processor,e.received_at
- FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
- WHERE e.store_id IS NOT NULL AND (
-  (e.event_type = 'catalog.category.snapshot.v2' AND p.processor='catalog_category_projection.v1'
-   AND e.payload->>'category_id'=ANY(sqlc.arg(category_ids)::text[])) OR
-  (e.event_type='catalog.tag.snapshot.v1' AND p.processor='catalog_tag_projection.v1'
-   AND e.payload->>'tag_id'=ANY(sqlc.arg(tag_ids)::text[])))
- AND (p.status='processed' OR (p.status='blocked'
-  AND p.last_error_code IN ('STORE_SCOPE_CONFLICT','CATALOG_REVISION_CONFLICT')
-  AND p.last_error_message IN ('category owned by another store','tag owned by another store','equal revision with conflicting state')
-  AND NOT EXISTS (SELECT 1 FROM sync_events own JOIN sync_event_processing settled
-       ON settled.event_id=own.event_id AND settled.processor=p.processor AND settled.status='processed'
-       WHERE own.store_id=e.store_id AND own.event_type=e.event_type
-         AND COALESCE(own.payload->>'category_id',own.payload->>'tag_id')=COALESCE(e.payload->>'category_id',e.payload->>'tag_id')
-         AND (own.payload->>'catalog_revision')::bigint >= (e.payload->>'catalog_revision')::bigint)
-  AND (EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
-        WHERE c.category_id::text=e.payload->>'category_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id)
-    OR EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
-        WHERE t.tag_id::text=e.payload->>'tag_id' AND s.store_id IS NOT NULL AND s.store_id<>e.store_id))
-  AND NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
-        WHERE c.default_algorithm=1 AND c.store_id=e.store_id AND s.payload->>'category_id'=e.payload->>'category_id')
-  AND NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
-        WHERE t.default_algorithm=1 AND t.store_id=e.store_id AND s.payload->>'tag_id'=e.payload->>'tag_id')))
- ORDER BY e.store_id,CASE WHEN e.event_type = 'catalog.category.snapshot.v2' THEN 'catalog.category.snapshot' ELSE e.event_type END,COALESCE(e.payload->>'category_id',e.payload->>'tag_id'),
-          (e.payload->>'catalog_revision')::bigint DESC,e.received_at DESC,e.event_id DESC
-), candidates AS (
- SELECT d.event_id,d.processor,d.received_at FROM defaults d WHERE
-  (d.event_type = 'catalog.category.snapshot.v2' AND (
-   NOT EXISTS(SELECT 1 FROM catalog_categories c JOIN sync_events s ON s.event_id=c.source_event_id
-     WHERE c.default_algorithm=1 AND c.store_id=d.store_id AND s.payload->>'category_id'=d.payload->>'category_id'
-       AND c.source_revision >= (d.payload->>'catalog_revision')::bigint)
-   OR EXISTS(SELECT 1 FROM catalog_categories c WHERE c.category_id::text=d.payload->>'category_id' AND c.store_id=d.store_id AND c.default_algorithm=0)))
-  OR (d.event_type='catalog.tag.snapshot.v1' AND (
-   NOT EXISTS(SELECT 1 FROM catalog_tags t JOIN sync_events s ON s.event_id=t.source_event_id
-     WHERE t.default_algorithm=1 AND t.store_id=d.store_id AND s.payload->>'tag_id'=d.payload->>'tag_id'
-       AND t.source_revision >= (d.payload->>'catalog_revision')::bigint)
-   OR EXISTS(SELECT 1 FROM catalog_tags t WHERE t.tag_id::text=d.payload->>'tag_id' AND t.store_id=d.store_id AND t.default_algorithm=0)))
- UNION
- -- R2 tried to insert the canonical Tag while the same Store's older raw
- -- default still occupied its slug. The retained raw source proves the
- -- obsolete collision even after retirement (algorithm 2). Other slug
- -- owners, equal revisions and unbound/custom identities never qualify.
- SELECT e.event_id,p.processor,e.received_at
- FROM sync_events e JOIN sync_event_processing p ON p.event_id=e.event_id
- JOIN catalog_tags raw ON raw.tag_id::text=e.payload->>'tag_id'
- JOIN sync_events source ON source.event_id=raw.source_event_id
- JOIN sync_event_processing settled ON settled.event_id=source.event_id
-   AND settled.processor='catalog_tag_projection.v1' AND settled.status='processed'
- WHERE e.event_type='catalog.tag.snapshot.v1' AND e.store_id IS NOT NULL
- AND p.processor='catalog_tag_projection.v1' AND p.status='blocked'
- AND p.last_error_code='CATALOG_REVISION_CONFLICT' AND p.last_error_message='tag identity collision'
- AND e.payload->>'tag_id'=ANY(sqlc.arg(tag_ids)::text[])
- AND source.event_type=e.event_type AND source.store_id=e.store_id
- AND source.payload->>'tag_id'=e.payload->>'tag_id'
- AND raw.default_algorithm IN (0,2)
- AND ((raw.default_algorithm=0 AND raw.store_id=e.store_id)
-   OR (raw.default_algorithm=2 AND raw.store_id IS NULL))
- AND raw.slug=e.payload->>'slug' AND source.payload->>'slug'=raw.slug
- AND raw.source_revision=(source.payload->>'catalog_revision')::bigint
- AND raw.source_revision < (e.payload->>'catalog_revision')::bigint
- AND NOT EXISTS (
-  SELECT 1 FROM catalog_tags other WHERE other.store_id=e.store_id AND other.slug=raw.slug
-    AND other.tag_id<>raw.tag_id AND NOT (other.default_algorithm=1 AND EXISTS (
-      SELECT 1 FROM sync_events canonical WHERE canonical.event_id=other.source_event_id
-      AND canonical.store_id=e.store_id AND canonical.event_type=e.event_type
-      AND canonical.payload->>'tag_id'=e.payload->>'tag_id')))
- AND NOT EXISTS (
-  SELECT 1 FROM sync_events own JOIN sync_event_processing terminal ON terminal.event_id=own.event_id
-  AND terminal.processor=p.processor AND terminal.status='processed'
-  WHERE own.store_id=e.store_id AND own.event_type=e.event_type
-  AND own.payload->>'tag_id'=e.payload->>'tag_id'
-  AND own.payload->>'catalog_revision'=e.payload->>'catalog_revision'
-  AND own.payload<>e.payload)
- UNION
- SELECT e.event_id,p.processor,e.received_at FROM catalog_categories c
- JOIN sync_events e ON e.event_id=c.source_event_id AND e.store_id=c.store_id
- JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_category_projection.v1'
- WHERE p.status='processed' AND EXISTS(SELECT 1 FROM catalog_category_edges edge
-   WHERE edge.child_id=c.category_id AND edge.parent_id::text=ANY(sqlc.arg(category_ids)::text[]))
- UNION
- SELECT e.event_id,p.processor,e.received_at FROM catalog_products product
- JOIN sync_events e ON e.event_id=product.source_event_id AND e.store_id=product.store_id
- JOIN sync_event_processing p ON p.event_id=e.event_id AND p.processor='catalog_product_projection.v1'
- WHERE p.status='processed' AND (product.top_category_id::text=ANY(sqlc.arg(category_ids)::text[])
-   OR EXISTS(SELECT 1 FROM catalog_product_subcategories sub WHERE sub.product_id=product.product_id AND sub.category_id::text=ANY(sqlc.arg(category_ids)::text[]))
-   OR EXISTS(SELECT 1 FROM catalog_product_tags tag WHERE tag.product_id=product.product_id AND tag.tag_id::text=ANY(sqlc.arg(tag_ids)::text[])))
-)
-SELECT event_id,processor FROM candidates ORDER BY received_at,event_id LIMIT 100;
-
--- name: RearmDefaultCatalogRecovery :execrows
-UPDATE sync_event_processing SET status='pending',next_attempt_at=NULL,processed_at=NULL,
-       last_error_code=NULL,last_error_message=NULL
-WHERE event_id=$1 AND processor=$2 AND status IN ('processed','blocked');
+WHERE t.tag_id = $1;

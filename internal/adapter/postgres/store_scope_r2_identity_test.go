@@ -174,55 +174,6 @@ func countCatalogRows(t *testing.T, f *scopeFixture) string {
 	return string(raw)
 }
 
-// TestR2_PreFixBlockedRecovery proves error codes alone never authorize
-// recovery of genuine terminal conflicts without obsolete raw ownership.
-func TestR2_PreFixBlockedRecovery(t *testing.T) {
-	f := openScopeFixture(t)
-	ctx := context.Background()
-	// Create three blocked catalog events with distinct codes.
-	mk := func(seq int, eventType, payload, code string) string {
-		e := r2EventID(seq)
-		f.ingest(t, f.devA, f.credA, e, eventType, payload)
-		return e
-	}
-	e1 := mk(300, catalog.EventTagSnapshotV1, tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1), "")
-	e2 := mk(301, catalog.EventCategorySnapshotV2, categoryPayload(sharedCatIslamic, "active", map[string]string{"en": "Islamic"}, nil, 1), "")
-	e3 := mk(302, catalog.EventTagSnapshotV1, tagPayload("10000000-0000-0000-0000-000000000003", "popular", true, map[string]string{"en": "Pop"}, 1), "")
-	// Force durable blocked rows with the exact codes under test.
-	set := func(event, processor, code string) {
-		if _, err := f.pool.Exec(ctx, `INSERT INTO sync_event_processing (event_id, processor, status, attempt_count, updated_at, last_error_code)
-			VALUES ($1,$2,'blocked',1,now(),$3)
-			ON CONFLICT (event_id, processor) DO UPDATE SET status='blocked', last_error_code=$3`, event, processor, code); err != nil {
-			t.Fatal(err)
-		}
-	}
-	set(e1, catalog.ProcessorTagProjectionV1, ErrStoreScopeConflict)
-	set(e2, catalog.ProcessorCategoryProjectionV1, ErrCatalogRevisionConflict)
-	set(e3, catalog.ProcessorTagProjectionV1, ErrValidation) // unrelated: must stay blocked
-
-	devices := NewDevices(f.pool, 5*time.Second)
-	n, err := devices.RecoverDefaultCatalogBlocked(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Fatalf("re-armed %d, want 0", n)
-	}
-	statusOf := func(event, processor string) string {
-		var s string
-		if err := f.pool.QueryRow(ctx, `SELECT status FROM sync_event_processing WHERE event_id=$1 AND processor=$2`, event, processor).Scan(&s); err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}
-	if statusOf(e1, catalog.ProcessorTagProjectionV1) != "blocked" || statusOf(e2, catalog.ProcessorCategoryProjectionV1) != "blocked" {
-		t.Fatal("genuine conflicts without obsolete raw ownership must remain blocked")
-	}
-	if statusOf(e3, catalog.ProcessorTagProjectionV1) != "blocked" {
-		t.Fatal("validation failure must NOT be reset")
-	}
-}
-
 // TestR2_AbortRetryPreservesDurablePayloads is the Phase 12 F12
 // production-invariant probe: after any PERMITTED serialization abort and
 // bounded re-attempt, the final state is canonical and the durable payload

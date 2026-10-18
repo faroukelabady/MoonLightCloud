@@ -14,7 +14,9 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
+	istore "github.com/faroukelabady/MoonLightCloud/internal/store"
 	isync "github.com/faroukelabady/MoonLightCloud/internal/sync"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -112,6 +114,7 @@ type saleEnv struct {
 	proj    *sale.Projector
 	devID   string
 	credID  string
+	storeID string
 }
 
 func openSaleEnv(t *testing.T) *saleEnv {
@@ -122,13 +125,27 @@ func openSaleEnv(t *testing.T) *saleEnv {
 		t.Fatal(err)
 	}
 	store := NewDevices(pool, 5*time.Second)
+	storeID := bindTestStore(t, store, p.Device.ID)
 	return &saleEnv{
 		pool:    pool,
 		syncSvc: isync.NewService(store, clock.System{}, testEventRegistry()),
 		proj: sale.NewProjector(store, clock.System{},
 			nilLogger()),
-		devID: p.Device.ID, credID: p.Credential.ID,
+		devID: p.Device.ID, credID: p.Credential.ID, storeID: storeID,
 	}
+}
+
+// bindTestStore registers a fresh Store for a test device: every upload
+// needs a Store binding (ADR-0055).
+func bindTestStore(t *testing.T, devices Devices, deviceID string) string {
+	t.Helper()
+	storeID := uuid.NewString()
+	if _, err := devices.RegisterStore(context.Background(), deviceID, istore.RegistrationRequest{
+		StoreID: storeID, DisplayName: "Test Store", Timezone: "Africa/Cairo",
+	}); err != nil {
+		t.Fatalf("bind test store: %v", err)
+	}
+	return storeID
 }
 
 func (e *saleEnv) ingest(t *testing.T, eventID, payload string) isync.BatchResult {

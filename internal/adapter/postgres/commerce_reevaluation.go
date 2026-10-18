@@ -2,12 +2,15 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	"github.com/jackc/pgx/v5"
 )
 
 // Phase 13 §83: durable commerce re-evaluation queue (read/write). All
@@ -96,14 +99,25 @@ func (d Devices) EnqueueProductReevaluation(ctx context.Context, productID strin
 		return err
 	}
 	params := sqlcgen.EnqueueProductReevaluationParams{ProductID: uid, Reason: reason}
+	q := sqlcgen.New(d.pool)
 	if storeID != nil && *storeID != "" {
 		suid, err := parseUUID(*storeID)
 		if err != nil {
 			return err
 		}
 		params.StoreID = suid
+	} else {
+		// Every re-evaluation belongs to its Product's Store (ADR-0055).
+		row, err := q.CatalogProductByID(ctx, uid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperr.New(apperr.NotFound, "catalog product not found")
+		}
+		if err != nil {
+			return redact(err)
+		}
+		params.StoreID = row.StoreID
 	}
-	if err := sqlcgen.New(d.pool).EnqueueProductReevaluation(ctx, params); err != nil {
+	if err := q.EnqueueProductReevaluation(ctx, params); err != nil {
 		return redact(err)
 	}
 	return nil

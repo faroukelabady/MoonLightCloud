@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,7 +55,8 @@ func openScopeFixture(t *testing.T) *scopeFixture {
 	}
 	devA, credA := mkDevice("scope-dev-a")
 	devB, credB := mkDevice("scope-dev-b")
-	devC, credC := mkDevice("scope-dev-legacy")
+	// devC is never bound to a Store: its uploads are refused (ADR-0055).
+	devC, credC := mkDevice("scope-dev-unbound")
 	devices := NewDevices(pool, 5*time.Second)
 	if _, err := devices.RegisterStore(ctx, devA, store.RegistrationRequest{
 		StoreID: scopeStoreA, DisplayName: "Store A", Timezone: "Africa/Cairo",
@@ -69,6 +71,21 @@ func openScopeFixture(t *testing.T) *scopeFixture {
 	return &scopeFixture{
 		pool: pool, syncSvc: isync.NewService(devices, clock.System{}, testEventRegistry()),
 		devA: devA, credA: credA, devB: devB, credB: credB, devC: devC, credC: credC,
+	}
+}
+
+// ingestRefused asserts that an unbound device cannot upload events.
+func (f *scopeFixture) ingestRefused(t *testing.T, devID, credID, eventID, eventType, payload string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":%q,"occurred_at":"2026-09-20T10:00:00Z","payload":%s}]}`,
+		eventID, eventType, payload)
+	_, err := f.syncSvc.Ingest(context.Background(), devID, credID, []byte(body))
+	if err == nil || !strings.Contains(err.Error(), "STORE_ENROLLMENT_REQUIRED") {
+		t.Fatalf("unbound ingest must be refused, got %v", err)
+	}
+	var stored int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sync_events WHERE event_id = $1`, eventID).Scan(&stored); err != nil || stored != 0 {
+		t.Fatalf("refused event stored: %d %v", stored, err)
 	}
 }
 
@@ -312,58 +329,6 @@ func TestScope_ProductSKURetired(t *testing.T) {
 	}
 }
 
-// TestScope_ProductAdoptionAndConflict proves the legacy current-state
-// adoption rule: a NULL row adopts Store A by aggregate-ID + revision
-// continuity, then a Store B event for the same aggregate conflicts
-// instead of overwriting.
-func TestScope_ProductAdoptionAndConflict(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 140, "root-c", "tag-c", "prod-c")
-	rootC, tagC, prodC := ids["root-c"], ids["tag-c"], ids["prod-c"]
-	names := map[string]string{"ar": "c"}
-	// Legacy NULL baseline via the unbound device.
-	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV2, categoryPayload(rootC, "active", names, nil, 1))
-	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000002",
-		catalog.EventTagSnapshotV1, tagPayload(tagC, "adopt-tag", true, names, 1))
-	f.ingest(t, f.devC, f.credC, "e0000140-0000-4000-8000-000000000003",
-		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt", rootC, nil, []string{tagC}, 1))
-	for _, tc := range []struct{ event, typ string }{
-		{"e0000140-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2},
-		{"e0000140-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1},
-		{"e0000140-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2},
-	} {
-		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
-	}
-	if got := f.rowStore(t, "catalog_products", "product_id", prodC); got != nil {
-		t.Fatalf("legacy row stays NULL: %v", got)
-	}
-	// Store A continues the aggregate: safe adoption.
-	f.ingest(t, f.devA, f.credA, "e0000140-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt A", rootC, nil, []string{tagC}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000140-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
-	if got := f.rowStore(t, "catalog_products", "product_id", prodC); got == nil || *got != scopeStoreA {
-		t.Fatalf("adopted to A: %v", got)
-	}
-	// Store B attempts the same aggregate: permanent conflict, A intact.
-	f.ingest(t, f.devB, f.credB, "e0000140-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV2, productPayload(prodC, "ADOPT-1", "Adopt B", rootC, nil, []string{tagC}, 3))
-	res := f.projectCatalog(t, "e0000140-0000-4000-8000-000000000005", catalog.EventProductSnapshotV2)
-	requireOutcome(t, res, catalog.OutcomeBlocked, ErrStoreScopeConflict)
-	if got := f.rowStore(t, "catalog_products", "product_id", prodC); got == nil || *got != scopeStoreA {
-		t.Fatalf("A ownership intact: %v", got)
-	}
-	var name string
-	var rev int64
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT name_ar, source_revision FROM catalog_products WHERE product_id=$1`, prodC).Scan(&name, &rev); err != nil {
-		t.Fatal(err)
-	}
-	if name != "Adopt A" || rev != 2 {
-		t.Fatalf("B write left no trace: %q rev %d", name, rev)
-	}
-}
-
 // TestScope_CategoryDAGIsolation proves same-ID categories conflict
 // across Stores, same names coexist under different IDs, and cross-Store
 // edges are impossible.
@@ -416,40 +381,6 @@ func TestScope_ProductTagIsolation(t *testing.T) {
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM catalog_products WHERE product_id=$1`, ids["prod-x"]).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("no partial product row: %d (%v)", count, err)
-	}
-}
-
-// TestScope_LegacyEventKeepsAdoptedStore proves COALESCE preservation: a
-// legacy event with a higher revision updates business data on an
-// adopted row without wiping its Store.
-func TestScope_LegacyEventKeepsAdoptedStore(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 180, "root-l", "tag-l", "prod-l")
-	rootL, tagL, prodL := ids["root-l"], ids["tag-l"], ids["prod-l"]
-	names := map[string]string{"ar": "l"}
-	for i, tc := range []struct{ event, typ, payload string }{
-		{"e0000180-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2, categoryPayload(rootL, "active", names, nil, 1)},
-		{"e0000180-0000-4000-8000-000000000002", catalog.EventTagSnapshotV1, tagPayload(tagL, "keep-tag", true, names, 1)},
-		{"e0000180-0000-4000-8000-000000000003", catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 1)},
-	} {
-		f.ingest(t, f.devC, f.credC, tc.event, tc.typ, tc.payload)
-		requireOutcome(t, f.projectCatalog(t, tc.event, tc.typ), catalog.OutcomeProcessed, "")
-		_ = i
-	}
-	f.ingest(t, f.devA, f.credA, "e0000180-0000-4000-8000-000000000004",
-		catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep", rootL, nil, []string{tagL}, 2))
-	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000004", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
-	// Legacy higher revision: business data advances, Store stays A.
-	f.ingest(t, f.devC, f.credC, "e0000180-0000-4000-8000-000000000005",
-		catalog.EventProductSnapshotV2, productPayload(prodL, "KEEP-1", "Keep legacy", rootL, nil, []string{tagL}, 3))
-	requireOutcome(t, f.projectCatalog(t, "e0000180-0000-4000-8000-000000000005", catalog.EventProductSnapshotV2), catalog.OutcomeProcessed, "")
-	if got := f.rowStore(t, "catalog_products", "product_id", prodL); got == nil || *got != scopeStoreA {
-		t.Fatalf("adopted store preserved: %v", got)
-	}
-	var name string
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT name_ar FROM catalog_products WHERE product_id=$1`, prodL).Scan(&name); err != nil || name != "Keep legacy" {
-		t.Fatalf("arbitration still advances data: %q (%v)", name, err)
 	}
 }
 

@@ -475,7 +475,7 @@ func (q *Queries) AdminProductTags(ctx context.Context, productID pgtype.UUID) (
 const adminProductTypeByCode = `-- name: AdminProductTypeByCode :one
 SELECT type_id, store_id, type_revision
 FROM catalog_product_types
-WHERE code = $1::text AND ((store_id::text = $2::text) OR ($2::text = '' AND store_id IS NULL))
+WHERE code = $1::text AND store_id::text = $2::text
 `
 
 type AdminProductTypeByCodeParams struct {
@@ -506,7 +506,7 @@ FROM catalog_product_types t
 LEFT JOIN sync_events source ON source.event_id = t.source_event_id
     AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE t.type_id = $1::uuid
-  AND (t.store_id::text = $2::text OR ($2::text = '' AND t.store_id IS NULL))
+  AND t.store_id::text = $2::text
 `
 
 type AdminProductTypeDetailParams struct {
@@ -556,7 +556,7 @@ SELECT t.type_id, t.code, t.name_ar, t.name_en,
 FROM catalog_product_types t
 LEFT JOIN sync_events source ON source.event_id = t.source_event_id
     AND source.event_type = 'catalog.product_type.snapshot.v1'
-WHERE (t.store_id::text = $1::text OR ($1::text = '' AND t.store_id IS NULL))
+WHERE t.store_id::text = $1::text
 ORDER BY t.position, t.code
 `
 
@@ -824,7 +824,7 @@ SELECT t.tag_id, t.slug, t.name_ar, t.name_en, t.is_active,
           AND c.status = 'PENDING' AND tgt.status IN ('PENDING','DELIVERED')
     ) AS has_pending
 FROM catalog_tags t
-WHERE t.store_id = $1::uuid
+WHERE t.store_id::text = $1::text
 ORDER BY t.tag_id
 `
 

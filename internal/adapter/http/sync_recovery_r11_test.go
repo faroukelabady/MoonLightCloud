@@ -21,7 +21,7 @@ func TestR12BoundaryHandshakePrecedesRetailSnapshot(t *testing.T) {
 	deviceID, token := f.newToken("r12-boundary-handshake")
 	f.bind(t, deviceID, f.storeA)
 	initialID := "10000000-0000-4000-8000-000000000001"
-	f.insertEvent(t, initialID, deviceID, &f.storeA, "aa")
+	f.insertEvent(t, initialID, deviceID, f.storeA, "aa")
 	if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "restore"); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestR12StaleGenerationCannotRecordSnapshotPage(t *testing.T) {
 	oldGeneration := start()
 	currentGeneration := start()
 	eventID := "30000000-0000-4000-8000-000000000003"
-	f.insertEvent(t, eventID, deviceID, &f.storeA, "cc")
+	f.insertEvent(t, eventID, deviceID, f.storeA, "cc")
 	page, _ := json.Marshal(map[string]any{
 		"generation": oldGeneration, "declared_total": 1, "end_of_history": true,
 		"events": []syncrecovery.EventIdentity{{EventID: eventID, PayloadHash: "cc"}},
@@ -121,7 +121,7 @@ func TestR11LiveHistoryGrowthMayExceedDeclaredCount(t *testing.T) {
 		{EventID: "20000000-0000-4000-8000-000000000002", PayloadHash: "bb"},
 		{EventID: "30000000-0000-4000-8000-000000000003", PayloadHash: "cc"},
 	}
-	f.insertEvent(t, events[0].EventID, deviceID, &f.storeA, events[0].PayloadHash)
+	f.insertEvent(t, events[0].EventID, deviceID, f.storeA, events[0].PayloadHash)
 	code, body := f.verify(t, token, events[:1], 1, false, "")
 	if code != http.StatusOK {
 		t.Fatalf("initial page should open lower-bound pass: HTTP %d %s", code, body)
@@ -129,7 +129,7 @@ func TestR11LiveHistoryGrowthMayExceedDeclaredCount(t *testing.T) {
 	// The initial retained count was one. New Sales/inventory events arrive
 	// during the pass and are visible before Retail's terminal page.
 	for _, event := range events[1:] {
-		f.insertEvent(t, event.EventID, deviceID, &f.storeA, event.PayloadHash)
+		f.insertEvent(t, event.EventID, deviceID, f.storeA, event.PayloadHash)
 	}
 	code, body = f.verify(t, token, events[1:], 0, true, "")
 	if code != http.StatusOK {
@@ -169,11 +169,11 @@ func TestR11BeginPassCapturesCloudEventsAcceptedBeforeFirstPage(t *testing.T) {
 		{EventID: "50000000-0000-4000-8000-000000000002", PayloadHash: "bb"},
 		{EventID: "60000000-0000-4000-8000-000000000003", PayloadHash: "cc"},
 	}
-	f.insertEvent(t, events[0].EventID, deviceID, &f.storeA, events[0].PayloadHash)
+	f.insertEvent(t, events[0].EventID, deviceID, f.storeA, events[0].PayloadHash)
 	// Retail has already captured 1 as the initial count. New events are
 	// accepted before it sends that first count-bearing page.
 	for _, event := range events[1:] {
-		f.insertEvent(t, event.EventID, deviceID, &f.storeA, event.PayloadHash)
+		f.insertEvent(t, event.EventID, deviceID, f.storeA, event.PayloadHash)
 	}
 	code, body := f.verify(t, token, events[:1], 1, false, "")
 	if code != http.StatusOK {
@@ -223,7 +223,7 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 				{EventID: "50000000-0000-4000-8000-000000000003", PayloadHash: "cc"},
 			}
 			for _, event := range tails {
-				f.insertEvent(t, event.EventID, deviceID, &f.storeA, event.PayloadHash)
+				f.insertEvent(t, event.EventID, deviceID, f.storeA, event.PayloadHash)
 			}
 			start := func() int64 {
 				t.Helper()
@@ -281,7 +281,7 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 			case tc.newFirstPage:
 				currentGeneration = start()
 				newFirst := syncrecovery.EventIdentity{EventID: "30000000-0000-4000-8000-000000000004", PayloadHash: "dd"}
-				f.insertEvent(t, newFirst.EventID, deviceID, &f.storeA, newFirst.PayloadHash)
+				f.insertEvent(t, newFirst.EventID, deviceID, f.storeA, newFirst.PayloadHash)
 				code, body = f.verify(t, token, []syncrecovery.EventIdentity{newFirst}, 1, false,
 					fmt.Sprintf("\"generation\":%d", currentGeneration))
 				if code != http.StatusOK {

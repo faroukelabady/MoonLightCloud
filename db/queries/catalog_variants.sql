@@ -23,7 +23,7 @@ ON CONFLICT (variant_id) DO UPDATE SET
     variant_revision = excluded.variant_revision, catalog_revision = excluded.catalog_revision,
     source_event_id = excluded.source_event_id, source_device_id = excluded.source_device_id,
     source_payload_hash = excluded.source_payload_hash, source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_product_variants.store_id),
+    store_id = excluded.store_id,
     projected_at = now();
 
 -- name: CatalogProductVariantByID :one
@@ -99,7 +99,7 @@ ON CONFLICT (variant_id) DO UPDATE SET
     source_revision = excluded.source_revision,
     source_event_id = excluded.source_event_id, source_device_id = excluded.source_device_id,
     source_payload_hash = excluded.source_payload_hash, source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_product_variant_inventory.store_id),
+    store_id = excluded.store_id,
     projected_at = now();
 
 -- name: CatalogProductVariantInventoryByID :one
@@ -116,10 +116,10 @@ FROM catalog_product_variant_inventory WHERE variant_id = $1;
 
 -- name: CatalogProductVariantDependentStores :many
 SELECT i.store_id FROM catalog_product_variant_inventory i
-WHERE i.variant_id = $1 AND i.store_id IS NOT NULL
+WHERE i.variant_id = $1
 UNION
 SELECT m.store_id FROM commerce_product_variant_mappings m
-WHERE m.variant_id = $1 AND m.store_id IS NOT NULL;
+WHERE m.variant_id = $1;
 
 -- name: CatalogVariantAvailabilityByVariantID :one
 -- Per-variant ONLINE availability inputs (Phase 17). Centered on the
@@ -149,12 +149,12 @@ SELECT
 FROM catalog_product_variants v
 LEFT JOIN catalog_products p
   ON p.product_id = v.product_id
- AND (p.store_id IS NULL OR p.store_id = v.store_id)
+ AND p.store_id = v.store_id
 LEFT JOIN catalog_product_sales_policies pol
   ON pol.product_id = v.product_id
- AND (pol.store_id IS NULL OR pol.store_id = v.store_id)
+ AND pol.store_id = v.store_id
 LEFT JOIN catalog_product_variant_inventory inv
   ON inv.variant_id = v.variant_id AND inv.product_id = v.product_id
  AND inv.sku = v.sku
- AND (inv.store_id IS NULL OR inv.store_id = v.store_id)
+ AND inv.store_id = v.store_id
 WHERE v.variant_id = $1;

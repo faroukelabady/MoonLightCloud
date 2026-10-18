@@ -260,17 +260,17 @@ func TestPhase12R1HealthReadOnly(t *testing.T) {
 		t.Fatal("barrier mutated", e)
 	}
 	exec(`UPDATE commerce_product_mutation_barriers SET state='resolved',resolved_at=now(),resolution='remote_not_applied' WHERE product_id=$1`, pA)
-	exec(`UPDATE commerce_product_mappings SET store_id=NULL WHERE provider_key='website' AND product_id=$1`, pA)
+	exec(`UPDATE commerce_product_mappings SET store_id=$2 WHERE provider_key='website' AND product_id=$1`, pA, scopeStoreA)
 	resolved, err := s.CatalogHealth(ctx, req, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range resolved.Counts {
 		if (c.ReasonCode == "COMMERCE_SYNC_AMBIGUOUS" || c.ReasonCode == "COMMERCE_STORE_CONFLICT") && c.Products != 0 {
-			t.Fatalf("resolved barrier or NULL owner false positive %+v", c)
+			t.Fatalf("resolved barrier or corrected owner false positive %+v", c)
 		}
 	}
-	t.Log("resolved barrier excluded and NULL mapping owner not a Store conflict; read-only session PASS")
+	t.Log("resolved barrier excluded and same-Store mapping owner not a Store conflict; read-only session PASS")
 	exec(`ALTER TABLE catalog_products ALTER COLUMN top_category_id DROP NOT NULL`)
 	exec(`UPDATE catalog_products SET top_category_id=NULL WHERE product_id=$1`, pA)
 	exec(`DELETE FROM catalog_product_variant_inventory WHERE product_id=$1`, pA)

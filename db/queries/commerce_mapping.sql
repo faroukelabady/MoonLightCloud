@@ -21,15 +21,6 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
 RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at;
 
--- name: AdoptCommerceProductMappingStore :one
--- Phase 9C one-time legacy adoption: a NULL mapping adopts the proven
--- Store of its own product. The WHERE clause makes concurrent adoption
--- deterministic (same product implies same Store); a lost race reads
--- back the winner instead of overwriting.
-UPDATE commerce_product_mappings SET store_id = $3, updated_at = now()
-WHERE provider_key = $1 AND product_id = $2 AND store_id IS NULL
-RETURNING provider_key, product_id, external_product_id, store_id, created_at, updated_at;
-
 -- name: ListCommerceProductMappingsForStore :many
 -- Phase 9C Store-scoped mapping enumeration. No global list exists, so
 -- there is no legacy behavior to preserve: scoped reads only.
@@ -84,6 +75,5 @@ SET external_variant_id = sqlc.arg(new_external_variant_id), updated_at = now()
 WHERE m.provider_key = sqlc.arg(provider_key) AND m.product_id = sqlc.arg(product_id)
  AND m.variant_id = sqlc.arg(variant_id) AND m.external_product_id = sqlc.arg(external_product_id)
  AND m.external_variant_id = sqlc.arg(expected_external_variant_id)
- AND m.store_id IS NOT NULL
  AND EXISTS (SELECT 1 FROM catalog_products p WHERE p.product_id=m.product_id AND p.store_id=m.store_id)
 RETURNING m.provider_key, m.product_id, m.variant_id, m.external_product_id, m.external_variant_id, m.store_id, m.created_at, m.updated_at;

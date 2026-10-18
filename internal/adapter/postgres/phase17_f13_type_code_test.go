@@ -92,7 +92,7 @@ func TestSaleV3PreviouslyAcceptedOversizedTypeCodeBlocks(t *testing.T) {
 				eventID := uuid.NewString()
 				payload := f13TypeCodePayload(t, length, withVariant)
 				hash := sha256.Sum256([]byte(payload))
-				if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id,device_id,event_type,occurred_at,payload,payload_hash) VALUES ($1,$2,'sale.finalized.v3',now(),$3,$4)`, eventID, env.devID, payload, hash[:]); err != nil {
+				if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id,device_id,event_type,occurred_at,payload,payload_hash, store_id) VALUES ($1,$2,'sale.finalized.v3',now(),$3,$4, (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, eventID, env.devID, payload, hash[:]); err != nil {
 					t.Fatal(err)
 				}
 				var beforePayload string

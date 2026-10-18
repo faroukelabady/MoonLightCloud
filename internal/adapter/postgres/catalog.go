@@ -423,7 +423,7 @@ func graphSettledForProduct(ctx context.Context, q *sqlcgen.Queries, topID strin
 		}
 		events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 			EventType: catalog.EventCategorySnapshotV2, Column2: "category_id", Column3: rawDefaultCategoryID(id, scope),
-			Processor: catalog.ProcessorCategoryProjectionV1, Column5: "catalog_revision", StoreID: scope, StoreScopedDefault: defaultCatalogEntity(catalog.EventCategorySnapshotV2, rawDefaultCategoryID(id, scope)),
+			Processor: catalog.ProcessorCategoryProjectionV1, Column5: "catalog_revision", StoreID: scope,
 		})
 		if err != nil {
 			return false, err
@@ -603,7 +603,7 @@ func productOrphanedByGraph(ctx context.Context, q *sqlcgen.Queries, productID s
 func entitySuperseded(ctx context.Context, q *sqlcgen.Queries, eventType, idKey, entityID, processor, revKey string, incomingRevision int64, scope pgtype.UUID) (bool, error) {
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor, Column5: revKey, StoreID: scope, StoreScopedDefault: defaultCatalogEntity(eventType, entityID),
+		Processor: processor, Column5: revKey, StoreID: scope,
 	})
 	if err != nil {
 		return false, err
@@ -656,7 +656,7 @@ func entityHasNewerRepairableEvent(ctx context.Context, q *sqlcgen.Queries, even
 	}
 	events, err := q.CatalogEntityEventRevisions(ctx, sqlcgen.CatalogEntityEventRevisionsParams{
 		EventType: eventType, Column2: idKey, Column3: entityID,
-		Processor: processor, Column5: revKey, StoreID: scope, StoreScopedDefault: defaultCatalogEntity(eventType, entityID),
+		Processor: processor, Column5: revKey, StoreID: scope,
 	})
 	if err != nil {
 		return false, err
@@ -837,62 +837,6 @@ func (d Devices) RearmBlockedProducts(ctx context.Context) error {
 		return apperr.Wrap(apperr.Internal, "re-arm blocked catalog products", redact(err))
 	}
 	return nil
-}
-
-// RecoverDefaultCatalogBlocked re-arms at most 100 authoritative source
-// events for missing canonical defaults and raw current-state references.
-// Obsolete blocked defaults require concrete foreign ownership or same-Store
-// raw slug-collision provenance; an error code alone never authorizes reset.
-// Repeat after catalog workers converge until zero. Durable processing rows
-// make interruption restart-safe.
-func (d Devices) RecoverDefaultCatalogBlocked(ctx context.Context) (int64, error) {
-	ctx, cancel := d.ctx(ctx)
-	defer cancel()
-	// Serialize provenance selection with projection state changes. A race
-	// aborts the whole reset batch rather than rearming a newly genuine conflict.
-	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-	if err != nil {
-		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	q := sqlcgen.New(tx)
-	categories := []string{}
-	for id := range sharedCategoryIDs {
-		categories = append(categories, id)
-	}
-	tags := []string{}
-	for id := range sharedTagIDs {
-		tags = append(tags, id)
-	}
-	candidates, err := q.DefaultCatalogRecoveryCandidates(ctx, sqlcgen.DefaultCatalogRecoveryCandidatesParams{CategoryIds: categories, TagIds: tags})
-	if err != nil {
-		return 0, apperr.Wrap(apperr.Internal, "catalog recovery lookup failed", redact(err))
-	}
-	var n int64
-	for _, candidate := range candidates {
-		count, err := q.RearmDefaultCatalogRecovery(ctx, sqlcgen.RearmDefaultCatalogRecoveryParams{EventID: candidate.EventID, Processor: candidate.Processor})
-		if err != nil {
-			return 0, apperr.Wrap(apperr.Internal, "catalog recovery failed", redact(err))
-		}
-		n += count
-	}
-	if n < 100 {
-		types, err := q.SharedProductTypeRecoveryCandidates(ctx, sqlcgen.SharedProductTypeRecoveryCandidatesParams{SeedID: mustProductTypeUUID(sharedProductTypeID), BatchLimit: int32(100 - n)})
-		if err != nil {
-			return 0, apperr.Wrap(apperr.Internal, "type recovery lookup failed", redact(err))
-		}
-		for _, candidate := range types {
-			count, err := q.RearmDefaultCatalogRecovery(ctx, sqlcgen.RearmDefaultCatalogRecoveryParams{EventID: candidate.EventID, Processor: candidate.Processor})
-			if err != nil {
-				return 0, apperr.Wrap(apperr.Internal, "type recovery failed", redact(err))
-			}
-			n += count
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, apperr.Wrap(apperr.Unavailable, "catalog recovery unavailable", redact(err))
-	}
-	return n, nil
 }
 
 // hasCatalogParents reports whether every parent ID has a projected row.
@@ -1144,22 +1088,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 			scopedParentIDs = append(scopedParentIDs, parent)
 		}
 	}
-	// Retirement is part of the same serialized transaction even when the
-	// canonical revision is already identical or newer. Conflicting equal
-	// state never reaches this completion path.
 	finishNoop := func() (catalog.ProjectResult, error) {
-		if sharedNode {
-			established, err := q.EstablishedDefaultCatalog(ctx, sqlcgen.EstablishedDefaultCatalogParams{
-				Kind: "category", CanonicalID: cuid, StoreID: eventWriteStore, RawID: valid.CategoryID,
-			})
-			if err == nil && established.Valid && established.Bool {
-				_, err = q.RetireRawDefaultCategory(ctx, sqlcgen.RetireRawDefaultCategoryParams{CategoryID: mustParseUUID(valid.CategoryID), StoreID: eventWriteStore})
-			}
-			if err != nil {
-				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
-			}
-		}
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorCategoryProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
@@ -1350,18 +1279,8 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		}
 	}
 
-	if sharedNode {
-		if _, err := q.RetireRawDefaultCategory(ctx, sqlcgen.RetireRawDefaultCategoryParams{CategoryID: mustParseUUID(valid.CategoryID), StoreID: eventWriteStore}); err != nil {
-			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorCategoryProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
-		}
-	}
 	fingerprint := catalog.FingerprintCategory(valid)
 	nameAR, nameEN := valid.NameAR, pgTextPtr(valid.NameEN)
-	defaultAlgorithm := int16(0)
-	if sharedNode {
-		defaultAlgorithm = 1
-	}
 	// Phase 13 §82: capture the pre-write policy/hierarchy state so the
 	// durable commerce re-evaluation fan-out (below, same transaction)
 	// fires only on a real eligibility-context change — pure renames and
@@ -1376,7 +1295,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 		OnlineEnabled:  valid.OnlineEnabled,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
-		StoreID: writeStore, DefaultAlgorithm: defaultAlgorithm,
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isUniqueViolation(err) {
@@ -1656,22 +1575,7 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 			return d.markCatalogBlocked(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrStoreScopeConflict, "tag owned by another store")
 		}
 	}
-	// Retirement is part of the same serialized transaction even when the
-	// canonical revision is already identical or newer. Conflicting equal
-	// state never reaches this completion path.
 	finishNoop := func() (catalog.ProjectResult, error) {
-		if sharedNode {
-			established, err := q.EstablishedDefaultCatalog(ctx, sqlcgen.EstablishedDefaultCatalogParams{
-				Kind: "tag", CanonicalID: tuid, StoreID: eventWriteStore, RawID: valid.TagID,
-			})
-			if err == nil && established.Valid && established.Bool {
-				_, err = q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore})
-			}
-			if err != nil {
-				_ = tx.Rollback(ctx)
-				return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
-			}
-		}
 		return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorTagProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 	}
 	proceed, stale := revisionGate(valid.CatalogRevision, storedRevision)
@@ -1732,23 +1636,13 @@ func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now 
 	}
 
 	nameAR, nameEN := valid.NameAR, pgTextPtr(valid.NameEN)
-	if sharedNode {
-		if _, err := q.RetireRawDefaultTag(ctx, sqlcgen.RetireRawDefaultTagParams{TagID: mustParseUUID(valid.TagID), StoreID: eventWriteStore}); err != nil {
-			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorTagProjectionV1, attempt.euid, now, ErrProjection, "default transition failed", err)
-		}
-	}
 	fingerprint := catalog.FingerprintTag(valid)
-	defaultAlgorithm := int16(0)
-	if sharedNode {
-		defaultAlgorithm = 1
-	}
 	if err := q.UpsertCatalogTag(ctx, sqlcgen.UpsertCatalogTagParams{
 		TagID: tuid, Slug: valid.Slug, IsActive: valid.IsActive,
 		NameAr: nameAR, NameEn: nameEN,
 		SourceRevision: valid.CatalogRevision, SourceEventID: attempt.euid, SourceDeviceID: attempt.duid,
 		SourcePayloadHash: fingerprint[:], SourceReceivedAt: pgTime(event.ReceivedAt),
-		StoreID: writeStore, DefaultAlgorithm: defaultAlgorithm,
+		StoreID: writeStore,
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		if isUniqueViolation(err) {
@@ -2150,7 +2044,7 @@ func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, 
 			ProductID: puid, StoreID: writeStore, Reason: "product_classification",
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed", err)
+			return d.persistCatalogRetry(ctx, catalog.ProcessorProductProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error(), err)
 		}
 	}
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
@@ -2899,12 +2793,11 @@ func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog
 	// (§149), so rapid mutation sequences converge to the latest durable
 	// projection (§150).
 	if err := q.EnqueueProductReevaluation(ctx, sqlcgen.EnqueueProductReevaluationParams{
-		ProductID: puid, Reason: "product_configuration",
+		ProductID: puid, StoreID: productRow.StoreID, Reason: "product_configuration",
 	}); err != nil {
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, now, ErrProjection, "reevaluation enqueue failed: "+err.Error(), err)
 	}
-	_ = productRow
 	return finishCatalogAttempt(ctx, q, tx, catalog.ProcessorProductConfigurationProjectionV1, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
 

@@ -1,7 +1,10 @@
 # ADR-0042: Store-Scoped Default Catalog Identity and Adoption Dependency Integrity (Phase 9-R1/R2)
 
 Date: 2026-10-02
-Status: accepted (Phase 9-R1; revised Phase 9-R2)
+Status: accepted (Phase 9-R1; revised Phase 9-R2). The raw-default
+compatibility path, `default_algorithm` and `projection recover-catalog`
+were removed by baseline 00105 (ADR-0055 step 2c): every Cloud row now
+requires a Store and unbound devices cannot upload.
 
 ## Context
 

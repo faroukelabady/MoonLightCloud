@@ -183,7 +183,7 @@ func TestStoreRenamePreservesIdentity(t *testing.T) {
 
 func TestStoreIngressSnapshotsBinding(t *testing.T) {
 	env := openSaleEnv(t)
-	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
+	storeID := env.storeID
 	storeDevices := NewDevices(env.pool, 5*time.Second)
 	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
@@ -204,22 +204,6 @@ func TestStoreIngressSnapshotsBinding(t *testing.T) {
 	}
 	// Spoofed payload store context is impossible: events carry no store
 	// field; context comes from the binding alone.
-}
-
-func TestStoreLegacyEventsStayNull(t *testing.T) {
-	env := openSaleEnv(t)
-	eventID := "44444444-4444-7222-8222-222222222222"
-	if res := env.ingest(t, eventID, fixture(t, "sale_usd.json")); res.Events[0].Status != "accepted" {
-		t.Fatalf("ingest: %+v", res)
-	}
-	var isNull bool
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT store_id IS NULL FROM sync_events WHERE event_id = $1`, eventID).Scan(&isNull); err != nil {
-		t.Fatal(err)
-	}
-	if !isNull {
-		t.Fatal("unbound device events keep NULL store context, never fabricated")
-	}
 }
 
 func TestStoreTwoDevicesOneStore(t *testing.T) {
@@ -255,7 +239,7 @@ func TestStoreTwoDevicesOneStore(t *testing.T) {
 
 func TestStoreEventRetryPreservesContext(t *testing.T) {
 	env := openSaleEnv(t)
-	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
+	storeID := env.storeID
 	storeDevices := NewDevices(env.pool, 5*time.Second)
 	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
@@ -288,7 +272,7 @@ func TestStoreRenameKeepsBindingAndEvents(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
 	storeDevices := NewDevices(env.pool, 5*time.Second)
-	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
+	storeID := env.storeID
 	if _, err := storeDevices.RegisterStore(ctx, env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
 	}); err != nil {

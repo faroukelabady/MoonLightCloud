@@ -137,12 +137,13 @@ func TestImpossibleWinningEventReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTestStore(t, NewDevices(pool, 5*time.Second), p.Device.ID)
 	dev, _ := parseUUID(p.Device.ID)
 	e, _ := parseUUID("41111111-1111-7111-8111-111111111111")
 	s1, _ := parseUUID("4aaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa")
 	s2, _ := parseUUID("4bbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb")
-	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00')`, "41111111-1111-7111-8111-111111111111", p.Device.ID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+		VALUES ($1,$2,'sale.finalized.v3',now(),now(),'{}','\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`, "41111111-1111-7111-8111-111111111111", p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO sale_event_ownership (sale_id, winning_event_id, winning_device_id)

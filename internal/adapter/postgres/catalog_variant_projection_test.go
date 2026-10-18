@@ -151,7 +151,7 @@ func TestCatalogVariantProjectionLifecycle(t *testing.T) {
 // revision continuity (00023 conventions).
 func TestCatalogVariantStoreIsolation(t *testing.T) {
 	f := openScopeFixture(t)
-	ids := catalogIDs(t, 600, "catA", "prodA", "v1", "v2", "v3", "catL", "prodL")
+	ids := catalogIDs(t, 600, "catA", "prodA", "v1")
 
 	// Store A product graph.
 	catEvent := variantEventID(610)
@@ -191,75 +191,9 @@ func TestCatalogVariantStoreIsolation(t *testing.T) {
 		t.Fatalf("ownership must stay A, got %v", got)
 	}
 
-	// Legacy events apply revision continuity but never claim or wipe
-	// Store ownership.
-	v1c := variantEventID(614)
-	f.ingest(t, f.devC, f.credC, v1c, catalog.EventProductVariantSnapshotV1,
+	// An unbound device can never write a variant (ADR-0055).
+	f.ingestRefused(t, f.devC, f.credC, variantEventID(614), catalog.EventProductVariantSnapshotV1,
 		variantPayload(ids["v1"], ids["prodA"], "ML-L-V1", true, false, "color=blue", nil, 3))
-	if res := projectCatalogTerminal(t, f, v1c, catalog.EventProductVariantSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("legacy write: %+v", res)
-	}
-	if got := f.rowStore(t, "catalog_product_variants", "variant_id", ids["v1"]); got == nil || *got != scopeStoreA {
-		t.Fatalf("legacy must not wipe A, got %v", got)
-	}
-	var sku string
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT sku FROM catalog_product_variants WHERE variant_id=$1`, ids["v1"]).Scan(&sku); err != nil || sku != "ML-L-V1" {
-		t.Fatalf("legacy revision continuity: %q (%v)", sku, err)
-	}
-
-	// A scoped event adopts a legacy NULL row.
-	v2c := variantEventID(615)
-	f.ingest(t, f.devC, f.credC, v2c, catalog.EventProductVariantSnapshotV1,
-		variantPayload(ids["v2"], ids["prodA"], "ML-L-V2", true, false, "color=red", nil, 1))
-	if res := projectCatalogTerminal(t, f, v2c, catalog.EventProductVariantSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("legacy variant: %+v", res)
-	}
-	if got := f.rowStore(t, "catalog_product_variants", "variant_id", ids["v2"]); got != nil {
-		t.Fatalf("legacy row must start unscoped, got %v", *got)
-	}
-	v2a := variantEventID(616)
-	f.ingest(t, f.devA, f.credA, v2a, catalog.EventProductVariantSnapshotV1,
-		variantPayload(ids["v2"], ids["prodA"], "ML-A-V2", true, false, "color=red", nil, 2))
-	if res := projectCatalogTerminal(t, f, v2a, catalog.EventProductVariantSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("adoption: %+v", res)
-	}
-	if got := f.rowStore(t, "catalog_product_variants", "variant_id", ids["v2"]); got == nil || *got != scopeStoreA {
-		t.Fatalf("adoption must claim A, got %v", got)
-	}
-
-	// A Store B variant is never adoptable by Store A. Both Stores may
-	// hold variant rows of one legacy (unscoped) product, so the fixture
-	// product here is projected legacy.
-	catL := variantEventID(617)
-	f.ingest(t, f.devC, f.credC, catL, catalog.EventCategorySnapshotV2,
-		categoryPayload(ids["catL"], "active", map[string]string{"ar": "قسم"}, nil, 1))
-	if res := projectCatalogTerminal(t, f, catL, catalog.EventCategorySnapshotV2); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("legacy category: %+v", res)
-	}
-	prodL := variantEventID(618)
-	f.ingest(t, f.devC, f.credC, prodL, catalog.EventProductSnapshotV2,
-		productPayload(ids["prodL"], "ML-L-1", "منتج", ids["catL"], nil, nil, 1))
-	if res := projectCatalogTerminal(t, f, prodL, catalog.EventProductSnapshotV2); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("legacy product: %+v", res)
-	}
-
-	v3b := variantEventID(619)
-	f.ingest(t, f.devB, f.credB, v3b, catalog.EventProductVariantSnapshotV1,
-		variantPayload(ids["v3"], ids["prodL"], "ML-B-V3", true, false, "color=green", nil, 1))
-	if res := projectCatalogTerminal(t, f, v3b, catalog.EventProductVariantSnapshotV1); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("variant B: %+v", res)
-	}
-	if got := f.rowStore(t, "catalog_product_variants", "variant_id", ids["v3"]); got == nil || *got != scopeStoreB {
-		t.Fatalf("variant B ownership, got %v", got)
-	}
-	v3a := variantEventID(620)
-	f.ingest(t, f.devA, f.credA, v3a, catalog.EventProductVariantSnapshotV1,
-		variantPayload(ids["v3"], ids["prodL"], "ML-A-V3", true, false, "color=green", nil, 2))
-	res = projectCatalogTerminal(t, f, v3a, catalog.EventProductVariantSnapshotV1)
-	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrStoreScopeConflict {
-		t.Fatalf("foreign adoption: %+v", res)
-	}
 }
 
 // TestCatalogVariantTombstoneKept proves tombstones are stored, never
@@ -295,32 +229,10 @@ func TestCatalogVariantTombstoneKept(t *testing.T) {
 	}
 }
 
-// TestCatalogVariantDuplicateCombinationTolerated proves duplicate
-// combination data is tolerated at the projection layer for unscoped
-// legacy rows (NULL ownership never collides), while proven Store rows
-// reject identity collisions deterministically.
-func TestCatalogVariantDuplicateCombinationTolerated(t *testing.T) {
-	env := openSaleEnv(t)
-	_, prodID := seedCatalogProduct(t, env, 800, "ML-P-8")
-	ids := catalogIDs(t, 820, "v1", "v2")
-
-	for i, vid := range []string{ids["v1"], ids["v2"]} {
-		event := variantEventID(830 + i)
-		ingestCatalog(t, env, event, catalog.EventProductVariantSnapshotV1, "2026-09-20T10:00:00Z",
-			variantPayload(vid, prodID, fmt.Sprintf("ML-V-8%d", i), true, false, "color=blue",
-				[]any{variantAttr("color", "blue", 0)}, 1))
-		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
-			t.Fatalf("legacy duplicate %d: %+v", i, res)
-		}
-	}
-	var rows int
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM catalog_product_variants WHERE product_id=$1 AND combination_key='color=blue'`,
-		prodID).Scan(&rows); err != nil || rows != 2 {
-		t.Fatalf("legacy duplicates must coexist: %d (%v)", rows, err)
-	}
-
-	// Proven Store rows still enforce their Store-local identity.
+// TestCatalogVariantDuplicateCombinationRejected proves Store rows enforce
+// their Store-local variant identity: a second variant with the same
+// combination is blocked deterministically.
+func TestCatalogVariantDuplicateCombinationRejected(t *testing.T) {
 	f := openScopeFixture(t)
 	ids2 := catalogIDs(t, 860, "catA", "prodA", "w1", "w2")
 	catEvent := variantEventID(870)
@@ -484,29 +396,29 @@ func TestCatalogHealthVariantCodes(t *testing.T) {
 			t.Fatalf("seed: %v\n%s", err, query)
 		}
 	}
-	exec(fmt.Sprintf(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash)
-		VALUES ('f0000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v2', now(), '{}', '\x00')`, devID))
-	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, online_enabled, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-		VALUES ('f0000000-0000-4000-8000-000000000002', 'active', 'cat', true, 1, 'f0000000-0000-4000-8000-000000000001', '` + devID + `', '\x00', now())`)
+	exec(fmt.Sprintf(`INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash, store_id)
+		VALUES ('f0000000-0000-4000-8000-000000000001', '%s', 'catalog.product.snapshot.v2', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, devID, devID))
+	exec(`INSERT INTO catalog_categories (category_id, status, name_ar, online_enabled, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+		VALUES ('f0000000-0000-4000-8000-000000000002', 'active', 'cat', true, 1, 'f0000000-0000-4000-8000-000000000001', '` + devID + `', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '` + devID + `'))`)
 	// p1: active product, no variants at all.
 	// p2: online-eligible, one live variant with zero stock.
 	// p3: online-eligible, one inactive variant (informational).
 	// p4: online-eligible, one live variant with stock but no mapping.
 	for i := 1; i <= 4; i++ {
 		p := fmt.Sprintf("f0000000-0000-4000-8000-00000000000%d", 2+i)
-		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', 'p%d', 'f0000000-0000-4000-8000-000000000002', true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, i, devID))
-		exec(fmt.Sprintf(`INSERT INTO catalog_product_sales_policies (product_id, sell_offline, sell_online, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', true, true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, p, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+			VALUES ('%s', 'p%d', 'f0000000-0000-4000-8000-000000000002', true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, p, i, devID, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_product_sales_policies (product_id, sell_offline, sell_online, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+			VALUES ('%s', true, true, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, p, devID, devID))
 	}
 	mkVariant := func(id, product, sku, combination string, active bool) {
-		exec(fmt.Sprintf(`INSERT INTO catalog_product_variants (variant_id, product_id, sku, is_active, deleted, position, combination_key, variant_revision, catalog_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', '%s', '%s', %v, false, 0, '%s', 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, id, product, sku, active, combination, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_product_variants (variant_id, product_id, sku, is_active, deleted, position, combination_key, variant_revision, catalog_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+			VALUES ('%s', '%s', '%s', %v, false, 0, '%s', 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, id, product, sku, active, combination, devID, devID))
 		exec(fmt.Sprintf(`INSERT INTO catalog_product_variant_prices (variant_id, currency, price_minor) VALUES ('%s', 'EGP', 100)`, id))
 	}
 	mkStock := func(variant, product, sku string, stock int64) {
-		exec(fmt.Sprintf(`INSERT INTO catalog_product_variant_inventory (variant_id, product_id, sku, stock_quantity, ready, sell_online, policy_revision, catalog_revision, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at)
-			VALUES ('%s', '%s', '%s', %d, true, true, 1, 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now())`, variant, product, sku, stock, devID))
+		exec(fmt.Sprintf(`INSERT INTO catalog_product_variant_inventory (variant_id, product_id, sku, stock_quantity, ready, sell_online, policy_revision, catalog_revision, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+			VALUES ('%s', '%s', '%s', %d, true, true, 1, 1, 1, 'f0000000-0000-4000-8000-000000000001', '%s', '\x00', now(), (SELECT store_id FROM device_store_bindings WHERE device_id = '%s'))`, variant, product, sku, stock, devID, devID))
 	}
 	mkVariant("f0000000-0000-4000-8000-000000000011", "f0000000-0000-4000-8000-000000000004", "V-2", "color=blue", true)
 	mkStock("f0000000-0000-4000-8000-000000000011", "f0000000-0000-4000-8000-000000000004", "V-2", 0)

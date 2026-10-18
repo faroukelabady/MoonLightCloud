@@ -701,8 +701,8 @@ func TestReturnVoidProjects(t *testing.T) {
 }
 
 // TestReturnCrossDeviceProjects proves device affinity is not required:
-// the return may come from a different device than the sale; guards are
-// device-agnostic by design.
+// the return may come from a different device of the same Store than the
+// sale; guards are device-agnostic by design.
 func TestReturnCrossDeviceProjects(t *testing.T) {
 	env := returnEnv(t)
 	salePayload := fixture(t, "sale_egp.json")
@@ -713,6 +713,10 @@ func TestReturnCrossDeviceProjects(t *testing.T) {
 	svc := auth.NewService(NewDevices(env.pool, 5*time.Second), mustTestHasher(t), "", 1, clock.System{}, ids.System{})
 	p2, err := svc.Create(context.Background(), "shop-two")
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The second device belongs to the same Store as the sale.
+	if err := NewDevices(env.pool, 5*time.Second).EnrollStore(context.Background(), p2.Device.ID, env.storeID); err != nil {
 		t.Fatal(err)
 	}
 	env2 := newSaleEnvOnPool(t, env.pool, p2.Device.ID, p2.Credential.ID)

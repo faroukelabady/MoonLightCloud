@@ -37,24 +37,11 @@ on a ProductType name, translated label or user-entered code.
 
 ## Existing blocked installations
 
-After deploying the correction, run the existing bounded operation:
-
-```sh
-moonlight-cloud projection recover-catalog
-```
-
-The operation now includes seed Type and Product-v2 events previously blocked
-with the exact Type ownership reason. Eligibility requires the original
-non-NULL ingress Store and a foreign-owned raw seed projection. A Product
-owned by another Store is excluded. Recovery never resets custom identity
-collisions, same-Store revision contradictions or arbitrary validation errors.
-
-At most 100 source events are rearmed per invocation, across all supported
-recovery families. Selection and reset share the existing serializable
-transaction. Allow ordinary workers to converge, then repeat until the count
-is zero. A serialization abort is safely retryable. Payloads, hashes, histories
-and already valid projections are not rewritten. Recovery is not a historical
-Store backfill.
+Superseded by baseline 00105 (ADR-0055 step 2c). Every Cloud row now
+requires a Store and unbound devices cannot upload, so the raw-seed
+collision this recovery addressed cannot occur, and the
+`projection recover-catalog` command has been removed. The platform is
+pre-production; there are no installations to recover.
 
 ## Migration 40 development rollback
 
@@ -94,7 +81,7 @@ WHERE p.status = 'blocked'
 ```
 
 Do not delete, re-own or edit the occupant row, and do not reset the blocked
-event with `projection recover-catalog` (it intentionally excludes this case).
+event.
 Escalate as a security incident: identify the device that sent the occupant's
 source event (`catalog_product_types.source_device_id`), revoke it if it is
 not a legitimate Retail installation, and plan any data correction as a

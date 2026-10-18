@@ -191,8 +191,7 @@ WHERE e.event_id = ANY($1::uuid[])
       SELECT 1
       FROM device_store_bindings b
       WHERE b.device_id = $2::uuid
-        AND (e.store_id = b.store_id
-             OR (e.store_id IS NULL AND e.device_id = b.device_id))
+        AND e.store_id = b.store_id
   )
 `
 
@@ -211,8 +210,7 @@ type SyncEventHashesRow struct {
 // is reported missing. One bounded query per page (no N+1).
 // The authenticated device's binding is resolved server-side. All event
 // rows belonging to that Store remain visible for supported replacement
-// devices. Legacy rows without a Store are matchable only by their original
-// device; unbound callers therefore receive no identity matches.
+// devices; unbound callers receive no identity matches.
 func (q *Queries) SyncEventHashes(ctx context.Context, arg SyncEventHashesParams) ([]SyncEventHashesRow, error) {
 	rows, err := q.db.Query(ctx, syncEventHashes, arg.EventIds, arg.DeviceID)
 	if err != nil {

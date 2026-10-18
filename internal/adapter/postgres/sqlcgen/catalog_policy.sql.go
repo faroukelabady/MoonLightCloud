@@ -217,7 +217,7 @@ ON CONFLICT (product_id) DO UPDATE SET
     source_revision = excluded.source_revision, source_event_id = excluded.source_event_id,
     source_device_id = excluded.source_device_id, source_payload_hash = excluded.source_payload_hash,
     source_received_at = excluded.source_received_at,
-    store_id = COALESCE(excluded.store_id, catalog_product_sales_policies.store_id),
+    store_id = excluded.store_id,
     projected_at = now()
 `
 

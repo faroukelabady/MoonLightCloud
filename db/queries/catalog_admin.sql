@@ -140,7 +140,7 @@ WHERE type_id = @type_id::uuid;
 -- name: AdminProductTypeByCode :one
 SELECT type_id, store_id, type_revision
 FROM catalog_product_types
-WHERE code = @code::text AND ((store_id::text = @store_id::text) OR (@store_id::text = '' AND store_id IS NULL));
+WHERE code = @code::text AND store_id::text = @store_id::text;
 
 -- Phase 17-R2 type reads (Store-scoped, projection only).
 -- name: AdminProductTypeList :many
@@ -152,7 +152,7 @@ SELECT t.type_id, t.code, t.name_ar, t.name_en,
 FROM catalog_product_types t
 LEFT JOIN sync_events source ON source.event_id = t.source_event_id
     AND source.event_type = 'catalog.product_type.snapshot.v1'
-WHERE (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL))
+WHERE t.store_id::text = @store_id::text
 ORDER BY t.position, t.code;
 
 -- name: AdminProductTypeDetail :one
@@ -165,7 +165,7 @@ FROM catalog_product_types t
 LEFT JOIN sync_events source ON source.event_id = t.source_event_id
     AND source.event_type = 'catalog.product_type.snapshot.v1'
 WHERE t.type_id = @type_id::uuid
-  AND (t.store_id::text = @store_id::text OR (@store_id::text = '' AND t.store_id IS NULL));
+  AND t.store_id::text = @store_id::text;
 
 -- Admin catalog reads: Store-scoped projection lists for the operator.
 -- Never query Retail directly. Search is bounded ILIKE on variant SKU/name
@@ -277,7 +277,7 @@ SELECT t.tag_id, t.slug, t.name_ar, t.name_en, t.is_active,
           AND c.status = 'PENDING' AND tgt.status IN ('PENDING','DELIVERED')
     ) AS has_pending
 FROM catalog_tags t
-WHERE t.store_id = @store_id::uuid
+WHERE t.store_id::text = @store_id::text
 ORDER BY t.tag_id;
 
 -- name: AdminProductHasPending :one

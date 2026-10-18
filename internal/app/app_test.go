@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 
+	istore "github.com/faroukelabady/MoonLightCloud/internal/store"
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func testConfig(t *testing.T, url string) config.Config {
@@ -158,11 +161,12 @@ func TestBlockedProjectionKeepsHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindAppTestStore(t, a, p.Device.ID)
 	// Bypass HTTP validation with a corrupt inbox row, then project it.
 	eventID := "22222222-2222-7222-8222-222222222222"
 	if _, err := a.Pool.Exec(ctx, `
-		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash)
-		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00')`,
+		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+		VALUES ($1, $2, 'sale.finalized.v3', now(), now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2))`,
 		eventID, p.Device.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -244,4 +248,16 @@ func containsCode(s, code string) bool {
 		}
 	}
 	return false
+}
+
+// bindAppTestStore enrolls a device into a fresh Store; every stored event
+// carries its device's Store (ADR-0055).
+func bindAppTestStore(t *testing.T, a *App, deviceID string) {
+	t.Helper()
+	devices := postgres.NewDevices(a.Pool, 5*time.Second)
+	if _, err := devices.RegisterStore(context.Background(), deviceID, istore.RegistrationRequest{
+		StoreID: uuid.NewString(), DisplayName: "Test Store", Timezone: "Africa/Cairo",
+	}); err != nil {
+		t.Fatalf("bind test store: %v", err)
+	}
 }

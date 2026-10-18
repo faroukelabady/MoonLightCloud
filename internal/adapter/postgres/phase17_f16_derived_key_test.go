@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/google/uuid"
@@ -138,58 +137,6 @@ func TestF16PreviouslyAcceptedDerivedKeyBlocksTerminally(t *testing.T) {
 		t.Fatalf("blocked event wrote %d rows", n)
 	}
 	f16ProjectSeedAndProduct(t, f, f.devA, f.credA, scopeStoreA)
-}
-
-// An installation that accepted an occupant before F16 keeps it unchanged;
-// Store A's seed reports the specific diagnostic and recovery does not
-// re-arm, rewrite, adopt or delete anything.
-func TestF16LegacyForeignOccupantPreservedWithDiagnostic(t *testing.T) {
-	f := openScopeFixture(t)
-	ctx := context.Background()
-	d := NewDevices(f.pool, 5*time.Second)
-	keyA := f16StoreKey(scopeStoreA)
-	occupantEvent := uuid.NewString()
-	occupantPayload := typePayload(keyA, "squat", 1)
-	hash := sha256.Sum256([]byte(occupantPayload))
-	if _, err := f.pool.Exec(ctx, `INSERT INTO sync_events (event_id,device_id,event_type,occurred_at,payload,payload_hash,store_id)
-		VALUES ($1,$2,$3,now(),$4,$5,$6)`, occupantEvent, f.devB, catalog.EventProductTypeSnapshotV1, occupantPayload, hash[:], scopeStoreB); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO catalog_product_types(type_id,code,name_ar,name_en,is_active,position,type_revision,source_event_id,source_device_id,source_payload_hash,source_received_at,store_id)
-		VALUES($1,'squat','برديات','Squat',true,0,1,$2,$3,'\x00',now(),$4)`, keyA, occupantEvent, f.devB, scopeStoreB); err != nil {
-		t.Fatal(err)
-	}
-	var before string
-	if err := f.pool.QueryRow(ctx, `SELECT row_to_json(t)::text FROM catalog_product_types t WHERE type_id=$1`, keyA).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
-
-	seed := uuid.NewString()
-	f.ingest(t, f.devA, f.credA, seed, catalog.EventProductTypeSnapshotV1, typePayload(sharedProductTypeID, "papyrus", 1))
-	if res := projectCatalogTerminal(t, f, seed, catalog.EventProductTypeSnapshotV1); res.Outcome != catalog.OutcomeBlocked {
-		t.Fatalf("seed over foreign occupant: %+v", res)
-	}
-	var message string
-	if err := f.pool.QueryRow(ctx, `SELECT last_error_message FROM sync_event_processing WHERE event_id=$1`, seed).Scan(&message); err != nil {
-		t.Fatal(err)
-	}
-	if message != "product type seed storage key occupied by another store" {
-		t.Fatalf("diagnostic %q", message)
-	}
-	rearmed, err := d.RecoverDefaultCatalogBlocked(ctx)
-	if err != nil || rearmed != 0 {
-		t.Fatalf("recovery re-armed %d: %v", rearmed, err)
-	}
-	var after string
-	if err := f.pool.QueryRow(ctx, `SELECT row_to_json(t)::text FROM catalog_product_types t WHERE type_id=$1`, keyA).Scan(&after); err != nil {
-		t.Fatal(err)
-	}
-	if before != after {
-		t.Fatalf("occupant changed:\n%s\n%s", before, after)
-	}
-	if n := f16Count(t, f, `SELECT count(*) FROM catalog_product_types WHERE store_id=$1`, scopeStoreA); n != 0 {
-		t.Fatalf("store A adopted the occupant: %d rows", n)
-	}
 }
 
 func TestF16ConcurrentSeedAndSquatAttempts(t *testing.T) {

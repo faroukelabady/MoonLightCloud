@@ -93,6 +93,7 @@ func TestCommerceOrderProjectionMatrix(t *testing.T) {
 
 	// Mapping change: resolve the line, rev 4.
 	productID := "11111111-1111-4111-8111-111111111111"
+	seedStoreProduct(t, env, productID)
 	if _, err := catalogStore(env).CreateProductMapping(context.Background(), "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}

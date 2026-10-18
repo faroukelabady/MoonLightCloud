@@ -98,5 +98,15 @@ on all money-bearing documents.
   shared choices in Retail; `catalog.product.configurations.update.v1` is
   removed from Cloud catalog administration. The configuration snapshot
   contract is unchanged.
+- Baseline 00105 (step 2c) makes `store_id` NOT NULL on every Store-scoped
+  table and drops the NULL-wildcard predicates, raw-default compatibility
+  (`default_algorithm`) and the `projection recover-catalog` command.
+  Ingest refuses a device without a Store binding (`STORE_ENROLLMENT_REQUIRED`);
+  Retail registers its Store before its first upload. Commerce mappings and
+  re-evaluations take the Store of their projected Product. Three columns stay
+  nullable by design: `update_rollouts.store_id` (a fleet-wide rollout),
+  `update_audit_events.store_id` (global audit) and
+  `commerce_online_orders.store_id` (orders from a provider not attributed
+  to a Store).
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

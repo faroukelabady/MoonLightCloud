@@ -24,6 +24,7 @@ func openSync(t *testing.T) (*pgxpool.Pool, isync.Service, string, string) {
 		t.Fatal(err)
 	}
 	store := NewDevices(pool, 5*time.Second)
+	bindTestStore(t, store, p.Device.ID)
 	return pool, isync.NewService(store, clock.System{}, testEventRegistry()), p.Device.ID, p.Credential.ID
 }
 
@@ -242,6 +243,7 @@ func TestCredentialRotationDuringRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDevices(pool, 5*time.Second)
+	bindTestStore(t, store, p.Device.ID)
 	syncSvc := isync.NewService(store, clock.System{}, testEventRegistry())
 	id := "22222222-2222-7222-8222-222222222222"
 	body := batch(ev(id, `{"a":1}`))

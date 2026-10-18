@@ -112,9 +112,11 @@ sections are unchanged history; where they imply one global row per
   outbox bytes and Sale/Return historical snapshots always use the Retail
   source ID. Ownership and convergence lookups take the requested Store
   explicitly; another Store's projection never converges a command.
-- **Recovery.** `projection recover-catalog` re-arms only Type and Product-v2
+- **Recovery.** `projection recover-catalog` re-armed only Type and Product-v2
   events blocked by the exact pre-amendment seed ownership collision, within
   the existing bounded serializable transaction (≤100 events per run).
+  Removed by baseline 00105 (ADR-0055 step 2c): every row now requires a
+  Store, so the collision cannot arise.
 - **Derived identities are never intent (F16).** Retail mints every
   ProductType ID as random UUIDv4 and the seed is v4, so a UUIDv5
   ProductType identity can only target a derived storage key. Cloud refuses

@@ -45,13 +45,21 @@ func TestCommerceMappingRepository(t *testing.T) {
 	store := catalogStore(env)
 	productA := commerceProductID(0xA0)
 	productB := commerceProductID(0xB0)
+	seedStoreProduct(t, env, productA, productB)
 
+	// A mapping needs a projected product: it inherits that product's Store.
+	if _, err := store.CreateProductMapping(ctx, "primary", commerceProductID(0xF0), "ext-0"); !isCommerceNotFound(err) {
+		t.Fatalf("unprojected product: %v", err)
+	}
 	created, err := store.CreateProductMapping(ctx, "primary", productA, "ext-1")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if created.ProviderKey != "primary" || created.ProductID != productA || created.ExternalProductID != "ext-1" {
 		t.Fatalf("mapping: %+v", created)
+	}
+	if created.StoreID == nil || *created.StoreID != env.storeID {
+		t.Fatalf("mapping store: %v want %s", created.StoreID, env.storeID)
 	}
 	if created.CreatedAt.IsZero() {
 		t.Fatal("timestamps recorded")
@@ -121,6 +129,7 @@ func TestCommerceMappingConcurrentSame(t *testing.T) {
 	ctx := context.Background()
 	store := catalogStore(env)
 	productID := commerceProductID(0xC0)
+	seedStoreProduct(t, env, productID)
 
 	start := make(chan struct{})
 	results := make(chan error, 4)
@@ -151,6 +160,7 @@ func TestCommerceMappingConcurrentConflict(t *testing.T) {
 	ctx := context.Background()
 	store := catalogStore(env)
 	productID := commerceProductID(0xD0)
+	seedStoreProduct(t, env, productID)
 
 	start := make(chan struct{})
 	type outcome struct {
@@ -577,6 +587,7 @@ func TestCommerceMappingConcurrentGate(t *testing.T) {
 	defer cancel()
 	store := catalogStore(env)
 	productID := commerceProductID(0x1D0)
+	seedStoreProduct(t, env, productID)
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)

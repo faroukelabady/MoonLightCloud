@@ -260,25 +260,14 @@ func projectionHeaderParams(saleUID, euid, duid pgtype.UUID, event sale.EventRec
 }
 
 // saleScopeCheck enforces historical ownership immutability at the write
-// boundary. The durable winner is already proven to be this event; when a
-// sale row from another event exists, two proven non-NULL Stores must
-// never mix: the incoming event blocks with STORE_SCOPE_CONFLICT. Legacy
-// NULL rows never adopt Store ownership (historical truth): same-event
-// replay proceeds and keeps its stored (possibly NULL) context, while a
-// different event for an existing sale stays a scope conflict when either
-// side is scoped, else falls through to the existing integrity check.
-func saleScopeCheck(existingStore pgtype.UUID, existingEvent string, event sale.EventRecord) *sale.ProjectResult {
+// boundary. The durable winner is already proven to be this event; a sale
+// row written by another event is never re-attributed, so the incoming
+// event blocks with STORE_SCOPE_CONFLICT. Same-event replay proceeds.
+func saleScopeCheck(existingEvent string, event sale.EventRecord) *sale.ProjectResult {
 	if existingEvent == event.EventID {
 		return nil
 	}
-	incoming := event.StoreID
-	if incoming != nil && *incoming != "" {
-		return &sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: ErrStoreScopeConflict}
-	}
-	if existingStore.Valid {
-		return &sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: ErrStoreScopeConflict}
-	}
-	return nil
+	return &sale.ProjectResult{Outcome: sale.OutcomeBlocked, ErrorCode: ErrStoreScopeConflict}
 }
 
 // insertProjectionChildren writes lines + payments + classifications with

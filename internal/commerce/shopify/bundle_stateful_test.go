@@ -842,6 +842,26 @@ func (s r3DesiredSource) GetDesiredCommerceProduct(context.Context, string) (com
 	return s.desired, nil
 }
 
+// seedR3Product projects a minimal Store-owned catalog product so commerce
+// mappings can resolve the product's Store (ADR-0055: no unscoped rows).
+func seedR3Product(t *testing.T, pool *pgxpool.Pool, productID string) {
+	t.Helper()
+	if _, e := pool.Exec(context.Background(), `
+		WITH s AS (INSERT INTO stores (id, display_name, timezone) VALUES (gen_random_uuid(), 'R3', 'Africa/Cairo') RETURNING id),
+		d AS (INSERT INTO devices (id, name) VALUES (gen_random_uuid(), 'r3-device') RETURNING id),
+		b AS (INSERT INTO device_store_bindings (device_id, store_id) SELECT d.id, s.id FROM d, s RETURNING device_id, store_id),
+		e AS (INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, payload, payload_hash, store_id)
+			SELECT gen_random_uuid(), b.device_id, 'catalog.product.snapshot.v2', now(), '{}', '\x00', b.store_id FROM b
+			RETURNING event_id, device_id, store_id),
+		c AS (INSERT INTO catalog_categories (category_id, status, name_ar, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+			SELECT gen_random_uuid(), 'active', 'Root', 1, e.event_id, e.device_id, '\x00', now(), e.store_id FROM e
+			RETURNING category_id)
+		INSERT INTO catalog_products (product_id, name_ar, top_category_id, is_active, source_revision, source_event_id, source_device_id, source_payload_hash, source_received_at, store_id)
+		SELECT $1, 'R3', c.category_id, true, 1, e.event_id, e.device_id, '\x00', now(), e.store_id FROM c, e`, productID); e != nil {
+		t.Fatalf("seed product: %v", e)
+	}
+}
+
 func TestR3ProviderServiceErrorPrivacy(t *testing.T) {
 	for _, boundary := range []string{"frame_component_set", "bundle_create", "bundle_update", "bundle_operation", "MoonlightVariantPrices", "MoonlightMetafieldsSet", "MoonlightProduct"} {
 		for _, position := range []string{"beginning", "middle", "end"} {
@@ -859,6 +879,7 @@ func TestR3ProviderServiceErrorPrivacy(t *testing.T) {
 					t.Fatal(e)
 				}
 				req := upsertRequest("019c0000-0000-7000-8000-000000000071", "R3-PRIVACY", true)
+				seedR3Product(t, pool, req.ProductID)
 				req.Product.Configurations = []commerce.CommerceConfiguration{frameConfig("019c0000-0000-7000-8000-000000000072", "classic", "black", "Classic", "Black", 1000, nil, true)}
 				registry := commerce.NewRegistry()
 				if e = registry.Register(p.Key(), p); e != nil {
@@ -910,6 +931,7 @@ func TestR3MappingFailureAdoptsReceipt(t *testing.T) {
 	defer func() { pool.Close() }()
 	f := newBundleFixture(t)
 	req := upsertRequest("019c0000-0000-7000-8000-000000000081", "R3-MAP-FAULT", true)
+	seedR3Product(t, pool, req.ProductID)
 	req.Product.Configurations = []commerce.CommerceConfiguration{frameConfig("019c0000-0000-7000-8000-000000000082", "classic", "black", "Classic", "Black", 1000, nil, true)}
 	makeService := func() *commerce.CommerceService {
 		d := postgres.NewDevices(pool, 5*time.Second)
@@ -1009,6 +1031,12 @@ func TestR3ReceiptProcessHelper(t *testing.T) {
 }
 func TestR3ReceiptSurvivesSeparateProcesses(t *testing.T) {
 	database := testutil.Isolated(t)
+	seedPool, e := pgxpool.New(context.Background(), database)
+	if e != nil {
+		t.Fatal(e)
+	}
+	seedR3Product(t, seedPool, "019c0000-0000-7000-8000-000000000091")
+	seedPool.Close()
 	f := newBundleFixture(t)
 	f.mu.Lock()
 	f.pendingReads = 6

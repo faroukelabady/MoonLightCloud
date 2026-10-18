@@ -67,8 +67,7 @@ FROM (
            p.product_id, ''::text AS sku, p.name_ar AS name, p.store_id
     FROM commerce_product_mappings m
     JOIN catalog_products p ON p.product_id = m.product_id
-    WHERE m.store_id IS NOT NULL AND p.store_id IS NOT NULL
-      AND m.store_id <> p.store_id
+    WHERE m.store_id <> p.store_id
       AND ($2::text = '' OR m.provider_key = $2::text)
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
@@ -104,7 +103,7 @@ FROM (
                   WHERE o.product_id = v.product_id
                     AND o.combination_key = v.combination_key
                     AND o.variant_id <> v.variant_id
-                    AND o.store_id IS NOT DISTINCT FROM v.store_id
+                    AND o.store_id = v.store_id
                     AND NOT o.deleted)
       AND ($1::text = '' OR v.store_id = $1::uuid)
     UNION ALL
@@ -314,8 +313,7 @@ FROM (
     SELECT 'COMMERCE_STORE_CONFLICT'
     FROM commerce_product_mappings m
     JOIN catalog_products p ON p.product_id = m.product_id
-    WHERE m.store_id IS NOT NULL AND p.store_id IS NOT NULL
-      AND m.store_id <> p.store_id
+    WHERE m.store_id <> p.store_id
       AND ($2::text = '' OR m.provider_key = $2::text)
       AND ($1::text = '' OR p.store_id = $1::uuid)
     UNION ALL
@@ -389,7 +387,7 @@ FROM (
                   WHERE o.product_id = v.product_id
                     AND o.combination_key = v.combination_key
                     AND o.variant_id <> v.variant_id
-                    AND o.store_id IS NOT DISTINCT FROM v.store_id
+                    AND o.store_id = v.store_id
                     AND NOT o.deleted)
       AND ($1::text = '' OR v.store_id = $1::uuid)
     UNION ALL
