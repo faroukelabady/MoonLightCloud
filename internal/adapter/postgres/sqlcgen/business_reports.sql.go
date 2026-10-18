@@ -185,8 +185,8 @@ func (q *Queries) ClaimRun(ctx context.Context, arg ClaimRunParams) (ClaimRunRow
 
 const createRecipient = `-- name: CreateRecipient :one
 
-INSERT INTO business_report_recipients (id, label, provider_key, recipient, locale, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO notification_recipients (id, purpose, label, provider_key, recipient, locale, enabled)
+VALUES ($1, 'business_report', $2, $3, $4, $5, $6)
 RETURNING id
 `
 
@@ -549,8 +549,8 @@ func (q *Queries) GetManualRun(ctx context.Context, arg GetManualRunParams) (Get
 
 const getRecipient = `-- name: GetRecipient :one
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
-WHERE id = $1
+FROM notification_recipients
+WHERE id = $1 AND purpose = 'business_report'
 `
 
 type GetRecipientRow struct {
@@ -578,8 +578,8 @@ func (q *Queries) GetRecipient(ctx context.Context, id pgtype.UUID) (GetRecipien
 
 const getRecipientForUpdate = `-- name: GetRecipientForUpdate :one
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
-WHERE id = $1
+FROM notification_recipients
+WHERE id = $1 AND purpose = 'business_report'
 FOR UPDATE
 `
 
@@ -964,7 +964,8 @@ func (q *Queries) LinkScheduleRecipient(ctx context.Context, arg LinkScheduleRec
 
 const listRecipients = `-- name: ListRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
+FROM notification_recipients
+WHERE purpose = 'business_report'
 ORDER BY created_at, id
 `
 
@@ -1131,8 +1132,9 @@ func (q *Queries) ListRuns(ctx context.Context, limit int32) ([]ListRunsRow, err
 
 const listScheduleRecipients = `-- name: ListScheduleRecipients :many
 SELECT r.id, r.label, r.provider_key, r.recipient, r.locale, r.enabled
-FROM business_report_recipients AS r
-JOIN business_report_schedule_recipients AS link ON link.recipient_id = r.id
+FROM notification_recipients AS r
+JOIN business_report_schedule_recipients AS link
+  ON link.recipient_id = r.id AND link.recipient_purpose = r.purpose
 WHERE link.schedule_id = $1
 ORDER BY r.created_at, r.id
 `
@@ -1260,9 +1262,9 @@ func (q *Queries) PersistDeliverySnapshot(ctx context.Context, arg PersistDelive
 }
 
 const setRecipientEnabled = `-- name: SetRecipientEnabled :exec
-UPDATE business_report_recipients
+UPDATE notification_recipients
 SET enabled = $2, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND purpose = 'business_report'
 `
 
 type SetRecipientEnabledParams struct {

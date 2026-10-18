@@ -117,17 +117,6 @@ type BusinessReportDelivery struct {
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
 }
 
-type BusinessReportRecipient struct {
-	ID          pgtype.UUID        `json:"id"`
-	Label       string             `json:"label"`
-	ProviderKey string             `json:"provider_key"`
-	Recipient   string             `json:"recipient"`
-	Locale      string             `json:"locale"`
-	Enabled     bool               `json:"enabled"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type BusinessReportRun struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
@@ -165,9 +154,10 @@ type BusinessReportSchedule struct {
 }
 
 type BusinessReportScheduleRecipient struct {
-	ScheduleID  pgtype.UUID        `json:"schedule_id"`
-	RecipientID pgtype.UUID        `json:"recipient_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ScheduleID       pgtype.UUID        `json:"schedule_id"`
+	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	RecipientPurpose string             `json:"recipient_purpose"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type CatalogAdminCommand struct {
@@ -201,12 +191,6 @@ type CatalogAdminCommandTarget struct {
 	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-}
-
-type CatalogAdminDeviceCapability struct {
-	DeviceID               pgtype.UUID        `json:"device_id"`
-	CatalogAdminCommandsV1 bool               `json:"catalog_admin_commands_v1"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CatalogCategory struct {
@@ -610,6 +594,12 @@ type Device struct {
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 }
 
+type DeviceCapability struct {
+	DeviceID   pgtype.UUID        `json:"device_id"`
+	Capability string             `json:"capability"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DeviceControlCommand struct {
 	ID              pgtype.UUID        `json:"id"`
 	DeviceID        pgtype.UUID        `json:"device_id"`
@@ -631,7 +621,6 @@ type DeviceControlCommand struct {
 
 type DeviceControlPresence struct {
 	DeviceID              pgtype.UUID        `json:"device_id"`
-	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
 	LastPollAt            pgtype.Timestamptz `json:"last_poll_at"`
 	LastCommandAcceptedAt pgtype.Timestamptz `json:"last_command_accepted_at"`
 	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
@@ -713,6 +702,18 @@ type NotificationMessage struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type NotificationRecipient struct {
+	ID          pgtype.UUID        `json:"id"`
+	Purpose     string             `json:"purpose"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationTemplateMapping struct {
 	ProviderKey          string             `json:"provider_key"`
 	TemplateKey          string             `json:"template_key"`
@@ -742,17 +743,6 @@ type OperationalAlertDelivery struct {
 	LastErrorCode              pgtype.Text        `json:"last_error_code"`
 	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
-}
-
-type OperationalAlertRecipient struct {
-	ID          pgtype.UUID        `json:"id"`
-	Label       string             `json:"label"`
-	ProviderKey string             `json:"provider_key"`
-	Recipient   string             `json:"recipient"`
-	Locale      string             `json:"locale"`
-	Enabled     bool               `json:"enabled"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OperationalIncident struct {

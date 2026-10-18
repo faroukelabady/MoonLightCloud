@@ -286,8 +286,8 @@ func (q *Queries) CreateAlertDeliveryIdempotent(ctx context.Context, arg CreateA
 
 const createAlertRecipient = `-- name: CreateAlertRecipient :one
 
-INSERT INTO operational_alert_recipients (id, label, provider_key, recipient, locale, enabled, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, TRUE, $6, $6)
+INSERT INTO notification_recipients (id, purpose, label, provider_key, recipient, locale, enabled, created_at, updated_at)
+VALUES ($1, 'operational_alert', $2, $3, $4, $5, TRUE, $6, $6)
 RETURNING id, label, provider_key, recipient, locale, enabled, created_at, updated_at
 `
 
@@ -300,8 +300,19 @@ type CreateAlertRecipientParams struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CreateAlertRecipientRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Phase 7D operational incidents, alert deliveries, recovery actions.
-func (q *Queries) CreateAlertRecipient(ctx context.Context, arg CreateAlertRecipientParams) (OperationalAlertRecipient, error) {
+func (q *Queries) CreateAlertRecipient(ctx context.Context, arg CreateAlertRecipientParams) (CreateAlertRecipientRow, error) {
 	row := q.db.QueryRow(ctx, createAlertRecipient,
 		arg.ID,
 		arg.Label,
@@ -310,7 +321,7 @@ func (q *Queries) CreateAlertRecipient(ctx context.Context, arg CreateAlertRecip
 		arg.Locale,
 		arg.CreatedAt,
 	)
-	var i OperationalAlertRecipient
+	var i CreateAlertRecipientRow
 	err := row.Scan(
 		&i.ID,
 		&i.Label,
@@ -367,7 +378,8 @@ func (q *Queries) CreateRecoveryAction(ctx context.Context, arg CreateRecoveryAc
 }
 
 const disableAlertRecipient = `-- name: DisableAlertRecipient :execrows
-UPDATE operational_alert_recipients SET enabled = FALSE, updated_at = $2 WHERE id = $1 AND enabled
+UPDATE notification_recipients SET enabled = FALSE, updated_at = $2
+WHERE id = $1 AND purpose = 'operational_alert' AND enabled
 `
 
 type DisableAlertRecipientParams struct {
@@ -741,19 +753,31 @@ func (q *Queries) ListActiveByRule(ctx context.Context, arg ListActiveByRulePara
 
 const listAlertRecipients = `-- name: ListAlertRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled, created_at, updated_at
-FROM operational_alert_recipients
+FROM notification_recipients
+WHERE purpose = 'operational_alert'
 ORDER BY created_at, id
 `
 
-func (q *Queries) ListAlertRecipients(ctx context.Context) ([]OperationalAlertRecipient, error) {
+type ListAlertRecipientsRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAlertRecipients(ctx context.Context) ([]ListAlertRecipientsRow, error) {
 	rows, err := q.db.Query(ctx, listAlertRecipients)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []OperationalAlertRecipient{}
+	items := []ListAlertRecipientsRow{}
 	for rows.Next() {
-		var i OperationalAlertRecipient
+		var i ListAlertRecipientsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Label,
@@ -847,20 +871,31 @@ func (q *Queries) ListDeliveriesForIncident(ctx context.Context, incidentID pgty
 
 const listEnabledAlertRecipients = `-- name: ListEnabledAlertRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled, created_at, updated_at
-FROM operational_alert_recipients
-WHERE enabled
+FROM notification_recipients
+WHERE purpose = 'operational_alert' AND enabled
 ORDER BY created_at, id
 `
 
-func (q *Queries) ListEnabledAlertRecipients(ctx context.Context) ([]OperationalAlertRecipient, error) {
+type ListEnabledAlertRecipientsRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Label       string             `json:"label"`
+	ProviderKey string             `json:"provider_key"`
+	Recipient   string             `json:"recipient"`
+	Locale      string             `json:"locale"`
+	Enabled     bool               `json:"enabled"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListEnabledAlertRecipients(ctx context.Context) ([]ListEnabledAlertRecipientsRow, error) {
 	rows, err := q.db.Query(ctx, listEnabledAlertRecipients)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []OperationalAlertRecipient{}
+	items := []ListEnabledAlertRecipientsRow{}
 	for rows.Next() {
-		var i OperationalAlertRecipient
+		var i ListEnabledAlertRecipientsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Label,
@@ -1247,9 +1282,10 @@ func (q *Queries) OpenIncident(ctx context.Context, arg OpenIncidentParams) (Ope
 }
 
 const opsPresence = `-- name: OpsPresence :one
-SELECT last_seen_at
-FROM device_control_presence
-WHERE device_id = $1
+SELECT d.last_seen_at
+FROM device_control_presence p
+JOIN devices d ON d.id = p.device_id
+WHERE p.device_id = $1
 `
 
 func (q *Queries) OpsPresence(ctx context.Context, deviceID pgtype.UUID) (pgtype.Timestamptz, error) {
@@ -1308,7 +1344,8 @@ SET state = 'resolved', resolved_at = $3, resolution_code = $4, updated_at = $3
 WHERE i.id = $1 AND i.state IN ('open', 'acknowledged')
   AND NOT EXISTS (
     SELECT 1 FROM device_control_presence p
-    WHERE p.device_id = i.subject_id::uuid AND p.last_seen_at <= $2)
+    JOIN devices d ON d.id = p.device_id
+    WHERE p.device_id = i.subject_id::uuid AND d.last_seen_at <= $2)
 RETURNING id, rule_key, subject_type, subject_id, severity, state, episode, source_event_key,
     opened_at, last_observed_at, acknowledged_at, resolved_at, resolution_code, created_at, updated_at, open_intent_materialized, resolved_intent_materialized
 `
@@ -1688,17 +1725,17 @@ func (q *Queries) ScanFailedCommands(ctx context.Context, limit int32) ([]ScanFa
 
 const scanOfflineDevices = `-- name: ScanOfflineDevices :many
 
-SELECT d.id, d.name, d.status, p.last_seen_at
+SELECT d.id, d.name, d.status, d.last_seen_at
 FROM devices d
 JOIN device_control_presence p ON p.device_id = d.id
 WHERE d.status = 'active'
-  AND p.last_seen_at IS NOT NULL
-  AND p.last_seen_at < $1
+  AND d.last_seen_at IS NOT NULL
+  AND d.last_seen_at < $1
   AND NOT EXISTS (
     SELECT 1 FROM operational_incidents i
     WHERE i.rule_key = 'DEVICE_OFFLINE' AND i.subject_type = 'device'
       AND i.subject_id = d.id::text AND i.state IN ('open', 'acknowledged'))
-ORDER BY p.last_seen_at, d.id
+ORDER BY d.last_seen_at, d.id
 LIMIT $2
 `
 

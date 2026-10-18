@@ -36,8 +36,9 @@ func TestResolveRaceSingleDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := opsSeedDevice(t, pool, "h01-dev")
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	// Open the incident once (first detector wins the open race too).
@@ -178,8 +179,9 @@ func TestAckVsResolveRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := opsSeedDevice(t, pool, "ackrace-dev")
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	mkDetector := func() (*operations.Detector, *operations.Metrics) {
@@ -261,8 +263,9 @@ func TestFastOpenResolveSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := opsSeedDevice(t, pool, "fast-dev")
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	metrics := operations.NewMetrics()
@@ -364,8 +367,9 @@ func TestDetectorResolveStarvationBounded(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		dev := opsSeedDevice(t, pool, "m02r-dev")
 		devs = append(devs, dev)
-		if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-			VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+		if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+			VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -609,8 +613,9 @@ func TestDetectorScanPlansIndexed(t *testing.T) {
 	ctx := context.Background()
 	svc := opsService(store)
 	dev := opsSeedDevice(t, pool, "plan-dev")
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3000; i++ {
@@ -739,8 +744,9 @@ func TestManualResolveRaceGuarded(t *testing.T) {
 			ctx := context.Background()
 			svc := opsService(store)
 			dev := opsSeedDevice(t, pool, "guard-race-dev")
-			if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-				VALUES ($1, now(), now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
+			if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+				VALUES ($1, now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
 				t.Fatal(err)
 			}
 			opened, _, err := svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
@@ -785,7 +791,7 @@ func TestManualResolveRaceGuarded(t *testing.T) {
 			if !tc.flipFresh {
 				flipAgo = 10 * time.Minute
 			}
-			if _, err := pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = $1 WHERE device_id = $2`,
+			if _, err := pool.Exec(ctx, `UPDATE devices SET last_seen_at = $1 WHERE id = $2`,
 				time.Now().UTC().Add(-flipAgo), mustOpsUUID(t, dev)); err != nil {
 				t.Fatal(err)
 			}
@@ -814,8 +820,9 @@ func TestManualResolveConcurrentPair(t *testing.T) {
 	ctx := context.Background()
 	svc := opsService(store)
 	dev := opsSeedDevice(t, pool, "guard-pair-dev")
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now(), now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now(), now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	opened, _, err := svc.OpenStateful(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")

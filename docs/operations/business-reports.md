@@ -170,7 +170,7 @@ instead. Stale completions are safe no-ops, never errors.
 
 ## Backup requirements
 
-`business_report_recipients`, `business_report_schedules`,
+`notification_recipients` (purpose `business_report`), `business_report_schedules`,
 `business_report_schedule_recipients`, `business_report_runs`, and
 `business_report_deliveries` are durable backup-required business
 state. No rebuild path deletes them; no retention purge exists.

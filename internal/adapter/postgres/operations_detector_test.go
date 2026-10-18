@@ -151,7 +151,7 @@ func TestDetectorOfflineLifecycle(t *testing.T) {
 	}
 	// Note: TouchSeen is monotonic GREATEST — an older touch cannot move
 	// last_seen backwards. Age directly instead.
-	if _, err := env.pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = now() - interval '10 minutes', last_poll_at = now() - interval '10 minutes' WHERE device_id = $1`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1) UPDATE device_control_presence SET last_poll_at = now() - interval '10 minutes' WHERE device_id = $1`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -173,7 +173,7 @@ func TestDetectorOfflineLifecycle(t *testing.T) {
 		t.Fatal("healing disabled: no recovery action")
 	}
 	// Recurrence → episode 2.
-	if _, err := env.pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = now() - interval '10 minutes' WHERE device_id = $1`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -197,8 +197,9 @@ func TestDetectorRevokedResolves(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "rev-dev")
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -366,8 +367,9 @@ func TestDetectorReconnectHealing(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "heal-dev")
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -413,8 +415,9 @@ func TestDetectorReconnectSatisfied(t *testing.T) {
 	ctx := context.Background()
 	dev := env.device(t, "sat-dev")
 	env.command.active[dev] = "manual-cmd-id"
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -444,8 +447,9 @@ func TestDetectorFailedAutoNoRecursion(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "failauto-dev")
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -488,8 +492,9 @@ func TestDetectorAckResolveRace(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
 	dev := env.device(t, "race-dev")
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)
@@ -518,8 +523,9 @@ func TestDetectorManualResolveConflict(t *testing.T) {
 	env := newOpsDetectorEnv(t, false)
 	ctx := context.Background()
 	dev := env.device(t, "man-dev")
-	if _, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
+	if _, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
 		t.Fatal(err)
 	}
 	env.scan(t)

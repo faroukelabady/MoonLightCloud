@@ -113,5 +113,13 @@ on all money-bearing documents.
   `currency`, which is now checked to be EGP or USD. The wire payloads are
   unchanged; validation already rejects any money whose currency differs from
   the header.
+- Baseline 00107 (step 2e) merges business-report and operational-alert
+  recipients into `notification_recipients` with a `purpose`; a report
+  schedule can only link a `business_report` recipient (composite foreign
+  key). Device capabilities are rows in `device_capabilities`.
+  `device_control_presence.last_seen_at` is removed: control contact advances
+  `devices.last_seen_at` monotonically and presence/offline reads use it.
+  As a result any authenticated request (a sync upload too) now counts as
+  contact for offline detection, not only control-plane polls.
 - Remaining model steps are tracked in the paired Retail baseline plan;
   this checkpoint does not claim that the whole plan is complete.

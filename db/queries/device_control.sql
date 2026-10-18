@@ -1,10 +1,15 @@
 -- Phase 7C device control plane: presence + durable sync_now commands.
 
+-- Control contact also advances devices.last_seen_at monotonically: the
+-- device row is the one last-contact time (ADR-0055 step 2e).
 -- name: UpsertPresenceSeen :exec
-INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $4)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, @seen_at::timestamptz), @seen_at::timestamptz)
+    WHERE id = @device_id::uuid
+)
+INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+VALUES (@device_id::uuid, sqlc.narg(last_poll_at)::timestamptz, @seen_at::timestamptz, @seen_at::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_poll_at = CASE
         WHEN EXCLUDED.last_poll_at IS NULL THEN device_control_presence.last_poll_at
         ELSE GREATEST(COALESCE(device_control_presence.last_poll_at, EXCLUDED.last_poll_at), EXCLUDED.last_poll_at)
@@ -12,32 +17,40 @@ ON CONFLICT (device_id) DO UPDATE SET
     updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
 -- name: UpsertPresenceAccepted :exec
-INSERT INTO device_control_presence (device_id, last_seen_at, last_command_accepted_at, created_at, updated_at)
-VALUES ($1, $2, $2, $2, $2)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, @seen_at::timestamptz), @seen_at::timestamptz)
+    WHERE id = @device_id::uuid
+)
+INSERT INTO device_control_presence (device_id, last_command_accepted_at, created_at, updated_at)
+VALUES (@device_id::uuid, @seen_at::timestamptz, @seen_at::timestamptz, @seen_at::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_command_accepted_at = EXCLUDED.last_command_accepted_at,
     updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
 -- name: UpsertPresenceFinished :exec
-INSERT INTO device_control_presence (device_id, last_seen_at, last_command_finished_at, created_at, updated_at)
-VALUES ($1, $2, $2, $2, $2)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, @seen_at::timestamptz), @seen_at::timestamptz)
+    WHERE id = @device_id::uuid
+)
+INSERT INTO device_control_presence (device_id, last_command_finished_at, created_at, updated_at)
+VALUES (@device_id::uuid, @seen_at::timestamptz, @seen_at::timestamptz, @seen_at::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_command_finished_at = EXCLUDED.last_command_finished_at,
     updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at);
 
 -- name: GetPresence :one
-SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
-    last_command_finished_at, created_at, updated_at
-FROM device_control_presence
-WHERE device_id = $1;
+SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, p.created_at, p.updated_at
+FROM device_control_presence p
+JOIN devices d ON d.id = p.device_id
+WHERE p.device_id = $1;
 
 -- name: ListPresence :many
-SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
-    last_command_finished_at, created_at, updated_at
-FROM device_control_presence
-ORDER BY device_id;
+SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, p.created_at, p.updated_at
+FROM device_control_presence p
+JOIN devices d ON d.id = p.device_id
+ORDER BY p.device_id;
 
 -- name: CreateControlCommand :one
 INSERT INTO device_control_commands (id, device_id, command_type, command_version, idempotency_key, status, requested_at, created_at, updated_at)

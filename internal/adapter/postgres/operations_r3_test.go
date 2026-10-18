@@ -35,8 +35,9 @@ func r3ManualIncident(t *testing.T, store Devices, pool *pgxpool.Pool, event, st
 	if stale {
 		seen = seen.Add(-10 * time.Minute)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO device_control_presence (device_id,last_seen_at,last_poll_at,created_at,updated_at)
-		VALUES ($1,$2,$2,now(),now())`, mustOpsUUID(t, dev), seen); err != nil {
+	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = $2 WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, $2, now(), now())`, mustOpsUUID(t, dev), seen); err != nil {
 		t.Fatal(err)
 	}
 	incident, created, err := opsService(store).OpenStatefulAtomic(ctx, ids.System{}.New(), operations.RuleDeviceOffline,
@@ -273,8 +274,9 @@ func TestR3RevocationWinsBeforeLifecycleDecision(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "r3-revoke-first")
-	_, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id,last_seen_at,last_poll_at,created_at,updated_at)
-		VALUES ($1,now()-interval '10 minutes',now(),now(),now())`, mustOpsUUID(t, dev))
+	_, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now()-interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now(), now(), now())`, mustOpsUUID(t, dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,8 +322,9 @@ func TestR3RevokedWithFreshPresenceNeverHeals(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "r3-revoked-fresh")
-	_, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id,last_seen_at,last_poll_at,created_at,updated_at)
-		VALUES ($1,now()-interval '10 minutes',now(),now(),now())`, mustOpsUUID(t, dev))
+	_, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now()-interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now(), now(), now())`, mustOpsUUID(t, dev))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +357,9 @@ func TestR3ReconnectDecisionPrecedesRevocation(t *testing.T) {
 	env := newOpsDetectorEnv(t, true)
 	ctx := context.Background()
 	dev := env.device(t, "r3-resolve-first")
-	_, err := env.pool.Exec(ctx, `INSERT INTO device_control_presence (device_id,last_seen_at,last_poll_at,created_at,updated_at)
-		VALUES ($1,now()-interval '10 minutes',now(),now(),now())`, mustOpsUUID(t, dev))
+	_, err := env.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now()-interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now(), now(), now())`, mustOpsUUID(t, dev))
 	if err != nil {
 		t.Fatal(err)
 	}

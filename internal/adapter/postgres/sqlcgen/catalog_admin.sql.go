@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addDeviceCapability = `-- name: AddDeviceCapability :exec
+INSERT INTO device_capabilities (device_id, capability, updated_at)
+VALUES ($1::uuid, $2::text, now())
+ON CONFLICT (device_id, capability) DO UPDATE SET updated_at = now()
+`
+
+type AddDeviceCapabilityParams struct {
+	DeviceID   pgtype.UUID `json:"device_id"`
+	Capability string      `json:"capability"`
+}
+
+func (q *Queries) AddDeviceCapability(ctx context.Context, arg AddDeviceCapabilityParams) error {
+	_, err := q.db.Exec(ctx, addDeviceCapability, arg.DeviceID, arg.Capability)
+	return err
+}
+
 const adminCategoryList = `-- name: AdminCategoryList :many
 SELECT c.category_id, c.name_ar, c.name_en, c.status, c.online_enabled,
     c.source_revision AS catalog_revision,
@@ -941,10 +957,11 @@ func (q *Queries) CancelPendingCatalogAdminTargets(ctx context.Context, commandI
 const catalogAdminDeviceStates = `-- name: CatalogAdminDeviceStates :many
 SELECT d.id, d.name, d.status,
        b.store_id,
-       COALESCE(cap.catalog_admin_commands_v1, FALSE) AS catalog_admin_commands_v1
+       (cap.device_id IS NOT NULL)::bool AS catalog_admin_commands_v1
 FROM devices d
 LEFT JOIN device_store_bindings b ON b.device_id = d.id
-LEFT JOIN catalog_admin_device_capabilities cap ON cap.device_id = d.id
+LEFT JOIN device_capabilities cap
+  ON cap.device_id = d.id AND cap.capability = 'catalog_admin_commands_v1'
 WHERE d.id = ANY($1::uuid[])
 `
 
@@ -1217,19 +1234,6 @@ func (q *Queries) FinishCatalogAdminTarget(ctx context.Context, arg FinishCatalo
 	return i, err
 }
 
-const getCatalogAdminCapability = `-- name: GetCatalogAdminCapability :one
-SELECT device_id, catalog_admin_commands_v1, updated_at
-FROM catalog_admin_device_capabilities
-WHERE device_id = $1::uuid
-`
-
-func (q *Queries) GetCatalogAdminCapability(ctx context.Context, deviceID pgtype.UUID) (CatalogAdminDeviceCapability, error) {
-	row := q.db.QueryRow(ctx, getCatalogAdminCapability, deviceID)
-	var i CatalogAdminDeviceCapability
-	err := row.Scan(&i.DeviceID, &i.CatalogAdminCommandsV1, &i.UpdatedAt)
-	return i, err
-}
-
 const getCatalogAdminCommand = `-- name: GetCatalogAdminCommand :one
 SELECT id, store_id, command_type, command_version, entity_id, target_kind, requested_key, result_entity_id, payload, payload_hash,
     expected_revision, actor, status, created_at, updated_at
@@ -1276,6 +1280,25 @@ func (q *Queries) GetCatalogAdminCommand(ctx context.Context, id pgtype.UUID) (G
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const hasDeviceCapability = `-- name: HasDeviceCapability :one
+SELECT EXISTS (
+    SELECT 1 FROM device_capabilities
+    WHERE device_id = $1::uuid AND capability = $2::text
+)::bool
+`
+
+type HasDeviceCapabilityParams struct {
+	DeviceID   pgtype.UUID `json:"device_id"`
+	Capability string      `json:"capability"`
+}
+
+func (q *Queries) HasDeviceCapability(ctx context.Context, arg HasDeviceCapabilityParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasDeviceCapability, arg.DeviceID, arg.Capability)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const listCatalogAdminCommands = `-- name: ListCatalogAdminCommands :many
@@ -1501,6 +1524,21 @@ func (q *Queries) MarkCatalogAdminTargetDelivered(ctx context.Context, arg MarkC
 	return i, err
 }
 
+const removeDeviceCapability = `-- name: RemoveDeviceCapability :exec
+DELETE FROM device_capabilities
+WHERE device_id = $1::uuid AND capability = $2::text
+`
+
+type RemoveDeviceCapabilityParams struct {
+	DeviceID   pgtype.UUID `json:"device_id"`
+	Capability string      `json:"capability"`
+}
+
+func (q *Queries) RemoveDeviceCapability(ctx context.Context, arg RemoveDeviceCapabilityParams) error {
+	_, err := q.db.Exec(ctx, removeDeviceCapability, arg.DeviceID, arg.Capability)
+	return err
+}
+
 const setCommandResultEntity = `-- name: SetCommandResultEntity :execrows
 UPDATE catalog_admin_commands
 SET result_entity_id = $1::text, updated_at = now()
@@ -1524,24 +1562,4 @@ func (q *Queries) SetCommandResultEntity(ctx context.Context, arg SetCommandResu
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const upsertCatalogAdminCapability = `-- name: UpsertCatalogAdminCapability :one
-INSERT INTO catalog_admin_device_capabilities (device_id, catalog_admin_commands_v1, updated_at)
-VALUES ($1::uuid, $2::bool, now())
-ON CONFLICT (device_id) DO UPDATE
-SET catalog_admin_commands_v1 = EXCLUDED.catalog_admin_commands_v1, updated_at = now()
-RETURNING device_id, catalog_admin_commands_v1, updated_at
-`
-
-type UpsertCatalogAdminCapabilityParams struct {
-	DeviceID pgtype.UUID `json:"device_id"`
-	Capable  bool        `json:"capable"`
-}
-
-func (q *Queries) UpsertCatalogAdminCapability(ctx context.Context, arg UpsertCatalogAdminCapabilityParams) (CatalogAdminDeviceCapability, error) {
-	row := q.db.QueryRow(ctx, upsertCatalogAdminCapability, arg.DeviceID, arg.Capable)
-	var i CatalogAdminDeviceCapability
-	err := row.Scan(&i.DeviceID, &i.CatalogAdminCommandsV1, &i.UpdatedAt)
-	return i, err
 }

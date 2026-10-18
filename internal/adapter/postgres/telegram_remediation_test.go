@@ -53,12 +53,12 @@ func TestTelegramR1RecipientCLI(t *testing.T) {
 			if bytes.Contains(output, []byte(address)) {
 				t.Fatal("CLI exposed full recipient")
 			}
-			table := "operational_alert_recipients"
+			purpose := "operational_alert"
 			if surface == "business-reports" {
-				table = "business_report_recipients"
+				purpose = "business_report"
 			}
 			var count int
-			if err := env.pool.QueryRow(context.Background(), "SELECT count(*) FROM "+table+" WHERE label=$1 AND recipient=$2", label, address).Scan(&count); err != nil {
+			if err := env.pool.QueryRow(context.Background(), "SELECT count(*) FROM notification_recipients WHERE purpose=$1 AND label=$2 AND recipient=$3", purpose, label, address).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			want := 0
@@ -334,8 +334,8 @@ func TestTelegramR1UsernamePersistence(t *testing.T) {
 	if err = env.pool.QueryRow(ctx, `SELECT recipient FROM notification_messages WHERE id=$1`, id).Scan(&stored); err != nil || stored != username {
 		t.Fatal("queue truncated username", err)
 	}
-	for _, row := range []struct{ table, id string }{{"business_report_recipients", recipient.ID}, {"operational_alert_recipients", alertRecipient.ID}} {
-		if err = env.pool.QueryRow(ctx, `SELECT recipient FROM `+row.table+` WHERE id=$1`, row.id).Scan(&stored); err != nil || stored != username {
+	for _, id := range []string{recipient.ID, alertRecipient.ID} {
+		if err = env.pool.QueryRow(ctx, `SELECT recipient FROM notification_recipients WHERE id=$1`, id).Scan(&stored); err != nil || stored != username {
 			t.Fatal("administration changed username", err)
 		}
 	}

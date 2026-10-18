@@ -492,7 +492,7 @@ func TestControlTerminalReplayRefreshesPresence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = $2, updated_at = $2 WHERE device_id = $1`,
+	if _, err := store.pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = $2 WHERE id = $1) UPDATE device_control_presence SET updated_at = $2 WHERE device_id = $1`,
 		uid, pgTime(old)); err != nil {
 		t.Fatal(err)
 	}

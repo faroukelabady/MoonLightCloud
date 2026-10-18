@@ -41,7 +41,7 @@ func toOpsIncident(r sqlcgen.OperationalIncident) operations.Incident {
 	return in
 }
 
-func toOpsRecipient(r sqlcgen.OperationalAlertRecipient) operations.Recipient {
+func toOpsRecipient(r sqlcgen.CreateAlertRecipientRow) operations.Recipient {
 	return operations.Recipient{
 		ID: uuidString(r.ID), Label: r.Label, ProviderKey: r.ProviderKey,
 		Recipient: r.Recipient, Locale: r.Locale, Enabled: r.Enabled,
@@ -99,7 +99,7 @@ func (d Devices) ListOpsRecipients(ctx context.Context) ([]operations.Recipient,
 	}
 	out := make([]operations.Recipient, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, toOpsRecipient(r))
+		out = append(out, toOpsRecipient(sqlcgen.CreateAlertRecipientRow(r)))
 	}
 	return out, nil
 }
@@ -114,7 +114,7 @@ func (d Devices) ListEnabledOpsRecipients(ctx context.Context) ([]operations.Rec
 	}
 	out := make([]operations.Recipient, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, toOpsRecipient(r))
+		out = append(out, toOpsRecipient(sqlcgen.CreateAlertRecipientRow(r)))
 	}
 	return out, nil
 }

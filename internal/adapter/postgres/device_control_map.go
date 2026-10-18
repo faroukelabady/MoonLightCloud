@@ -40,7 +40,7 @@ func toCommand(row sqlcgen.DeviceControlCommand) devicecontrol.Command {
 	return cmd
 }
 
-func toPresence(row sqlcgen.DeviceControlPresence) devicecontrol.Presence {
+func toPresence(row sqlcgen.GetPresenceRow) devicecontrol.Presence {
 	p := devicecontrol.Presence{DeviceID: uuidString(row.DeviceID)}
 	if row.LastSeenAt.Valid {
 		t := row.LastSeenAt.Time.UTC()

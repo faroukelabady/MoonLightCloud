@@ -3,30 +3,31 @@
 -- :exec drops trailing statements silently.
 
 -- name: CreateRecipient :one
-INSERT INTO business_report_recipients (id, label, provider_key, recipient, locale, enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO notification_recipients (id, purpose, label, provider_key, recipient, locale, enabled)
+VALUES ($1, 'business_report', $2, $3, $4, $5, $6)
 RETURNING id;
 
 -- name: GetRecipient :one
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
-WHERE id = $1;
+FROM notification_recipients
+WHERE id = $1 AND purpose = 'business_report';
 
 -- name: GetRecipientForUpdate :one
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
-WHERE id = $1
+FROM notification_recipients
+WHERE id = $1 AND purpose = 'business_report'
 FOR UPDATE;
 
 -- name: ListRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled
-FROM business_report_recipients
+FROM notification_recipients
+WHERE purpose = 'business_report'
 ORDER BY created_at, id;
 
 -- name: SetRecipientEnabled :exec
-UPDATE business_report_recipients
+UPDATE notification_recipients
 SET enabled = $2, updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND purpose = 'business_report';
 
 -- name: CreateSchedule :exec
 INSERT INTO business_report_schedules (
@@ -93,8 +94,9 @@ ON CONFLICT DO NOTHING;
 
 -- name: ListScheduleRecipients :many
 SELECT r.id, r.label, r.provider_key, r.recipient, r.locale, r.enabled
-FROM business_report_recipients AS r
-JOIN business_report_schedule_recipients AS link ON link.recipient_id = r.id
+FROM notification_recipients AS r
+JOIN business_report_schedule_recipients AS link
+  ON link.recipient_id = r.id AND link.recipient_purpose = r.purpose
 WHERE link.schedule_id = $1
 ORDER BY r.created_at, r.id;
 

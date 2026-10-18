@@ -852,7 +852,7 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 	}
 	// Address-only change conflicts.
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET recipient = '201099988877', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET recipient = '201099988877', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -860,13 +860,13 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 		t.Fatal("address change must conflict")
 	}
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET recipient = '201012345678', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET recipient = '201012345678', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
 	// Provider change conflicts.
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET provider_key = 'whatsapp-second', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET provider_key = 'whatsapp-second', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -874,13 +874,13 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 		t.Fatal("provider change must conflict")
 	}
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET provider_key = 'whatsapp-main', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET provider_key = 'whatsapp-main', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
 	// Locale change conflicts.
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET locale = 'en', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET locale = 'en', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -888,13 +888,13 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 		t.Fatal("locale change must conflict")
 	}
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET locale = 'ar', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET locale = 'ar', updated_at = now() WHERE id = $1`,
 		mustReportPgID(ar.ID)); err != nil {
 		t.Fatal(err)
 	}
 	// Recipient removal conflicts.
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET enabled = FALSE, updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET enabled = FALSE, updated_at = now() WHERE id = $1`,
 		mustReportPgID(en.ID)); err != nil {
 		t.Fatal(err)
 	}
@@ -902,13 +902,13 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 		t.Fatal("recipient removal must conflict")
 	}
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET enabled = TRUE, updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET enabled = TRUE, updated_at = now() WHERE id = $1`,
 		mustReportPgID(en.ID)); err != nil {
 		t.Fatal(err)
 	}
 	// Change only the label: same run.
 	if _, err := env.pool.Exec(ctx,
-		`UPDATE business_report_recipients SET label = 'renamed', updated_at = now() WHERE id = $1`,
+		`UPDATE notification_recipients SET label = 'renamed', updated_at = now() WHERE id = $1`,
 		mustReportPgID(en.ID)); err != nil {
 		t.Fatal(err)
 	}

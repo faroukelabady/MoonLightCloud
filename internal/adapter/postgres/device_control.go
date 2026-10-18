@@ -28,7 +28,7 @@ func (d Devices) TouchSeen(ctx context.Context, deviceID string, at time.Time, i
 		poll = pgTime(at)
 	}
 	if err := sqlcgen.New(d.pool).UpsertPresenceSeen(ctx, sqlcgen.UpsertPresenceSeenParams{
-		DeviceID: uid, LastSeenAt: pgTime(at), LastPollAt: poll, CreatedAt: pgTime(at),
+		DeviceID: uid, SeenAt: pgTime(at), LastPollAt: poll,
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
@@ -45,7 +45,7 @@ func (d Devices) TouchAccepted(ctx context.Context, deviceID string, at time.Tim
 		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 	}
 	if err := sqlcgen.New(d.pool).UpsertPresenceAccepted(ctx, sqlcgen.UpsertPresenceAcceptedParams{
-		DeviceID: uid, LastSeenAt: pgTime(at.UTC()),
+		DeviceID: uid, SeenAt: pgTime(at.UTC()),
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
@@ -62,7 +62,7 @@ func (d Devices) TouchFinished(ctx context.Context, deviceID string, at time.Tim
 		return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 	}
 	if err := sqlcgen.New(d.pool).UpsertPresenceFinished(ctx, sqlcgen.UpsertPresenceFinishedParams{
-		DeviceID: uid, LastSeenAt: pgTime(at.UTC()),
+		DeviceID: uid, SeenAt: pgTime(at.UTC()),
 	}); err != nil {
 		return apperr.Wrap(apperr.Internal, "touch presence", redact(err))
 	}
@@ -97,7 +97,7 @@ func (d Devices) ListPresence(ctx context.Context) ([]devicecontrol.Presence, er
 	}
 	out := make([]devicecontrol.Presence, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, toPresence(sqlcgen.DeviceControlPresence(r)))
+		out = append(out, toPresence(sqlcgen.GetPresenceRow(r)))
 	}
 	return out, nil
 }

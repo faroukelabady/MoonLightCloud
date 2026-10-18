@@ -88,17 +88,20 @@ UPDATE catalog_admin_command_targets
 SET status = 'CANCELLED', updated_at = now()
 WHERE command_id = @command_id::uuid AND status IN ('PENDING','DELIVERED');
 
--- name: UpsertCatalogAdminCapability :one
-INSERT INTO catalog_admin_device_capabilities (device_id, catalog_admin_commands_v1, updated_at)
-VALUES (@device_id::uuid, @capable::bool, now())
-ON CONFLICT (device_id) DO UPDATE
-SET catalog_admin_commands_v1 = EXCLUDED.catalog_admin_commands_v1, updated_at = now()
-RETURNING device_id, catalog_admin_commands_v1, updated_at;
+-- name: AddDeviceCapability :exec
+INSERT INTO device_capabilities (device_id, capability, updated_at)
+VALUES (@device_id::uuid, @capability::text, now())
+ON CONFLICT (device_id, capability) DO UPDATE SET updated_at = now();
 
--- name: GetCatalogAdminCapability :one
-SELECT device_id, catalog_admin_commands_v1, updated_at
-FROM catalog_admin_device_capabilities
-WHERE device_id = @device_id::uuid;
+-- name: RemoveDeviceCapability :exec
+DELETE FROM device_capabilities
+WHERE device_id = @device_id::uuid AND capability = @capability::text;
+
+-- name: HasDeviceCapability :one
+SELECT EXISTS (
+    SELECT 1 FROM device_capabilities
+    WHERE device_id = @device_id::uuid AND capability = @capability::text
+)::bool;
 
 -- name: ListStoreBoundDevices :many
 SELECT b.device_id, d.name
@@ -374,8 +377,9 @@ WHERE id IN (SELECT command_id FROM catalog_admin_command_targets WHERE id = @ta
 -- name: CatalogAdminDeviceStates :many
 SELECT d.id, d.name, d.status,
        b.store_id,
-       COALESCE(cap.catalog_admin_commands_v1, FALSE) AS catalog_admin_commands_v1
+       (cap.device_id IS NOT NULL)::bool AS catalog_admin_commands_v1
 FROM devices d
 LEFT JOIN device_store_bindings b ON b.device_id = d.id
-LEFT JOIN catalog_admin_device_capabilities cap ON cap.device_id = d.id
+LEFT JOIN device_capabilities cap
+  ON cap.device_id = d.id AND cap.capability = 'catalog_admin_commands_v1'
 WHERE d.id = ANY(@device_ids::uuid[]);

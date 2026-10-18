@@ -153,7 +153,7 @@ exhausted transient retries — capped at 10, then operator decides).
 
 ## Backup requirements
 
-`operational_alert_recipients`, `operational_incidents`,
+`notification_recipients` (purpose `operational_alert`), `operational_incidents`,
 `operational_alert_deliveries`, and `operational_recovery_actions` are
 durable operational audit/history: back them up. No rebuild deletes
 them; no retention purge exists. Subjects and notifications are logical

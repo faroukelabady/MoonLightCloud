@@ -446,10 +446,15 @@ func (d Devices) UpsertCatalogAdminCapability(ctx context.Context, deviceID stri
 	if err != nil {
 		return err
 	}
-	_, err = sqlcgen.New(d.pool).UpsertCatalogAdminCapability(ctx, sqlcgen.UpsertCatalogAdminCapabilityParams{
-		DeviceID: duid, Capable: capable,
-	})
-	return catalogAdminErr(err)
+	q := sqlcgen.New(d.pool)
+	if capable {
+		return catalogAdminErr(q.AddDeviceCapability(ctx, sqlcgen.AddDeviceCapabilityParams{
+			DeviceID: duid, Capability: catalogadmin.CapabilityV1,
+		}))
+	}
+	return catalogAdminErr(q.RemoveDeviceCapability(ctx, sqlcgen.RemoveDeviceCapabilityParams{
+		DeviceID: duid, Capability: catalogadmin.CapabilityV1,
+	}))
 }
 
 // GetCatalogAdminCapability reads Retail capability; missing means
@@ -461,14 +466,13 @@ func (d Devices) GetCatalogAdminCapability(ctx context.Context, deviceID string)
 	if err != nil {
 		return false, err
 	}
-	row, err := sqlcgen.New(d.pool).GetCatalogAdminCapability(ctx, duid)
+	capable, err := sqlcgen.New(d.pool).HasDeviceCapability(ctx, sqlcgen.HasDeviceCapabilityParams{
+		DeviceID: duid, Capability: catalogadmin.CapabilityV1,
+	})
 	if err != nil {
-		if isNotFoundErr(err) {
-			return false, nil
-		}
 		return false, catalogAdminErr(err)
 	}
-	return row.CatalogAdminCommandsV1, nil
+	return capable, nil
 }
 
 // ListCatalogAdminBoundDevices snapshots eligible targets: every

@@ -325,15 +325,26 @@ func (q *Queries) GetControlCommandForDevice(ctx context.Context, arg GetControl
 }
 
 const getPresence = `-- name: GetPresence :one
-SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
-    last_command_finished_at, created_at, updated_at
-FROM device_control_presence
-WHERE device_id = $1
+SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, p.created_at, p.updated_at
+FROM device_control_presence p
+JOIN devices d ON d.id = p.device_id
+WHERE p.device_id = $1
 `
 
-func (q *Queries) GetPresence(ctx context.Context, deviceID pgtype.UUID) (DeviceControlPresence, error) {
+type GetPresenceRow struct {
+	DeviceID              pgtype.UUID        `json:"device_id"`
+	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
+	LastPollAt            pgtype.Timestamptz `json:"last_poll_at"`
+	LastCommandAcceptedAt pgtype.Timestamptz `json:"last_command_accepted_at"`
+	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetPresence(ctx context.Context, deviceID pgtype.UUID) (GetPresenceRow, error) {
 	row := q.db.QueryRow(ctx, getPresence, deviceID)
-	var i DeviceControlPresence
+	var i GetPresenceRow
 	err := row.Scan(
 		&i.DeviceID,
 		&i.LastSeenAt,
@@ -440,21 +451,32 @@ func (q *Queries) ListActiveControlCommands(ctx context.Context) ([]DeviceContro
 }
 
 const listPresence = `-- name: ListPresence :many
-SELECT device_id, last_seen_at, last_poll_at, last_command_accepted_at,
-    last_command_finished_at, created_at, updated_at
-FROM device_control_presence
-ORDER BY device_id
+SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, p.created_at, p.updated_at
+FROM device_control_presence p
+JOIN devices d ON d.id = p.device_id
+ORDER BY p.device_id
 `
 
-func (q *Queries) ListPresence(ctx context.Context) ([]DeviceControlPresence, error) {
+type ListPresenceRow struct {
+	DeviceID              pgtype.UUID        `json:"device_id"`
+	LastSeenAt            pgtype.Timestamptz `json:"last_seen_at"`
+	LastPollAt            pgtype.Timestamptz `json:"last_poll_at"`
+	LastCommandAcceptedAt pgtype.Timestamptz `json:"last_command_accepted_at"`
+	LastCommandFinishedAt pgtype.Timestamptz `json:"last_command_finished_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListPresence(ctx context.Context) ([]ListPresenceRow, error) {
 	rows, err := q.db.Query(ctx, listPresence)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DeviceControlPresence{}
+	items := []ListPresenceRow{}
 	for rows.Next() {
-		var i DeviceControlPresence
+		var i ListPresenceRow
 		if err := rows.Scan(
 			&i.DeviceID,
 			&i.LastSeenAt,
@@ -626,49 +648,58 @@ func (q *Queries) MarkControlRunning(ctx context.Context, arg MarkControlRunning
 }
 
 const upsertPresenceAccepted = `-- name: UpsertPresenceAccepted :exec
-INSERT INTO device_control_presence (device_id, last_seen_at, last_command_accepted_at, created_at, updated_at)
-VALUES ($1, $2, $2, $2, $2)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, $2::timestamptz), $2::timestamptz)
+    WHERE id = $1::uuid
+)
+INSERT INTO device_control_presence (device_id, last_command_accepted_at, created_at, updated_at)
+VALUES ($1::uuid, $2::timestamptz, $2::timestamptz, $2::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_command_accepted_at = EXCLUDED.last_command_accepted_at,
     updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at)
 `
 
 type UpsertPresenceAcceptedParams struct {
-	DeviceID   pgtype.UUID        `json:"device_id"`
-	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	DeviceID pgtype.UUID        `json:"device_id"`
+	SeenAt   pgtype.Timestamptz `json:"seen_at"`
 }
 
 func (q *Queries) UpsertPresenceAccepted(ctx context.Context, arg UpsertPresenceAcceptedParams) error {
-	_, err := q.db.Exec(ctx, upsertPresenceAccepted, arg.DeviceID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, upsertPresenceAccepted, arg.DeviceID, arg.SeenAt)
 	return err
 }
 
 const upsertPresenceFinished = `-- name: UpsertPresenceFinished :exec
-INSERT INTO device_control_presence (device_id, last_seen_at, last_command_finished_at, created_at, updated_at)
-VALUES ($1, $2, $2, $2, $2)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, $2::timestamptz), $2::timestamptz)
+    WHERE id = $1::uuid
+)
+INSERT INTO device_control_presence (device_id, last_command_finished_at, created_at, updated_at)
+VALUES ($1::uuid, $2::timestamptz, $2::timestamptz, $2::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_command_finished_at = EXCLUDED.last_command_finished_at,
     updated_at = GREATEST(device_control_presence.updated_at, EXCLUDED.updated_at)
 `
 
 type UpsertPresenceFinishedParams struct {
-	DeviceID   pgtype.UUID        `json:"device_id"`
-	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	DeviceID pgtype.UUID        `json:"device_id"`
+	SeenAt   pgtype.Timestamptz `json:"seen_at"`
 }
 
 func (q *Queries) UpsertPresenceFinished(ctx context.Context, arg UpsertPresenceFinishedParams) error {
-	_, err := q.db.Exec(ctx, upsertPresenceFinished, arg.DeviceID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, upsertPresenceFinished, arg.DeviceID, arg.SeenAt)
 	return err
 }
 
 const upsertPresenceSeen = `-- name: UpsertPresenceSeen :exec
 
-INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $4)
+WITH seen AS (
+    UPDATE devices SET last_seen_at = GREATEST(COALESCE(last_seen_at, $3::timestamptz), $3::timestamptz)
+    WHERE id = $1::uuid
+)
+INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+VALUES ($1::uuid, $2::timestamptz, $3::timestamptz, $3::timestamptz)
 ON CONFLICT (device_id) DO UPDATE SET
-    last_seen_at = GREATEST(device_control_presence.last_seen_at, EXCLUDED.last_seen_at),
     last_poll_at = CASE
         WHEN EXCLUDED.last_poll_at IS NULL THEN device_control_presence.last_poll_at
         ELSE GREATEST(COALESCE(device_control_presence.last_poll_at, EXCLUDED.last_poll_at), EXCLUDED.last_poll_at)
@@ -678,18 +709,14 @@ ON CONFLICT (device_id) DO UPDATE SET
 
 type UpsertPresenceSeenParams struct {
 	DeviceID   pgtype.UUID        `json:"device_id"`
-	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
 	LastPollAt pgtype.Timestamptz `json:"last_poll_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	SeenAt     pgtype.Timestamptz `json:"seen_at"`
 }
 
 // Phase 7C device control plane: presence + durable sync_now commands.
+// Control contact also advances devices.last_seen_at monotonically: the
+// device row is the one last-contact time (ADR-0055 step 2e).
 func (q *Queries) UpsertPresenceSeen(ctx context.Context, arg UpsertPresenceSeenParams) error {
-	_, err := q.db.Exec(ctx, upsertPresenceSeen,
-		arg.DeviceID,
-		arg.LastSeenAt,
-		arg.LastPollAt,
-		arg.CreatedAt,
-	)
+	_, err := q.db.Exec(ctx, upsertPresenceSeen, arg.DeviceID, arg.LastPollAt, arg.SeenAt)
 	return err
 }

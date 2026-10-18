@@ -214,8 +214,9 @@ func TestDisabledOperationsManualResolveGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := prov.Device.ID
-	if _, err := a.Pool.Exec(ctx, `INSERT INTO device_control_presence (device_id, last_seen_at, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now() - interval '10 minutes', now(), now())`, dev); err != nil {
+	if _, err := a.Pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
+		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
+		VALUES ($1, now() - interval '10 minutes', now(), now())`, dev); err != nil {
 		t.Fatal(err)
 	}
 	incident, created, err := a.OperationsService.OpenStateful(ctx, "DEVICE_OFFLINE", "device", dev, "")
@@ -232,7 +233,7 @@ func TestDisabledOperationsManualResolveGuard(t *testing.T) {
 		t.Fatalf("incident still active: %+v %v", active, err)
 	}
 	// Genuinely cleared (fresh contact): resolution succeeds.
-	if _, err := a.Pool.Exec(ctx, `UPDATE device_control_presence SET last_seen_at = now(), last_poll_at = now() WHERE device_id = $1`, dev); err != nil {
+	if _, err := a.Pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() WHERE id = $1) UPDATE device_control_presence SET last_poll_at = now() WHERE device_id = $1`, dev); err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := a.OperationsReader.ResolveOperator(ctx, incident.ID, "")

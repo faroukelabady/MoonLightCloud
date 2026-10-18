@@ -672,16 +672,22 @@ CREATE INDEX idx_notification_history_lookup ON notification_delivery_status_his
 -- snapshots, and delivery records. No destructive FKs to rebuildable
 -- projections; notification linkage is a logical UUID reference.
 
-CREATE TABLE business_report_recipients (
+-- ADR-0055 step 2e: business-report and operational-alert recipients share
+-- one table; `purpose` says which feature owns the row. Telegram allows 32
+-- username characters plus the @ destination prefix.
+CREATE TABLE notification_recipients (
     id            UUID PRIMARY KEY,
+    purpose       TEXT NOT NULL CHECK (purpose IN ('business_report', 'operational_alert')),
     label         TEXT NOT NULL CHECK (char_length(label) BETWEEN 1 AND 64),
     provider_key  TEXT NOT NULL CHECK (provider_key ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
-    recipient     TEXT NOT NULL CHECK (char_length(recipient) BETWEEN 1 AND 32),
+    recipient     TEXT NOT NULL CHECK (char_length(recipient) BETWEEN 1 AND 33),
     locale        TEXT NOT NULL CHECK (locale IN ('ar', 'en')),
     enabled       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, purpose)
 );
+CREATE INDEX idx_notification_recipients_purpose ON notification_recipients (purpose, created_at, id);
 
 CREATE TABLE business_report_schedules (
     id                  UUID PRIMARY KEY,
@@ -702,10 +708,13 @@ CREATE TABLE business_report_schedules (
 CREATE INDEX idx_report_schedules_due ON business_report_schedules (enabled, next_run_at);
 
 CREATE TABLE business_report_schedule_recipients (
-    schedule_id  UUID NOT NULL REFERENCES business_report_schedules(id) ON DELETE CASCADE,
-    recipient_id UUID NOT NULL REFERENCES business_report_recipients(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (schedule_id, recipient_id)
+    schedule_id       UUID NOT NULL REFERENCES business_report_schedules(id) ON DELETE CASCADE,
+    recipient_id      UUID NOT NULL,
+    -- Only business-report recipients can be scheduled.
+    recipient_purpose TEXT NOT NULL DEFAULT 'business_report' CHECK (recipient_purpose = 'business_report'),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (schedule_id, recipient_id),
+    FOREIGN KEY (recipient_id, recipient_purpose) REFERENCES notification_recipients (id, purpose)
 );
 
 CREATE TABLE business_report_runs (
@@ -767,9 +776,10 @@ CREATE INDEX idx_report_deliveries_run ON business_report_deliveries (run_id);
 -- Commands carry no business payload in v1 (sync_now.v1 only); result codes
 -- are bounded machine codes, never raw errors or customer data.
 
+-- Last contact is devices.last_seen_at (ADR-0055 step 2e); presence keeps
+-- only the control-plane timestamps.
 CREATE TABLE device_control_presence (
     device_id              UUID PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
-    last_seen_at           TIMESTAMPTZ,
     last_poll_at           TIMESTAMPTZ,
     last_command_accepted_at TIMESTAMPTZ,
     last_command_finished_at TIMESTAMPTZ,
@@ -855,16 +865,7 @@ ALTER TABLE device_control_commands
 -- report-projection rebuilds. Bodies carry bounded machine summaries only:
 -- no raw errors, customer payloads, provider bodies, or credentials.
 
-CREATE TABLE operational_alert_recipients (
-    id            UUID PRIMARY KEY,
-    label         TEXT NOT NULL CHECK (char_length(label) BETWEEN 1 AND 64),
-    provider_key  TEXT NOT NULL CHECK (provider_key ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
-    recipient     TEXT NOT NULL CHECK (char_length(recipient) BETWEEN 1 AND 32),
-    locale        TEXT NOT NULL CHECK (locale IN ('ar', 'en')),
-    enabled       BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- Alert recipients live in notification_recipients (purpose 'operational_alert').
 
 CREATE TABLE operational_incidents (
     id               UUID PRIMARY KEY,
@@ -1109,10 +1110,6 @@ CREATE INDEX idx_commerce_online_orders_store_provider_order ON commerce_online_
 -- Existing TEXT values and immutable delivery snapshots are never rewritten.
 ALTER TABLE notification_messages DROP CONSTRAINT notification_messages_recipient_check;
 ALTER TABLE notification_messages ADD CONSTRAINT notification_messages_recipient_check CHECK (char_length(recipient) BETWEEN 1 AND 33);
-ALTER TABLE business_report_recipients DROP CONSTRAINT business_report_recipients_recipient_check;
-ALTER TABLE business_report_recipients ADD CONSTRAINT business_report_recipients_recipient_check CHECK (char_length(recipient) BETWEEN 1 AND 33);
-ALTER TABLE operational_alert_recipients DROP CONSTRAINT operational_alert_recipients_recipient_check;
-ALTER TABLE operational_alert_recipients ADD CONSTRAINT operational_alert_recipients_recipient_check CHECK (char_length(recipient) BETWEEN 1 AND 33);
 
 -- ==== 00027_commerce_mutation_barriers ====
 -- Durable send-before-write evidence. No FK to rebuildable projections.
@@ -1422,13 +1419,14 @@ CREATE TABLE catalog_admin_command_targets (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (command_id, device_id)
 );
--- Capability advertisement: Retail announces catalog_admin_commands_v1.
--- A missing row means incapable (old Retail): Cloud never delivers
+-- Capability advertisement: one row per capability a device announces
+-- (ADR-0055 step 2e). A missing row means incapable: Cloud never delivers
 -- unknown commands there and the dashboard shows update-required.
-CREATE TABLE catalog_admin_device_capabilities (
-    device_id UUID PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
-    catalog_admin_commands_v1 BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE device_capabilities (
+    device_id  UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    capability TEXT NOT NULL CHECK (capability IN ('catalog_admin_commands_v1')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (device_id, capability)
 );
 CREATE INDEX idx_catalog_admin_commands_store ON catalog_admin_commands(store_id, created_at DESC, id);
 CREATE INDEX idx_catalog_admin_commands_entity ON catalog_admin_commands(store_id, entity_id, created_at DESC);
@@ -2270,13 +2268,13 @@ DROP TABLE IF EXISTS admin_user_store_memberships CASCADE;
 DROP TABLE IF EXISTS admin_users CASCADE;
 DROP TABLE IF EXISTS auth_audit_events CASCADE;
 DROP TABLE IF EXISTS business_report_deliveries CASCADE;
-DROP TABLE IF EXISTS business_report_recipients CASCADE;
+DROP TABLE IF EXISTS notification_recipients CASCADE;
 DROP TABLE IF EXISTS business_report_runs CASCADE;
 DROP TABLE IF EXISTS business_report_schedule_recipients CASCADE;
 DROP TABLE IF EXISTS business_report_schedules CASCADE;
 DROP TABLE IF EXISTS catalog_admin_command_targets CASCADE;
 DROP TABLE IF EXISTS catalog_admin_commands CASCADE;
-DROP TABLE IF EXISTS catalog_admin_device_capabilities CASCADE;
+DROP TABLE IF EXISTS device_capabilities CASCADE;
 DROP TABLE IF EXISTS catalog_categories CASCADE;
 DROP TABLE IF EXISTS catalog_category_edges CASCADE;
 DROP TABLE IF EXISTS catalog_product_configurations CASCADE;
@@ -2314,7 +2312,6 @@ DROP TABLE IF EXISTS notification_delivery_status_history CASCADE;
 DROP TABLE IF EXISTS notification_messages CASCADE;
 DROP TABLE IF EXISTS notification_template_mappings CASCADE;
 DROP TABLE IF EXISTS operational_alert_deliveries CASCADE;
-DROP TABLE IF EXISTS operational_alert_recipients CASCADE;
 DROP TABLE IF EXISTS operational_incidents CASCADE;
 DROP TABLE IF EXISTS operational_recovery_actions CASCADE;
 DROP TABLE IF EXISTS release_artifacts CASCADE;
