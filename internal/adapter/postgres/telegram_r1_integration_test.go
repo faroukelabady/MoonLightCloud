@@ -135,7 +135,7 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 						t.Fatal("financial basis/money/currency mismatch")
 					}
 					registry, tgBodies, waBodies, mu := r1Providers(t, fail)
-					notifications.NewDispatcher(catalogStore(env), registry, notifications.SystemClock{}, "matrix", nilLogger()).DrainForTest(ctx)
+					notifications.NewDispatcher(notificationStore(env), registry, notifications.SystemClock{}, "matrix", nilLogger()).DrainForTest(ctx)
 					for _, d := range deliveries {
 						status, _ := r1State(t, env, d.NotificationID)
 						expected := "accepted"
@@ -212,7 +212,7 @@ func TestTelegramR1OperationalAlerts(t *testing.T) {
 	recipient := "@" + strings.Repeat("a", 32)
 	r1OpsLifecycle(t, env, recipient)
 	registry, tgBodies, _, mu := r1Providers(t, "")
-	notifications.NewDispatcher(catalogStore(env), registry, notifications.SystemClock{}, "ops", nilLogger()).DrainForTest(context.Background())
+	notifications.NewDispatcher(notificationStore(env), registry, notifications.SystemClock{}, "ops", nilLogger()).DrainForTest(context.Background())
 	rows, err := env.pool.Query(context.Background(), `SELECT d.recipient_snapshot,d.body_snapshot,n.dispatch_status,n.recipient FROM operational_alert_deliveries d JOIN notification_messages n ON n.id=d.notification_id ORDER BY d.created_at,d.id`)
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 				}
 			}
 			registry, tgBodies, _, mu := r1Providers(t, "")
-			notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "sale-seeded", nilLogger()).DrainForTest(ctx)
+			notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "sale-seeded", nilLogger()).DrainForTest(ctx)
 			mu.Lock()
 			defer mu.Unlock()
 			if len(*tgBodies) != 2 {

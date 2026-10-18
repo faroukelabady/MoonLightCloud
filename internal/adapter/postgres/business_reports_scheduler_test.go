@@ -20,7 +20,7 @@ import (
 func reportTestService(t *testing.T, env *saleEnv, source businessreports.ReportSource) *businessreports.Service {
 	t.Helper()
 	store := catalogStore(env)
-	notificationService := notifications.NewService(store, store, nilLogger())
+	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger())
 	loc, err := businessreports.LoadCairo()
 	if err != nil {
 		panic(err)

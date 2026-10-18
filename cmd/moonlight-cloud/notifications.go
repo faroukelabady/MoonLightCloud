@@ -297,7 +297,7 @@ func runNotificationStatus(ctx context.Context, store notificationStatusStore, o
 // notification services. The pool stays open until close runs.
 type notificationsEnv struct {
 	pool                interface{ Close() }
-	store               postgres.Devices
+	store               postgres.Notifications
 	notificationService *notifications.Service
 }
 
@@ -319,7 +319,7 @@ func openNotificationsEnv(stderr io.Writer) (*notificationsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	store := postgres.NewNotifications(pool, cfg.DBQueryTimeout)
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	return &notificationsEnv{
 		pool:                pool,

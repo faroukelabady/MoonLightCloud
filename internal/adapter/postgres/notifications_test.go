@@ -10,9 +10,13 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 )
 
+func notificationStore(env *saleEnv) Notifications {
+	return NewNotifications(env.pool, 5*time.Second)
+}
+
 func notificationTestMapping(t *testing.T, env *saleEnv, provider string) {
 	t.Helper()
-	if err := catalogStore(env).UpsertTemplateMapping(context.Background(), notifications.TemplateMapping{
+	if err := notificationStore(env).UpsertTemplateMapping(context.Background(), notifications.TemplateMapping{
 		ProviderKey: provider, TemplateKey: "operator_test_v1", Locale: "ar",
 		ExternalTemplateName: "moonlight_operator_test_ar", ExternalLanguageCode: "ar",
 		ParameterNames: []string{"name", "message"}, Enabled: true,
@@ -33,7 +37,7 @@ func notificationTestIntent(provider, key string) notifications.EnqueueIntent {
 
 func enqueueNotification(t *testing.T, env *saleEnv, intent notifications.EnqueueIntent) string {
 	t.Helper()
-	id, outcome, err := catalogStore(env).EnqueueNotification(context.Background(), intent)
+	id, outcome, err := notificationStore(env).EnqueueNotification(context.Background(), intent)
 	if err != nil || outcome != notifications.EnqueueInserted {
 		t.Fatalf("enqueue: %v %v", outcome, err)
 	}
@@ -42,7 +46,7 @@ func enqueueNotification(t *testing.T, env *saleEnv, intent notifications.Enqueu
 
 func claimNotification(t *testing.T, env *saleEnv, owner string) notifications.ClaimedNotification {
 	t.Helper()
-	claimed, ok, err := catalogStore(env).ClaimNotification(
+	claimed, ok, err := notificationStore(env).ClaimNotification(
 		context.Background(), owner, 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
@@ -55,23 +59,23 @@ func claimNotification(t *testing.T, env *saleEnv, owner string) notifications.C
 func TestNotificationEnqueueIdempotency(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	intent := notificationTestIntent("whatsapp-main", "key-1")
-	first, outcome, err := store.EnqueueNotification(ctx, intent)
+	first, outcome, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, intent)
 	if err != nil || outcome != notifications.EnqueueInserted {
 		t.Fatalf("first: %v %v", outcome, err)
 	}
-	second, outcome, err := store.EnqueueNotification(ctx, intent)
+	second, outcome, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, intent)
 	if err != nil || outcome != notifications.EnqueueDuplicateIdentical || second != first {
 		t.Fatalf("duplicate: %v %v %v", second, outcome, err)
 	}
 	changed := intent
 	changed.Parameters = map[string]string{"name": "Moon Light", "message": "other"}
-	if _, _, err := store.EnqueueNotification(ctx, changed); err == nil {
+	if _, _, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, changed); err == nil {
 		t.Fatal("conflicting payload must fail")
 	}
 	// Original row untouched by the conflict.
-	stored, found, err := store.LookupByProviderMessage(ctx, "whatsapp-main", "wamid-never")
+	stored, found, err := NewNotifications(store.pool, store.timeout).LookupByProviderMessage(ctx, "whatsapp-main", "wamid-never")
 	if err != nil || found || stored != "" {
 		t.Fatalf("lookup: %v %v %v", stored, found, err)
 	}
@@ -82,13 +86,13 @@ func TestNotificationEnqueueIdempotency(t *testing.T) {
 func TestNotificationClaimLease(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	claimedA := claimNotification(t, env, "worker-A")
 	if claimedA.ID != id || claimedA.LeaseGeneration != 1 {
 		t.Fatalf("gen1: %+v", claimedA)
 	}
-	if _, ok, err := store.ClaimNotification(ctx, "worker-B", 5*time.Minute, time.Now().UTC()); err != nil || ok {
+	if _, ok, err := NewNotifications(store.pool, store.timeout).ClaimNotification(ctx, "worker-B", 5*time.Minute, time.Now().UTC()); err != nil || ok {
 		t.Fatalf("held lease must not claim: %v %v", ok, err)
 	}
 	if _, err := env.pool.Exec(ctx,
@@ -99,16 +103,16 @@ func TestNotificationClaimLease(t *testing.T) {
 	if claimedB.LeaseGeneration != 2 {
 		t.Fatalf("gen2: %+v", claimedB)
 	}
-	result, err := store.FinishNotificationAccepted(ctx, id, claimedB.LeaseOwner, claimedB.LeaseGeneration, "wamid.1")
+	result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimedB.LeaseOwner, claimedB.LeaseGeneration, "wamid.1")
 	if err != nil || result != notifications.FinishApplied {
 		t.Fatalf("accept: %v %v", result, err)
 	}
-	result, err = store.FinishNotificationRetry(ctx, id,
+	result, err = NewNotifications(store.pool, store.timeout).FinishNotificationRetry(ctx, id,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, time.Now().UTC().Add(time.Minute), "x")
 	if err != nil || result != notifications.FinishStale {
 		t.Fatalf("stale: %v %v", result, err)
 	}
-	found, ok, err := store.LookupByProviderMessage(ctx, "whatsapp-main", "wamid.1")
+	found, ok, err := NewNotifications(store.pool, store.timeout).LookupByProviderMessage(ctx, "whatsapp-main", "wamid.1")
 	if err != nil || !ok || found != id {
 		t.Fatalf("correlation: %v %v %v", found, ok, err)
 	}
@@ -120,10 +124,10 @@ func TestNotificationClaimLease(t *testing.T) {
 func TestNotificationSendStartMarker(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	claimed := claimNotification(t, env, "worker-A")
-	result, err := store.MarkNotificationSendStarted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration)
+	result, err := NewNotifications(store.pool, store.timeout).MarkNotificationSendStarted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration)
 	if err != nil || result != notifications.FinishApplied {
 		t.Fatalf("mark: %v %v", result, err)
 	}
@@ -135,7 +139,7 @@ func TestNotificationSendStartMarker(t *testing.T) {
 	if !reclaimed.SendStarted {
 		t.Fatal("marker must be visible on reclaim")
 	}
-	result, err = store.FinishNotificationAmbiguous(ctx, id,
+	result, err = NewNotifications(store.pool, store.timeout).FinishNotificationAmbiguous(ctx, id,
 		reclaimed.LeaseOwner, reclaimed.LeaseGeneration, notifications.CodeSendAmbiguous)
 	if err != nil || result != notifications.FinishApplied {
 		t.Fatalf("ambiguous: %v %v", result, err)
@@ -147,7 +151,7 @@ func TestNotificationSendStartMarker(t *testing.T) {
 func TestNotificationConcurrentEnqueue(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	intent := notificationTestIntent("whatsapp-main", "race-key")
 	var wg sync.WaitGroup
 	ids := make(chan string, 16)
@@ -156,7 +160,7 @@ func TestNotificationConcurrentEnqueue(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, _, err := store.EnqueueNotification(ctx, intent)
+			id, _, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, intent)
 			ids <- id
 			errs <- err
 		}()
@@ -179,7 +183,7 @@ func TestNotificationConcurrentEnqueue(t *testing.T) {
 	// Contradictory payload under the same key conflicts.
 	changed := intent
 	changed.Parameters = map[string]string{"name": "x", "message": "y"}
-	if _, _, err := store.EnqueueNotification(ctx, changed); err == nil {
+	if _, _, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, changed); err == nil {
 		t.Fatal("conflict must fail")
 	}
 }
@@ -191,14 +195,14 @@ func TestNotificationConcurrentEnqueue(t *testing.T) {
 func TestNotificationMessageIDCollision(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	first := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	second := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-2"))
 	claimed := claimNotification(t, env, "worker-A")
 	if claimed.ID != first {
 		t.Fatalf("claim order: %v %v", claimed.ID, first)
 	}
-	result, err := store.FinishNotificationAccepted(ctx, first, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.dup")
+	result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, first, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.dup")
 	if err != nil || result != notifications.FinishApplied {
 		t.Fatalf("first accept: %v %v", result, err)
 	}
@@ -210,10 +214,10 @@ func TestNotificationMessageIDCollision(t *testing.T) {
 	if claimed2.ID != second {
 		t.Fatalf("second claim: %v", claimed2.ID)
 	}
-	if _, err := store.MarkNotificationSendStarted(ctx, second, claimed2.LeaseOwner, claimed2.LeaseGeneration); err != nil {
+	if _, err := NewNotifications(store.pool, store.timeout).MarkNotificationSendStarted(ctx, second, claimed2.LeaseOwner, claimed2.LeaseGeneration); err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.FinishNotificationAccepted(ctx, second, claimed2.LeaseOwner, claimed2.LeaseGeneration, "wamid.dup")
+	_, err = NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, second, claimed2.LeaseOwner, claimed2.LeaseGeneration, "wamid.dup")
 	if err == nil {
 		t.Fatal("duplicate provider message ID must fail")
 	}
@@ -241,10 +245,10 @@ func TestNotificationMessageIDCollision(t *testing.T) {
 func TestNotificationDeliveryOrdering(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	claimed := claimNotification(t, env, "worker-A")
-	if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.9"); err != nil || result != notifications.FinishApplied {
+	if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.9"); err != nil || result != notifications.FinishApplied {
 		t.Fatalf("accept: %v %v", result, err)
 	}
 	base := time.Now().UTC().Truncate(time.Second)
@@ -262,7 +266,7 @@ func TestNotificationDeliveryOrdering(t *testing.T) {
 		event.Fingerprint = notifications.DeliveryEventFingerprint(
 			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 			event.Canonical, event.ProviderTimestamp, "")
-		outcome, err := store.ApplyDeliveryStatus(ctx, id, event)
+		outcome, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, event)
 		if err != nil {
 			t.Fatalf("apply %s: %v", raw, err)
 		}
@@ -311,7 +315,7 @@ func TestNotificationDeliveryOrdering(t *testing.T) {
 	unknown.Fingerprint = notifications.DeliveryEventFingerprint(
 		"whatsapp-main", unknown.ProviderMessageID, unknown.RawStatus,
 		unknown.Canonical, unknown.ProviderTimestamp, "")
-	outcome, err := store.ApplyDeliveryStatus(ctx, id, unknown)
+	outcome, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, unknown)
 	if err != nil || !outcome.HistoryInserted || outcome.CurrentAdvanced {
 		t.Fatalf("unknown: %+v %v", outcome, err)
 	}
@@ -334,28 +338,28 @@ func TestNotificationDeliveryOrdering(t *testing.T) {
 func TestNotificationTemplateMapping(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	notificationTestMapping(t, env, "whatsapp-main")
-	mapping, found, err := store.GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "ar")
+	mapping, found, err := NewNotifications(store.pool, store.timeout).GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "ar")
 	if err != nil || !found || mapping.ExternalTemplateName != "moonlight_operator_test_ar" || !mapping.Enabled {
 		t.Fatalf("lookup: %+v %v %v", mapping, found, err)
 	}
-	if _, found, err := store.GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "en"); err != nil || found {
+	if _, found, err := NewNotifications(store.pool, store.timeout).GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "en"); err != nil || found {
 		t.Fatalf("locale isolation: %v %v", found, err)
 	}
-	if _, found, err := store.GetTemplateMapping(ctx, "other", "operator_test_v1", "ar"); err != nil || found {
+	if _, found, err := NewNotifications(store.pool, store.timeout).GetTemplateMapping(ctx, "other", "operator_test_v1", "ar"); err != nil || found {
 		t.Fatalf("provider isolation: %v %v", found, err)
 	}
 	disabled := mapping
 	disabled.Enabled = false
-	if err := store.UpsertTemplateMapping(ctx, disabled); err != nil {
+	if err := NewNotifications(store.pool, store.timeout).UpsertTemplateMapping(ctx, disabled); err != nil {
 		t.Fatal(err)
 	}
-	updated, found, err := store.GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "ar")
+	updated, found, err := NewNotifications(store.pool, store.timeout).GetTemplateMapping(ctx, "whatsapp-main", "operator_test_v1", "ar")
 	if err != nil || !found || updated.Enabled {
 		t.Fatalf("disable: %+v %v %v", updated, found, err)
 	}
-	listed, err := store.ListTemplateMappings(ctx, "whatsapp-main")
+	listed, err := NewNotifications(store.pool, store.timeout).ListTemplateMappings(ctx, "whatsapp-main")
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("list: %+v %v", listed, err)
 	}
@@ -365,10 +369,10 @@ func TestNotificationTemplateMapping(t *testing.T) {
 func TestNotificationQueueStats(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-2"))
-	stats, err := store.NotificationQueueStats(ctx)
+	stats, err := NewNotifications(store.pool, store.timeout).NotificationQueueStats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +383,7 @@ func TestNotificationQueueStats(t *testing.T) {
 		t.Fatal("oldest pending must be set")
 	}
 	fresh := openSaleEnv(t)
-	none, err := catalogStore(fresh).NotificationQueueStats(ctx)
+	none, err := notificationStore(fresh).NotificationQueueStats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,12 +433,12 @@ func (v *scriptDispatchStoreView) iface() notifications.DispatchStore { return v
 // pending notification produce exactly one provider send.
 func TestNotificationDispatcherRace(t *testing.T) {
 	env := openSaleEnv(t)
-	store := catalogStore(env)
+	store := notificationStore(env)
 	enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	provider := &scriptNotificationProvider{key: "whatsapp-main", send: func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
 		return notifications.SendResult{ProviderMessageID: "wamid.race1"}, nil
 	}}
-	view := &scriptDispatchStoreView{store: store}
+	view := &scriptDispatchStoreView{store: NewNotifications(store.pool, store.timeout)}
 	workerA := notificationDispatcher(t, view, provider, "worker-A")
 	workerB := notificationDispatcher(t, view, provider, "worker-B")
 	start := make(chan struct{})
@@ -459,9 +463,9 @@ func TestNotificationDispatcherRace(t *testing.T) {
 func TestNotificationDispatcherCrashBeforeSend(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
-	claimed, ok, err := store.ClaimNotification(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimed, ok, err := NewNotifications(store.pool, store.timeout).ClaimNotification(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok || claimed.ID != id {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
@@ -473,7 +477,7 @@ func TestNotificationDispatcherCrashBeforeSend(t *testing.T) {
 	provider := &scriptNotificationProvider{key: "whatsapp-main", send: func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
 		return notifications.SendResult{ProviderMessageID: "wamid.crash1"}, nil
 	}}
-	view := &scriptDispatchStoreView{store: store}
+	view := &scriptDispatchStoreView{store: NewNotifications(store.pool, store.timeout)}
 	notificationDispatcher(t, view, provider, "worker-B").DrainForTest(ctx)
 	if provider.count() != 1 {
 		t.Fatalf("one send: %d", provider.count())
@@ -517,7 +521,7 @@ var errInjectedDBValue = errInjectedDBType("injected db failure")
 func TestNotificationDispatcherAcceptDBFailure(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	provider := &scriptNotificationProvider{key: "whatsapp-main", send: func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
 		return notifications.SendResult{ProviderMessageID: "wamid.dbfail1"}, nil
@@ -554,7 +558,7 @@ func TestNotificationDispatcherAcceptDBFailure(t *testing.T) {
 func TestNotificationDispatcherRetryThenAccept(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	provider := &scriptNotificationProvider{key: "whatsapp-main"}
 	provider.send = func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
@@ -567,7 +571,7 @@ func TestNotificationDispatcherRetryThenAccept(t *testing.T) {
 	if err := registry.Register("whatsapp-main", provider); err != nil {
 		t.Fatal(err)
 	}
-	worker := notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "worker-A", nil)
+	worker := notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "worker-A", nil)
 	worker.DrainForTest(ctx)
 	var dispatch string
 	if err := env.pool.QueryRow(ctx,
@@ -594,7 +598,7 @@ func TestNotificationDispatcherRetryThenAccept(t *testing.T) {
 func TestNotificationMappingSnapshotImmutable(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	notificationTestMapping(t, env, "whatsapp-main")
 	enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	edited := notifications.TemplateMapping{
@@ -602,7 +606,7 @@ func TestNotificationMappingSnapshotImmutable(t *testing.T) {
 		ExternalTemplateName: "changed_name", ExternalLanguageCode: "ar",
 		ParameterNames: []string{"name", "message"}, Enabled: true,
 	}
-	if err := store.UpsertTemplateMapping(ctx, edited); err != nil {
+	if err := NewNotifications(store.pool, store.timeout).UpsertTemplateMapping(ctx, edited); err != nil {
 		t.Fatal(err)
 	}
 	claimed := claimNotification(t, env, "worker-A")
@@ -617,7 +621,7 @@ func TestNotificationMappingSnapshotImmutable(t *testing.T) {
 func TestNotificationConcurrentIdempotencyConflict(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	var wg sync.WaitGroup
 	type enqueueResult struct {
 		id      string
@@ -637,7 +641,7 @@ func TestNotificationConcurrentIdempotencyConflict(t *testing.T) {
 		wg.Add(1)
 		go func(intent notifications.EnqueueIntent) {
 			defer wg.Done()
-			id, outcome, err := store.EnqueueNotification(ctx, intent)
+			id, outcome, err := NewNotifications(store.pool, store.timeout).EnqueueNotification(ctx, intent)
 			results <- enqueueResult{id: id, outcome: outcome, err: err}
 		}(intent)
 	}
@@ -664,10 +668,10 @@ func TestNotificationConcurrentIdempotencyConflict(t *testing.T) {
 func TestNotificationConcurrentStatusApplies(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
 	claimed := claimNotification(t, env, "worker-A")
-	if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.race"); err != nil || result != notifications.FinishApplied {
+	if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.race"); err != nil || result != notifications.FinishApplied {
 		t.Fatalf("accept: %v %v", result, err)
 	}
 	base := time.Now().UTC().Truncate(time.Second)
@@ -688,7 +692,7 @@ func TestNotificationConcurrentStatusApplies(t *testing.T) {
 			event.Fingerprint = notifications.DeliveryEventFingerprint(
 				"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 				event.Canonical, event.ProviderTimestamp, "")
-			if _, err := store.ApplyDeliveryStatus(ctx, id, event); err != nil {
+			if _, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, event); err != nil {
 				t.Errorf("apply: %v", err)
 			}
 		}(i)
@@ -717,7 +721,7 @@ func TestNotificationConcurrentStatusApplies(t *testing.T) {
 func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	apply := func(id, wamid, raw string, at time.Time) notifications.DeliveryOutcome {
 		t.Helper()
 		event := notifications.DeliveryEvent{
@@ -728,7 +732,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 		event.Fingerprint = notifications.DeliveryEventFingerprint(
 			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 			event.Canonical, event.ProviderTimestamp, "")
-		outcome, err := store.ApplyDeliveryStatus(ctx, id, event)
+		outcome, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, event)
 		if err != nil {
 			t.Fatalf("apply %s: %v", raw, err)
 		}
@@ -748,7 +752,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 	t.Run("same second advances", func(t *testing.T) {
 		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-1"))
 		claimed := claimNotification(t, env, "worker-A")
-		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base1"); err != nil || result != notifications.FinishApplied {
+		if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base1"); err != nil || result != notifications.FinishApplied {
 			t.Fatalf("accept: %v %v", result, err)
 		}
 		// Provider second-granularity callback at/below local accept time.
@@ -771,7 +775,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 	t.Run("earlier provider timestamp advances", func(t *testing.T) {
 		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-2"))
 		claimed := claimNotification(t, env, "worker-A")
-		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base2"); err != nil || result != notifications.FinishApplied {
+		if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base2"); err != nil || result != notifications.FinishApplied {
 			t.Fatalf("accept: %v %v", result, err)
 		}
 		earlier := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
@@ -790,7 +794,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 	t.Run("failed first advances without resend", func(t *testing.T) {
 		id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "base-3"))
 		claimed := claimNotification(t, env, "worker-A")
-		if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base3"); err != nil || result != notifications.FinishApplied {
+		if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.base3"); err != nil || result != notifications.FinishApplied {
 			t.Fatalf("accept: %v %v", result, err)
 		}
 		at := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
@@ -812,7 +816,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 func TestNotificationPacedLifecycle(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	provider := &scriptNotificationProvider{key: "whatsapp-main", send: func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
 		// Adapter contract for held_for_quality_assessment: valid ID
 		// returned, dispatch accepted, no resend.
@@ -823,7 +827,7 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "paced-1"))
-	worker := notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "worker-A", nil)
+	worker := notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "worker-A", nil)
 	worker.DrainForTest(ctx)
 	if provider.count() != 1 {
 		t.Fatalf("one send: %d", provider.count())
@@ -846,7 +850,7 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 		event.Fingerprint = notifications.DeliveryEventFingerprint(
 			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 			event.Canonical, event.ProviderTimestamp, "")
-		if _, err := store.ApplyDeliveryStatus(ctx, id, event); err != nil {
+		if _, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, event); err != nil {
 			t.Fatalf("apply %s: %v", raw, err)
 		}
 	}
@@ -865,7 +869,7 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 		t.Fatalf("no second send: %d", provider.count())
 	}
 	// Correlation survives across store handles (restart equivalent).
-	lookup, found, err := catalogStore(env).LookupByProviderMessage(ctx, "whatsapp-main", "wamid.paced1")
+	lookup, found, err := notificationStore(env).LookupByProviderMessage(ctx, "whatsapp-main", "wamid.paced1")
 	if err != nil || !found || lookup != id {
 		t.Fatalf("restart correlation: %v %v %v", lookup, found, err)
 	}
@@ -877,10 +881,10 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 func TestNotificationFailedErrorCodeNull(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "null-code-1"))
 	claimed := claimNotification(t, env, "worker-A")
-	if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.nulleode1"); err != nil || result != notifications.FinishApplied {
+	if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, "wamid.nulleode1"); err != nil || result != notifications.FinishApplied {
 		t.Fatalf("accept: %v %v", result, err)
 	}
 	at := time.Now().UTC().Truncate(time.Second)
@@ -891,7 +895,7 @@ func TestNotificationFailedErrorCodeNull(t *testing.T) {
 	event.Fingerprint = notifications.DeliveryEventFingerprint(
 		"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 		event.Canonical, event.ProviderTimestamp, "")
-	outcome, err := store.ApplyDeliveryStatus(ctx, id, event)
+	outcome, err := NewNotifications(store.pool, store.timeout).ApplyDeliveryStatus(ctx, id, event)
 	if err != nil || !outcome.CurrentAdvanced {
 		t.Fatalf("failed advances: %+v %v", outcome, err)
 	}

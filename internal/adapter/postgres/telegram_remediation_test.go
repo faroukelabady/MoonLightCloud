@@ -75,7 +75,7 @@ func TestTelegramR1RecipientCLI(t *testing.T) {
 func r1Enqueue(t *testing.T, env *saleEnv, key, recipient, body string) string {
 	t.Helper()
 	store := catalogStore(env)
-	result, err := notifications.NewService(store, store, slog.New(slog.NewTextHandler(io.Discard, nil))).EnqueueTemplate(context.Background(), notifications.EnqueueTemplateRequest{ProviderKey: "telegram-main", IdempotencyKey: key, Recipient: recipient, TemplateKey: "operator_test_v1", Locale: "ar", Parameters: map[string]string{"body": body}})
+	result, err := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), slog.New(slog.NewTextHandler(io.Discard, nil))).EnqueueTemplate(context.Background(), notifications.EnqueueTemplateRequest{ProviderKey: "telegram-main", IdempotencyKey: key, Recipient: recipient, TemplateKey: "operator_test_v1", Locale: "ar", Parameters: map[string]string{"body": body}})
 	if err != nil || !result.Created {
 		t.Fatalf("enqueue: %+v %v", result, err)
 	}
@@ -130,7 +130,7 @@ func TestTelegramR1DurableNoResend(t *testing.T) {
 			store := catalogStore(env)
 			registry := telegramTestRegistry(t, provider)
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
-			notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "first", log).DrainForTest(context.Background())
+			notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "first", log).DrainForTest(context.Background())
 			status, started := r1State(t, env, id)
 			expected := "ambiguous"
 			if index == len(cases)-3 {
@@ -156,7 +156,7 @@ func TestTelegramR1DurableNoResend(t *testing.T) {
 				t.Fatal("request receipt not proven")
 			}
 			r1Eligible(t, env, id)
-			notifications.NewDispatcher(store, registry, notifications.SystemClock{}, "restarted", log).DrainForTest(context.Background())
+			notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "restarted", log).DrainForTest(context.Background())
 			status, finalStarted := r1State(t, env, id)
 			mu.Lock()
 			final := calls
@@ -343,7 +343,7 @@ func TestTelegramR1UsernamePersistence(t *testing.T) {
 		t.Fatal("generic gate accepted max+1")
 	}
 	stub := newBotStub(t)
-	notifications.NewDispatcher(catalogStore(env), telegramTestRegistry(t, telegramTestProvider(t, stub)), notifications.SystemClock{}, "max-username", slog.Default()).DrainForTest(ctx)
+	notifications.NewDispatcher(notificationStore(env), telegramTestRegistry(t, telegramTestProvider(t, stub)), notifications.SystemClock{}, "max-username", slog.Default()).DrainForTest(ctx)
 	status, _ := r1State(t, env, id)
 	if status != "accepted" || stub.count() != 1 {
 		t.Fatal("max username not dispatched")

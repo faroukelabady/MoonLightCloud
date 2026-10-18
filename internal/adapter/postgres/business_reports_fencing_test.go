@@ -463,7 +463,7 @@ func TestDeliveryFencingAdoptionAfterLeaseLoss(t *testing.T) {
 		t.Fatalf("one delivery: %+v %v", detail, err)
 	}
 	delivery := detail.Deliveries[0]
-	notificationService := notifications.NewService(store, store, nilLogger())
+	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger())
 	first, err := notificationService.EnqueueTemplate(ctx, notifications.EnqueueTemplateRequest{
 		ProviderKey: delivery.ProviderKey, IdempotencyKey: delivery.NotificationIdempotencyKey,
 		Recipient: delivery.Recipient, TemplateKey: delivery.TemplateKey, Locale: delivery.Locale,

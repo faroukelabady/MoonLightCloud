@@ -21,7 +21,7 @@ func barrierNotification(t *testing.T, env *saleEnv, key, wamid string) string {
 	if claimed.ID != id {
 		t.Fatalf("claim order: %v %v", claimed.ID, id)
 	}
-	if result, err := store.FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, wamid); err != nil || result != notifications.FinishApplied {
+	if result, err := NewNotifications(store.pool, store.timeout).FinishNotificationAccepted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration, wamid); err != nil || result != notifications.FinishApplied {
 		t.Fatalf("accept: %v %v", result, err)
 	}
 	return id
@@ -39,7 +39,7 @@ func statusApplier(env *saleEnv, id, wamid, raw string, base time.Time, offset i
 		event.Fingerprint = notifications.DeliveryEventFingerprint(
 			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 			event.Canonical, event.ProviderTimestamp, "")
-		if _, err := catalogStore(env).ApplyDeliveryStatus(context.Background(), id, event); err != nil {
+		if _, err := notificationStore(env).ApplyDeliveryStatus(context.Background(), id, event); err != nil {
 			panic(err)
 		}
 	}
@@ -224,7 +224,7 @@ func TestDeliveryUnknownConcurrent(t *testing.T) {
 		event.Fingerprint = notifications.DeliveryEventFingerprint(
 			"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 			event.Canonical, event.ProviderTimestamp, "")
-		if _, err := catalogStore(env).ApplyDeliveryStatus(context.Background(), id, event); err != nil {
+		if _, err := notificationStore(env).ApplyDeliveryStatus(context.Background(), id, event); err != nil {
 			panic(err)
 		}
 	}
@@ -360,7 +360,7 @@ func TestDeliveryAtomicityRollback(t *testing.T) {
 	event.Fingerprint = notifications.DeliveryEventFingerprint(
 		"whatsapp-main", event.ProviderMessageID, event.RawStatus,
 		event.Canonical, event.ProviderTimestamp, "")
-	if _, err := catalogStore(env).ApplyDeliveryStatus(context.Background(), id, event); err == nil {
+	if _, err := notificationStore(env).ApplyDeliveryStatus(context.Background(), id, event); err == nil {
 		t.Fatal("constraint violation must fail")
 	}
 	if status := deliveryCurrent(t, env, id); status != "sent" {

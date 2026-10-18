@@ -31,7 +31,7 @@ func testRunnerNoSeed(t *testing.T, env *saleEnv, source businessreports.ReportS
 func makeRunner(t *testing.T, env *saleEnv, store Devices, source businessreports.ReportSource) *businessreports.Runner {
 	t.Helper()
 	return businessreports.NewRunner(store, store, source,
-		notifications.NewService(store, store, nilLogger()),
+		notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger()),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25,
 		"worker-A", 5*time.Minute, nilLogger())
 }
@@ -44,7 +44,7 @@ func seedReportTemplateMapping(t *testing.T, env *saleEnv) {
 	store := catalogStore(env)
 	for _, template := range []string{"daily_business_report_v1", "ten_day_business_report_v1"} {
 		for _, locale := range []string{"ar", "en"} {
-			if err := store.UpsertTemplateMapping(ctx, notifications.TemplateMapping{
+			if err := NewNotifications(store.pool, store.timeout).UpsertTemplateMapping(ctx, notifications.TemplateMapping{
 				ProviderKey: "whatsapp-main", TemplateKey: template, Locale: locale,
 				ExternalTemplateName: "moonlight_" + template + "_" + locale,
 				ExternalLanguageCode: locale, ParameterNames: []string{"report_body"},
@@ -331,7 +331,7 @@ func TestReportRunnerCrashAfterEnqueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The crashed attempt's durable 7A row (never recorded in 7B).
-	notificationService := notifications.NewService(store, store, nilLogger())
+	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger())
 	crashed, err := notificationService.EnqueueTemplate(ctx, notifications.EnqueueTemplateRequest{
 		ProviderKey: delivery.ProviderKey, IdempotencyKey: delivery.NotificationIdempotencyKey,
 		Recipient: delivery.Recipient, TemplateKey: delivery.TemplateKey, Locale: delivery.Locale,
@@ -560,7 +560,7 @@ func TestReportRunnerLogPrivacy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	store := catalogStore(env)
 	loc := mustCairo()
-	notificationService := notifications.NewService(store, store, logger)
+	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), logger)
 	reportService := businessreports.NewService(store, store, store, store,
 		&stubReportSummary{summary: cannedSummary()}, notificationService,
 		businessreports.SystemClock{}, loc, 5*time.Minute, 25, logger)
@@ -646,7 +646,7 @@ func TestReportLateDataInterleaving(t *testing.T) {
 			arabicID = delivery.ID
 		}
 	}
-	notificationService := notifications.NewService(store, store, nilLogger())
+	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger())
 	res, err := notificationService.EnqueueTemplate(ctx, notifications.EnqueueTemplateRequest{
 		ProviderKey: "whatsapp-main", IdempotencyKey: "business-report:" + runID + ":" + arabicID,
 		Recipient: "201012345678", TemplateKey: "daily_business_report_v1", Locale: "ar",

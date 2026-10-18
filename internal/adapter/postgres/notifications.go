@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
@@ -16,13 +17,31 @@ import (
 )
 
 // Notification template mappings and the idempotent outbox live on
-// Devices (shared pool + timeouts). They are Cloud-only durable
+// Notifications (shared pool + timeouts). They are Cloud-only durable
 // integration state: no catalog/policy/inventory/order rebuild path
 // touches these tables.
+type Notifications struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ notifications.MappingStore = Notifications{}
+var _ notifications.EnqueueStore = Notifications{}
+var _ notifications.DispatchStore = Notifications{}
+var _ notifications.DeliveryStore = Notifications{}
+
+// NewNotifications shares the application's pool without owning its lifecycle.
+func NewNotifications(pool *pgxpool.Pool, timeout time.Duration) Notifications {
+	return Notifications{pool: pool, timeout: timeout}
+}
+
+func (d Notifications) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 // UpsertTemplateMapping creates or replaces one mapping. Parameter
 // names define the deterministic provider order.
-func (d Devices) UpsertTemplateMapping(ctx context.Context, mapping notifications.TemplateMapping) error {
+func (d Notifications) UpsertTemplateMapping(ctx context.Context, mapping notifications.TemplateMapping) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := notifications.ValidateProviderKey(mapping.ProviderKey); err != nil {
@@ -45,7 +64,7 @@ func (d Devices) UpsertTemplateMapping(ctx context.Context, mapping notification
 }
 
 // GetTemplateMapping resolves one mapping or reports found=false.
-func (d Devices) GetTemplateMapping(ctx context.Context, providerKey, templateKey, locale string) (notifications.TemplateMapping, bool, error) {
+func (d Notifications) GetTemplateMapping(ctx context.Context, providerKey, templateKey, locale string) (notifications.TemplateMapping, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).GetTemplateMapping(ctx, sqlcgen.GetTemplateMappingParams{
@@ -65,7 +84,7 @@ func (d Devices) GetTemplateMapping(ctx context.Context, providerKey, templateKe
 }
 
 // ListTemplateMappings lists mappings for one provider ("" for all).
-func (d Devices) ListTemplateMappings(ctx context.Context, providerKey string) ([]notifications.TemplateMapping, error) {
+func (d Notifications) ListTemplateMappings(ctx context.Context, providerKey string) ([]notifications.TemplateMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListTemplateMappings(ctx, providerKey)
@@ -86,7 +105,7 @@ func (d Devices) ListTemplateMappings(ctx context.Context, providerKey string) (
 // EnqueueNotification inserts one notification or classifies the
 // idempotent replay. Same key + same fingerprint is idempotent; same
 // key + different fingerprint is a Conflict that never overwrites.
-func (d Devices) EnqueueNotification(ctx context.Context, enqueue notifications.EnqueueIntent) (string, notifications.EnqueueOutcome, error) {
+func (d Notifications) EnqueueNotification(ctx context.Context, enqueue notifications.EnqueueIntent) (string, notifications.EnqueueOutcome, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	id := uuid.NewString()
@@ -139,7 +158,7 @@ func enqueueFingerprint(_ context.Context, enqueue notifications.EnqueueIntent) 
 // permanent state) makes crashed claims eligible again. A claimed row
 // whose send-start marker is already set must NOT be sent again: the
 // dispatcher routes it to ambiguous without provider I/O.
-func (d Devices) ClaimNotification(ctx context.Context, owner string, lease time.Duration, now time.Time) (notifications.ClaimedNotification, bool, error) {
+func (d Notifications) ClaimNotification(ctx context.Context, owner string, lease time.Duration, now time.Time) (notifications.ClaimedNotification, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	leaseUntil := pgtype.Timestamptz{Time: now.Add(lease).UTC(), Valid: true}
@@ -173,7 +192,7 @@ func (d Devices) ClaimNotification(ctx context.Context, owner string, lease time
 // MarkNotificationSendStarted durably records that the current dispatch
 // attempt actually started before any provider HTTP. It runs in its own
 // short transaction; the claim transaction is long released.
-func (d Devices) MarkNotificationSendStarted(ctx context.Context, id string, owner string, generation int64) (notifications.FinishResult, error) {
+func (d Notifications) MarkNotificationSendStarted(ctx context.Context, id string, owner string, generation int64) (notifications.FinishResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	affected, err := sqlcgen.New(d.pool).MarkNotificationSendStarted(ctx, sqlcgen.MarkNotificationSendStartedParams{
@@ -190,7 +209,7 @@ func (d Devices) MarkNotificationSendStarted(ctx context.Context, id string, own
 
 // fencedFinish runs one fenced terminal transition against a
 // non-terminal row. Stale claims affect zero rows: safe no-op.
-func (d Devices) fencedFinish(ctx context.Context, id string, owner string, generation int64, op string,
+func (d Notifications) fencedFinish(ctx context.Context, id string, owner string, generation int64, op string,
 	exec func(q *sqlcgen.Queries) (int64, error)) (notifications.FinishResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -208,7 +227,7 @@ func (d Devices) fencedFinish(ctx context.Context, id string, owner string, gene
 // one message ID. A provider-message-ID collision fails safely here:
 // the row keeps its send-start marker and converges to ambiguous on
 // the next claim instead of reassigning ownership.
-func (d Devices) FinishNotificationAccepted(ctx context.Context, id string, owner string, generation int64, providerMessageID string) (notifications.FinishResult, error) {
+func (d Notifications) FinishNotificationAccepted(ctx context.Context, id string, owner string, generation int64, providerMessageID string) (notifications.FinishResult, error) {
 	return d.fencedFinish(ctx, id, owner, generation, "accept", func(q *sqlcgen.Queries) (int64, error) {
 		return q.FinishNotificationAccepted(ctx, sqlcgen.FinishNotificationAcceptedParams{
 			ID: mustPgID(id), LeaseOwner: pgText(owner), LeaseGeneration: generation,
@@ -219,7 +238,7 @@ func (d Devices) FinishNotificationAccepted(ctx context.Context, id string, owne
 
 // FinishNotificationRetry records an explicitly safe retry outcome and
 // clears the send-start marker, authorizing one new send attempt.
-func (d Devices) FinishNotificationRetry(ctx context.Context, id string, owner string, generation int64, next time.Time, code string) (notifications.FinishResult, error) {
+func (d Notifications) FinishNotificationRetry(ctx context.Context, id string, owner string, generation int64, next time.Time, code string) (notifications.FinishResult, error) {
 	return d.fencedFinish(ctx, id, owner, generation, "retry", func(q *sqlcgen.Queries) (int64, error) {
 		return q.FinishNotificationRetry(ctx, sqlcgen.FinishNotificationRetryParams{
 			ID: mustPgID(id), LeaseOwner: pgText(owner), LeaseGeneration: generation,
@@ -229,7 +248,7 @@ func (d Devices) FinishNotificationRetry(ctx context.Context, id string, owner s
 }
 
 // FinishNotificationBlocked records a terminal non-retryable outcome.
-func (d Devices) FinishNotificationBlocked(ctx context.Context, id string, owner string, generation int64, code string) (notifications.FinishResult, error) {
+func (d Notifications) FinishNotificationBlocked(ctx context.Context, id string, owner string, generation int64, code string) (notifications.FinishResult, error) {
 	return d.fencedFinish(ctx, id, owner, generation, "block", func(q *sqlcgen.Queries) (int64, error) {
 		return q.FinishNotificationBlocked(ctx, sqlcgen.FinishNotificationBlockedParams{
 			ID: mustPgID(id), LeaseOwner: pgText(owner), LeaseGeneration: generation,
@@ -241,7 +260,7 @@ func (d Devices) FinishNotificationBlocked(ctx context.Context, id string, owner
 // FinishNotificationAmbiguous records an unknown remote outcome.
 // Terminal for automatic retry: only a new explicit notification may
 // supersede it after human assessment.
-func (d Devices) FinishNotificationAmbiguous(ctx context.Context, id string, owner string, generation int64, code string) (notifications.FinishResult, error) {
+func (d Notifications) FinishNotificationAmbiguous(ctx context.Context, id string, owner string, generation int64, code string) (notifications.FinishResult, error) {
 	return d.fencedFinish(ctx, id, owner, generation, "ambiguous", func(q *sqlcgen.Queries) (int64, error) {
 		return q.FinishNotificationAmbiguous(ctx, sqlcgen.FinishNotificationAmbiguousParams{
 			ID: mustPgID(id), LeaseOwner: pgText(owner), LeaseGeneration: generation,
@@ -268,7 +287,7 @@ func mustGoID(id pgtype.UUID) string {
 // LookupByProviderMessage correlates a status callback to exactly one
 // notification by provider message ID. Unknown IDs report found=false;
 // correlation never uses recipient data.
-func (d Devices) LookupByProviderMessage(ctx context.Context, providerKey, providerMessageID string) (string, bool, error) {
+func (d Notifications) LookupByProviderMessage(ctx context.Context, providerKey, providerMessageID string) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).GetNotificationByProviderMessage(ctx, sqlcgen.GetNotificationByProviderMessageParams{
@@ -295,7 +314,7 @@ func (d Devices) LookupByProviderMessage(ctx context.Context, providerKey, provi
 // decision always uses post-lock current state. Lock order is fixed:
 // notification row, then history insert, then current update. Different
 // notifications never block each other.
-func (d Devices) ApplyDeliveryStatus(ctx context.Context, notificationID string, event notifications.DeliveryEvent) (notifications.DeliveryOutcome, error) {
+func (d Notifications) ApplyDeliveryStatus(ctx context.Context, notificationID string, event notifications.DeliveryEvent) (notifications.DeliveryOutcome, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	id, err := parseUUID(notificationID)
@@ -376,7 +395,7 @@ type NotificationQueueStats struct {
 
 // NotificationQueueStats returns outbox counts plus the oldest pending
 // age. Safe low-cardinality fields only.
-func (d Devices) NotificationQueueStats(ctx context.Context) (NotificationQueueStats, error) {
+func (d Notifications) NotificationQueueStats(ctx context.Context) (NotificationQueueStats, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).NotificationQueueStats(ctx)
@@ -412,7 +431,7 @@ type NotificationStatus struct {
 }
 
 // GetNotificationStatus reads one notification's safe operator state.
-func (d Devices) GetNotificationStatus(ctx context.Context, id string) (NotificationStatus, error) {
+func (d Notifications) GetNotificationStatus(ctx context.Context, id string) (NotificationStatus, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)

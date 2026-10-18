@@ -49,11 +49,11 @@ func TestTelegramReportRunnerEndToEnd(t *testing.T) {
 
 	store := catalogStore(env)
 	stub := newBotStub(t)
-	notifications.NewDispatcher(store,
+	notifications.NewDispatcher(NewNotifications(store.pool, store.timeout),
 		telegramTestRegistry(t, telegramTestProvider(t, stub)),
 		notifications.SystemClock{}, "worker-T", slog.Default()).DrainForTest(ctx)
 
-	status, err := store.GetNotificationStatus(ctx, deliveries[0].NotificationID)
+	status, err := NewNotifications(store.pool, store.timeout).GetNotificationStatus(ctx, deliveries[0].NotificationID)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

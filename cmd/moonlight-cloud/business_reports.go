@@ -466,7 +466,8 @@ func openBusinessReportsEnv(stderr io.Writer) (*businessReportsEnv, error) {
 	}
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	notificationService := notifications.NewService(store, store, logger)
+	notificationStore := postgres.NewNotifications(pool, cfg.DBQueryTimeout)
+	notificationService := notifications.NewService(notificationStore, notificationStore, logger)
 	reportService := report.NewService(postgres.NewReporting(pool, cfg.DBQueryTimeout), clock.System{}, cfg.StoreLocation)
 	loc, err := businessreports.LoadCairo()
 	if err != nil {

@@ -50,7 +50,7 @@ func seedOpsMapping(t *testing.T, store Devices) {
 	ctx := context.Background()
 	for _, locale := range []string{"ar", "en"} {
 		for _, tpl := range []string{operations.TemplateOpen, operations.TemplateResolved} {
-			if err := store.UpsertTemplateMapping(ctx, notifications.TemplateMapping{
+			if err := NewNotifications(store.pool, store.timeout).UpsertTemplateMapping(ctx, notifications.TemplateMapping{
 				ProviderKey: "whatsapp-main", TemplateKey: tpl, Locale: locale,
 				ExternalTemplateName: "ext_" + tpl, ExternalLanguageCode: locale,
 				ParameterNames: []string{operations.ParamAlertBody}, Enabled: true,
@@ -301,7 +301,7 @@ type opsNotifier struct {
 }
 
 func (n *opsNotifier) EnqueueTemplate(ctx context.Context, req notifications.EnqueueTemplateRequest) (notifications.EnqueueResult, error) {
-	svc := notifications.NewService(n.store, n.store, testOpsLogger())
+	svc := notifications.NewService(NewNotifications(n.store.pool, n.store.timeout), NewNotifications(n.store.pool, n.store.timeout), testOpsLogger())
 	return svc.EnqueueTemplate(ctx, req)
 }
 

@@ -222,6 +222,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
 		"orders", ordersEnabled)
+	notificationStore := postgres.NewNotifications(pool, cfg.DBQueryTimeout)
 	a.NotificationRegistry = notifications.NewRegistry()
 	var notificationWebhooks *adapterhttp.WhatsAppWebhookHandlers
 	if cfg.WhatsAppNotifications.Enabled {
@@ -237,7 +238,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		secret := cfg.WhatsAppNotifications.WebhookVerifyToken
 		appSecret := cfg.WhatsAppNotifications.AppSecret
 		key := string(provider.Key())
-		notificationWebhooks = adapterhttp.NewWhatsAppWebhookHandlers(store,
+		notificationWebhooks = adapterhttp.NewWhatsAppWebhookHandlers(notificationStore,
 			func(providerKey string) (string, bool) {
 				if providerKey == key {
 					return secret, true
@@ -274,7 +275,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// lease and the dispatcher stays nil.
 	if cfg.WhatsAppNotifications.Enabled || cfg.TelegramNotifications.Enabled {
 		a.NotificationDispatcher = notifications.NewDispatcher(
-			store, a.NotificationRegistry, notifications.SystemClock{}, commerceOwner(), log)
+			notificationStore, a.NotificationRegistry, notifications.SystemClock{}, commerceOwner(), log)
 	}
 	a.Log.Info("notification providers", "count", a.NotificationRegistry.Count(),
 		"whatsapp", cfg.WhatsAppNotifications.Enabled,
@@ -285,7 +286,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			pool.Close()
 			return nil, err
 		}
-		notificationService := notifications.NewService(store, store, log)
+		notificationService := notifications.NewService(notificationStore, notificationStore, log)
 		a.ReportService = businessreports.NewService(store, store, store, store,
 			a.Reports, notificationService,
 			businessreports.SystemClock{}, loc,
@@ -327,7 +328,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// while canonical Retail events are missing.
 	syncRecoverySvc := syncrecovery.NewService(postgres.NewSyncRecovery(pool, cfg.DBQueryTimeout))
 	syncRecoveryHandlers := &adapterhttp.SyncRecoveryHandlers{Svc: syncRecoverySvc, Log: log}
-	opsNotify := notifications.NewService(opsStore, opsStore, log)
+	opsNotify := notifications.NewService(notificationStore, notificationStore, log)
 	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)
 	opsDetector := operations.NewDetector(opsStore, opsService, opsAlerts, operations.DetectorConfig{
 		BatchSize: cfg.Operations.ScanBatchSize, OfflineAfter: cfg.Operations.DeviceOfflineAfter,

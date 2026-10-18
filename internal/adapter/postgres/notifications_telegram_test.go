@@ -75,7 +75,7 @@ func telegramTestRegistry(t *testing.T, provider *telegram.Provider) *notificati
 func seedTelegramTemplateMapping(t *testing.T, env *saleEnv) {
 	t.Helper()
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	for _, template := range []string{"daily_business_report_v1", "ten_day_business_report_v1",
 		"operational_alert_open_v1", "operational_alert_resolved_v1", "operator_test_v1"} {
 		for _, locale := range []string{"ar", "en"} {
@@ -86,7 +86,7 @@ func seedTelegramTemplateMapping(t *testing.T, env *saleEnv) {
 			if template == "operator_test_v1" {
 				param = "body"
 			}
-			if err := store.UpsertTemplateMapping(ctx, notifications.TemplateMapping{
+			if err := NewNotifications(store.pool, store.timeout).UpsertTemplateMapping(ctx, notifications.TemplateMapping{
 				ProviderKey: "telegram-main", TemplateKey: template, Locale: locale,
 				ExternalTemplateName: telegram.RendererBodyV1, ExternalLanguageCode: locale,
 				ParameterNames: []string{param}, Enabled: true,
@@ -104,9 +104,9 @@ func seedTelegramTemplateMapping(t *testing.T, env *saleEnv) {
 func TestTelegramDurableDispatchProvesAcceptance(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := notificationStore(env)
 	seedTelegramTemplateMapping(t, env)
-	service := notifications.NewService(store, store, slog.Default())
+	service := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), slog.Default())
 
 	result, err := service.EnqueueTemplate(ctx, notifications.EnqueueTemplateRequest{
 		ProviderKey: "telegram-main", IdempotencyKey: "tg-proof-001",
@@ -127,12 +127,12 @@ func TestTelegramDurableDispatchProvesAcceptance(t *testing.T) {
 	}
 
 	stub := newBotStub(t)
-	dispatcher := notifications.NewDispatcher(store,
+	dispatcher := notifications.NewDispatcher(NewNotifications(store.pool, store.timeout),
 		telegramTestRegistry(t, telegramTestProvider(t, stub)),
 		notifications.SystemClock{}, "worker-T", slog.Default())
 	dispatcher.DrainForTest(ctx)
 
-	status, err := store.GetNotificationStatus(ctx, result.ID)
+	status, err := NewNotifications(store.pool, store.timeout).GetNotificationStatus(ctx, result.ID)
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
