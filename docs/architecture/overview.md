@@ -32,6 +32,15 @@ Store, mutation-barrier and timeout contracts. Known boundary exceptions and
 incremental extraction work are tracked in the architecture refactoring plan.
 There is no common Retail/Cloud business-model module.
 
+PostgreSQL persistence is being separated into bounded adapters sharing the same
+application-owned pool and query timeout. `SyncInbox` owns ingestion,
+`SyncRecovery` the recovery ledger, `Reporting` financial/dashboard reads,
+`Notifications` mappings/outbox/delivery state, `DeviceControl` presence and
+remote-sync commands, and `BusinessReports` schedules/runs/delivery snapshots.
+Each type satisfies its domain store contracts directly. The remaining
+`Devices` families are still being extracted; these types do not embed that
+universal repository. Cross-table atomic operations remain in one transaction.
+
 ## Ingestion, projection and recovery
 
 `internal/sync` validates envelopes and exact canonical JSON, commits immutable
@@ -75,10 +84,10 @@ explicit operational action.
 ADR-0055 replaces the old development migration chain with a guarded baseline.
 Each model checkpoint raises its file/version and refuses an older development
 database. `internal/migrate.TargetVersion` is authoritative for the current
-checkpoint. The paired Retail `plan/database-baseline-plan.md` records remaining
-work: normalized names/prices/frames, mandatory Store scope and other projection
-cleanup are not all implemented yet. Cloud now derives Product stock from the
-complete active Variant inventory set and has no Product-level inventory writer.
+checkpoint. The paired Retail `plan/database-baseline-plan.md` records the
+completed data-model checkpoints and their verification, separately from manual
+packaged-desktop acceptance. Cloud derives Product stock from the complete
+active Variant inventory set and has no Product-level inventory writer.
 
 See `docs/operations/disaster-recovery.md`, `docs/security/threat-model.md`,
 `docs/operations/railway.md`, and the accepted ADRs for deployment requirements.
