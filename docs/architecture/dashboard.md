@@ -20,23 +20,23 @@
 
 ## Prerequisites
 
-- Go toolchain (repo-pinned), Podman/Docker, Node 22 + npm (pinned lockfile).
+- Go toolchain (repo-pinned), Podman/Docker, Node 22 + pnpm 12 (pinned lockfile).
 - PostgreSQL 18 via `deploy/compose.yaml` (`./scripts/dev-up.sh`).
 
 ## Frontend workflows
 
 ```bash
-npm --prefix dashboard ci      # locked install
-npm --prefix dashboard run dev # Vite dev server :5173 (proxies /api to :8080)
-npm --prefix dashboard run typecheck
-npm --prefix dashboard test    # vitest unit + component
-npm --prefix dashboard run build        # dist/ for Go serving
-npm --prefix dashboard run test:e2e     # needs dev stack (see below)
+pnpm --dir dashboard install --frozen-lockfile  # locked install
+pnpm --dir dashboard run dev # Vite dev server :5173 (proxies /api to :8080)
+pnpm --dir dashboard run typecheck
+pnpm --dir dashboard test    # vitest unit + component
+pnpm --dir dashboard run build        # dist/ for Go serving
+pnpm --dir dashboard run test:e2e     # needs dev stack (see below)
 ```
 
 Full-stack local loop: `./scripts/dev-up.sh` (builds dashboard `dist/`?
 No — dev serves Go from source; build `dashboard/dist` once with
-`npm --prefix dashboard run build`, then `go run ./cmd/moonlight-cloud`
+`pnpm --dir dashboard run build`, then `go run ./cmd/moonlight-cloud`
 serves it at `/dashboard`). For hot frontend iteration use Vite dev
 (`:5173`, API proxied to Go on `:8080`).
 

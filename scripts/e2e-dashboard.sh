@@ -19,13 +19,13 @@
 #
 # Test data stays test-owned: specs that need report rows ingest them
 # through the device API themselves (e.g. phase12-r1); nothing is seeded
-# globally. Requires podman, node/npx (dashboard deps installed, Chromium via
-# `npx playwright install chromium`), openssl and curl.
+# globally. Requires podman, node/pnpm (dashboard deps installed, Chromium via
+# `pnpm --dir dashboard exec playwright install chromium`), openssl and curl.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 cd "$REPO_ROOT"
 
-for c in podman node npx openssl curl; do
+for c in podman node pnpm openssl curl; do
   command -v "$c" >/dev/null 2>&1 || { echo "error: $c is required" >&2; exit 1; }
 done
 
@@ -114,7 +114,7 @@ rc=0
   E2E_DASHBOARD_USER="$OWNER_USER" E2E_DASHBOARD_PASSWORD="$OWNER_PW" \
   E2E_ADMIN_USER="admin@e2e.test" E2E_ADMIN_PASSWORD="$(rand 24)" E2E_ADMIN_STORE="$STORE_A" \
   E2E_DEVICE_CREDENTIAL_A="$DEV_A" \
-    npx playwright test "$@"
+    pnpm exec playwright test "$@"
 ) || rc=$?
 
 if podman logs "$APP" 2>&1 | grep -qF "$OWNER_PW"; then

@@ -77,15 +77,16 @@ echo "== govulncheck =="
 go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...
 
 echo "== frontend (typecheck, unit tests, build) =="
-if ! command -v npm >/dev/null 2>&1; then
-  echo "error: npm required for dashboard checks" >&2
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "error: pnpm 12 required for dashboard checks (mise or Corepack)" >&2
   exit 1
 fi
-npm --prefix dashboard ci --no-audit --no-fund
-npm --prefix dashboard run typecheck
-npm --prefix dashboard run check
-npm --prefix dashboard test
-npm --prefix dashboard run build
+pnpm --dir dashboard install --frozen-lockfile
+pnpm --dir dashboard run typecheck
+pnpm --dir dashboard run check
+pnpm --dir dashboard test
+pnpm --dir dashboard run build
+pnpm --dir dashboard audit --audit-level high
 test -f dashboard/dist/index.html || { echo "dashboard build missing index.html" >&2; exit 1; }
 # Strict CSP compatibility: no inline scripts in the built shell.
 if grep -qE '<script(\s[^>]*)?>[^[:space:]<]' dashboard/dist/index.html; then

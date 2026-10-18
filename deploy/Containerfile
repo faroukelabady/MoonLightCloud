@@ -3,10 +3,11 @@
 # Stage 1: build the Svelte dashboard to static assets (no CDN at runtime).
 FROM docker.io/library/node:22.23.0-bookworm-slim AS frontend
 WORKDIR /dash
-COPY dashboard/package.json dashboard/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN corepack enable
+COPY dashboard/package.json dashboard/pnpm-lock.yaml dashboard/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY dashboard/ ./
-RUN npm run build
+RUN pnpm run build
 
 # Stage 2: build a static Go binary with reproducible metadata.
 FROM docker.io/library/golang:1.27.2-bookworm AS build
