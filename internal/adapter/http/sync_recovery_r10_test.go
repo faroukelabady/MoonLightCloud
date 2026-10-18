@@ -44,6 +44,7 @@ func (b *completionReadBarrier) VerifyProgress(ctx context.Context, deviceID str
 type recoveryHTTPFixture struct {
 	pool     *pgxpool.Pool
 	devices  postgres.Devices
+	recovery postgres.SyncRecovery
 	service  *syncrecovery.Service
 	server   *httptest.Server
 	storeA   string
@@ -59,6 +60,7 @@ func newRecoveryHTTPFixture(t *testing.T, serviceStore syncrecovery.Store) *reco
 	}
 	t.Cleanup(pool.Close)
 	devices := postgres.NewDevices(pool, 5*time.Second)
+	recovery := postgres.NewSyncRecovery(pool, 5*time.Second)
 	hasher, err := auth.NewHasher([]byte(strings.Repeat("r", 32)))
 	if err != nil {
 		t.Fatal(err)
@@ -75,9 +77,9 @@ func newRecoveryHTTPFixture(t *testing.T, serviceStore syncrecovery.Store) *reco
 	}
 	storeA := uuid.NewString()
 	if serviceStore == nil {
-		serviceStore = devices
+		serviceStore = recovery
 	} else if barrier, ok := serviceStore.(*completionReadBarrier); ok {
-		barrier.Store = devices
+		barrier.Store = recovery
 	}
 	service := syncrecovery.NewService(serviceStore)
 	handler := &SyncRecoveryHandlers{Svc: service, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -88,7 +90,7 @@ func newRecoveryHTTPFixture(t *testing.T, serviceStore syncrecovery.Store) *reco
 	mux.Handle("POST /api/v1/device-control/recovery/complete", DeviceAuth(authService)(http.HandlerFunc(handler.RecoveryComplete)))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	return &recoveryHTTPFixture{pool: pool, devices: devices, service: service, server: server, storeA: storeA, newToken: newToken}
+	return &recoveryHTTPFixture{pool: pool, devices: devices, recovery: recovery, service: service, server: server, storeA: storeA, newToken: newToken}
 }
 
 func (f *recoveryHTTPFixture) bind(t *testing.T, deviceID, storeID string) {
@@ -174,7 +176,7 @@ func TestR10StaleCompletionCannotClearNewGenerationAuthenticatedPostgres(t *test
 	if err := json.Unmarshal(body, &initial); err != nil || len(initial.Missing) != 0 {
 		t.Fatalf("initial verification response=%+v err=%v", initial, err)
 	}
-	before, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	before, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || before.Generation != 1 || before.Missing != 0 || !before.Complete {
 		t.Fatalf("initial durable generation=%+v err=%v", before, err)
 	}
@@ -206,7 +208,7 @@ func TestR10StaleCompletionCannotClearNewGenerationAuthenticatedPostgres(t *test
 	if err := json.Unmarshal(body, &newer); err != nil || len(newer.Missing) != 1 || newer.Missing[0] != missingID {
 		t.Fatalf("new generation must record missing identity: %+v err=%v", newer, err)
 	}
-	current, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	current, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || current.Generation != before.Generation+1 || current.Missing != 1 || current.Events != 2 || current.LastEventID != missingID {
 		t.Fatalf("new ledger before stale completion release=%+v err=%v", current, err)
 	}
@@ -223,11 +225,11 @@ func TestR10StaleCompletionCannotClearNewGenerationAuthenticatedPostgres(t *test
 	if stale.code != http.StatusBadRequest || !strings.Contains(string(stale.body), "stale or incomplete") {
 		t.Fatalf("stale completion must return a truthful 400: HTTP=%d %s", stale.code, stale.body)
 	}
-	after, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	after, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || after != current {
 		t.Fatalf("stale completion modified current ledger: before=%+v after=%+v err=%v", current, after, err)
 	}
-	state, found, err := f.devices.GetRecoveryState(ctx, deviceID)
+	state, found, err := f.recovery.GetRecoveryState(ctx, deviceID)
 	if err != nil || !found || !state.Required {
 		t.Fatalf("stale completion cleared recovery: state=%+v found=%v err=%v", state, found, err)
 	}
@@ -239,7 +241,7 @@ func TestR10StaleCompletionCannotClearNewGenerationAuthenticatedPostgres(t *test
 
 	// Recreate the service to model a Cloud restart: the newer required
 	// generation and missing count remain durable in PostgreSQL.
-	restarted := syncrecovery.NewService(f.devices)
+	restarted := syncrecovery.NewService(f.recovery)
 	restartedReport, err := restarted.Status(ctx, deviceID)
 	if err != nil || !restartedReport.Required || restartedReport.StoreReconciled {
 		t.Fatalf("restarted recovery status=%+v err=%v", restartedReport, err)
@@ -334,7 +336,7 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 	if code != http.StatusOK || json.Unmarshal(body, &replacement) != nil || len(replacement.Missing) != 0 {
 		t.Fatalf("same-Store replacement must preserve scoped continuity: HTTP=%d response=%+v body=%s", code, replacement, body)
 	}
-	aProgressBeforeForeign, _, err := f.devices.VerifyProgress(ctx, aID)
+	aProgressBeforeForeign, _, err := f.recovery.VerifyProgress(ctx, aID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +352,7 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 	if code != http.StatusOK || json.Unmarshal(body, &unbound) != nil || len(unbound.Missing) != 1 {
 		t.Fatalf("unbound identity lookup must fail closed: HTTP=%d response=%+v body=%s", code, unbound, body)
 	}
-	aProgressAfterForeign, _, err := f.devices.VerifyProgress(ctx, aID)
+	aProgressAfterForeign, _, err := f.recovery.VerifyProgress(ctx, aID)
 	if err != nil || aProgressAfterForeign != aProgressBeforeForeign {
 		t.Fatalf("foreign verification changed Store A ledger: before=%+v after=%+v err=%v", aProgressBeforeForeign, aProgressAfterForeign, err)
 	}
@@ -363,7 +365,7 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 		t.Fatalf("hash mismatch must be reported missing: HTTP=%d response=%+v body=%s", code, mismatch, body)
 	}
 
-	aProgress, _, err := f.devices.VerifyProgress(ctx, aID)
+	aProgress, _, err := f.recovery.VerifyProgress(ctx, aID)
 	if err != nil || aProgress.Generation != aProgressBeforeForeign.Generation+1 || aProgress.Events != 1 || aProgress.Missing != 1 {
 		t.Fatalf("Store A durable verification state=%+v err=%v", aProgress, err)
 	}
@@ -403,7 +405,7 @@ func TestR10CompleteAndNewRecoveryMarkAreGenerationSerialized(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("completion did not pause after its ledger read")
 	}
-	if err := f.devices.UpsertRecoveryState(ctx, deviceID, "new recovery mark"); err != nil {
+	if err := f.recovery.UpsertRecoveryState(ctx, deviceID, "new recovery mark"); err != nil {
 		t.Fatal(err)
 	}
 	close(barrier.release)
@@ -415,11 +417,11 @@ func TestR10CompleteAndNewRecoveryMarkAreGenerationSerialized(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("completion did not finish after release")
 	}
-	state, found, err := f.devices.GetRecoveryState(ctx, deviceID)
+	state, found, err := f.recovery.GetRecoveryState(ctx, deviceID)
 	if err != nil || !found || !state.Required {
 		t.Fatalf("new recovery requirement was cleared: %+v found=%v err=%v", state, found, err)
 	}
-	progress, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != 2 || progress.Events != 0 || progress.Pages != 0 || progress.Missing != 0 || progress.Complete {
 		t.Fatalf("mark racing completion did not preserve a clean newer ledger: %+v err=%v", progress, err)
 	}
@@ -447,7 +449,7 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 		declared := declared
 		go func() {
 			<-start
-			generation, err := f.devices.BeginVerifyPass(ctx, deviceID, declared)
+			generation, err := f.recovery.BeginVerifyPass(ctx, deviceID, declared)
 			results <- beginResult{generation: generation, declared: declared, err: err}
 		}()
 	}
@@ -460,27 +462,27 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 	if current.generation < old.generation {
 		old, current = current, old
 	}
-	progress, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != current.generation || progress.DeclaredTotal != current.declared {
 		t.Fatalf("initialization did not preserve newest generation/cursor: current=%+v ledger=%+v err=%v", current, progress, err)
 	}
-	advanced, err := f.devices.RecordVerifyPage(ctx, deviceID, old.generation, oldEvent, oldEvent, 1, 0, 1, true)
+	advanced, err := f.recovery.RecordVerifyPage(ctx, deviceID, old.generation, oldEvent, oldEvent, 1, 0, 1, true)
 	if err != nil || advanced {
 		t.Fatalf("stale page record advanced new generation: advanced=%v err=%v", advanced, err)
 	}
-	progress, _, err = f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != current.generation || progress.Events != 0 || progress.Pages != 0 || progress.LastEventID != "" {
 		t.Fatalf("stale page mutated current generation: %+v err=%v", progress, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, oldEvent, oldEvent, 1, 0, 1, false)
+	advanced, err = f.recovery.RecordVerifyPage(ctx, deviceID, current.generation, oldEvent, oldEvent, 1, 0, 1, false)
 	if err != nil || !advanced {
 		t.Fatalf("current generation first page did not advance: advanced=%v err=%v", advanced, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, current.generation, newEvent, newEvent, 1, 0, 0, true)
+	advanced, err = f.recovery.RecordVerifyPage(ctx, deviceID, current.generation, newEvent, newEvent, 1, 0, 0, true)
 	if err != nil || !advanced {
 		t.Fatalf("current generation second page did not advance: advanced=%v err=%v", advanced, err)
 	}
-	progress, _, err = f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != current.generation || progress.Events != 2 || progress.Pages != 2 || progress.LastEventID != newEvent || !progress.Complete {
 		t.Fatalf("page accounting/cursor changed under concurrent initialization: %+v err=%v", progress, err)
 	}
@@ -490,7 +492,7 @@ func TestR10RecoveryPageRecordRejectsStaleGeneration(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("current pass verification HTTP %d: %s", code, body)
 	}
-	progress, _, err = f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != current.generation+1 || progress.Events != 2 || progress.Pages != 1 {
 		t.Fatalf("current verification did not advance expected generation: %+v err=%v", progress, err)
 	}

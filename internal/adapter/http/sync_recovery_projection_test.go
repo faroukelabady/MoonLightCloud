@@ -51,7 +51,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	recovery := syncrecovery.NewService(devices)
+	recovery := syncrecovery.NewService(postgres.NewSyncRecovery(pool, 5*time.Second))
 	if err := recovery.MarkRestoreRequired(ctx, []string{created.Device.ID}, "restore regression"); err != nil {
 		t.Fatal(err)
 	}

@@ -324,7 +324,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// Phase 20 R2: Cloud-restore recovery protocol. Durable state so a
 	// restored database can never silently claim full synchronization
 	// while canonical Retail events are missing.
-	syncRecoverySvc := syncrecovery.NewService(store)
+	syncRecoverySvc := syncrecovery.NewService(postgres.NewSyncRecovery(pool, cfg.DBQueryTimeout))
 	syncRecoveryHandlers := &adapterhttp.SyncRecoveryHandlers{Svc: syncRecoverySvc, Log: log}
 	opsNotify := notifications.NewService(opsStore, opsStore, log)
 	opsAlerts := operations.NewAlertProcessor(opsStore, opsService, opsNotify, ids.System{}.New, time.Now, opsMetrics)

@@ -51,7 +51,7 @@ func TestR12BoundaryHandshakePrecedesRetailSnapshot(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("snapshot page HTTP %d: %s", code, body)
 	}
-	progress, found, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.Generation != started.Generation || progress.DeclaredTotal != 1 || progress.Events != 1 || progress.Missing != 0 || !progress.Complete {
 		t.Fatalf("unexpected finite-boundary ledger: %+v found=%v err=%v", progress, found, err)
 	}
@@ -99,7 +99,7 @@ func TestR12StaleGenerationCannotRecordSnapshotPage(t *testing.T) {
 	if code != http.StatusBadRequest || !strings.Contains(string(body), "stale") {
 		t.Fatalf("stale page should be rejected, HTTP %d: %s", code, body)
 	}
-	progress, found, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.Generation != currentGeneration || progress.Pages != 0 || progress.Events != 0 {
 		t.Fatalf("stale page changed current ledger: %+v found=%v err=%v", progress, found, err)
 	}
@@ -135,7 +135,7 @@ func TestR11LiveHistoryGrowthMayExceedDeclaredCount(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("terminal live walk with excess coverage should be accepted: HTTP %d %s", code, body)
 	}
-	progress, found, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.DeclaredTotal != 1 || progress.Events != 3 || progress.Missing != 0 || !progress.Complete {
 		t.Fatalf("expected complete zero-missing 3-of-1 lower-bound ledger, got %+v found=%v err=%v", progress, found, err)
 	}
@@ -143,7 +143,7 @@ func TestR11LiveHistoryGrowthMayExceedDeclaredCount(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("generation-fenced completion rejected valid excess coverage: HTTP %d %s", code, body)
 	}
-	state, found, err := f.devices.GetRecoveryState(ctx, deviceID)
+	state, found, err := f.recovery.GetRecoveryState(ctx, deviceID)
 	if err != nil || !found || state.Required || state.VerifiedEvents != 3 {
 		t.Fatalf("completion did not durably clear recovery at verified count: state=%+v found=%v err=%v", state, found, err)
 	}
@@ -179,7 +179,7 @@ func TestR11BeginPassCapturesCloudEventsAcceptedBeforeFirstPage(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("first page rejected after concurrent Cloud events: HTTP %d %s", code, body)
 	}
-	progress, found, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.DeclaredTotal != 3 || progress.Events != 1 || progress.Complete {
 		t.Fatalf("pass must atomically raise its effective lower bound to Cloud's current count: %+v found=%v err=%v", progress, found, err)
 	}
@@ -191,7 +191,7 @@ func TestR11BeginPassCapturesCloudEventsAcceptedBeforeFirstPage(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("completion at the atomically captured Cloud floor: HTTP %d %s", code, body)
 	}
-	progress, found, err = f.devices.VerifyProgress(ctx, deviceID)
+	progress, found, err = f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || !found || progress.DeclaredTotal != 3 || progress.Events != 3 || progress.Missing != 0 || !progress.Complete {
 		t.Fatalf("expected complete generation at captured floor: %+v found=%v err=%v", progress, found, err)
 	}
@@ -245,7 +245,7 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("old first page HTTP %d: %s", code, body)
 			}
-			before, found, err := f.devices.VerifyProgress(ctx, deviceID)
+			before, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 			if err != nil || !found || before.Generation != oldGeneration || before.Pages != 1 || before.Events != 1 || before.Missing != 1 {
 				t.Fatalf("old generation was not prepared with missing history: %+v found=%v err=%v", before, found, err)
 			}
@@ -273,7 +273,7 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 				if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "operator re-mark"); err != nil {
 					t.Fatal(err)
 				}
-				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				want, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -287,13 +287,13 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 				if code != http.StatusOK {
 					t.Fatalf("new generation first page HTTP %d: %s", code, body)
 				}
-				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				want, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 				if err != nil {
 					t.Fatal(err)
 				}
 			default:
 				currentGeneration = start()
-				want, _, err = f.devices.VerifyProgress(ctx, deviceID)
+				want, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -312,11 +312,11 @@ func TestR13ExplicitContinuationCannotRetargetNewLedger(t *testing.T) {
 			if stale.code != http.StatusBadRequest {
 				t.Fatalf("old explicit continuation must be rejected, HTTP %d: %s", stale.code, stale.body)
 			}
-			after, found, err := f.devices.VerifyProgress(ctx, deviceID)
+			after, found, err := f.recovery.VerifyProgress(ctx, deviceID)
 			if err != nil || !found || after != want {
 				t.Fatalf("stale continuation changed current ledger: want=%+v got=%+v found=%v err=%v", want, after, found, err)
 			}
-			state, found, err := f.devices.GetRecoveryState(ctx, deviceID)
+			state, found, err := f.recovery.GetRecoveryState(ctx, deviceID)
 			if err != nil || !found || !state.Required {
 				t.Fatalf("stale continuation cleared recovery: state=%+v found=%v err=%v", state, found, err)
 			}
@@ -335,33 +335,33 @@ func TestR13SQLPageDeclarationRulesAreAtomic(t *testing.T) {
 	if err := f.service.MarkRestoreRequired(ctx, []string{deviceID}, "restore"); err != nil {
 		t.Fatal(err)
 	}
-	generation, err := f.devices.BeginVerifyPass(ctx, deviceID, 0)
+	generation, err := f.recovery.BeginVerifyPass(ctx, deviceID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := "10000000-0000-4000-8000-000000000011"
 	second := "20000000-0000-4000-8000-000000000022"
-	advanced, err := f.devices.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 0, false)
+	advanced, err := f.recovery.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 0, false)
 	if err != nil || advanced {
 		t.Fatalf("SQL accepted first page without snapshot declaration: advanced=%v err=%v", advanced, err)
 	}
-	progress, _, err := f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err := f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Generation != generation || progress.Pages != 0 || progress.Events != 0 {
 		t.Fatalf("rejected first page mutated ledger: %+v err=%v", progress, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 2, false)
+	advanced, err = f.recovery.RecordVerifyPage(ctx, deviceID, generation, first, first, 1, 0, 2, false)
 	if err != nil || !advanced {
 		t.Fatalf("SQL rejected valid declared first page: advanced=%v err=%v", advanced, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 2, true)
+	advanced, err = f.recovery.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 2, true)
 	if err != nil || advanced {
 		t.Fatalf("SQL accepted continuation that redeclared snapshot: advanced=%v err=%v", advanced, err)
 	}
-	progress, _, err = f.devices.VerifyProgress(ctx, deviceID)
+	progress, _, err = f.recovery.VerifyProgress(ctx, deviceID)
 	if err != nil || progress.Pages != 1 || progress.Events != 1 || progress.DeclaredTotal != 2 || progress.Complete {
 		t.Fatalf("rejected declaration mutated ledger: %+v err=%v", progress, err)
 	}
-	advanced, err = f.devices.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 0, true)
+	advanced, err = f.recovery.RecordVerifyPage(ctx, deviceID, generation, second, second, 1, 0, 0, true)
 	if err != nil || !advanced {
 		t.Fatalf("SQL rejected valid continuation: advanced=%v err=%v", advanced, err)
 	}

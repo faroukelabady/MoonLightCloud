@@ -4,21 +4,38 @@ import (
 	"context"
 	"encoding/hex"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/syncrecovery"
 )
 
-// Sync recovery persistence on Devices (shared pool + timeouts). All
-// operations are bounded and read/write only the recovery-state table
-// and sync_events identity — never business projections.
+// SyncRecovery owns recovery-state persistence and reads accepted event
+// identities and projection progress. It never mutates business projections.
+type SyncRecovery struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ syncrecovery.Store = SyncRecovery{}
+
+// NewSyncRecovery shares the application's pool without owning its lifecycle.
+// timeout bounds each operation, including callers without a deadline.
+func NewSyncRecovery(pool *pgxpool.Pool, timeout time.Duration) SyncRecovery {
+	return SyncRecovery{pool: pool, timeout: timeout}
+}
+
+func (d SyncRecovery) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 // UpsertRecoveryState durably marks one device as needing
 // reconciliation after a Cloud restore and starts a fresh verification
 // generation, so a ledger from an earlier recovery can never be reused.
-func (d Devices) UpsertRecoveryState(ctx context.Context, deviceID, reason string) error {
+func (d SyncRecovery) UpsertRecoveryState(ctx context.Context, deviceID, reason string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -32,7 +49,7 @@ func (d Devices) UpsertRecoveryState(ctx context.Context, deviceID, reason strin
 
 // ClearRecoveryState marks one device reconciled, recording how many
 // retained events were verified.
-func (d Devices) ClearRecoveryState(ctx context.Context, deviceID string, generation, verifiedEvents int64) error {
+func (d SyncRecovery) ClearRecoveryState(ctx context.Context, deviceID string, generation, verifiedEvents int64) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -52,7 +69,7 @@ func (d Devices) ClearRecoveryState(ctx context.Context, deviceID string, genera
 }
 
 // GetRecoveryState reads one device's durable recovery requirement.
-func (d Devices) GetRecoveryState(ctx context.Context, deviceID string) (syncrecovery.State, bool, error) {
+func (d SyncRecovery) GetRecoveryState(ctx context.Context, deviceID string) (syncrecovery.State, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -87,7 +104,7 @@ func (d Devices) GetRecoveryState(ctx context.Context, deviceID string) (syncrec
 // CountRecoveryRequired reports how many active devices of the
 // requesting device's Store still need reconciliation. Another Store's
 // devices never count. A Store is never "recovered" while this is nonzero.
-func (d Devices) CountRecoveryRequired(ctx context.Context, deviceID string) (int, error) {
+func (d SyncRecovery) CountRecoveryRequired(ctx context.Context, deviceID string) (int, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -104,7 +121,7 @@ func (d Devices) CountRecoveryRequired(ctx context.Context, deviceID string) (in
 // SyncEventHashes returns the stored payload hash of every reported event
 // Cloud holds, keyed by canonical (lowercase) event ID, in one bounded
 // query. Comparison is by identity only — counts never prove equality.
-func (d Devices) SyncEventHashes(ctx context.Context, deviceID string, eventIDs []string) (map[string]string, error) {
+func (d SyncRecovery) SyncEventHashes(ctx context.Context, deviceID string, eventIDs []string) (map[string]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -131,7 +148,7 @@ func (d Devices) SyncEventHashes(ctx context.Context, deviceID string, eventIDs 
 }
 
 // VerifyProgress reads the server-side verification coverage ledger.
-func (d Devices) VerifyProgress(ctx context.Context, deviceID string) (syncrecovery.VerifyProgress, bool, error) {
+func (d SyncRecovery) VerifyProgress(ctx context.Context, deviceID string) (syncrecovery.VerifyProgress, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -158,7 +175,7 @@ func (d Devices) VerifyProgress(ctx context.Context, deviceID string) (syncrecov
 
 // BeginVerifyPass starts a fresh verification generation so an
 // interrupted reconciliation resumes cleanly.
-func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error) {
+func (d SyncRecovery) BeginVerifyPass(ctx context.Context, deviceID string, declaredTotal int64) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -178,7 +195,7 @@ func (d Devices) BeginVerifyPass(ctx context.Context, deviceID string, declaredT
 // The UPDATE applies only when the page starts above the recorded cursor
 // in byte order (COLLATE "C"), so a skipped-back, replayed or
 // out-of-order page affects zero rows and is reported as refused.
-func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing, declaredTotal int64, endOfHistory bool) (bool, error) {
+func (d SyncRecovery) RecordVerifyPage(ctx context.Context, deviceID string, generation int64, firstEventID, lastEventID string, events, missing, declaredTotal int64, endOfHistory bool) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -199,7 +216,7 @@ func (d Devices) RecordVerifyPage(ctx context.Context, deviceID string, generati
 // retry, blocked) for events of the requesting device's Store. §5:
 // ingest is not projection; a non-zero count means business projections
 // have not converged.
-func (d Devices) CountPendingProjections(ctx context.Context, deviceID string) (int64, error) {
+func (d SyncRecovery) CountPendingProjections(ctx context.Context, deviceID string) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)

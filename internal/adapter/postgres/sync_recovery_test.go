@@ -19,8 +19,7 @@ import (
 func TestSyncRecoveryLedgerStoreScopeAndOrdering(t *testing.T) {
 	pool, authSvc := openTestRepo(t)
 	ctx := context.Background()
-	devices := NewDevices(pool, 5*time.Second)
-	svc := syncrecovery.NewService(devices)
+	svc := syncrecovery.NewService(NewSyncRecovery(pool, 5*time.Second))
 
 	newDevice := func(name string) string {
 		p, err := authSvc.Create(ctx, name)
@@ -180,7 +179,7 @@ func TestSyncRecoveryCountsEveryCanonicalProcessor(t *testing.T) {
 	}
 	status := func(want int64) {
 		t.Helper()
-		report, err := syncrecovery.NewService(devices).Status(ctx, p.Device.ID)
+		report, err := syncrecovery.NewService(NewSyncRecovery(pool, 5*time.Second)).Status(ctx, p.Device.ID)
 		if err != nil || int64(report.ProjectionsPending) != want || report.StoreReconciled != (want == 0) {
 			t.Fatalf("pending=%d reconciled=%v, want pending=%d: %v", report.ProjectionsPending, report.StoreReconciled, want, err)
 		}
