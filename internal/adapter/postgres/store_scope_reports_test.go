@@ -440,7 +440,7 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 		t.Fatal(err)
 	}
 	devices := NewDevices(pool, 5*time.Second)
-	if _, err := devices.RegisterStore(ctx, p.Device.ID, store.RegistrationRequest{
+	if _, err := NewStoreRegistry(pool, 5*time.Second).RegisterStore(ctx, p.Device.ID, store.RegistrationRequest{
 		StoreID: scopeStoreA, DisplayName: "Store A", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatalf("bind: %v", err)

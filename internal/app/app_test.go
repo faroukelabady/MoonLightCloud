@@ -255,7 +255,7 @@ func containsCode(s, code string) bool {
 // carries its device's Store (ADR-0055).
 func bindAppTestStore(t *testing.T, a *App, deviceID string) {
 	t.Helper()
-	devices := postgres.NewDevices(a.Pool, 5*time.Second)
+	devices := postgres.NewStoreRegistry(a.Pool, 5*time.Second)
 	if _, err := devices.RegisterStore(context.Background(), deviceID, istore.RegistrationRequest{
 		StoreID: uuid.NewString(), DisplayName: "Test Store", Timezone: "Africa/Cairo",
 	}); err != nil {

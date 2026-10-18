@@ -57,13 +57,12 @@ func openScopeFixture(t *testing.T) *scopeFixture {
 	devB, credB := mkDevice("scope-dev-b")
 	// devC is never bound to a Store: its uploads are refused (ADR-0055).
 	devC, credC := mkDevice("scope-dev-unbound")
-	devices := NewDevices(pool, 5*time.Second)
-	if _, err := devices.RegisterStore(ctx, devA, store.RegistrationRequest{
+	if _, err := NewStoreRegistry(pool, 5*time.Second).RegisterStore(ctx, devA, store.RegistrationRequest{
 		StoreID: scopeStoreA, DisplayName: "Store A", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatalf("bind A: %v", err)
 	}
-	if _, err := devices.RegisterStore(ctx, devB, store.RegistrationRequest{
+	if _, err := NewStoreRegistry(pool, 5*time.Second).RegisterStore(ctx, devB, store.RegistrationRequest{
 		StoreID: scopeStoreB, DisplayName: "Store B", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatalf("bind B: %v", err)

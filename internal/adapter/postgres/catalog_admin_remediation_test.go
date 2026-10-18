@@ -19,7 +19,7 @@ import (
 )
 
 type remediationDirectory struct {
-	d Devices
+	d StoreRegistry
 	a auth.Service
 }
 
@@ -70,7 +70,7 @@ func remediationCloudSetup(t *testing.T) remediationCloud {
 			t.Fatal(e)
 		}
 	}
-	dir := remediationDirectory{d, a}
+	dir := remediationDirectory{NewStoreRegistry(p, 5*time.Second), a}
 	s := catalogadmin.NewService(d, dir)
 	if _, e = s.ReportCapabilities(ctx, did, []string{catalogadmin.CapabilityV1}); e != nil {
 		t.Fatal(e)

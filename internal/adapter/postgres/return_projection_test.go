@@ -715,7 +715,7 @@ func TestReturnCrossDeviceProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The second device belongs to the same Store as the sale.
-	if err := NewDevices(env.pool, 5*time.Second).EnrollStore(context.Background(), p2.Device.ID, env.storeID); err != nil {
+	if err := NewStoreRegistry(env.pool, 5*time.Second).EnrollStore(context.Background(), p2.Device.ID, env.storeID); err != nil {
 		t.Fatal(err)
 	}
 	env2 := newSaleEnvOnPool(t, env.pool, p2.Device.ID, p2.Credential.ID)

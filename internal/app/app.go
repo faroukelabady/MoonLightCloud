@@ -128,6 +128,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, err
 	}
 	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	storeRegistry := postgres.NewStoreRegistry(pool, cfg.DBQueryTimeout)
 	a := &App{Cfg: cfg, Log: log, Pool: pool}
 	a.Devices = auth.NewService(
 		store, hasher, cfg.PepperRaw, cfg.PepperVersion,
@@ -316,13 +317,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ctlHandlers = &adapterhttp.DeviceControlHandlers{Svc: a.DeviceControl, Log: log}
 	}
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
-		Svc: a.DeviceControl, Auth: a.Devices, Stores: store, OnlineWindow: cfg.DeviceControl.OnlineWindow,
+		Svc: a.DeviceControl, Auth: a.Devices, Stores: storeRegistry, OnlineWindow: cfg.DeviceControl.OnlineWindow,
 	}
 	// Phase 16 catalog admin: durable operator intent + Retail pull.
 	// Always wired (routes registered unconditionally): authorization
 	// is per-request via dashboard session / device credential, and
 	// commands only flow to capable bound devices.
-	catalogAdminSvc := catalogadmin.NewService(store, catalogAdminDevices{stores: store, auth: a.Devices})
+	catalogAdminSvc := catalogadmin.NewService(store, catalogAdminDevices{stores: storeRegistry, auth: a.Devices})
 	catalogAdminHandlers := &adapterhttp.CatalogAdminHandlers{Svc: catalogAdminSvc, Log: log}
 	// Phase 20 R2: Cloud-restore recovery protocol. Durable state so a
 	// restored database can never silently claim full synchronization
@@ -352,7 +353,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	updateHandlers := newUpdateHandlers(cfg, pool, log)
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, store, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

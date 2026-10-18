@@ -44,7 +44,7 @@ func TestStoreEnrollmentAuthenticatedPostgres(t *testing.T) {
 		tokens[i] = p.Device.ID + "." + p.Credential.ID + "." + p.RawSecret
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/sync/store-registration", DeviceAuth(authSvc)(StoreRegistration(repo)))
+	mux.Handle("POST /api/v1/sync/store-registration", DeviceAuth(authSvc)(StoreRegistration(postgres.NewStoreRegistry(pool, 5*time.Second))))
 	mux.Handle("POST /api/v1/sync/batch", DeviceAuth(authSvc)(SyncBatch(isync.NewService(postgres.NewSyncInbox(pool, 5*time.Second), clock.System{}, isync.DiagnosticRegistry()), nil)))
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -107,13 +107,13 @@ func TestStoreEnrollmentAuthenticatedPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT display_name FROM stores WHERE id=$1`, storeA).Scan(&name); err != nil || name != "A" {
 		t.Fatalf("metadata mutation: %q %v", name, err)
 	}
-	if err := repo.EnrollStore(ctx, deviceIDs[3], strings.ToUpper(storeA)); err != nil {
+	if err := postgres.NewStoreRegistry(pool, 5*time.Second).EnrollStore(ctx, deviceIDs[3], strings.ToUpper(storeA)); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.EnrollStore(ctx, deviceIDs[3], storeA); err != nil {
+	if err := postgres.NewStoreRegistry(pool, 5*time.Second).EnrollStore(ctx, deviceIDs[3], storeA); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.EnrollStore(ctx, deviceIDs[3], storeB); err == nil {
+	if err := postgres.NewStoreRegistry(pool, 5*time.Second).EnrollStore(ctx, deviceIDs[3], storeB); err == nil {
 		t.Fatal("operator rebind accepted")
 	}
 	if code := post(tokens[3], "/api/v1/sync/store-registration", request(strings.ToUpper(storeA), "متجر A")); code != 200 {
@@ -155,10 +155,10 @@ func TestStoreEnrollmentAuthenticatedPostgres(t *testing.T) {
 	if code := post(tokens[3], "/api/v1/sync/store-registration", request(storeA, "revoked")); code != 401 {
 		t.Fatalf("revoked registration: %d", code)
 	}
-	if err := repo.EnrollStore(ctx, deviceIDs[3], storeA); err == nil {
+	if err := postgres.NewStoreRegistry(pool, 5*time.Second).EnrollStore(ctx, deviceIDs[3], storeA); err == nil {
 		t.Fatal("revoked operator enrollment accepted")
 	}
-	if err := repo.EnrollStore(ctx, "11111111-1111-4111-8111-111111111111", storeA); err == nil {
+	if err := postgres.NewStoreRegistry(pool, 5*time.Second).EnrollStore(ctx, "11111111-1111-4111-8111-111111111111", storeA); err == nil {
 		t.Fatal("unknown device enrolled")
 	}
 }

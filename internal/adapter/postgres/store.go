@@ -4,12 +4,29 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// StoreRegistry owns Store registration, enrollment and binding directory reads.
+// Device authentication remains separate; the application owns the shared pool.
+type StoreRegistry struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+func NewStoreRegistry(pool *pgxpool.Pool, timeout time.Duration) StoreRegistry {
+	return StoreRegistry{pool: pool, timeout: timeout}
+}
+
+func (d StoreRegistry) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 // Registration conflict code (stable, operator-facing).
 const ErrStoreBindingConflict = "STORE_BINDING_CONFLICT"
@@ -20,7 +37,7 @@ const ErrStoreBindingConflict = "STORE_BINDING_CONFLICT"
 // metadata follows last-writer-wins on the presented values; identity
 // never changes. All writes happen in one short transaction; no locks
 // are held across network calls.
-func (d Devices) RegisterStore(ctx context.Context, deviceID string, request store.RegistrationRequest) (store.RegistrationResult, error) {
+func (d StoreRegistry) RegisterStore(ctx context.Context, deviceID string, request store.RegistrationRequest) (store.RegistrationResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if err := store.ValidateRegistration(request); err != nil {
@@ -104,7 +121,7 @@ func (d Devices) RegisterStore(ctx context.Context, deviceID string, request sto
 
 // EnrollStore is an operator-only enrollment seam used by the trusted CLI.
 // It never changes Store metadata or replaces an existing device binding.
-func (d Devices) EnrollStore(ctx context.Context, deviceID, storeID string) error {
+func (d StoreRegistry) EnrollStore(ctx context.Context, deviceID, storeID string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
@@ -164,7 +181,7 @@ type DeviceStoreInfo struct {
 
 // BindingsWithStores returns every device binding with its Store display
 // metadata in one bounded read (stores are few; no per-device queries).
-func (d Devices) BindingsWithStores(ctx context.Context) ([]DeviceStoreInfo, error) {
+func (d StoreRegistry) BindingsWithStores(ctx context.Context) ([]DeviceStoreInfo, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListBindingsWithStores(ctx)
@@ -182,7 +199,7 @@ func (d Devices) BindingsWithStores(ctx context.Context) ([]DeviceStoreInfo, err
 }
 
 // StoreSummaries lists stores with device counts in one aggregate read.
-func (d Devices) StoreSummaries(ctx context.Context) ([]store.Summary, error) {
+func (d StoreRegistry) StoreSummaries(ctx context.Context) ([]store.Summary, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListStores(ctx)
@@ -202,7 +219,7 @@ func (d Devices) StoreSummaries(ctx context.Context) ([]store.Summary, error) {
 
 // CatalogAdminBindingStore resolves the current Store binding for one
 // device, or "" when unbound. Read-only; bindings are immutable.
-func (d Devices) CatalogAdminBindingStore(ctx context.Context, deviceID string) (string, error) {
+func (d StoreRegistry) CatalogAdminBindingStore(ctx context.Context, deviceID string) (string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)

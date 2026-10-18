@@ -24,7 +24,7 @@ import (
 )
 
 type pairDirectory struct {
-	repo           postgres.Devices
+	repo           postgres.StoreRegistry
 	authentication auth.Service
 }
 
@@ -58,7 +58,7 @@ func TestRemediationExactPair(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	svc := catalogadmin.NewService(repo, pairDirectory{repo, authentication})
+	svc := catalogadmin.NewService(repo, pairDirectory{postgres.NewStoreRegistry(p, 5*time.Second), authentication})
 	h := CatalogAdminHandlers{Svc: svc, Log: slog.Default()}
 	commands := make(chan catalogadmin.CommandView, 1)
 	mux := http.NewServeMux()

@@ -95,7 +95,7 @@ func newRecoveryHTTPFixture(t *testing.T, serviceStore syncrecovery.Store) *reco
 
 func (f *recoveryHTTPFixture) bind(t *testing.T, deviceID, storeID string) {
 	t.Helper()
-	if _, err := f.devices.RegisterStore(context.Background(), deviceID, store.RegistrationRequest{
+	if _, err := postgres.NewStoreRegistry(f.pool, 5*time.Second).RegisterStore(context.Background(), deviceID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "R10 Store", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestR10RecoveryEventHashesAreAuthenticatedStoreScopedHTTPPostgres(t *testin
 	bID, bToken := f.newToken("r10-f06-b")
 	unboundID, unboundToken := f.newToken("r10-f06-unbound")
 	f.bind(t, aID, f.storeA)
-	if err := f.devices.EnrollStore(ctx, replacementID, f.storeA); err != nil {
+	if err := postgres.NewStoreRegistry(f.pool, 5*time.Second).EnrollStore(ctx, replacementID, f.storeA); err != nil {
 		t.Fatalf("operator same-Store replacement enrollment: %v", err)
 	}
 	storeB := uuid.NewString()

@@ -3,22 +3,24 @@ package app
 import (
 	"context"
 
+	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 )
 
-// catalogAdminDevices adapts existing Store bindings and the device
-// lifecycle to catalog-admin delivery gating. No new authority is
-// introduced: bindings stay immutable, revocation stays owned by auth.
+// catalogAdminBindingReader exposes immutable Store binding reads.
+type catalogAdminBindingReader interface {
+	CatalogAdminBindingStore(ctx context.Context, deviceID string) (string, error)
+}
+
+// catalogAdminDevices combines Store bindings with the auth-owned device lifecycle.
 type catalogAdminDevices struct {
-	stores interface {
-		CatalogAdminBindingStore(ctx context.Context, deviceID string) (string, error)
-	}
-	auth auth.Service
+	stores catalogAdminBindingReader
+	auth   auth.Service
 }
 
 // CatalogAdminBindingStore resolves the current Store binding. It is
-// implemented on postgres.Devices; declared here so app wiring stays
+// implemented on postgres.StoreRegistry; declared here so app wiring stays
 // against the narrow capability.
 func (c catalogAdminDevices) BindingStore(ctx context.Context, deviceID string) (string, error) {
 	return c.stores.CatalogAdminBindingStore(ctx, deviceID)
@@ -40,4 +42,8 @@ func (c catalogAdminDevices) DeviceName(ctx context.Context, deviceID string) st
 	return dev.Name
 }
 
-var _ = postgres.Devices{}
+var (
+	_ catalogAdminBindingReader  = postgres.StoreRegistry{}
+	_ adapterhttp.StoreRegistrar = postgres.StoreRegistry{}
+	_ adapterhttp.StoreDirectory = postgres.StoreRegistry{}
+)

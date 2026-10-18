@@ -53,7 +53,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	storeID := "019c0000-0000-7000-8000-000000000091"
-	if _, err = d.RegisterStore(ctx, device.Device.ID, storemodel.RegistrationRequest{StoreID: storeID, DisplayName: "Candidate", Timezone: "Africa/Cairo"}); err != nil {
+	if _, err = postgres.NewStoreRegistry(pool, 5*time.Second).RegisterStore(ctx, device.Device.ID, storemodel.RegistrationRequest{StoreID: storeID, DisplayName: "Candidate", Timezone: "Africa/Cairo"}); err != nil {
 		t.Fatal(err)
 	}
 	validators := map[string]func(json.RawMessage) error{

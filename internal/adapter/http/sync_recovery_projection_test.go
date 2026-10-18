@@ -46,7 +46,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 		t.Fatal(err)
 	}
 	token := created.Device.ID + "." + created.Credential.ID + "." + created.RawSecret
-	if _, err := devices.RegisterStore(ctx, created.Device.ID, store.RegistrationRequest{
+	if _, err := postgres.NewStoreRegistry(pool, 5*time.Second).RegisterStore(ctx, created.Device.ID, store.RegistrationRequest{
 		StoreID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", DisplayName: "Recovery HTTP", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatal(err)

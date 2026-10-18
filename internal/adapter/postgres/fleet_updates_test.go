@@ -71,7 +71,7 @@ func (f *fleetFixture) device(name, storeID string) string {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	_, err = f.devices.RegisterStore(context.Background(), p.Device.ID, store.RegistrationRequest{
+	_, err = NewStoreRegistry(f.pool, 5*time.Second).RegisterStore(context.Background(), p.Device.ID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Store " + storeID[:4], Timezone: "Africa/Cairo"})
 	if err != nil {
 		// Additional devices of an existing Store need operator enrollment

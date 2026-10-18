@@ -18,14 +18,14 @@ import (
 // Phase 9A store registration: idempotency, conflicts, races, and
 // multi-device joins against real PostgreSQL.
 
-func openStoreEnv(t *testing.T) (Devices, string) {
+func openStoreEnv(t *testing.T) (StoreRegistry, string) {
 	t.Helper()
 	pool, authSvc := openTestRepo(t)
 	p, err := authSvc.Create(context.Background(), "shop-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewDevices(pool, 5*time.Second), p.Device.ID
+	return NewStoreRegistry(pool, 5*time.Second), p.Device.ID
 }
 
 func TestStoreRegistrationIdempotent(t *testing.T) {
@@ -184,7 +184,7 @@ func TestStoreRenamePreservesIdentity(t *testing.T) {
 func TestStoreIngressSnapshotsBinding(t *testing.T) {
 	env := openSaleEnv(t)
 	storeID := env.storeID
-	storeDevices := NewDevices(env.pool, 5*time.Second)
+	storeDevices := NewStoreRegistry(env.pool, 5*time.Second)
 	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
 	}); err != nil {
@@ -217,7 +217,7 @@ func TestStoreTwoDevicesOneStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDevices(pool, 5*time.Second)
+	d := NewStoreRegistry(pool, 5*time.Second)
 	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
 	for i, devID := range []string{first.Device.ID, second.Device.ID} {
 		if i == 1 {
@@ -240,7 +240,7 @@ func TestStoreTwoDevicesOneStore(t *testing.T) {
 func TestStoreEventRetryPreservesContext(t *testing.T) {
 	env := openSaleEnv(t)
 	storeID := env.storeID
-	storeDevices := NewDevices(env.pool, 5*time.Second)
+	storeDevices := NewStoreRegistry(env.pool, 5*time.Second)
 	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
 	}); err != nil {
@@ -271,7 +271,7 @@ func TestStoreEventRetryPreservesContext(t *testing.T) {
 func TestStoreRenameKeepsBindingAndEvents(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	storeDevices := NewDevices(env.pool, 5*time.Second)
+	storeDevices := NewStoreRegistry(env.pool, 5*time.Second)
 	storeID := env.storeID
 	if _, err := storeDevices.RegisterStore(ctx, env.devID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
@@ -310,7 +310,7 @@ func TestStoreRevocationPreservesStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDevices(pool, 5*time.Second)
+	d := NewStoreRegistry(pool, 5*time.Second)
 	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
 	if _, err := d.RegisterStore(ctx, p.Device.ID, store.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
@@ -344,7 +344,7 @@ func TestStoreCrossDeviceIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := NewDevices(pool, 5*time.Second)
+	d := NewStoreRegistry(pool, 5*time.Second)
 	storeA := "aaaaaaaa-0000-4000-8000-000000000001"
 	storeB := "bbbbbbbb-0000-4000-8000-000000000002"
 	if _, err := d.RegisterStore(ctx, devA.Device.ID, store.RegistrationRequest{
@@ -388,7 +388,7 @@ func TestStoreCrossDeviceIsolation(t *testing.T) {
 func TestStoreConcurrentDifferentDevicesCannotImplicitlyEnroll(t *testing.T) {
 	pool, authSvc := openTestRepo(t)
 	ctx := context.Background()
-	d := NewDevices(pool, 5*time.Second)
+	d := NewStoreRegistry(pool, 5*time.Second)
 	ids := make([]string, 8)
 	for i := range ids {
 		p, err := authSvc.Create(ctx, fmt.Sprintf("bootstrap-%d", i))

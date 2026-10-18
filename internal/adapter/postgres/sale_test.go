@@ -140,7 +140,7 @@ func openSaleEnv(t *testing.T) *saleEnv {
 func bindTestStore(t *testing.T, devices Devices, deviceID string) string {
 	t.Helper()
 	storeID := uuid.NewString()
-	if _, err := devices.RegisterStore(context.Background(), deviceID, istore.RegistrationRequest{
+	if _, err := NewStoreRegistry(devices.pool, devices.timeout).RegisterStore(context.Background(), deviceID, istore.RegistrationRequest{
 		StoreID: storeID, DisplayName: "Test Store", Timezone: "Africa/Cairo",
 	}); err != nil {
 		t.Fatalf("bind test store: %v", err)

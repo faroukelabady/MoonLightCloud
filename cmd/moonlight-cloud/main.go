@@ -502,7 +502,7 @@ func deviceCmd(args []string) error {
 		if len(args) != 3 {
 			return fmt.Errorf("usage: moonlight-cloud device enroll-store <device-id> <store-id>")
 		}
-		return postgres.NewDevices(pool, cfg.DBQueryTimeout).EnrollStore(ctx, args[1], args[2])
+		return postgres.NewStoreRegistry(pool, cfg.DBQueryTimeout).EnrollStore(ctx, args[1], args[2])
 	case "create":
 		fs := flag.NewFlagSet("create", flag.ContinueOnError)
 		name := fs.String("name", "", "device name")
