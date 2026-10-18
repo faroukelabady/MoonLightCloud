@@ -124,8 +124,8 @@ A 2xx without exactly one valid ID stays ambiguous.
 ## Delivery statuses
 
 `ACCEPTED` (local API-acceptance baseline, not provider ordering
-evidence) → provider callbacks `SENT` → `DELIVERED` → `READ`, plus
-provider `FAILED` (delivery outcome only — never resends) and
+evidence) → provider callbacks `SENT` → `delivered` → `READ`, plus
+provider `failed` (delivery outcome only — never resends) and
 `UNKNOWN` (raw preserved, current state untouched). The first known
 provider callback always establishes provider ordering state even if
 its timestamp predates local acceptance; afterwards out-of-order

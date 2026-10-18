@@ -17,21 +17,21 @@ import (
 
 // Rollout scopes, modes and lifecycle.
 const (
-	ScopeDevice = "DEVICE"
-	ScopeStore  = "STORE"
-	ScopeAll    = "ALL"
+	ScopeDevice = "device"
+	ScopeStore  = "store"
+	ScopeAll    = "all"
 
-	ModeOptional  = "OPTIONAL"
-	ModeMandatory = "MANDATORY"
+	ModeOptional  = "optional"
+	ModeMandatory = "mandatory"
 
-	RolloutDraft     = "DRAFT"
-	RolloutActive    = "ACTIVE"
-	RolloutPaused    = "PAUSED"
-	RolloutCompleted = "COMPLETED"
-	RolloutCancelled = "CANCELLED"
+	RolloutDraft     = "draft"
+	RolloutActive    = "active"
+	RolloutPaused    = "paused"
+	RolloutCompleted = "completed"
+	RolloutCancelled = "cancelled"
 
-	ReleaseActive  = "ACTIVE"
-	ReleaseRevoked = "REVOKED"
+	ReleaseActive  = "active"
+	ReleaseRevoked = "revoked"
 
 	// Package delivered to updater protocol 1.
 	PackageTarGz = "tar.gz"
@@ -46,22 +46,22 @@ const (
 
 // Target states (fleet view; never Retail's local authority).
 const (
-	TargetNotSelected   = "NOT_SELECTED"
-	TargetPending       = "PENDING"
-	TargetDelivered     = "DELIVERED"
-	TargetDownloading   = "DOWNLOADING"
-	TargetVerified      = "VERIFIED"
-	TargetWaiting       = "WAITING_SAFE_BOUNDARY"
-	TargetInstalling    = "INSTALLING"
-	TargetAwaitHealth   = "AWAITING_HEALTH"
-	TargetSucceeded     = "SUCCEEDED"
-	TargetCompliant     = "ALREADY_COMPLIANT"
-	TargetFailed        = "FAILED"
-	TargetRolledBack    = "ROLLED_BACK"
-	TargetManual        = "MANUAL_ACTION_REQUIRED"
-	TargetSkippedNewer  = "SKIPPED_NEWER"
-	TargetUnsupported   = "UNSUPPORTED"
-	TargetCancelled     = "CANCELLED"
+	TargetNotSelected   = "not_selected"
+	TargetPending       = "pending"
+	TargetDelivered     = "delivered"
+	TargetDownloading   = "downloading"
+	TargetVerified      = "verified"
+	TargetWaiting       = "waiting_safe_boundary"
+	TargetInstalling    = "installing"
+	TargetAwaitHealth   = "awaiting_health"
+	TargetSucceeded     = "succeeded"
+	TargetCompliant     = "already_compliant"
+	TargetFailed        = "failed"
+	TargetRolledBack    = "rolled_back"
+	TargetManual        = "manual_action_required"
+	TargetSkippedNewer  = "skipped_newer"
+	TargetUnsupported   = "unsupported"
+	TargetCancelled     = "cancelled"
 	codeAlreadyInstalld = "UPDATE_ALREADY_INSTALLED"
 )
 
@@ -96,31 +96,31 @@ func activating(state string) bool {
 // state. ok=false rejects an unknown state value.
 func MapReport(localState, errorCode string) (string, bool) {
 	switch localState {
-	case "AVAILABLE":
+	case "available":
 		return TargetDelivered, true
-	case "DOWNLOADING":
+	case "downloading":
 		return TargetDownloading, true
-	case "DOWNLOADED", "VERIFYING", "VERIFIED", "STAGED":
+	case "downloaded", "verifying", "verified", "staged":
 		return TargetVerified, true
-	case "WAITING_SAFE_BOUNDARY":
+	case "waiting_safe_boundary":
 		return TargetWaiting, true
-	case "INSTALLING", "SWITCHED":
+	case "installing", "switched":
 		return TargetInstalling, true
-	case "AWAITING_STARTUP_HEALTH":
+	case "awaiting_startup_health":
 		return TargetAwaitHealth, true
-	case "SUCCEEDED":
+	case "succeeded":
 		if errorCode == codeAlreadyInstalld {
 			return TargetCompliant, true
 		}
 		return TargetSucceeded, true
-	case "ROLLED_BACK", "ROLLING_BACK":
-		if localState == "ROLLING_BACK" {
+	case "rolled_back", "rolling_back":
+		if localState == "rolling_back" {
 			return TargetInstalling, true
 		}
 		return TargetRolledBack, true
-	case "MANUAL_ACTION_REQUIRED":
+	case "manual_action_required":
 		return TargetManual, true
-	case "FAILED":
+	case "failed":
 		switch errorCode {
 		case "UPDATE_DOWNGRADE_REJECTED":
 			return TargetSkippedNewer, true

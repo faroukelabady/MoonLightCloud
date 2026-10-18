@@ -35,7 +35,7 @@ SELECT c.category_id, c.name_ar, c.name_en, c.status, c.online_enabled,
         SELECT 1 FROM catalog_admin_commands cmd
         JOIN catalog_admin_command_targets t ON t.command_id = cmd.id
         WHERE cmd.store_id = $1::uuid AND cmd.entity_id = c.category_id::text
-          AND cmd.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND cmd.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_categories c
 WHERE c.store_id = $1::uuid
@@ -239,7 +239,7 @@ SELECT EXISTS (
     SELECT 1 FROM catalog_admin_commands c
     JOIN catalog_admin_command_targets t ON t.command_id = c.id
     WHERE c.store_id = $1::uuid AND c.entity_id = ($2::uuid)::text
-      AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+      AND c.status = 'pending' AND t.status IN ('pending','delivered')
 )::bool AS has_pending
 `
 
@@ -275,7 +275,7 @@ SELECT p.product_id, p.name_ar,
         SELECT 1 FROM catalog_admin_commands c
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = $1::uuid AND c.entity_id = p.product_id::text
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
@@ -699,7 +699,7 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = $1::uuid
           AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
@@ -763,7 +763,7 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = $1::uuid
           AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
@@ -837,7 +837,7 @@ SELECT t.tag_id, t.slug, t.name_ar, t.name_en, t.is_active,
         SELECT 1 FROM catalog_admin_commands c
         JOIN catalog_admin_command_targets tgt ON tgt.command_id = c.id
         WHERE c.store_id = $1::uuid AND c.entity_id = t.tag_id::text
-          AND c.status = 'PENDING' AND tgt.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND tgt.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_tags t
 WHERE t.store_id::text = $1::text
@@ -926,8 +926,8 @@ func (q *Queries) AdminVariantOwnership(ctx context.Context, variantID pgtype.UU
 
 const cancelCatalogAdminCommand = `-- name: CancelCatalogAdminCommand :one
 UPDATE catalog_admin_commands
-SET status = 'CANCELLED', updated_at = now()
-WHERE id = $1::uuid AND status = 'PENDING'
+SET status = 'cancelled', updated_at = now()
+WHERE id = $1::uuid AND status = 'pending'
 RETURNING id, status
 `
 
@@ -945,8 +945,8 @@ func (q *Queries) CancelCatalogAdminCommand(ctx context.Context, id pgtype.UUID)
 
 const cancelPendingCatalogAdminTargets = `-- name: CancelPendingCatalogAdminTargets :exec
 UPDATE catalog_admin_command_targets
-SET status = 'CANCELLED', updated_at = now()
-WHERE command_id = $1::uuid AND status IN ('PENDING','DELIVERED')
+SET status = 'cancelled', updated_at = now()
+WHERE command_id = $1::uuid AND status IN ('pending','delivered')
 `
 
 func (q *Queries) CancelPendingCatalogAdminTargets(ctx context.Context, commandID pgtype.UUID) error {
@@ -1091,7 +1091,7 @@ const createCatalogAdminTarget = `-- name: CreateCatalogAdminTarget :one
 INSERT INTO catalog_admin_command_targets
     (id, command_id, device_id, status)
 VALUES
-    ($1::uuid, $2::uuid, $3::uuid, 'PENDING')
+    ($1::uuid, $2::uuid, $3::uuid, 'pending')
 RETURNING id, command_id, device_id, status, result_code, entity_id, pre_revision, post_revision,
     delivered_at, finished_at, created_at, updated_at
 `
@@ -1128,8 +1128,8 @@ SELECT t.id, t.command_id, t.device_id, t.status,
 FROM catalog_admin_command_targets t
 JOIN catalog_admin_commands c ON c.id = t.command_id
 WHERE t.device_id = $1::uuid
-  AND t.status IN ('PENDING','DELIVERED')
-  AND c.status = 'PENDING'
+  AND t.status IN ('pending','delivered')
+  AND c.status = 'pending'
 ORDER BY c.created_at, c.id
 LIMIT $2::int
 `
@@ -1187,11 +1187,11 @@ const finishCatalogAdminTarget = `-- name: FinishCatalogAdminTarget :one
 UPDATE catalog_admin_command_targets
 SET status = $1::text, result_code = $2::text, entity_id = $3::text,
     pre_revision = $4::bigint, post_revision = $5::bigint,
-    finished_at = CASE WHEN $1::text IN ('APPLIED','CONFLICT','REJECTED','BLOCKED_CAPABILITY','SKIPPED_REVOKED','CANCELLED') THEN now() ELSE finished_at END,
+    finished_at = CASE WHEN $1::text IN ('applied','conflict','rejected','blocked_capability','skipped_revoked','cancelled') THEN now() ELSE finished_at END,
     delivered_at = COALESCE(delivered_at, now()),
     updated_at = now()
 WHERE id = $6::uuid AND device_id = $7::uuid
-  AND status IN ('PENDING','DELIVERED')
+  AND status IN ('pending','delivered')
 RETURNING id, command_id, device_id, status, result_code
 `
 
@@ -1502,8 +1502,8 @@ func (q *Queries) ListStoreBoundDevices(ctx context.Context, storeID pgtype.UUID
 
 const markCatalogAdminTargetDelivered = `-- name: MarkCatalogAdminTargetDelivered :one
 UPDATE catalog_admin_command_targets
-SET status = 'DELIVERED', delivered_at = COALESCE(delivered_at, now()), updated_at = now()
-WHERE id = $1::uuid AND device_id = $2::uuid AND status = 'PENDING'
+SET status = 'delivered', delivered_at = COALESCE(delivered_at, now()), updated_at = now()
+WHERE id = $1::uuid AND device_id = $2::uuid AND status = 'pending'
 RETURNING id, status
 `
 

@@ -56,7 +56,7 @@
 	let users = $state<UserView[]>([]);
 	let cursor = $state('');
 	let activation = $state<{ login: string; link: string } | null>(null);
-	let form = $state({ login: '', display_name: '', role: 'ADMIN' as 'OWNER' | 'ADMIN', all_stores: false, store_ids: [] as string[] });
+	let form = $state({ login: '', display_name: '', role: 'admin' as 'owner' | 'admin', all_stores: false, store_ids: [] as string[] });
 
 	async function fetchUsers(reset: boolean) {
 		if (!canRead) return;
@@ -78,25 +78,25 @@
 
 	function createUser(e: Event) {
 		e.preventDefault();
-		if (form.role === 'OWNER' && !confirm(`Create ${form.login} as OWNER? Owners can administer accounts and security.`)) return;
+		if (form.role === 'owner' && !confirm(`Create ${form.login} as OWNER? Owners can administer accounts and security.`)) return;
 		void act(async () => {
 			const r = await usersApi.create({ ...form, store_ids: form.all_stores ? [] : form.store_ids });
 			activation = { login: r.user.login, link: activationLink(r.activation_token) };
-			form = { login: '', display_name: '', role: 'ADMIN', all_stores: false, store_ids: [] };
+			form = { login: '', display_name: '', role: 'admin', all_stores: false, store_ids: [] };
 			await fetchUsers(true);
 		});
 	}
 
-	function setStatus(u: UserView, status: 'ACTIVE' | 'DISABLED') {
-		const verb = status === 'DISABLED' ? 'Disable' : 'Re-enable';
-		if (!confirm(`${verb} ${u.login}? ${status === 'DISABLED' ? 'All of their sessions end immediately.' : ''}`)) return;
+	function setStatus(u: UserView, status: 'active' | 'disabled') {
+		const verb = status === 'disabled' ? 'Disable' : 'Re-enable';
+		if (!confirm(`${verb} ${u.login}? ${status === 'disabled' ? 'All of their sessions end immediately.' : ''}`)) return;
 		void act(async () => {
 			await usersApi.action(u.id, 'status', { status });
 			await fetchUsers(true);
 		});
 	}
 
-	function setRole(u: UserView, role: 'OWNER' | 'ADMIN') {
+	function setRole(u: UserView, role: 'owner' | 'admin') {
 		if (!confirm(`Change ${u.login} to ${role}? Their sessions end and they must sign in again.`)) return;
 		void act(async () => {
 			await usersApi.action(u.id, 'role', { role });
@@ -181,8 +181,8 @@
 				<label>
 					الدور / Role
 					<select bind:value={form.role}>
-						<option value="ADMIN">مسؤول / ADMIN</option>
-						{#if me.all_stores}<option value="OWNER">مالك / OWNER</option>{/if}
+						<option value="admin">مسؤول / ADMIN</option>
+						{#if me.all_stores}<option value="owner">مالك / OWNER</option>{/if}
 					</select>
 				</label>
 				{#if me.all_stores}
@@ -224,11 +224,11 @@
 						<td>{u.mfa_enabled ? '✓' : '—'}</td>
 						<td class="actions">
 							{#if canManage && u.id !== me.user.id}
-								{#if u.status === 'ACTIVE'}<button onclick={() => setStatus(u, 'DISABLED')}>تعطيل / Disable</button>{/if}
-								{#if u.status === 'DISABLED'}<button onclick={() => setStatus(u, 'ACTIVE')}>تفعيل / Enable</button>{/if}
-								{#if u.status === 'PENDING_SETUP'}<button onclick={() => reissue(u)}>رابط جديد / New link</button>{/if}
-								{#if u.role === 'ADMIN' && me.all_stores}<button onclick={() => setRole(u, 'OWNER')}>ترقية / Make owner</button>{/if}
-								{#if u.role === 'OWNER'}<button onclick={() => setRole(u, 'ADMIN')}>خفض / Make admin</button>{/if}
+								{#if u.status === 'active'}<button onclick={() => setStatus(u, 'disabled')}>تعطيل / Disable</button>{/if}
+								{#if u.status === 'disabled'}<button onclick={() => setStatus(u, 'active')}>تفعيل / Enable</button>{/if}
+								{#if u.status === 'pending_setup'}<button onclick={() => reissue(u)}>رابط جديد / New link</button>{/if}
+								{#if u.role === 'admin' && me.all_stores}<button onclick={() => setRole(u, 'owner')}>ترقية / Make owner</button>{/if}
+								{#if u.role === 'owner'}<button onclick={() => setRole(u, 'admin')}>خفض / Make admin</button>{/if}
 								{#if canSecurity && u.mfa_enabled}<button onclick={() => resetMFA(u)}>إعادة MFA / Reset MFA</button>{/if}
 								<button onclick={() => revokeSessions(u)}>تسجيل الخروج / Sign out</button>
 							{/if}

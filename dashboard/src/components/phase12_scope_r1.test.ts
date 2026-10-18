@@ -7,7 +7,7 @@ vi.mock('../lib/chartAction.js',()=>({chart:()=>({destroy(){}})}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 // An all-Stores OWNER with a FULL (MFA-complete) session (ADR-0053).
-const ME={authenticated:true,stage:'FULL' as const,csrf_token:'t',user:{id:'u',login:'review@test',display_name:'review',role:'OWNER' as const,mfa_enabled:true},permissions:['reports.read','catalog.read'],all_stores:true,store_ids:[],session:{expires_at:'',idle_timeout_seconds:1800}};
+const ME={authenticated:true,stage:'full' as const,csrf_token:'t',user:{id:'u',login:'review@test',display_name:'review',role:'owner' as const,mfa_enabled:true},permissions:['reports.read','catalog.read'],all_stores:true,store_ids:[],session:{expires_at:'',idle_timeout_seconds:1800}};
 const bucket={currency:'EGP',line_sales_minor:'100',line_refund_minor:'0',net_minor:'100'};
 function tags(name:string){return {generated_at:'',timezone:'Africa/Cairo',store_id:null,overlap_note:'Tag totals overlap and must not be summed',rows:[{tag_id:A,tag_slug:'gold',name_ar:name,name_en:name,units:1,units_returned:0,currencies:[bucket]}]};}
 it('R1 regression: valid renamed historical Tag rows collide in the actual component',()=>{

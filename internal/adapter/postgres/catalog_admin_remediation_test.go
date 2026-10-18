@@ -117,21 +117,21 @@ func TestRemediationForgedOutcomes(t *testing.T) {
 		entity, code string
 		pre, post    int64
 	}{{uuid.NewString(), "APPLIED", 7, 8}, {r.pid, "ARBITRARY_RAW_ERROR_TEXT", 7, 8}, {r.pid, "APPLIED", 7, 0}, {r.pid, "APPLIED", 8, 9}, {r.pid, "APPLIED", 7, 7}, {r.pid, "APPLIED", 7, 1000}} {
-		if e := r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "APPLIED", tc.code, tc.entity, tc.pre, tc.post); e == nil {
+		if e := r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "applied", tc.code, tc.entity, tc.pre, tc.post); e == nil {
 			t.Fatal("forged ACK accepted", tc)
 		}
 	}
 	got, e := r.s.Get(ctx, r.sid, v.ID)
-	if e != nil || got.Converged || got.Targets[0].Status != "PENDING" {
+	if e != nil || got.Converged || got.Targets[0].Status != "pending" {
 		t.Fatal(got, e)
 	}
-	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "APPLIED", "APPLIED", r.pid, 7, 8); e != nil {
+	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "applied", "APPLIED", r.pid, 7, 8); e != nil {
 		t.Fatal(e)
 	}
-	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "APPLIED", "APPLIED", r.pid, 7, 8); e != nil {
+	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "applied", "APPLIED", r.pid, 7, 8); e != nil {
 		t.Fatal("identical retry", e)
 	}
-	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "CONFLICT", catalogadmin.CodeConflict, r.pid, 7, 0); e == nil {
+	if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "conflict", catalogadmin.CodeConflict, r.pid, 7, 0); e == nil {
 		t.Fatal("contradictory terminal accepted")
 	}
 }
@@ -150,7 +150,7 @@ func TestRemediationCancelAckRace(t *testing.T) {
 	ctx := context.Background()
 	v := r.create(t)
 	wrapper := remediationCancelStore{r.d, func() {
-		if e := r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "APPLIED", "APPLIED", r.pid, 7, 8); e != nil {
+		if e := r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "applied", "APPLIED", r.pid, 7, 8); e != nil {
 			t.Fatal(e)
 		}
 	}}
@@ -159,7 +159,7 @@ func TestRemediationCancelAckRace(t *testing.T) {
 		t.Fatal("racing applied command cancelled")
 	}
 	got, e := r.s.Get(ctx, r.sid, v.ID)
-	if e != nil || got.Aggregate != "APPLIED" || got.Targets[0].Status != "APPLIED" {
+	if e != nil || got.Aggregate != "applied" || got.Targets[0].Status != "applied" {
 		t.Fatal(got, e)
 	}
 }
@@ -181,7 +181,7 @@ func TestRemediationPollCancelRace(t *testing.T) {
 	if len(poll) > 0 && cancelErr == nil {
 		t.Fatal("delivered and cancelled", pollErr, got)
 	}
-	if got.Status == "CANCELLED" && len(poll) > 0 {
+	if got.Status == "cancelled" && len(poll) > 0 {
 		t.Fatal("cancelled command delivered")
 	}
 }
@@ -275,7 +275,7 @@ func TestRemediationRevokedTargetTerminal(t *testing.T) {
 		t.Fatal("revoked poll")
 	}
 	got, e := r.s.Get(ctx, r.sid, v.ID)
-	if e != nil || got.Targets[0].Status != catalogadmin.TargetSkippedRevoked || got.Aggregate == "PENDING" {
+	if e != nil || got.Targets[0].Status != catalogadmin.TargetSkippedRevoked || got.Aggregate == "pending" {
 		t.Fatal(got, e)
 	}
 	again, e := r.s.Get(ctx, r.sid, v.ID)
@@ -303,7 +303,7 @@ func TestRemediationPollByteBudget(t *testing.T) {
 		}
 		for _, d := range due {
 			seen[d.CommandID] = true
-			if e = r.s.ReportOutcome(ctx, r.did, d.TargetID, "REJECTED", catalogadmin.CodeValidationFailed, r.pid, 0, 0); e != nil {
+			if e = r.s.ReportOutcome(ctx, r.did, d.TargetID, "rejected", catalogadmin.CodeValidationFailed, r.pid, 0, 0); e != nil {
 				t.Fatal(e)
 			}
 		}
@@ -323,7 +323,7 @@ func TestRemediationNoopConvergence(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "APPLIED", "APPLIED", r.pid, 0, 0); e != nil {
+			if e = r.s.ReportOutcome(ctx, r.did, v.Targets[0].ID, "applied", "APPLIED", r.pid, 0, 0); e != nil {
 				t.Fatal(e)
 			}
 			got, e := r.s.Get(ctx, r.sid, v.ID)

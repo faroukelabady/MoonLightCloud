@@ -39,14 +39,14 @@ func (s *stubCatalogStore) CreateCatalogAdminCommand(_ context.Context, cmd cata
 	view := catalogadmin.CommandView{
 		ID: cmd.ID, StoreID: cmd.StoreID, Type: cmd.Type, Version: cmd.Version,
 		EntityID: cmd.EntityID, PayloadHash: cmd.PayloadHash,
-		ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor, Status: "PENDING",
+		ExpectedRevision: cmd.ExpectedRevision, Actor: cmd.Actor, Status: "pending",
 	}
 	s.commands[cmd.ID] = view
 	return view, nil
 }
 
 func (s *stubCatalogStore) CreateCatalogAdminTarget(_ context.Context, commandID, targetID, deviceID string) (catalogadmin.TargetView, error) {
-	t := catalogadmin.TargetView{ID: targetID, CommandID: commandID, DeviceID: deviceID, Status: "PENDING"}
+	t := catalogadmin.TargetView{ID: targetID, CommandID: commandID, DeviceID: deviceID, Status: "pending"}
 	s.targets[commandID] = append(s.targets[commandID], t)
 	return t, nil
 }
@@ -92,7 +92,7 @@ func (s *stubCatalogStore) FinishCatalogAdminTarget(_ context.Context, targetID,
 				if t.DeviceID != deviceID {
 					return false, nil
 				}
-				if t.Status != "PENDING" && t.Status != "DELIVERED" {
+				if t.Status != "pending" && t.Status != "delivered" {
 					return false, nil
 				}
 				list[i].Status = status
@@ -117,7 +117,7 @@ func (s *stubCatalogStore) CancelCatalogAdminCommand(_ context.Context, commandI
 	if !ok {
 		return false, nil
 	}
-	view.Status = "CANCELLED"
+	view.Status = "cancelled"
 	s.commands[commandID] = view
 	return true, nil
 }
@@ -247,7 +247,7 @@ func TestCatalogAdminCreateValidates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created["aggregate"] != "PENDING" {
+	if created["aggregate"] != "pending" {
 		t.Fatalf("creation must report pending, got %v", created["aggregate"])
 	}
 	targets, _ := created["targets"].([]any)
@@ -348,17 +348,17 @@ func TestCatalogAdminWrongDeviceACK(t *testing.T) {
 
 	report := func(device, target string) int {
 		t.Helper()
-		body := `{"status":"APPLIED","result_code":"APPLIED","entity_id":"` + entityID + `","pre_revision":5,"post_revision":6}`
+		body := `{"status":"applied","result_code":"APPLIED","entity_id":"` + entityID + `","pre_revision":5,"post_revision":6}`
 		_ = body
 		return 0
 	}
 	_ = report
 	// Wrong device: FinishCatalogAdminTarget binds target+device.
-	ok, err := stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceB, "APPLIED", "APPLIED", entityID, 5, 6)
+	ok, err := stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceB, "applied", "applied", entityID, 5, 6)
 	if err != nil || ok {
 		t.Fatalf("wrong-device ACK must not apply: ok=%v err=%v", ok, err)
 	}
-	ok, err = stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceA, "APPLIED", "APPLIED", entityID, 5, 6)
+	ok, err = stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceA, "applied", "applied", entityID, 5, 6)
 	if err != nil || !ok {
 		t.Fatalf("own-device ACK must apply: ok=%v err=%v", ok, err)
 	}

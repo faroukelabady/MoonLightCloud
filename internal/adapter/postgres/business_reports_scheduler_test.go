@@ -120,7 +120,7 @@ func TestReportPlannerMaterializesDue(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(0))
 	planner := businessreports.NewPlanner(catalogStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
@@ -159,7 +159,7 @@ func TestReportPlannerTwoInstances(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(0))
 	store := catalogStore(env)
 	plannerA := businessreports.NewPlanner(store, businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
@@ -188,7 +188,7 @@ func TestReportPlannerCatchUp(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(4))
 	planner := businessreports.NewPlanner(catalogStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
@@ -220,7 +220,7 @@ func TestReportPlannerDisabled(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	if _, err := service.DisableSchedule(context.Background(), schedule.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -252,17 +252,17 @@ func TestReportScheduleValidation(t *testing.T) {
 	if _, err := service.CreateSchedule(ctx, "x", "WEEKLY", "21:00", "", []string{"r"}); err == nil {
 		t.Fatal("bad kind must fail")
 	}
-	if _, err := service.CreateSchedule(ctx, "x", "DAILY", "25:00", "", []string{"r"}); err == nil {
+	if _, err := service.CreateSchedule(ctx, "x", "daily", "25:00", "", []string{"r"}); err == nil {
 		t.Fatal("bad time must fail")
 	}
 	recipient := addTestRecipient(t, service, "owner")
-	if _, err := service.CreateSchedule(ctx, "x", "TEN_DAY", "21:00", "", []string{recipient.ID}); err == nil {
+	if _, err := service.CreateSchedule(ctx, "x", "ten_day", "21:00", "", []string{recipient.ID}); err == nil {
 		t.Fatal("ten-day without anchor must fail")
 	}
-	if _, err := service.CreateSchedule(ctx, "x", "DAILY", "21:00", "", []string{recipient.ID}); err != nil {
+	if _, err := service.CreateSchedule(ctx, "x", "daily", "21:00", "", []string{recipient.ID}); err != nil {
 		t.Fatalf("valid daily: %v", err)
 	}
-	if _, err := service.CreateSchedule(ctx, "y", "DAILY", "21:00", "", nil); err == nil {
+	if _, err := service.CreateSchedule(ctx, "y", "daily", "21:00", "", nil); err == nil {
 		t.Fatalf("recipient-less schedule must fail: %v", err)
 	}
 }
@@ -274,7 +274,7 @@ func TestReportTenDaySchedule(t *testing.T) {
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
 	anchor := pastSlotDate(20)
-	schedule := createTestSchedule(t, service, "owner-ten-day", "TEN_DAY", "21:00", anchor, recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-ten-day", "ten_day", "21:00", anchor, recipient.ID)
 	if schedule.AnchorLocalDate != anchor {
 		t.Fatalf("anchor: %+v", schedule)
 	}
@@ -379,7 +379,7 @@ func TestReportEnableOverduePreserved(t *testing.T) {
 	ctx := context.Background()
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(3))
 	before, _, err := catalogStore(env).GetSchedule(ctx, schedule.ID)
 	if err != nil {
@@ -409,7 +409,7 @@ func TestReportConcurrentEnable(t *testing.T) {
 	ctx := context.Background()
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	if _, err := service.DisableSchedule(ctx, schedule.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestReportScheduleCreateAtomic(t *testing.T) {
 		return schedules, links
 	}
 	newSchedule := func(name string, recipients ...string) error {
-		_, err := service.CreateSchedule(ctx, name, "DAILY", "21:00", "", recipients)
+		_, err := service.CreateSchedule(ctx, name, "daily", "21:00", "", recipients)
 		return err
 	}
 	// Nonexistent recipient: nothing committed.
@@ -501,7 +501,7 @@ func TestReportScheduleCreateAtomic(t *testing.T) {
 		t.Fatalf("nothing committed: %d schedules %d links", schedules, links)
 	}
 	// Corrected same-name retry succeeds: names unconsumed.
-	if _, err := service.CreateSchedule(ctx, "s-bad", "DAILY", "21:00", "", []string{good.ID}); err != nil {
+	if _, err := service.CreateSchedule(ctx, "s-bad", "daily", "21:00", "", []string{good.ID}); err != nil {
 		t.Fatalf("corrected retry: %v", err)
 	}
 	if schedules, links := counts(); schedules != 1 || links != 1 {
@@ -537,7 +537,7 @@ func TestReportScheduleCreateRaces(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				_, err := service.CreateSchedule(ctx, "s-race", "DAILY", "21:00", "", []string{good.ID})
+				_, err := service.CreateSchedule(ctx, "s-race", "daily", "21:00", "", []string{good.ID})
 				results <- err
 			}()
 		}
@@ -570,7 +570,7 @@ func TestReportScheduleCreateRaces(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() {
-			_, err := service.CreateSchedule(ctx, "s-victim", "DAILY", "21:00", "", []string{victim.ID})
+			_, err := service.CreateSchedule(ctx, "s-victim", "daily", "21:00", "", []string{victim.ID})
 			done <- err
 		}()
 		// Race the disable against validation/linking; either order
@@ -602,7 +602,7 @@ func TestReportIDsAreUUIDv7(t *testing.T) {
 	ctx := context.Background()
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -636,7 +636,7 @@ func TestReportAggregateConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", ar.ID, en.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)

@@ -133,7 +133,7 @@ catalog_admin_commands.payload jsonb NOT NULL
 catalog_admin_commands.payload_hash text NOT NULL
 catalog_admin_commands.expected_revision int8 NOT NULL
 catalog_admin_commands.actor text NOT NULL
-catalog_admin_commands.status text NOT NULL DEFAULT 'PENDING'::text
+catalog_admin_commands.status text NOT NULL DEFAULT 'pending'::text
 catalog_admin_commands.created_at timestamptz NOT NULL DEFAULT now()
 catalog_admin_commands.updated_at timestamptz NOT NULL DEFAULT now()
 catalog_admin_commands.target_kind text NOT NULL DEFAULT 'entity'::text
@@ -529,7 +529,7 @@ notification_messages.lease_until timestamptz
 notification_messages.lease_generation int8 NOT NULL DEFAULT 0
 notification_messages.send_started_at timestamptz
 notification_messages.provider_message_id text
-notification_messages.delivery_status text NOT NULL DEFAULT 'UNKNOWN'::text
+notification_messages.delivery_status text NOT NULL DEFAULT 'unknown'::text
 notification_messages.delivery_status_at timestamptz
 notification_messages.last_error_code text
 notification_messages.created_at timestamptz NOT NULL DEFAULT now()
@@ -877,7 +877,7 @@ admin_recovery_codes admin_recovery_codes_user_id_not_null NOT NULL user_id
 admin_sessions admin_sessions_absolute_expires_at_not_null NOT NULL absolute_expires_at
 admin_sessions admin_sessions_auth_time_not_null NOT NULL auth_time
 admin_sessions admin_sessions_check CHECK ((absolute_expires_at > created_at))
-admin_sessions admin_sessions_check1 CHECK (((stage <> 'FULL'::text) OR (mfa_verified_at IS NOT NULL)))
+admin_sessions admin_sessions_check1 CHECK (((stage <> 'full'::text) OR (mfa_verified_at IS NOT NULL)))
 admin_sessions admin_sessions_created_at_not_null NOT NULL created_at
 admin_sessions admin_sessions_csrf_hash_check CHECK ((octet_length(csrf_hash) = 32))
 admin_sessions admin_sessions_csrf_hash_not_null NOT NULL csrf_hash
@@ -886,7 +886,7 @@ admin_sessions admin_sessions_last_seen_at_not_null NOT NULL last_seen_at
 admin_sessions admin_sessions_pkey PRIMARY KEY (id)
 admin_sessions admin_sessions_revoke_reason_check CHECK (((revoke_reason IS NULL) OR (revoke_reason ~ '^[a-z_]{1,32}$'::text)))
 admin_sessions admin_sessions_security_version_not_null NOT NULL security_version
-admin_sessions admin_sessions_stage_check CHECK ((stage = ANY (ARRAY['MFA_PENDING'::text, 'MFA_SETUP'::text, 'FULL'::text])))
+admin_sessions admin_sessions_stage_check CHECK ((stage = ANY (ARRAY['mfa_pending'::text, 'mfa_setup'::text, 'full'::text])))
 admin_sessions admin_sessions_stage_not_null NOT NULL stage
 admin_sessions admin_sessions_token_hash_check CHECK ((octet_length(token_hash) = 32))
 admin_sessions admin_sessions_token_hash_key UNIQUE (token_hash)
@@ -894,7 +894,7 @@ admin_sessions admin_sessions_token_hash_not_null NOT NULL token_hash
 admin_sessions admin_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE
 admin_sessions admin_sessions_user_id_not_null NOT NULL user_id
 admin_users admin_users_all_stores_not_null NOT NULL all_stores
-admin_users admin_users_check CHECK (((status = 'PENDING_SETUP'::text) OR (password_hash IS NOT NULL)))
+admin_users admin_users_check CHECK (((status = 'pending_setup'::text) OR (password_hash IS NOT NULL)))
 admin_users admin_users_created_at_not_null NOT NULL created_at
 admin_users admin_users_created_by_fkey FOREIGN KEY (created_by) REFERENCES admin_users(id) ON DELETE RESTRICT
 admin_users admin_users_display_name_check CHECK (((char_length(btrim(display_name)) >= 1) AND (char_length(btrim(display_name)) <= 100)))
@@ -905,11 +905,11 @@ admin_users admin_users_login_key UNIQUE (login)
 admin_users admin_users_login_not_null NOT NULL login
 admin_users admin_users_password_hash_check CHECK (((password_hash IS NULL) OR (password_hash ~~ '$argon2id$%'::text)))
 admin_users admin_users_pkey PRIMARY KEY (id)
-admin_users admin_users_role_check CHECK ((role = ANY (ARRAY['OWNER'::text, 'ADMIN'::text])))
+admin_users admin_users_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text])))
 admin_users admin_users_role_not_null NOT NULL role
 admin_users admin_users_security_version_check CHECK ((security_version >= 1))
 admin_users admin_users_security_version_not_null NOT NULL security_version
-admin_users admin_users_status_check CHECK ((status = ANY (ARRAY['PENDING_SETUP'::text, 'ACTIVE'::text, 'DISABLED'::text])))
+admin_users admin_users_status_check CHECK ((status = ANY (ARRAY['pending_setup'::text, 'active'::text, 'disabled'::text])))
 admin_users admin_users_status_not_null NOT NULL status
 admin_users admin_users_updated_at_not_null NOT NULL updated_at
 admin_user_store_memberships admin_user_store_memberships_created_at_not_null NOT NULL created_at
@@ -975,7 +975,7 @@ business_report_schedule_recipients business_report_schedule_recipients_recipien
 business_report_schedule_recipients business_report_schedule_recipients_recipient_purpose_not_null NOT NULL recipient_purpose
 business_report_schedule_recipients business_report_schedule_recipients_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES business_report_schedules(id) ON DELETE CASCADE
 business_report_schedule_recipients business_report_schedule_recipients_schedule_id_not_null NOT NULL schedule_id
-business_report_schedules business_report_schedules_check CHECK ((((report_kind = 'TEN_DAY'::text) AND (anchor_local_date IS NOT NULL)) OR (report_kind = 'DAILY'::text)))
+business_report_schedules business_report_schedules_check CHECK ((((report_kind = 'ten_day'::text) AND (anchor_local_date IS NOT NULL)) OR (report_kind = 'daily'::text)))
 business_report_schedules business_report_schedules_created_at_not_null NOT NULL created_at
 business_report_schedules business_report_schedules_enabled_not_null NOT NULL enabled
 business_report_schedules business_report_schedules_id_not_null NOT NULL id
@@ -987,7 +987,7 @@ business_report_schedules business_report_schedules_name_not_null NOT NULL name
 business_report_schedules business_report_schedules_next_run_at_not_null NOT NULL next_run_at
 business_report_schedules business_report_schedules_next_run_local_date_not_null NOT NULL next_run_local_date
 business_report_schedules business_report_schedules_pkey PRIMARY KEY (id)
-business_report_schedules business_report_schedules_report_kind_check CHECK ((report_kind = ANY (ARRAY['DAILY'::text, 'TEN_DAY'::text])))
+business_report_schedules business_report_schedules_report_kind_check CHECK ((report_kind = ANY (ARRAY['daily'::text, 'ten_day'::text])))
 business_report_schedules business_report_schedules_report_kind_not_null NOT NULL report_kind
 business_report_schedules business_report_schedules_revision_check CHECK ((revision >= 1))
 business_report_schedules business_report_schedules_revision_not_null NOT NULL revision
@@ -1010,7 +1010,7 @@ catalog_admin_commands catalog_admin_commands_payload_hash_check CHECK ((payload
 catalog_admin_commands catalog_admin_commands_payload_hash_not_null NOT NULL payload_hash
 catalog_admin_commands catalog_admin_commands_payload_not_null NOT NULL payload
 catalog_admin_commands catalog_admin_commands_pkey PRIMARY KEY (id)
-catalog_admin_commands catalog_admin_commands_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'CANCELLED'::text])))
+catalog_admin_commands catalog_admin_commands_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'cancelled'::text])))
 catalog_admin_commands catalog_admin_commands_status_not_null NOT NULL status
 catalog_admin_commands catalog_admin_commands_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT
 catalog_admin_commands catalog_admin_commands_store_id_not_null NOT NULL store_id
@@ -1029,7 +1029,7 @@ catalog_admin_command_targets catalog_admin_command_targets_pkey PRIMARY KEY (id
 catalog_admin_command_targets catalog_admin_command_targets_post_revision_not_null NOT NULL post_revision
 catalog_admin_command_targets catalog_admin_command_targets_pre_revision_not_null NOT NULL pre_revision
 catalog_admin_command_targets catalog_admin_command_targets_result_code_check CHECK (((result_code IS NULL) OR (result_code ~ '^[A-Z][A-Z0-9_]{0,63}$'::text)))
-catalog_admin_command_targets catalog_admin_command_targets_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'DELIVERED'::text, 'APPLIED'::text, 'CONFLICT'::text, 'REJECTED'::text, 'BLOCKED_CAPABILITY'::text, 'SKIPPED_REVOKED'::text, 'CANCELLED'::text])))
+catalog_admin_command_targets catalog_admin_command_targets_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'delivered'::text, 'applied'::text, 'conflict'::text, 'rejected'::text, 'blocked_capability'::text, 'skipped_revoked'::text, 'cancelled'::text])))
 catalog_admin_command_targets catalog_admin_command_targets_status_not_null NOT NULL status
 catalog_admin_command_targets catalog_admin_command_targets_updated_at_not_null NOT NULL updated_at
 catalog_categories catalog_categories_category_id_not_null NOT NULL category_id
@@ -1317,7 +1317,7 @@ commerce_online_order_reconcile_fences commerce_online_order_reconcile_fences_pk
 commerce_online_order_reconcile_fences commerce_online_order_reconcile_fences_provider_key_check CHECK ((provider_key ~ '^[a-z0-9][a-z0-9_-]{0,63}$'::text))
 commerce_online_order_reconcile_fences commerce_online_order_reconcile_fences_provider_key_not_null NOT NULL provider_key
 commerce_online_order_reconcile_fences commerce_online_order_reconcile_fences_updated_at_not_null NOT NULL updated_at
-commerce_online_orders commerce_online_orders_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['PENDING'::text, 'PROCESSING'::text, 'ON_HOLD'::text, 'COMPLETED'::text, 'CANCELLED'::text, 'REFUNDED'::text, 'FAILED'::text, 'UNKNOWN'::text, 'DELETED'::text])))
+commerce_online_orders commerce_online_orders_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['pending'::text, 'processing'::text, 'on_hold'::text, 'completed'::text, 'cancelled'::text, 'refunded'::text, 'failed'::text, 'unknown'::text, 'deleted'::text])))
 commerce_online_orders commerce_online_orders_canonical_status_not_null NOT NULL canonical_status
 commerce_online_orders commerce_online_orders_cart_tax_minor_not_null NOT NULL cart_tax_minor
 commerce_online_orders commerce_online_orders_created_at_not_null NOT NULL created_at
@@ -1356,7 +1356,7 @@ commerce_online_orders commerce_online_orders_total_tax_minor_not_null NOT NULL 
 commerce_online_orders commerce_online_orders_unmapped_lines_check CHECK ((unmapped_lines >= 0))
 commerce_online_orders commerce_online_orders_unmapped_lines_not_null NOT NULL unmapped_lines
 commerce_online_orders commerce_online_orders_updated_at_not_null NOT NULL updated_at
-commerce_online_order_status_history commerce_online_order_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['PENDING'::text, 'PROCESSING'::text, 'ON_HOLD'::text, 'COMPLETED'::text, 'CANCELLED'::text, 'REFUNDED'::text, 'FAILED'::text, 'UNKNOWN'::text, 'DELETED'::text])))
+commerce_online_order_status_history commerce_online_order_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['pending'::text, 'processing'::text, 'on_hold'::text, 'completed'::text, 'cancelled'::text, 'refunded'::text, 'failed'::text, 'unknown'::text, 'deleted'::text])))
 commerce_online_order_status_history commerce_online_order_status_history_canonical_status_not_null NOT NULL canonical_status
 commerce_online_order_status_history commerce_online_order_status_history_external_order_id_not_null NOT NULL external_order_id
 commerce_online_order_status_history commerce_online_order_status_history_observed_at_not_null NOT NULL observed_at
@@ -1526,7 +1526,7 @@ device_update_status device_update_status_release_sequence_not_null NOT NULL rel
 device_update_status device_update_status_reported_at_not_null NOT NULL reported_at
 device_update_status device_update_status_unsupported_reason_check CHECK (((unsupported_reason IS NULL) OR (unsupported_reason ~ '^[A-Z][A-Z0-9_]{0,63}$'::text)))
 device_update_status device_update_status_update_error_check CHECK (((update_error IS NULL) OR (update_error ~ '^[A-Z][A-Z0-9_]{0,63}$'::text)))
-device_update_status device_update_status_update_state_check CHECK ((update_state ~ '^[A-Z][A-Z_]{0,63}$'::text))
+device_update_status device_update_status_update_state_check CHECK ((update_state ~ '^[a-z][a-z_]{0,63}$'::text))
 device_update_status device_update_status_update_state_not_null NOT NULL update_state
 device_update_status device_update_status_updater_capable_not_null NOT NULL updater_capable
 device_update_status device_update_status_updater_protocol_check CHECK (((updater_protocol >= 0) AND (updater_protocol <= 100)))
@@ -1535,7 +1535,7 @@ device_update_status device_update_status_version_check CHECK (((char_length(ver
 device_update_status device_update_status_version_not_null NOT NULL version
 notification_delivery_status_history notification_delivery_status_histo_provider_message_id_not_null NOT NULL provider_message_id
 notification_delivery_status_history notification_delivery_status_histo_provider_status_raw_not_null NOT NULL provider_status_raw
-notification_delivery_status_history notification_delivery_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['UNKNOWN'::text, 'ACCEPTED'::text, 'SENT'::text, 'DELIVERED'::text, 'READ'::text, 'FAILED'::text])))
+notification_delivery_status_history notification_delivery_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['unknown'::text, 'accepted'::text, 'sent'::text, 'delivered'::text, 'read'::text, 'failed'::text])))
 notification_delivery_status_history notification_delivery_status_history_canonical_status_not_null NOT NULL canonical_status
 notification_delivery_status_history notification_delivery_status_history_event_fingerprint_not_null NOT NULL event_fingerprint
 notification_delivery_status_history notification_delivery_status_history_notification_id_fkey FOREIGN KEY (notification_id) REFERENCES notification_messages(id)
@@ -1548,7 +1548,7 @@ notification_delivery_status_history notification_delivery_status_history_provid
 notification_messages notification_messages_attempt_count_check CHECK ((attempt_count >= 0))
 notification_messages notification_messages_attempt_count_not_null NOT NULL attempt_count
 notification_messages notification_messages_created_at_not_null NOT NULL created_at
-notification_messages notification_messages_delivery_status_check CHECK ((delivery_status = ANY (ARRAY['UNKNOWN'::text, 'ACCEPTED'::text, 'SENT'::text, 'DELIVERED'::text, 'READ'::text, 'FAILED'::text])))
+notification_messages notification_messages_delivery_status_check CHECK ((delivery_status = ANY (ARRAY['unknown'::text, 'accepted'::text, 'sent'::text, 'delivered'::text, 'read'::text, 'failed'::text])))
 notification_messages notification_messages_delivery_status_not_null NOT NULL delivery_status
 notification_messages notification_messages_dispatch_status_check CHECK ((dispatch_status = ANY (ARRAY['pending'::text, 'retry'::text, 'accepted'::text, 'blocked'::text, 'ambiguous'::text])))
 notification_messages notification_messages_dispatch_status_not_null NOT NULL dispatch_status
@@ -1711,7 +1711,7 @@ releases releases_release_sequence_not_null NOT NULL release_sequence
 releases releases_status_changed_at_not_null NOT NULL status_changed_at
 releases releases_status_changed_by_check CHECK (((char_length(status_changed_by) >= 1) AND (char_length(status_changed_by) <= 128)))
 releases releases_status_changed_by_not_null NOT NULL status_changed_by
-releases releases_status_check CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'REVOKED'::text])))
+releases releases_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text])))
 releases releases_status_not_null NOT NULL status
 releases releases_version_check CHECK (((char_length(version) >= 1) AND (char_length(version) <= 64)))
 releases releases_version_not_null NOT NULL version
@@ -1953,22 +1953,22 @@ update_audit_events update_audit_events_release_id_fkey FOREIGN KEY (release_id)
 update_audit_events update_audit_events_rollout_id_fkey FOREIGN KEY (rollout_id) REFERENCES update_rollouts(id) ON DELETE RESTRICT
 update_audit_events update_audit_events_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT
 update_audit_events update_audit_events_target_id_fkey FOREIGN KEY (target_id) REFERENCES update_rollout_targets(id) ON DELETE RESTRICT
-update_rollouts update_rollouts_check CHECK ((((scope = 'DEVICE'::text) AND (device_id IS NOT NULL) AND (store_id IS NOT NULL)) OR ((scope = 'STORE'::text) AND (store_id IS NOT NULL) AND (device_id IS NULL)) OR ((scope = 'ALL'::text) AND (store_id IS NULL) AND (device_id IS NULL))))
+update_rollouts update_rollouts_check CHECK ((((scope = 'device'::text) AND (device_id IS NOT NULL) AND (store_id IS NOT NULL)) OR ((scope = 'store'::text) AND (store_id IS NOT NULL) AND (device_id IS NULL)) OR ((scope = 'all'::text) AND (store_id IS NULL) AND (device_id IS NULL))))
 update_rollouts update_rollouts_created_at_not_null NOT NULL created_at
 update_rollouts update_rollouts_created_by_check CHECK (((char_length(created_by) >= 1) AND (char_length(created_by) <= 128)))
 update_rollouts update_rollouts_created_by_not_null NOT NULL created_by
 update_rollouts update_rollouts_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE RESTRICT
 update_rollouts update_rollouts_id_not_null NOT NULL id
-update_rollouts update_rollouts_mode_check CHECK ((mode = ANY (ARRAY['OPTIONAL'::text, 'MANDATORY'::text])))
+update_rollouts update_rollouts_mode_check CHECK ((mode = ANY (ARRAY['optional'::text, 'mandatory'::text])))
 update_rollouts update_rollouts_mode_not_null NOT NULL mode
 update_rollouts update_rollouts_percentage_check CHECK (((percentage >= 1) AND (percentage <= 100)))
 update_rollouts update_rollouts_percentage_not_null NOT NULL percentage
 update_rollouts update_rollouts_pkey PRIMARY KEY (id)
 update_rollouts update_rollouts_release_id_fkey FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE RESTRICT
 update_rollouts update_rollouts_release_id_not_null NOT NULL release_id
-update_rollouts update_rollouts_scope_check CHECK ((scope = ANY (ARRAY['DEVICE'::text, 'STORE'::text, 'ALL'::text])))
+update_rollouts update_rollouts_scope_check CHECK ((scope = ANY (ARRAY['device'::text, 'store'::text, 'all'::text])))
 update_rollouts update_rollouts_scope_not_null NOT NULL scope
-update_rollouts update_rollouts_status_check CHECK ((status = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'PAUSED'::text, 'COMPLETED'::text, 'CANCELLED'::text])))
+update_rollouts update_rollouts_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'paused'::text, 'completed'::text, 'cancelled'::text])))
 update_rollouts update_rollouts_status_not_null NOT NULL status
 update_rollouts update_rollouts_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT
 update_rollouts update_rollouts_target_count_check CHECK ((target_count >= 0))
@@ -1988,7 +1988,7 @@ update_rollout_targets update_rollout_targets_retryable_not_null NOT NULL retrya
 update_rollout_targets update_rollout_targets_rollout_id_device_id_key UNIQUE (rollout_id, device_id)
 update_rollout_targets update_rollout_targets_rollout_id_fkey FOREIGN KEY (rollout_id) REFERENCES update_rollouts(id) ON DELETE RESTRICT
 update_rollout_targets update_rollout_targets_rollout_id_not_null NOT NULL rollout_id
-update_rollout_targets update_rollout_targets_state_check CHECK ((state = ANY (ARRAY['NOT_SELECTED'::text, 'PENDING'::text, 'DELIVERED'::text, 'DOWNLOADING'::text, 'VERIFIED'::text, 'WAITING_SAFE_BOUNDARY'::text, 'INSTALLING'::text, 'AWAITING_HEALTH'::text, 'SUCCEEDED'::text, 'ALREADY_COMPLIANT'::text, 'FAILED'::text, 'ROLLED_BACK'::text, 'MANUAL_ACTION_REQUIRED'::text, 'SKIPPED_NEWER'::text, 'UNSUPPORTED'::text, 'CANCELLED'::text])))
+update_rollout_targets update_rollout_targets_state_check CHECK ((state = ANY (ARRAY['not_selected'::text, 'pending'::text, 'delivered'::text, 'downloading'::text, 'verified'::text, 'waiting_safe_boundary'::text, 'installing'::text, 'awaiting_health'::text, 'succeeded'::text, 'already_compliant'::text, 'failed'::text, 'rolled_back'::text, 'manual_action_required'::text, 'skipped_newer'::text, 'unsupported'::text, 'cancelled'::text])))
 update_rollout_targets update_rollout_targets_state_not_null NOT NULL state
 update_rollout_targets update_rollout_targets_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT
 update_rollout_targets update_rollout_targets_store_id_not_null NOT NULL store_id
@@ -1999,7 +1999,7 @@ update_target_events update_target_events_error_code_check CHECK (((error_code I
 update_target_events update_target_events_id_not_null NOT NULL id
 update_target_events update_target_events_pkey PRIMARY KEY (id)
 update_target_events update_target_events_recorded_at_not_null NOT NULL recorded_at
-update_target_events update_target_events_reported_state_check CHECK ((reported_state ~ '^[A-Z][A-Z_]{0,63}$'::text))
+update_target_events update_target_events_reported_state_check CHECK ((reported_state ~ '^[a-z][a-z_]{0,63}$'::text))
 update_target_events update_target_events_reported_state_not_null NOT NULL reported_state
 update_target_events update_target_events_retryable_not_null NOT NULL retryable
 update_target_events update_target_events_target_id_fkey FOREIGN KEY (target_id) REFERENCES update_rollout_targets(id) ON DELETE RESTRICT
@@ -2040,7 +2040,7 @@ CREATE INDEX idx_report_schedules_due ON public.business_report_schedules USING 
 CREATE UNIQUE INDEX catalog_admin_command_targets_command_id_device_id_key ON public.catalog_admin_command_targets USING btree (command_id, device_id)
 CREATE UNIQUE INDEX catalog_admin_command_targets_pkey ON public.catalog_admin_command_targets USING btree (id)
 CREATE INDEX idx_catalog_admin_targets_command ON public.catalog_admin_command_targets USING btree (command_id)
-CREATE INDEX idx_catalog_admin_targets_device ON public.catalog_admin_command_targets USING btree (device_id, status, created_at, id) WHERE (status = ANY (ARRAY['PENDING'::text, 'DELIVERED'::text]))
+CREATE INDEX idx_catalog_admin_targets_device ON public.catalog_admin_command_targets USING btree (device_id, status, created_at, id) WHERE (status = ANY (ARRAY['pending'::text, 'delivered'::text]))
 CREATE UNIQUE INDEX catalog_admin_commands_pkey ON public.catalog_admin_commands USING btree (id)
 CREATE INDEX idx_catalog_admin_commands_entity ON public.catalog_admin_commands USING btree (store_id, entity_id, created_at DESC)
 CREATE INDEX idx_catalog_admin_commands_store ON public.catalog_admin_commands USING btree (store_id, created_at DESC, id)
@@ -2202,7 +2202,7 @@ CREATE INDEX idx_sync_recovery_required ON public.sync_recovery_state USING btre
 CREATE UNIQUE INDEX sync_recovery_state_pkey ON public.sync_recovery_state USING btree (device_id)
 CREATE INDEX idx_update_audit_events_time ON public.update_audit_events USING btree (occurred_at DESC, id DESC)
 CREATE UNIQUE INDEX update_audit_events_pkey ON public.update_audit_events USING btree (id)
-CREATE INDEX idx_update_targets_device_open ON public.update_rollout_targets USING btree (device_id, next_attempt_at) WHERE (state = ANY (ARRAY['PENDING'::text, 'DELIVERED'::text]))
+CREATE INDEX idx_update_targets_device_open ON public.update_rollout_targets USING btree (device_id, next_attempt_at) WHERE (state = ANY (ARRAY['pending'::text, 'delivered'::text]))
 CREATE INDEX idx_update_targets_rollout ON public.update_rollout_targets USING btree (rollout_id, store_id, device_id)
 CREATE UNIQUE INDEX update_rollout_targets_pkey ON public.update_rollout_targets USING btree (id)
 CREATE UNIQUE INDEX update_rollout_targets_rollout_id_device_id_key ON public.update_rollout_targets USING btree (rollout_id, device_id)
@@ -2216,7 +2216,7 @@ catalog_product_online_state:  WITH RECURSIVE classification(product_id, categor
 catalog_product_stock:  SELECT p.product_id, p.store_id, CASE WHEN ((count(v.variant_id) > 0) AND (count(i.variant_id) FILTER (WHERE i.ready) = count(v.variant_id))) THEN (sum(i.stock_quantity))::bigint ELSE NULL::bigint END AS stock_quantity FROM ((catalog_products p LEFT JOIN catalog_product_variants v ON (((v.product_id = p.product_id) AND v.is_active AND (NOT v.deleted)))) LEFT JOIN catalog_product_variant_inventory i ON (((i.variant_id = v.variant_id) AND (i.product_id = v.product_id) AND (i.sku = v.sku) AND (v.store_id = p.store_id) AND (i.store_id = p.store_id)))) GROUP BY p.product_id, p.store_id;
 
 -- functions
-admin_users_keep_owner: CREATE OR REPLACE FUNCTION public.admin_users_keep_owner() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF EXISTS (SELECT 1 FROM admin_users) AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'OWNER' AND status = 'ACTIVE') THEN RAISE EXCEPTION 'at least one active OWNER must remain' USING ERRCODE = 'check_violation'; END IF; RETURN NULL; END; $function$ 
+admin_users_keep_owner: CREATE OR REPLACE FUNCTION public.admin_users_keep_owner() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF EXISTS (SELECT 1 FROM admin_users) AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'owner' AND status = 'active') THEN RAISE EXCEPTION 'at least one active OWNER must remain' USING ERRCODE = 'check_violation'; END IF; RETURN NULL; END; $function$ 
 auth_audit_append_only: CREATE OR REPLACE FUNCTION public.auth_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'auth audit events are append-only' USING ERRCODE = 'restrict_violation'; END; $function$ 
 release_artifacts_immutable: CREATE OR REPLACE FUNCTION public.release_artifacts_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'release artifacts are immutable' USING ERRCODE = 'check_violation'; END $function$ 
 releases_immutable: CREATE OR REPLACE FUNCTION public.releases_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'releases are never deleted; revoke instead' USING ERRCODE = 'restrict_violation'; END IF; IF NEW.id IS DISTINCT FROM OLD.id OR NEW.manifest_digest IS DISTINCT FROM OLD.manifest_digest OR NEW.release_sequence IS DISTINCT FROM OLD.release_sequence OR NEW.version IS DISTINCT FROM OLD.version OR NEW.build_commit IS DISTINCT FROM OLD.build_commit OR NEW.min_installed_sequence IS DISTINCT FROM OLD.min_installed_sequence OR NEW.key_id IS DISTINCT FROM OLD.key_id OR NEW.envelope IS DISTINCT FROM OLD.envelope OR NEW.imported_by IS DISTINCT FROM OLD.imported_by OR NEW.imported_at IS DISTINCT FROM OLD.imported_at THEN RAISE EXCEPTION 'release identity is immutable' USING ERRCODE = 'check_violation'; END IF; RETURN NEW; END $function$ 

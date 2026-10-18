@@ -94,7 +94,7 @@ targets; each eligible Retail applies independently and reports its
 own outcome. Aggregate success requires every target applied plus
 projection convergence. A conflicted device yields PARTIAL, never
 hidden success. Devices that rebind to another Store skip old
-targets (`SKIPPED_REVOKED`); revoked devices cannot fetch or ACK. Command
+targets (`skipped_revoked`); revoked devices cannot fetch or ACK. Command
 history reads durably reconcile revoked/rebound pending targets to this
 terminal skip, which contributes to PARTIAL rather than false success;
 devices joining after creation are not retroactive targets. Old

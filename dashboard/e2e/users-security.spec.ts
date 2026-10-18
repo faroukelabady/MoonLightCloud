@@ -15,14 +15,14 @@ test('OWNER opens Users & Security and sees the accounts', async ({ page }) => {
 	await expect(page).toHaveURL(/\/dashboard\/users/);
 	const users = page.getByTestId('users-page');
 	await expect(users).toBeVisible();
-	await expect(users.getByText(/My account/)).toContainText('OWNER');
+	await expect(users.getByText(/My account/)).toContainText('owner');
 	const rows = page.getByTestId('user-row');
 	await expect(rows.filter({ hasText: process.env.E2E_DASHBOARD_USER as string })).toHaveCount(1);
-	await expect(rows.filter({ hasText: process.env.E2E_DASHBOARD_USER as string })).toContainText('OWNER');
+	await expect(rows.filter({ hasText: process.env.E2E_DASHBOARD_USER as string })).toContainText('owner');
 	if (hasAdmin()) {
 		const adminRow = rows.filter({ hasText: admin().user });
-		await expect(adminRow).toContainText('ADMIN');
-		await expect(adminRow).toContainText('ACTIVE');
+		await expect(adminRow).toContainText('admin');
+		await expect(adminRow).toContainText('active');
 		// OWNER-only management controls are present for other accounts.
 		await expect(adminRow.getByRole('button', { name: /Disable/ })).toBeVisible();
 		await expect(adminRow.getByRole('button', { name: /Make owner/ })).toBeVisible();
@@ -36,15 +36,15 @@ test('OWNER begins ADMIN creation and receives a one-time activation link', asyn
 	const login = `pending-${Date.now()}@e2e.test`;
 	await form.getByLabel(/Login/).fill(login);
 	await form.getByLabel(/Display name/).fill('Pending Admin');
-	await form.getByLabel(/Role/).selectOption('ADMIN');
+	await form.getByLabel(/Role/).selectOption('admin');
 	await form.locator('select[multiple]').selectOption({ label: 'Store A' });
 	await form.getByRole('button', { name: /Create/ }).click();
 	const link = page.getByTestId('activation-link');
 	await expect(link).toContainText(login);
 	await expect(link.locator('input')).toHaveValue(/\/dashboard\/#activate=/);
 	const row = page.getByTestId('user-row').filter({ hasText: login });
-	await expect(row).toContainText('ADMIN');
-	await expect(row).toContainText('PENDING_SETUP');
+	await expect(row).toContainText('admin');
+	await expect(row).toContainText('pending_setup');
 	await expect(row.getByRole('button', { name: /New link/ })).toBeVisible();
 });
 
@@ -58,7 +58,7 @@ test('ADMIN does not receive OWNER-only controls', async ({ page }) => {
 	await page.goto('users');
 	const users = page.getByTestId('users-page');
 	await expect(users).toBeVisible();
-	await expect(users.getByText(/My account/)).toContainText('ADMIN');
+	await expect(users.getByText(/My account/)).toContainText('admin');
 	await expect(page.getByTestId('create-user')).toHaveCount(0);
 	await expect(page.getByTestId('user-row')).toHaveCount(0);
 	await expect(users.getByRole('button', { name: /Make owner|Reset MFA|Disable/ })).toHaveCount(0);

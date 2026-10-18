@@ -84,7 +84,7 @@ func (q *Queries) ClaimNotification(ctx context.Context, arg ClaimNotificationPa
 const finishNotificationAccepted = `-- name: FinishNotificationAccepted :execrows
 UPDATE notification_messages
 SET dispatch_status = 'accepted', provider_message_id = $4,
-    delivery_status = 'ACCEPTED', delivery_status_at = now(),
+    delivery_status = 'accepted', delivery_status_at = now(),
     last_error_code = NULL, lease_owner = NULL, lease_until = NULL,
     updated_at = now()
 WHERE id = $1 AND lease_owner = $2 AND lease_generation = $3

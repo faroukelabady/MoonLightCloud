@@ -28,12 +28,12 @@
 	}
 
 	async function enterStage(s: AuthStage) {
-		if (s === 'FULL') {
+		if (s === 'full') {
 			onauthenticated();
 			return;
 		}
 		code = '';
-		if (s === 'MFA_PENDING') {
+		if (s === 'mfa_pending') {
 			view = 'mfa';
 			return;
 		}

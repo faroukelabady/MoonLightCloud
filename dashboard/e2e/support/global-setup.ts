@@ -22,7 +22,7 @@ async function enroll(ctx: APIRequestContext, origin: string, csrf: string): Pro
 		headers: { Origin: origin, 'X-CSRF-Token': csrf }
 	});
 	const body = (await confirm.json()) as { stage?: string };
-	if (confirm.status() !== 200 || body.stage !== 'FULL') throw new Error(`mfa enroll confirm: ${confirm.status()} ${body.stage}`);
+	if (confirm.status() !== 200 || body.stage !== 'full') throw new Error(`mfa enroll confirm: ${confirm.status()} ${body.stage}`);
 	return secret;
 }
 
@@ -39,7 +39,7 @@ export default async function globalSetup(): Promise<void> {
 			headers: { Origin: origin }
 		});
 		const lb = (await login.json()) as { stage?: string; csrf_token: string };
-		if (login.status() !== 200 || lb.stage !== 'MFA_SETUP') throw new Error(`owner first login: ${login.status()} ${lb.stage} (expected a fresh, unenrolled OWNER)`);
+		if (login.status() !== 200 || lb.stage !== 'mfa_setup') throw new Error(`owner first login: ${login.status()} ${lb.stage} (expected a fresh, unenrolled OWNER)`);
 		const ownerSecret = await enroll(ownerCtx, origin, lb.csrf_token);
 		process.env.E2E_DASHBOARD_TOTP_SECRET = ownerSecret;
 
@@ -51,7 +51,7 @@ export default async function globalSetup(): Promise<void> {
 		// The enrollment rotated the OWNER session; re-read the CSRF token.
 		const me = (await (await ownerCtx.get('/api/v1/dashboard/auth/me')).json()) as { csrf_token: string };
 		const created = await ownerCtx.post('/api/v1/dashboard/users', {
-			data: { login: adminUser, display_name: 'E2E Admin', role: 'ADMIN', all_stores: false, store_ids: [store] },
+			data: { login: adminUser, display_name: 'E2E Admin', role: 'admin', all_stores: false, store_ids: [store] },
 			headers: { Origin: origin, 'X-CSRF-Token': me.csrf_token }
 		});
 		if (created.status() !== 201 && created.status() !== 200) throw new Error(`create ADMIN: ${created.status()} ${await created.text()}`);

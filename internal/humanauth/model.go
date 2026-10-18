@@ -13,9 +13,9 @@ import (
 type Stage string
 
 const (
-	StageMFAPending Stage = "MFA_PENDING" // password ok, TOTP/recovery challenge required
-	StageMFASetup   Stage = "MFA_SETUP"   // password ok, TOTP enrollment required
-	StageFull       Stage = "FULL"        // fully authenticated
+	StageMFAPending Stage = "mfa_pending" // password ok, TOTP/recovery challenge required
+	StageMFASetup   Stage = "mfa_setup"   // password ok, TOTP enrollment required
+	StageFull       Stage = "full"        // fully authenticated
 )
 
 // Policy holds the bounded, configurable session/throttle settings.

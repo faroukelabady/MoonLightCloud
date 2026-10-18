@@ -103,7 +103,7 @@ func orderHandlers() DashboardOrderHandlers {
 		summaries: []orders.OrderSummary{
 			{
 				ProviderKey: "website", ExternalOrderID: "800", OrderNumber: "800",
-				ProviderStatus: "processing", CanonicalStatus: "PROCESSING",
+				ProviderStatus: "processing", CanonicalStatus: "processing",
 				Currency: "EGP", TotalMinor: "9007199254740993",
 				CreatedAt: "2026-09-27T10:00:00Z", ModifiedAt: "2026-09-27T11:00:00Z",
 				CustomerName: "A B", MappingComplete: false, UnmappedLineCount: 1,
@@ -112,16 +112,16 @@ func orderHandlers() DashboardOrderHandlers {
 		detail: orders.OrderDetail{
 			Summary: orders.OrderSummary{
 				ProviderKey: "website", ExternalOrderID: "800", TotalMinor: "9007199254740993",
-				CanonicalStatus: "PROCESSING", MappingComplete: false, UnmappedLineCount: 1,
+				CanonicalStatus: "processing", MappingComplete: false, UnmappedLineCount: 1,
 			},
 			Lines: []orders.OrderLineView{
 				{ExternalLineID: 1, ExternalProductID: "999", SKU: "FOREIGN", Name: "Foreign", Quantity: 1, TotalMinor: "9007199254740993"},
 			},
 			StatusHistory: []orders.OrderStatusEvent{
-				{OrderRevision: 1, ProviderStatus: "processing", CanonicalStatus: "PROCESSING"},
+				{OrderRevision: 1, ProviderStatus: "processing", CanonicalStatus: "processing"},
 			},
 		},
-		counts: []orders.OrderStatusCount{{CanonicalStatus: "PROCESSING", Total: 1}},
+		counts: []orders.OrderStatusCount{{CanonicalStatus: "processing", Total: 1}},
 	}, testOrderLog())
 }
 
@@ -136,7 +136,7 @@ func TestDashboardOrdersList(t *testing.T) {
 	body := recorder.Body.String()
 	for _, want := range []string{
 		`"total_minor":"9007199254740993"`,
-		`"canonical_status":"PROCESSING"`,
+		`"canonical_status":"processing"`,
 		`"unmapped_line_count":1`,
 		`"status_counts"`,
 		`"webhook_inbox"`,

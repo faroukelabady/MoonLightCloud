@@ -442,7 +442,7 @@ func opsSeedNotificationFresh(t *testing.T, pool *pgxpool.Pool, key, status stri
 	if _, err := pool.Exec(context.Background(), `INSERT INTO notification_messages
 		(id, provider_key, idempotency_key, semantic_fingerprint, recipient, template_key, locale,
 		 ext_template_name, ext_language_code, dispatch_status, delivery_status)
-		VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', 'daily_business_report_v1', 'ar', 'ext', 'ar', $3, 'UNKNOWN')`,
+		VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', 'daily_business_report_v1', 'ar', 'ext', 'ar', $3, 'unknown')`,
 		mustOpsUUID(t, id), key, status); err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestDetectorScanPlansIndexed(t *testing.T) {
 		if _, err := pool.Exec(ctx, `INSERT INTO notification_messages
 			(id, provider_key, idempotency_key, semantic_fingerprint, recipient, template_key, locale,
 			 ext_template_name, ext_language_code, dispatch_status, delivery_status)
-			VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', 'daily_business_report_v1', 'ar', 'ext', 'ar', $3, 'UNKNOWN')`,
+			VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', 'daily_business_report_v1', 'ar', 'ext', 'ar', $3, 'unknown')`,
 			mustOpsUUID(t, id), "nb-plan-"+strconv.Itoa(i), status); err != nil {
 			t.Fatal(err)
 		}

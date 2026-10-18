@@ -34,7 +34,7 @@ function envelopeText(files: string[]): string {
 	return JSON.stringify({ format: 'moonlight-release-envelope-v1', key_id: 'k', manifest: btoa(JSON.stringify(manifest)), signature: 's' });
 }
 
-function release(id: string, status: 'ACTIVE' | 'REVOKED') {
+function release(id: string, status: 'active' | 'revoked') {
 	return {
 		id, manifest_digest: 'd', release_sequence: 14, version: '1.4.0', build_commit: 'a'.repeat(40), min_installed_sequence: 0,
 		key_id: 'kid', status, imported_by: 'op', imported_at: '2026-10-01T00:00:00Z', status_changed_by: 'op',
@@ -44,11 +44,11 @@ function release(id: string, status: 'ACTIVE' | 'REVOKED') {
 
 describe('update state labels', () => {
 	it('never reports success for states before Retail confirmed health', () => {
-		for (const s of ['PENDING', 'DELIVERED', 'DOWNLOADING', 'VERIFIED', 'WAITING_SAFE_BOUNDARY', 'INSTALLING', 'AWAITING_HEALTH']) {
+		for (const s of ['pending', 'delivered', 'downloading', 'verified', 'waiting_safe_boundary', 'installing', 'awaiting_health']) {
 			expect(updateStateLabel(s)).not.toMatch(/Succeeded|Updated/);
 		}
-		expect(updateStateLabel('SUCCEEDED')).toMatch(/Succeeded/);
-		expect(updateStateLabel('ROLLED_BACK')).toMatch(/Rolled back/);
+		expect(updateStateLabel('succeeded')).toMatch(/Succeeded/);
+		expect(updateStateLabel('rolled_back')).toMatch(/Rolled back/);
 	});
 
 	it('preview tolerates garbage and only lists signed file names', () => {
@@ -63,7 +63,7 @@ describe('UpdatesPage', () => {
 		api.fleet.mockResolvedValue({
 			devices: [
 				{ device_id: 'd1', device_name: 'till-1', device_status: 'active', store_id: STORE, version: '1.3.0', release_sequence: 13,
-					updater_protocol: 1, updater_capable: true, updater_reported: true, target_state: 'WAITING_SAFE_BOUNDARY',
+					updater_protocol: 1, updater_capable: true, updater_reported: true, target_state: 'waiting_safe_boundary',
 					target_version: '1.4.0', target_sequence: 14 },
 				{ device_id: 'd2', device_name: 'old', device_status: 'active', store_id: STORE, release_sequence: 0, updater_protocol: 0,
 					updater_capable: false, updater_reported: false }
@@ -114,13 +114,13 @@ describe('UpdatesPage', () => {
 
 	it('creates a store-scoped draft rollout and starts it', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE'), release('r2', 'REVOKED')] });
-		const draft = { id: 'ro1', release_id: 'r1', release_version: '1.4.0', release_sequence: 14, scope: 'STORE', store_id: STORE,
-			mode: 'MANDATORY', percentage: 10, status: 'DRAFT', target_count: 3, created_by: 'op', created_at: '', updated_at: '',
-			counts: { PENDING: 1, NOT_SELECTED: 2 } };
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active'), release('r2', 'revoked')] });
+		const draft = { id: 'ro1', release_id: 'r1', release_version: '1.4.0', release_sequence: 14, scope: 'store', store_id: STORE,
+			mode: 'mandatory', percentage: 10, status: 'draft', target_count: 3, created_by: 'op', created_at: '', updated_at: '',
+			counts: { pending: 1, not_selected: 2 } };
 		api.rollouts.mockResolvedValue({ rollouts: [draft], next_cursor: '' });
 		api.createRollout.mockResolvedValue(draft);
-		api.rolloutAction.mockResolvedValue({ ...draft, status: 'ACTIVE' });
+		api.rolloutAction.mockResolvedValue({ ...draft, status: 'active' });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
 		const select = (await screen.findByTestId('rollout-release')) as HTMLSelectElement;
@@ -128,7 +128,7 @@ describe('UpdatesPage', () => {
 		expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'r1']);
 		await fireEvent.change(select, { target: { value: 'r1' } });
 		await fireEvent.click(await screen.findByTestId('create-rollout'));
-		expect(api.createRollout).toHaveBeenCalledWith(expect.objectContaining({ release_id: 'r1', scope: 'STORE', store_id: STORE, device_id: undefined }));
+		expect(api.createRollout).toHaveBeenCalledWith(expect.objectContaining({ release_id: 'r1', scope: 'store', store_id: STORE, device_id: undefined }));
 		const row = await screen.findByTestId('rollout-row');
 		expect(row.textContent).toContain('Pending: 1');
 		// Starting a MANDATORY rollout requires an explicit confirmation.
@@ -144,7 +144,7 @@ describe('UpdatesPage', () => {
 
 	it('requires a Store before a Store-scoped rollout can be created', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
@@ -155,28 +155,28 @@ describe('UpdatesPage', () => {
 
 	it('binds a Device rollout to the selected Store', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		api.createRollout.mockResolvedValue({ target_count: 1 });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
 		await fireEvent.change(await screen.findByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: '  device-a  ' } });
 		await fireEvent.click(screen.getByTestId('create-rollout'));
 		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
-			release_id: 'r1', scope: 'DEVICE', store_id: STORE, device_id: 'device-a', mode: 'OPTIONAL', percentage: 10
+			release_id: 'r1', scope: 'device', store_id: STORE, device_id: 'device-a', mode: 'optional', percentage: 10
 		});
 	});
 
 	it('requires a Store for a Device rollout even when a Device ID is entered', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
 		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
 		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.getByText('اختر متجرًا أولاً / Choose a Store first.')).toBeTruthy();
@@ -186,12 +186,12 @@ describe('UpdatesPage', () => {
 
 	it('drops a previously entered Device ID when the selected Store changes', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		const { rerender } = render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
 		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
 		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(false);
 		await rerender({ store: '22222222-2222-4222-8222-222222222222' });
@@ -203,18 +203,18 @@ describe('UpdatesPage', () => {
 
 	it('keeps ALL rollouts independent of the selected Store and any prior Device ID', async () => {
 		api.fleet.mockResolvedValue({ devices: [], next_cursor: '' });
-		api.releases.mockResolvedValue({ releases: [release('r1', 'ACTIVE')] });
+		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		api.createRollout.mockResolvedValue({ target_count: 2 });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
 		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'DEVICE' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'ALL' } });
+		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'all' } });
 		await fireEvent.click(screen.getByTestId('create-rollout'));
 		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
-			release_id: 'r1', scope: 'ALL', store_id: undefined, device_id: undefined, mode: 'OPTIONAL', percentage: 10
+			release_id: 'r1', scope: 'all', store_id: undefined, device_id: undefined, mode: 'optional', percentage: 10
 		});
 	});
 });

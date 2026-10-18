@@ -64,7 +64,7 @@ func TestPhase12R1OnlineCurrencyScopes(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(native.CurrencyTotals) != 1 || native.CurrencyTotals[0].Currency != "USD" || native.CurrencyTotals[0].ValueMinor != "12345" || len(native.StatusCounts) != 1 || native.StatusCounts[0].CanonicalStatus != "CANCELLED" {
+	if len(native.CurrencyTotals) != 1 || native.CurrencyTotals[0].Currency != "USD" || native.CurrencyTotals[0].ValueMinor != "12345" || len(native.StatusCounts) != 1 || native.StatusCounts[0].CanonicalStatus != "cancelled" {
 		t.Fatalf("USD scope not applied %+v", native)
 	}
 	unknown, e := s.OrderAnalytics(ctx, req, "unknown")

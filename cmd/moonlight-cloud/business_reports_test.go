@@ -162,7 +162,7 @@ func TestBusinessReportsScheduleCLI(t *testing.T) {
 	ctx := context.Background()
 	service := newMemReportService()
 	var out bytes.Buffer
-	if err := runScheduleCreate(ctx, service, &out, "owner-daily", "DAILY", "21:00", "", []string{"recipient-1"}); err != nil {
+	if err := runScheduleCreate(ctx, service, &out, "owner-daily", "daily", "21:00", "", []string{"recipient-1"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if !strings.Contains(out.String(), "id=schedule-1") || !strings.Contains(out.String(), "next=2026-09-29") {

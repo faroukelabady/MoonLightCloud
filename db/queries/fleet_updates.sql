@@ -6,7 +6,7 @@
 INSERT INTO releases (id, manifest_digest, release_sequence, version, build_commit, min_installed_sequence,
     key_id, envelope, status, imported_by, imported_at, status_changed_by, status_changed_at)
 VALUES (@id::uuid, @manifest_digest::text, @release_sequence::bigint, @version::text, @build_commit::text,
-    @min_installed_sequence::bigint, @key_id::text, @envelope::text, 'ACTIVE', @actor::text, @now::timestamptz,
+    @min_installed_sequence::bigint, @key_id::text, @envelope::text, 'active', @actor::text, @now::timestamptz,
     @actor::text, @now::timestamptz);
 
 -- name: InsertReleaseArtifact :exec
@@ -49,7 +49,7 @@ WHERE id = @id::uuid AND status <> @status::text;
 INSERT INTO update_rollouts (id, release_id, scope, store_id, device_id, mode, percentage, status, not_before,
     target_count, created_by, created_at, updated_at)
 VALUES (@id::uuid, @release_id::uuid, @scope::text, sqlc.narg(store_id)::uuid, sqlc.narg(device_id)::uuid, @mode::text,
-    @percentage::int, 'DRAFT', sqlc.narg(not_before)::timestamptz, @target_count::int, @actor::text, @now::timestamptz, @now::timestamptz);
+    @percentage::int, 'draft', sqlc.narg(not_before)::timestamptz, @target_count::int, @actor::text, @now::timestamptz, @now::timestamptz);
 
 -- name: GetRollout :one
 SELECT id, release_id, scope, store_id, device_id, mode, percentage, status, not_before, target_count,
@@ -77,7 +77,7 @@ WHERE id = @id::uuid AND status = ANY(@from_statuses::text[]);
 
 -- name: SetRolloutPercentage :execrows
 UPDATE update_rollouts SET percentage = @percentage::int, updated_at = @now::timestamptz
-WHERE id = @id::uuid AND percentage < @percentage::int AND status IN ('DRAFT','ACTIVE','PAUSED');
+WHERE id = @id::uuid AND percentage < @percentage::int AND status IN ('draft','active','paused');
 
 -- name: EligibleRolloutDevices :many
 -- The immutable target snapshot: active, Store-bound devices in scope.
@@ -95,14 +95,14 @@ VALUES (@id::uuid, @rollout_id::uuid, @device_id::uuid, @store_id::uuid, @bucket
     @now::timestamptz, @now::timestamptz);
 
 -- name: PromoteSelectedTargets :execrows
-UPDATE update_rollout_targets SET state = 'PENDING', updated_at = @now::timestamptz
-WHERE rollout_id = @rollout_id::uuid AND state = 'NOT_SELECTED' AND bucket < @percentage::int;
+UPDATE update_rollout_targets SET state = 'pending', updated_at = @now::timestamptz
+WHERE rollout_id = @rollout_id::uuid AND state = 'not_selected' AND bucket < @percentage::int;
 
 -- name: CancelOpenTargets :execrows
 -- Cancellation cannot reach targets already in irreversible execution.
-UPDATE update_rollout_targets SET state = 'CANCELLED', finished_at = @now::timestamptz, updated_at = @now::timestamptz
+UPDATE update_rollout_targets SET state = 'cancelled', finished_at = @now::timestamptz, updated_at = @now::timestamptz
 WHERE rollout_id = @rollout_id::uuid
-  AND state IN ('NOT_SELECTED','PENDING','DELIVERED','DOWNLOADING','VERIFIED','WAITING_SAFE_BOUNDARY');
+  AND state IN ('not_selected','pending','delivered','downloading','verified','waiting_safe_boundary');
 
 -- name: CountRolloutTargetStates :many
 SELECT state, count(*)::bigint AS n FROM update_rollout_targets
@@ -133,8 +133,8 @@ JOIN releases rel ON rel.id = r.release_id
 JOIN device_store_bindings b ON b.device_id = t.device_id AND b.store_id = t.store_id
 JOIN release_artifacts a ON a.release_id = rel.id AND a.os = @os::text AND a.arch = @arch::text AND a.package = @package::text
 WHERE t.device_id = @device_id::uuid
-  AND t.state IN ('PENDING','DELIVERED')
-  AND r.status = 'ACTIVE' AND rel.status = 'ACTIVE'
+  AND t.state IN ('pending','delivered')
+  AND r.status = 'active' AND rel.status = 'active'
   AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= @now::timestamptz)
   AND (r.not_before IS NULL OR r.not_before <= @now::timestamptz)
 ORDER BY rel.release_sequence DESC, t.created_at, t.id
@@ -142,32 +142,32 @@ LIMIT 1
 FOR UPDATE OF t FOR SHARE OF r;
 
 -- name: MarkTargetDelivered :exec
-UPDATE update_rollout_targets SET state = 'DELIVERED', delivered_at = COALESCE(delivered_at, @now::timestamptz),
+UPDATE update_rollout_targets SET state = 'delivered', delivered_at = COALESCE(delivered_at, @now::timestamptz),
     updated_at = @now::timestamptz
-WHERE id = @id::uuid AND state IN ('PENDING','DELIVERED');
+WHERE id = @id::uuid AND state IN ('pending','delivered');
 
 -- name: MarkUnsupportedPlatformTargets :execrows
 -- Targets whose release has no artifact for the device platform can never
 -- be delivered: terminal UNSUPPORTED instead of permanent retry (§131).
-UPDATE update_rollout_targets t SET state = 'UNSUPPORTED', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
+UPDATE update_rollout_targets t SET state = 'unsupported', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
     finished_at = @now::timestamptz, updated_at = @now::timestamptz
 FROM update_rollouts r
-WHERE r.id = t.rollout_id AND t.device_id = @device_id::uuid AND t.state = 'PENDING'
+WHERE r.id = t.rollout_id AND t.device_id = @device_id::uuid AND t.state = 'pending'
   AND NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
                   AND a.os = @os::text AND a.arch = @arch::text AND a.package = @package::text);
 
 -- name: MarkIncapableDeviceTargets :execrows
-UPDATE update_rollout_targets SET state = 'UNSUPPORTED', last_error = @reason::text,
+UPDATE update_rollout_targets SET state = 'unsupported', last_error = @reason::text,
     finished_at = @now::timestamptz, updated_at = @now::timestamptz
-WHERE device_id = @device_id::uuid AND state = 'PENDING';
+WHERE device_id = @device_id::uuid AND state = 'pending';
 
 -- name: MarkNewerDeviceTargets :execrows
 -- A device already at or past the target never downgrades (§58-§59).
 UPDATE update_rollout_targets t
-SET state = CASE WHEN rel.release_sequence = @release_sequence::bigint THEN 'ALREADY_COMPLIANT' ELSE 'SKIPPED_NEWER' END,
+SET state = CASE WHEN rel.release_sequence = @release_sequence::bigint THEN 'already_compliant' ELSE 'skipped_newer' END,
     finished_at = @now::timestamptz, updated_at = @now::timestamptz
 FROM update_rollouts r JOIN releases rel ON rel.id = r.release_id
-WHERE r.id = t.rollout_id AND t.device_id = @device_id::uuid AND t.state = 'PENDING'
+WHERE r.id = t.rollout_id AND t.device_id = @device_id::uuid AND t.state = 'pending'
   AND (rel.release_sequence < @release_sequence::bigint
        OR (rel.release_sequence = @release_sequence::bigint AND rel.build_commit = @build_commit::text));
 
@@ -200,7 +200,7 @@ ORDER BY id DESC LIMIT @row_limit::int;
 -- name: OpenRolloutTargetCount :one
 SELECT count(*)::bigint FROM update_rollout_targets
 WHERE rollout_id = @rollout_id::uuid
-  AND state IN ('NOT_SELECTED','PENDING','DELIVERED','DOWNLOADING','VERIFIED','WAITING_SAFE_BOUNDARY','INSTALLING','AWAITING_HEALTH');
+  AND state IN ('not_selected','pending','delivered','downloading','verified','waiting_safe_boundary','installing','awaiting_health');
 
 -- name: UpsertDeviceUpdateStatus :exec
 INSERT INTO device_update_status (device_id, version, build_commit, release_sequence, os, arch, updater_protocol,

@@ -71,7 +71,7 @@ func TestDashboardDevicesConnectivity(t *testing.T) {
 	for _, d := range body.Devices {
 		byID[d.DeviceID] = d.Connectivity
 	}
-	if byID["dev-A"] != "ONLINE" || byID["dev-B"] != "NEVER_SEEN" {
+	if byID["dev-A"] != "online" || byID["dev-B"] != "never_seen" {
 		t.Fatalf("connectivity: %v", byID)
 	}
 }
@@ -143,7 +143,7 @@ func TestDashboardSyncRequestOfflineQueued(t *testing.T) {
 		} `json:"devices"`
 	}
 	_ = json.Unmarshal(rec2.Body.Bytes(), &body)
-	if body.Devices[0].Connectivity != "NEVER_SEEN" || body.Devices[0].Active == nil {
+	if body.Devices[0].Connectivity != "never_seen" || body.Devices[0].Active == nil {
 		t.Fatalf("queued while never seen: %s", rec2.Body.String())
 	}
 }

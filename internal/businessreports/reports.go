@@ -22,9 +22,9 @@ type ReportKind string
 
 const (
 	// ReportDaily covers one previous complete Cairo calendar day.
-	ReportDaily ReportKind = "DAILY"
+	ReportDaily ReportKind = "daily"
 	// ReportTenDay covers ten previous complete Cairo calendar days.
-	ReportTenDay ReportKind = "TEN_DAY"
+	ReportTenDay ReportKind = "ten_day"
 )
 
 // RunKind distinguishes scheduled slots from operator manual runs.

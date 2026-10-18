@@ -62,7 +62,7 @@ describe('OperationsPage', () => {
 
 	it('surfaces resolve conflicts when the condition is still active', async () => {
 		api.incidents.mockResolvedValue({ incidents: [row('i1', 'DEVICE_OFFLINE', 'open')], next_cursor: '' });
-		api.incidentResolve.mockRejectedValue(new ApiError(409, 'CONFLICT', 'request failed (409)'));
+		api.incidentResolve.mockRejectedValue(new ApiError(409, 'conflict', 'request failed (409)'));
 		render(OperationsPage);
 		const btn = (await screen.findByTestId('resolve')) as HTMLButtonElement;
 		await fireEvent.click(btn);

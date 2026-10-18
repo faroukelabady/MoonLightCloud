@@ -86,7 +86,7 @@ func (f *fleetFixture) device(name, storeID string) string {
 func (f *fleetFixture) capable(deviceID string, seq int64) {
 	f.t.Helper()
 	if err := f.svc.RecordStatus(context.Background(), deviceID, fleetupdate.StatusReport{Version: "1.0.0", BuildCommit: strings.Repeat("a", 40),
-		ReleaseSequence: seq, OS: "linux", Arch: "amd64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "IDLE"}); err != nil {
+		ReleaseSequence: seq, OS: "linux", Arch: "amd64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "idle"}); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -167,7 +167,7 @@ func TestReleaseImportIsVerifiedIdempotentAndImmutable(t *testing.T) {
 	ctx := context.Background()
 	env := f.signed(5)
 	view, created, err := f.svc.ImportRelease(ctx, "op", env, urls())
-	if err != nil || !created || view.ReleaseSequence != 5 || view.Status != "ACTIVE" {
+	if err != nil || !created || view.ReleaseSequence != 5 || view.Status != "active" {
 		t.Fatalf("%+v %v %v", view, created, err)
 	}
 	again, created, err := f.svc.ImportRelease(ctx, "op", env, urls())
@@ -213,11 +213,11 @@ func TestReleaseImportIsVerifiedIdempotentAndImmutable(t *testing.T) {
 			t.Fatalf("immutable release changed by %q", stmt)
 		}
 	}
-	revoked, err := f.svc.SetReleaseStatus(ctx, "op", view.ID, "REVOKED")
-	if err != nil || revoked.Status != "REVOKED" {
+	revoked, err := f.svc.SetReleaseStatus(ctx, "op", view.ID, "revoked")
+	if err != nil || revoked.Status != "revoked" {
 		t.Fatalf("%+v %v", revoked, err)
 	}
-	if _, err := f.svc.CreateRollout(ctx, "op", fleetupdate.RolloutRequest{ReleaseID: view.ID, Scope: "ALL", Mode: "OPTIONAL", Percentage: 100}); kind(err) != apperr.Conflict {
+	if _, err := f.svc.CreateRollout(ctx, "op", fleetupdate.RolloutRequest{ReleaseID: view.ID, Scope: "all", Mode: "optional", Percentage: 100}); kind(err) != apperr.Conflict {
 		t.Fatalf("rollout of a revoked release accepted: %v", err)
 	}
 	events, err := f.svc.Audit(ctx, "", 0, 50)
@@ -233,8 +233,8 @@ func TestStoreScopedRolloutIsolationAndLifecycle(t *testing.T) {
 		f.capable(d, 10)
 	}
 	rel := f.release(11)
-	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "MANDATORY", Percentage: 100}, false)
-	if ro.TargetCount != 2 || ro.Status != "DRAFT" {
+	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "mandatory", Percentage: 100}, false)
+	if ro.TargetCount != 2 || ro.Status != "draft" {
 		t.Fatalf("snapshot: %+v", ro)
 	}
 	if f.poll(f.devA) != nil {
@@ -247,17 +247,17 @@ func TestStoreScopedRolloutIsolationAndLifecycle(t *testing.T) {
 		t.Fatal("Store B device received a Store A rollout")
 	}
 	cmd := f.poll(f.devA)
-	if cmd == nil || cmd.Type != fleetupdate.CommandType || cmd.Mode != "MANDATORY" || cmd.ManifestDigest != rel.ManifestDigest || cmd.ReleaseStatus != "ACTIVE" {
+	if cmd == nil || cmd.Type != fleetupdate.CommandType || cmd.Mode != "mandatory" || cmd.ManifestDigest != rel.ManifestDigest || cmd.ReleaseStatus != "active" {
 		t.Fatalf("command: %+v", cmd)
 	}
 	if !strings.HasPrefix(cmd.ArtifactURL, "https://") || cmd.Envelope == "" {
 		t.Fatalf("command artifact/envelope: %+v", cmd)
 	}
 	// Store B's device can neither report on nor learn about A's target.
-	if _, err := f.report(f.devB, cmd.TargetID, "DOWNLOADING", "", false); kind(err) != apperr.NotFound {
+	if _, err := f.report(f.devB, cmd.TargetID, "downloading", "", false); kind(err) != apperr.NotFound {
 		t.Fatalf("foreign device report accepted: %v", err)
 	}
-	if _, err := f.report(f.devA2, cmd.TargetID, "DOWNLOADING", "", false); kind(err) != apperr.NotFound {
+	if _, err := f.report(f.devA2, cmd.TargetID, "downloading", "", false); kind(err) != apperr.NotFound {
 		t.Fatalf("same-Store other device report accepted: %v", err)
 	}
 	targets, _, err := f.svc.ListTargets(ctx, ro.ID, f.storeB, "", 50)
@@ -284,7 +284,7 @@ func TestStoreScopedRolloutIsolationAndLifecycle(t *testing.T) {
 	if f.poll(f.devA2) != nil {
 		t.Fatal("paused rollout delivered a new target")
 	}
-	for _, s := range []string{"DOWNLOADING", "STAGED", "WAITING_SAFE_BOUNDARY", "INSTALLING"} {
+	for _, s := range []string{"downloading", "staged", "waiting_safe_boundary", "installing"} {
 		if _, err := f.report(f.devA, cmd.TargetID, s, "", false); err != nil {
 			t.Fatalf("%s: %v", s, err)
 		}
@@ -298,23 +298,23 @@ func TestStoreScopedRolloutIsolationAndLifecycle(t *testing.T) {
 	}
 	// Success is reported only by the device, then the rollout completes
 	// once every target is terminal.
-	ack, err := f.report(f.devA, cmd.TargetID, "SUCCEEDED", "", false)
-	if err != nil || ack.TargetState != "SUCCEEDED" {
+	ack, err := f.report(f.devA, cmd.TargetID, "succeeded", "", false)
+	if err != nil || ack.TargetState != "succeeded" {
 		t.Fatalf("%+v %v", ack, err)
 	}
 	got, _ := f.svc.GetRollout(ctx, ro.ID)
-	if got.Status != "ACTIVE" {
+	if got.Status != "active" {
 		t.Fatalf("rollout completed while a target was open: %+v", got)
 	}
-	if _, err := f.report(f.devA2, cmd2.TargetID, "ROLLED_BACK", "UPDATE_HEALTH_FAILED", false); err != nil {
+	if _, err := f.report(f.devA2, cmd2.TargetID, "rolled_back", "UPDATE_HEALTH_FAILED", false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = f.svc.GetRollout(ctx, ro.ID)
-	if got.Status != "COMPLETED" || got.Counts["SUCCEEDED"] != 1 || got.Counts["ROLLED_BACK"] != 1 {
+	if got.Status != "completed" || got.Counts["succeeded"] != 1 || got.Counts["rolled_back"] != 1 {
 		t.Fatalf("truthful completion: %+v", got)
 	}
 	// Terminal outcomes are final; late/duplicate reports change nothing.
-	if ack, _ := f.report(f.devA, cmd.TargetID, "FAILED", "UPDATE_HASH_MISMATCH", false); ack.TargetState != "SUCCEEDED" {
+	if ack, _ := f.report(f.devA, cmd.TargetID, "failed", "UPDATE_HASH_MISMATCH", false); ack.TargetState != "succeeded" {
 		t.Fatalf("terminal success rewritten: %+v", ack)
 	}
 	history, err := f.svc.TargetHistory(ctx, cmd.TargetID)
@@ -333,21 +333,21 @@ func TestDeviceEligibilityIsTruthful(t *testing.T) {
 	arm := f.device("arm", f.storeA)
 	rel := f.release(11)
 	f.capable(f.devA, 10)
-	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 100}, true)
+	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
 	if f.poll(old) != nil {
 		t.Fatal("Cloud cannot bootstrap an updater into pre-Phase-18 Retail")
 	}
 	if err := f.svc.RecordStatus(ctx, incapable, fleetupdate.StatusReport{Version: "1.0.0", BuildCommit: "x", OS: "linux", Arch: "amd64",
-		UpdaterProtocol: 1, UpdaterCapable: false, UnsupportedReason: "UPDATE_PLATFORM_UNSUPPORTED", UpdateState: "IDLE"}); err != nil {
+		UpdaterProtocol: 1, UpdaterCapable: false, UnsupportedReason: "UPDATE_PLATFORM_UNSUPPORTED", UpdateState: "idle"}); err != nil {
 		t.Fatal(err)
 	}
 	f.capable(newer, 12)
 	if err := f.svc.RecordStatus(ctx, same, fleetupdate.StatusReport{Version: "1.1.0", BuildCommit: strings.Repeat("b", 40),
-		ReleaseSequence: 11, OS: "linux", Arch: "amd64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "SUCCEEDED"}); err != nil {
+		ReleaseSequence: 11, OS: "linux", Arch: "amd64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "succeeded"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.RecordStatus(ctx, arm, fleetupdate.StatusReport{Version: "1.0.0", BuildCommit: strings.Repeat("a", 40),
-		ReleaseSequence: 10, OS: "linux", Arch: "arm64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "IDLE"}); err != nil {
+		ReleaseSequence: 10, OS: "linux", Arch: "arm64", UpdaterProtocol: 1, UpdaterCapable: true, UpdateState: "idle"}); err != nil {
 		t.Fatal(err)
 	}
 	if f.poll(arm) != nil {
@@ -361,7 +361,7 @@ func TestDeviceEligibilityIsTruthful(t *testing.T) {
 	for _, tg := range targets {
 		states[tg.DeviceID] = tg.State
 	}
-	want := map[string]string{old: "PENDING", incapable: "UNSUPPORTED", newer: "SKIPPED_NEWER", same: "ALREADY_COMPLIANT", arm: "UNSUPPORTED", f.devA: "PENDING"}
+	want := map[string]string{old: "pending", incapable: "unsupported", newer: "skipped_newer", same: "already_compliant", arm: "unsupported", f.devA: "pending"}
 	for d, s := range want {
 		if states[d] != s {
 			t.Fatalf("device %s: %s want %s (%v)", d, states[d], s, states)
@@ -382,13 +382,13 @@ func TestRetryScheduleUsesApplicationClockUnderSkew(t *testing.T) {
 	f := newFleetFixture(t)
 	f.capable(f.devA, 10)
 	rel := f.release(11)
-	f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "DEVICE", StoreID: f.storeA, DeviceID: f.devA, Mode: "OPTIONAL", Percentage: 100}, true)
+	f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "device", StoreID: f.storeA, DeviceID: f.devA, Mode: "optional", Percentage: 100}, true)
 	cmd := f.poll(f.devA)
 	if cmd == nil {
 		t.Fatal("no command")
 	}
-	ack, err := f.report(f.devA, cmd.TargetID, "FAILED", "UPDATE_DOWNLOAD_FAILED", true)
-	if err != nil || ack.TargetState != "PENDING" {
+	ack, err := f.report(f.devA, cmd.TargetID, "failed", "UPDATE_DOWNLOAD_FAILED", true)
+	if err != nil || ack.TargetState != "pending" {
 		t.Fatalf("%+v %v", ack, err)
 	}
 	failedAt := f.now()
@@ -413,7 +413,7 @@ func TestRetryScheduleUsesApplicationClockUnderSkew(t *testing.T) {
 	}
 	// One permanently failing device never blocks another (§140).
 	f.capable(f.devA2, 10)
-	ro2 := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 100}, true)
+	ro2 := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
 	_ = ro2
 	if f.poll(f.devA2) == nil {
 		t.Fatal("healthy device blocked by a failing device")
@@ -426,22 +426,22 @@ func TestCancelRacesAndRevocationAndRebinding(t *testing.T) {
 	f.capable(f.devA, 10)
 	f.capable(f.devA2, 10)
 	rel := f.release(11)
-	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 100}, true)
+	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
 	cmd := f.poll(f.devA)
-	if _, err := f.report(f.devA, cmd.TargetID, "WAITING_SAFE_BOUNDARY", "", false); err != nil {
+	if _, err := f.report(f.devA, cmd.TargetID, "waiting_safe_boundary", "", false); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, err := f.svc.CancelRollout(ctx, "op", ro.ID)
-	if err != nil || cancelled.Counts["CANCELLED"] != 2 {
+	if err != nil || cancelled.Counts["cancelled"] != 2 {
 		t.Fatalf("%+v %v", cancelled, err)
 	}
 	// The device had already begun activation: truth wins over the cancel.
-	ack, err := f.report(f.devA, cmd.TargetID, "INSTALLING", "", false)
-	if err != nil || ack.TargetState != "INSTALLING" {
+	ack, err := f.report(f.devA, cmd.TargetID, "installing", "", false)
+	if err != nil || ack.TargetState != "installing" {
 		t.Fatalf("activation hidden behind cancel: %+v %v", ack, err)
 	}
 	// Pre-activation progress cannot undo a cancel; the ack tells Retail.
-	if ack, _ := f.report(f.devA2, mustTargetFor(t, f, ro.ID, f.devA2), "DOWNLOADING", "", false); ack.TargetState != "CANCELLED" {
+	if ack, _ := f.report(f.devA2, mustTargetFor(t, f, ro.ID, f.devA2), "downloading", "", false); ack.TargetState != "cancelled" {
 		t.Fatalf("cancel lost: %+v", ack)
 	}
 	events, _ := f.svc.Audit(ctx, f.storeA, 0, 50)
@@ -455,19 +455,19 @@ func TestCancelRacesAndRevocationAndRebinding(t *testing.T) {
 
 	// Revocation: no new delivery; reports learn REVOKED.
 	rel2 := f.release(12)
-	ro2 := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel2.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 100}, true)
+	ro2 := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel2.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
 	cmd2 := f.poll(f.devA2)
 	if cmd2 == nil {
 		t.Fatal("no command for release 12")
 	}
-	if _, err := f.svc.SetReleaseStatus(ctx, "op", rel2.ID, "REVOKED"); err != nil {
+	if _, err := f.svc.SetReleaseStatus(ctx, "op", rel2.ID, "revoked"); err != nil {
 		t.Fatal(err)
 	}
-	if ack, _ := f.report(f.devA2, cmd2.TargetID, "DOWNLOADING", "", false); ack.ReleaseStatus != "REVOKED" {
+	if ack, _ := f.report(f.devA2, cmd2.TargetID, "downloading", "", false); ack.ReleaseStatus != "revoked" {
 		t.Fatalf("revocation not relayed: %+v", ack)
 	}
 	_ = ro2
-	if _, err := f.svc.SetReleaseStatus(ctx, "op", rel2.ID, "ACTIVE"); err != nil {
+	if _, err := f.svc.SetReleaseStatus(ctx, "op", rel2.ID, "active"); err != nil {
 		t.Fatal(err)
 	}
 	// Rebinding: a device moved to Store B no longer receives Store A's
@@ -497,7 +497,7 @@ func TestStagedRolloutIsDeterministicAndSnapshotFrozen(t *testing.T) {
 		ids = append(ids, f.device("bulk", f.storeA))
 	}
 	rel := f.release(11)
-	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 25}, true)
+	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 25}, true)
 	expect := func(pct int) int {
 		n := 0
 		for _, d := range append(ids, f.devA, f.devA2) {
@@ -508,12 +508,12 @@ func TestStagedRolloutIsDeterministicAndSnapshotFrozen(t *testing.T) {
 		return n
 	}
 	got, _ := f.svc.GetRollout(ctx, ro.ID)
-	if int(got.Counts["PENDING"]) != expect(25) || got.TargetCount != 42 {
+	if int(got.Counts["pending"]) != expect(25) || got.TargetCount != 42 {
 		t.Fatalf("25%%: %+v want %d", got, expect(25))
 	}
 	late := f.device("late-enrollment", f.storeA)
 	got, err := f.svc.IncreasePercentage(ctx, "op", ro.ID, 60)
-	if err != nil || int(got.Counts["PENDING"]) != expect(60) || got.TargetCount != 42 {
+	if err != nil || int(got.Counts["pending"]) != expect(60) || got.TargetCount != 42 {
 		t.Fatalf("60%%: %+v %v want %d", got, err, expect(60))
 	}
 	var lateTargets int
@@ -537,7 +537,7 @@ func TestPauseVersusClaimRace(t *testing.T) {
 			devs = append(devs, d)
 		}
 		rel := f.release(11)
-		ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "STORE", StoreID: f.storeA, Mode: "OPTIONAL", Percentage: 100}, true)
+		ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
 		var wg sync.WaitGroup
 		var paused atomic.Bool
 		var lateDeliveries atomic.Int64
@@ -577,14 +577,14 @@ func TestConcurrentDuplicateReports(t *testing.T) {
 	f := newFleetFixture(t)
 	f.capable(f.devA, 10)
 	rel := f.release(11)
-	f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "DEVICE", StoreID: f.storeA, DeviceID: f.devA, Mode: "OPTIONAL", Percentage: 100}, true)
+	f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "device", StoreID: f.storeA, DeviceID: f.devA, Mode: "optional", Percentage: 100}, true)
 	cmd := f.poll(f.devA)
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := f.report(f.devA, cmd.TargetID, "SUCCEEDED", "", false); err != nil {
+			if _, err := f.report(f.devA, cmd.TargetID, "succeeded", "", false); err != nil {
 				t.Error(err)
 			}
 		}()

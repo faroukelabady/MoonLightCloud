@@ -618,15 +618,15 @@
 
 	function aggregateLabel(a: string): string {
 		switch (a) {
-			case 'PENDING': return 'بانتظار الكاشير / Pending';
-			case 'DELIVERED': return 'تم التسليم — بانتظار التطبيق / Delivered';
-			case 'APPLIED': return 'مطبق في الكاشير — بانتظار المزامنة / Applied — syncing';
-			case 'CONVERGED': return 'مكتمل ومتزامن / Converged';
-			case 'PARTIAL': return 'جزئي — راجع الأجهزة / Partial';
-			case 'CONFLICT': return 'تعارض — حدّث قبل إعادة المحاولة / Conflict';
-			case 'BLOCKED_CAPABILITY': return 'يتطلب تحديث الكاشير / Retail update required';
-			case 'SKIPPED_REVOKED': return 'تم تخطي الجهاز الملغى أو المنقول / Revoked or rebound device skipped';
-			case 'CANCELLED': return 'ملغي / Cancelled';
+			case 'pending': return 'بانتظار الكاشير / Pending';
+			case 'delivered': return 'تم التسليم — بانتظار التطبيق / Delivered';
+			case 'applied': return 'مطبق في الكاشير — بانتظار المزامنة / Applied — syncing';
+			case 'converged': return 'مكتمل ومتزامن / Converged';
+			case 'partial': return 'جزئي — راجع الأجهزة / Partial';
+			case 'conflict': return 'تعارض — حدّث قبل إعادة المحاولة / Conflict';
+			case 'blocked_capability': return 'يتطلب تحديث الكاشير / Retail update required';
+			case 'skipped_revoked': return 'تم تخطي الجهاز الملغى أو المنقول / Revoked or rebound device skipped';
+			case 'cancelled': return 'ملغي / Cancelled';
 			default: return a;
 		}
 	}
@@ -973,7 +973,7 @@
 							</tbody>
 						</table>
 					{/if}
-					{#if cmd.status === 'PENDING' && !cmd.targets?.some(t => t.status === 'DELIVERED' || t.status === 'APPLIED')}
+					{#if cmd.status === 'pending' && !cmd.targets?.some(t => t.status === 'delivered' || t.status === 'applied')}
 						<button type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>إلغاء الأمر المعلق / Cancel pending command</button>
 					{/if}
 				</section>

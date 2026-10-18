@@ -206,7 +206,7 @@ func reportScheduleCreateCmd(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	normalizedKind := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(*kind), "-", "_"))
+	normalizedKind := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(*kind), "-", "_"))
 	if strings.TrimSpace(*name) == "" || normalizedKind == "" || strings.TrimSpace(*localTime) == "" {
 		return fmt.Errorf("usage: moonlight-cloud business-reports schedules create --name <name> --kind <daily|ten-day> --time <HH:MM> [--anchor-date <YYYY-MM-DD>] --recipient <uuid> ...")
 	}

@@ -20,14 +20,14 @@ function device(store: string, name: string) {
 
 const RELEASE = {
 	id: 'r0000000-0000-4000-8000-000000000001', manifest_digest: 'sha256:' + 'ab'.repeat(32), release_sequence: 15,
-	version: '1.5.0', build_commit: 'c'.repeat(40), min_installed_sequence: 1, key_id: 'e2e-key', status: 'ACTIVE',
+	version: '1.5.0', build_commit: 'c'.repeat(40), min_installed_sequence: 1, key_id: 'e2e-key', status: 'active',
 	imported_by: 'owner@e2e.test', imported_at: '2026-10-01T09:00:00Z', status_changed_by: '', status_changed_at: '2026-10-01T09:00:00Z',
 	artifacts: []
 };
 
 const ROLLOUT = {
 	id: 'o0000000-0000-4000-8000-000000000001', release_id: RELEASE.id, release_version: '1.5.0', release_sequence: 15,
-	scope: 'STORE', store_id: STORE_A, mode: 'OPTIONAL', percentage: 50, status: 'ACTIVE', target_count: 2,
+	scope: 'store', store_id: STORE_A, mode: 'optional', percentage: 50, status: 'active', target_count: 2,
 	created_by: 'owner@e2e.test', created_at: '2026-10-01T09:30:00Z', updated_at: '2026-10-01T09:30:00Z', counts: { DELIVERED: 1 }
 };
 
@@ -71,7 +71,7 @@ test('Updates page loads and the Fleet / Releases / Rollouts tabs render', async
 	await expect(page.getByTestId('import-release')).toHaveCount(0); // no envelope pasted yet
 	await page.getByRole('button', { name: /Rollouts/ }).click();
 	await expect(page.getByTestId('rollout-row')).toHaveCount(1);
-	await expect(page.getByTestId('rollout-row')).toHaveAttribute('data-status', 'ACTIVE');
+	await expect(page.getByTestId('rollout-row')).toHaveAttribute('data-status', 'active');
 });
 
 test('permission denial is shown truthfully, never as an empty registry', async ({ page }) => {

@@ -12,9 +12,9 @@ import (
 )
 
 const cancelOpenTargets = `-- name: CancelOpenTargets :execrows
-UPDATE update_rollout_targets SET state = 'CANCELLED', finished_at = $1::timestamptz, updated_at = $1::timestamptz
+UPDATE update_rollout_targets SET state = 'cancelled', finished_at = $1::timestamptz, updated_at = $1::timestamptz
 WHERE rollout_id = $2::uuid
-  AND state IN ('NOT_SELECTED','PENDING','DELIVERED','DOWNLOADING','VERIFIED','WAITING_SAFE_BOUNDARY')
+  AND state IN ('not_selected','pending','delivered','downloading','verified','waiting_safe_boundary')
 `
 
 type CancelOpenTargetsParams struct {
@@ -40,8 +40,8 @@ JOIN releases rel ON rel.id = r.release_id
 JOIN device_store_bindings b ON b.device_id = t.device_id AND b.store_id = t.store_id
 JOIN release_artifacts a ON a.release_id = rel.id AND a.os = $1::text AND a.arch = $2::text AND a.package = $3::text
 WHERE t.device_id = $4::uuid
-  AND t.state IN ('PENDING','DELIVERED')
-  AND r.status = 'ACTIVE' AND rel.status = 'ACTIVE'
+  AND t.state IN ('pending','delivered')
+  AND r.status = 'active' AND rel.status = 'active'
   AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= $5::timestamptz)
   AND (r.not_before IS NULL OR r.not_before <= $5::timestamptz)
 ORDER BY rel.release_sequence DESC, t.created_at, t.id
@@ -311,7 +311,7 @@ const insertRelease = `-- name: InsertRelease :exec
 INSERT INTO releases (id, manifest_digest, release_sequence, version, build_commit, min_installed_sequence,
     key_id, envelope, status, imported_by, imported_at, status_changed_by, status_changed_at)
 VALUES ($1::uuid, $2::text, $3::bigint, $4::text, $5::text,
-    $6::bigint, $7::text, $8::text, 'ACTIVE', $9::text, $10::timestamptz,
+    $6::bigint, $7::text, $8::text, 'active', $9::text, $10::timestamptz,
     $9::text, $10::timestamptz)
 `
 
@@ -381,7 +381,7 @@ const insertRollout = `-- name: InsertRollout :exec
 INSERT INTO update_rollouts (id, release_id, scope, store_id, device_id, mode, percentage, status, not_before,
     target_count, created_by, created_at, updated_at)
 VALUES ($1::uuid, $2::uuid, $3::text, $4::uuid, $5::uuid, $6::text,
-    $7::int, 'DRAFT', $8::timestamptz, $9::int, $10::text, $11::timestamptz, $11::timestamptz)
+    $7::int, 'draft', $8::timestamptz, $9::int, $10::text, $11::timestamptz, $11::timestamptz)
 `
 
 type InsertRolloutParams struct {
@@ -1025,9 +1025,9 @@ func (q *Queries) LockRollout(ctx context.Context, id pgtype.UUID) (UpdateRollou
 }
 
 const markIncapableDeviceTargets = `-- name: MarkIncapableDeviceTargets :execrows
-UPDATE update_rollout_targets SET state = 'UNSUPPORTED', last_error = $1::text,
+UPDATE update_rollout_targets SET state = 'unsupported', last_error = $1::text,
     finished_at = $2::timestamptz, updated_at = $2::timestamptz
-WHERE device_id = $3::uuid AND state = 'PENDING'
+WHERE device_id = $3::uuid AND state = 'pending'
 `
 
 type MarkIncapableDeviceTargetsParams struct {
@@ -1046,10 +1046,10 @@ func (q *Queries) MarkIncapableDeviceTargets(ctx context.Context, arg MarkIncapa
 
 const markNewerDeviceTargets = `-- name: MarkNewerDeviceTargets :execrows
 UPDATE update_rollout_targets t
-SET state = CASE WHEN rel.release_sequence = $1::bigint THEN 'ALREADY_COMPLIANT' ELSE 'SKIPPED_NEWER' END,
+SET state = CASE WHEN rel.release_sequence = $1::bigint THEN 'already_compliant' ELSE 'skipped_newer' END,
     finished_at = $2::timestamptz, updated_at = $2::timestamptz
 FROM update_rollouts r JOIN releases rel ON rel.id = r.release_id
-WHERE r.id = t.rollout_id AND t.device_id = $3::uuid AND t.state = 'PENDING'
+WHERE r.id = t.rollout_id AND t.device_id = $3::uuid AND t.state = 'pending'
   AND (rel.release_sequence < $1::bigint
        OR (rel.release_sequence = $1::bigint AND rel.build_commit = $4::text))
 `
@@ -1076,9 +1076,9 @@ func (q *Queries) MarkNewerDeviceTargets(ctx context.Context, arg MarkNewerDevic
 }
 
 const markTargetDelivered = `-- name: MarkTargetDelivered :exec
-UPDATE update_rollout_targets SET state = 'DELIVERED', delivered_at = COALESCE(delivered_at, $1::timestamptz),
+UPDATE update_rollout_targets SET state = 'delivered', delivered_at = COALESCE(delivered_at, $1::timestamptz),
     updated_at = $1::timestamptz
-WHERE id = $2::uuid AND state IN ('PENDING','DELIVERED')
+WHERE id = $2::uuid AND state IN ('pending','delivered')
 `
 
 type MarkTargetDeliveredParams struct {
@@ -1092,10 +1092,10 @@ func (q *Queries) MarkTargetDelivered(ctx context.Context, arg MarkTargetDeliver
 }
 
 const markUnsupportedPlatformTargets = `-- name: MarkUnsupportedPlatformTargets :execrows
-UPDATE update_rollout_targets t SET state = 'UNSUPPORTED', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
+UPDATE update_rollout_targets t SET state = 'unsupported', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
     finished_at = $1::timestamptz, updated_at = $1::timestamptz
 FROM update_rollouts r
-WHERE r.id = t.rollout_id AND t.device_id = $2::uuid AND t.state = 'PENDING'
+WHERE r.id = t.rollout_id AND t.device_id = $2::uuid AND t.state = 'pending'
   AND NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
                   AND a.os = $3::text AND a.arch = $4::text AND a.package = $5::text)
 `
@@ -1127,7 +1127,7 @@ func (q *Queries) MarkUnsupportedPlatformTargets(ctx context.Context, arg MarkUn
 const openRolloutTargetCount = `-- name: OpenRolloutTargetCount :one
 SELECT count(*)::bigint FROM update_rollout_targets
 WHERE rollout_id = $1::uuid
-  AND state IN ('NOT_SELECTED','PENDING','DELIVERED','DOWNLOADING','VERIFIED','WAITING_SAFE_BOUNDARY','INSTALLING','AWAITING_HEALTH')
+  AND state IN ('not_selected','pending','delivered','downloading','verified','waiting_safe_boundary','installing','awaiting_health')
 `
 
 func (q *Queries) OpenRolloutTargetCount(ctx context.Context, rolloutID pgtype.UUID) (int64, error) {
@@ -1138,8 +1138,8 @@ func (q *Queries) OpenRolloutTargetCount(ctx context.Context, rolloutID pgtype.U
 }
 
 const promoteSelectedTargets = `-- name: PromoteSelectedTargets :execrows
-UPDATE update_rollout_targets SET state = 'PENDING', updated_at = $1::timestamptz
-WHERE rollout_id = $2::uuid AND state = 'NOT_SELECTED' AND bucket < $3::int
+UPDATE update_rollout_targets SET state = 'pending', updated_at = $1::timestamptz
+WHERE rollout_id = $2::uuid AND state = 'not_selected' AND bucket < $3::int
 `
 
 type PromoteSelectedTargetsParams struct {
@@ -1183,7 +1183,7 @@ func (q *Queries) SetReleaseStatus(ctx context.Context, arg SetReleaseStatusPara
 
 const setRolloutPercentage = `-- name: SetRolloutPercentage :execrows
 UPDATE update_rollouts SET percentage = $1::int, updated_at = $2::timestamptz
-WHERE id = $3::uuid AND percentage < $1::int AND status IN ('DRAFT','ACTIVE','PAUSED')
+WHERE id = $3::uuid AND percentage < $1::int AND status IN ('draft','active','paused')
 `
 
 type SetRolloutPercentageParams struct {

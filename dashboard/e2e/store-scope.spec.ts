@@ -51,7 +51,7 @@ function orderSummary(store: string) {
 		external_order_id: a ? '800' : '900',
 		order_number: a ? 'A-800' : 'B-900',
 		provider_status: 'processing',
-		canonical_status: 'PROCESSING',
+		canonical_status: 'processing',
 		currency: 'EGP',
 		total_minor: a ? '65000' : '130000',
 		created_at: '2026-09-27T10:00:00Z',
@@ -130,7 +130,7 @@ async function mockStoreScope(page: Page, opts: MockOptions = {}) {
 				contentType: 'application/json',
 				body: JSON.stringify({
 					orders: [page2],
-					status_counts: [{ canonical_status: 'PROCESSING', total: 1 }],
+					status_counts: [{ canonical_status: 'processing', total: 1 }],
 					webhook_inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null },
 					store_id: store
 				})
@@ -147,7 +147,7 @@ async function mockStoreScope(page: Page, opts: MockOptions = {}) {
 			body: JSON.stringify({
 				orders: rows,
 				next_cursor: store === STORE_A ? 'cursor-a' : null,
-				status_counts: rows.length ? [{ canonical_status: 'PROCESSING', total: rows.length }] : [],
+				status_counts: rows.length ? [{ canonical_status: 'processing', total: rows.length }] : [],
 				webhook_inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null },
 				store_id: store || null
 			})

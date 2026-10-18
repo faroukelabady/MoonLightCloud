@@ -11,7 +11,7 @@ function row(i: number) {
 	const id = `07${String(i).padStart(3, '0')}`;
 	return {
 		provider_key: 'website', external_order_id: id, order_number: id,
-		provider_status: 'processing', canonical_status: 'PROCESSING',
+		provider_status: 'processing', canonical_status: 'processing',
 		currency: 'EGP', total_minor: '68000',
 		created_at: '2026-09-27T12:00:00Z', modified_at: '2026-09-27T12:00:00Z',
 		customer_name: 'A B', mapping_complete: true, unmapped_line_count: 0,
@@ -22,14 +22,14 @@ function row(i: number) {
 const PAGE1 = {
 	orders: Array.from({ length: 20 }, (_, i) => row(i)),
 	next_cursor: 'cursor-page-2',
-	status_counts: [{ canonical_status: 'PROCESSING', total: 25 }],
+	status_counts: [{ canonical_status: 'processing', total: 25 }],
 	webhook_inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null }
 };
 
 const PAGE2 = {
 	orders: Array.from({ length: 5 }, (_, i) => row(20 + i)),
 	next_cursor: null,
-	status_counts: [{ canonical_status: 'PROCESSING', total: 25 }],
+	status_counts: [{ canonical_status: 'processing', total: 25 }],
 	webhook_inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null }
 };
 

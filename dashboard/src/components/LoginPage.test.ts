@@ -15,9 +15,9 @@ afterEach(() => {
 function me(over: Partial<Me> = {}): Me {
 	return {
 		authenticated: true,
-		stage: 'FULL',
+		stage: 'full',
 		csrf_token: 'csrf-1',
-		user: { id: 'u1', login: 'owner@shop.test', display_name: 'Owner', role: 'OWNER', mfa_enabled: true },
+		user: { id: 'u1', login: 'owner@shop.test', display_name: 'Owner', role: 'owner', mfa_enabled: true },
 		permissions: ['users.read', 'users.manage', 'security.manage', 'releases.read', 'catalog.read', 'devices.read', 'operations.read'],
 		all_stores: true,
 		store_ids: [],
@@ -30,8 +30,8 @@ describe('LoginPage (ADR-0053)', () => {
 	beforeEach(() => window.history.replaceState({}, '', '/dashboard/'));
 
 	it('signs in through the MFA challenge to a full session', async () => {
-		const login = vi.spyOn(authApi, 'login').mockResolvedValue({ stage: 'MFA_PENDING', csrf_token: 'c' });
-		const verify = vi.spyOn(authApi, 'verifyTOTP').mockResolvedValue({ stage: 'FULL', csrf_token: 'c2' });
+		const login = vi.spyOn(authApi, 'login').mockResolvedValue({ stage: 'mfa_pending', csrf_token: 'c' });
+		const verify = vi.spyOn(authApi, 'verifyTOTP').mockResolvedValue({ stage: 'full', csrf_token: 'c2' });
 		const onauthenticated = vi.fn();
 		render(LoginPage, { onauthenticated });
 		await fireEvent.input(screen.getByLabelText(/Email or login/), { target: { value: 'owner@shop.test' } });
@@ -56,9 +56,9 @@ describe('LoginPage (ADR-0053)', () => {
 	});
 
 	it('enrolls MFA and shows recovery codes once before continuing', async () => {
-		vi.spyOn(authApi, 'login').mockResolvedValue({ stage: 'MFA_SETUP', csrf_token: 'c' });
+		vi.spyOn(authApi, 'login').mockResolvedValue({ stage: 'mfa_setup', csrf_token: 'c' });
 		vi.spyOn(authApi, 'enrollStart').mockResolvedValue({ secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP' });
-		vi.spyOn(authApi, 'enrollConfirm').mockResolvedValue({ stage: 'FULL', csrf_token: 'c3', recovery_codes: ['AAAA-BBBB-CCCC-DDDD', 'EEEE-FFFF-GGGG-HHHH'] });
+		vi.spyOn(authApi, 'enrollConfirm').mockResolvedValue({ stage: 'full', csrf_token: 'c3', recovery_codes: ['AAAA-BBBB-CCCC-DDDD', 'EEEE-FFFF-GGGG-HHHH'] });
 		const onauthenticated = vi.fn();
 		render(LoginPage, { onauthenticated });
 		await fireEvent.input(screen.getByLabelText(/Email or login/), { target: { value: 'owner@shop.test' } });
@@ -78,7 +78,7 @@ describe('LoginPage (ADR-0053)', () => {
 
 	it('activates from a URL fragment and removes the token from the address bar', async () => {
 		window.history.replaceState({}, '', '/dashboard/#activate=one-time-token');
-		const activate = vi.spyOn(authApi, 'activate').mockResolvedValue({ stage: 'MFA_SETUP', csrf_token: 'c' });
+		const activate = vi.spyOn(authApi, 'activate').mockResolvedValue({ stage: 'mfa_setup', csrf_token: 'c' });
 		vi.spyOn(authApi, 'enrollStart').mockResolvedValue({ secret: 'ABCD', otpauth_uri: 'otpauth://x' });
 		render(LoginPage, { onauthenticated: vi.fn() });
 		expect(await screen.findByTestId('activate-form')).toBeTruthy();
@@ -92,7 +92,7 @@ describe('LoginPage (ADR-0053)', () => {
 	});
 
 	it('resumes a pending MFA stage from an existing session', async () => {
-		render(LoginPage, { stage: 'MFA_PENDING', onauthenticated: vi.fn() });
+		render(LoginPage, { stage: 'mfa_pending', onauthenticated: vi.fn() });
 		expect(await screen.findByTestId('mfa-form')).toBeTruthy();
 	});
 });
@@ -103,7 +103,7 @@ describe('CSRF and storage (ADR-0053)', () => {
 		await dashboardApi.me();
 		expect(mutationHeaders()['X-CSRF-Token']).toBe('csrf-1');
 		fetchSpy.mockResolvedValue(new Response(JSON.stringify({ user: {}, activation_token: 't' }), { status: 201 }));
-		await usersApi.create({ login: 'a@b.cd', display_name: 'A', role: 'ADMIN', all_stores: true, store_ids: [] });
+		await usersApi.create({ login: 'a@b.cd', display_name: 'A', role: 'admin', all_stores: true, store_ids: [] });
 		const init = fetchSpy.mock.calls.at(-1)![1] as RequestInit;
 		expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-1');
 		expect(init.credentials).toBe('same-origin');
@@ -130,7 +130,7 @@ describe('permission-gated UI (UX only; the server enforces)', () => {
 	it('offers account administration only to OWNERs and confirms sensitive actions', async () => {
 		vi.spyOn(usersApi, 'list').mockResolvedValue({
 			users: [
-				{ id: 'u2', login: 'admin@shop.test', display_name: 'Admin', role: 'ADMIN', status: 'ACTIVE', all_stores: true, store_ids: [], mfa_enabled: true, created_at: '', updated_at: '' }
+				{ id: 'u2', login: 'admin@shop.test', display_name: 'Admin', role: 'admin', status: 'active', all_stores: true, store_ids: [], mfa_enabled: true, created_at: '', updated_at: '' }
 			],
 			next_cursor: ''
 		});
@@ -143,7 +143,7 @@ describe('permission-gated UI (UX only; the server enforces)', () => {
 		expect(confirmSpy).toHaveBeenCalledOnce();
 		expect(action).not.toHaveBeenCalled();
 		cleanup();
-		const adminMe = me({ user: { id: 'u3', login: 'a@shop.test', display_name: 'A', role: 'ADMIN', mfa_enabled: true }, permissions: ['catalog.read'] });
+		const adminMe = me({ user: { id: 'u3', login: 'a@shop.test', display_name: 'A', role: 'admin', mfa_enabled: true }, permissions: ['catalog.read'] });
 		render(UsersPage, { me: adminMe, stores: [], onsessionchange: vi.fn() });
 		expect(screen.queryByTestId('create-user')).toBeNull();
 		expect(screen.queryByTestId('user-row')).toBeNull();

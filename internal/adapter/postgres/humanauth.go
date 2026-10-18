@@ -93,7 +93,7 @@ func (h HumanAuth) Bootstrap(ctx context.Context, owner humanauth.User, now time
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO admin_users (id, login, display_name, role, status, all_stores, password_hash,
 			password_changed_at, security_version, created_at, updated_at)
-			VALUES ($1, $2, $3, 'OWNER', 'ACTIVE', $4, $5, $6, 1, $6, $6)`,
+			VALUES ($1, $2, $3, 'owner', 'active', $4, $5, $6, 1, $6, $6)`,
 			owner.ID, owner.Login, owner.DisplayName, owner.AllStores, owner.PasswordHash, now); err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func (h HumanAuth) ListUsers(ctx context.Context, afterLogin string, limit int) 
 func (h HumanAuth) CreateUser(ctx context.Context, user humanauth.User, createdBy string, activationHash []byte, expiresAt, now time.Time) error {
 	return h.inTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO admin_users (id, login, display_name, role, status, all_stores, security_version, created_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, 'PENDING_SETUP', $5, 1, $6, $7, $7)`,
+			VALUES ($1, $2, $3, $4, 'pending_setup', $5, 1, $6, $7, $7)`,
 			user.ID, user.Login, user.DisplayName, string(user.Role), user.AllStores, createdBy, now); err != nil {
 			if isUniqueViolation(err) {
 				return humanauth.ErrLoginTaken
@@ -171,7 +171,7 @@ func (h HumanAuth) ChangeUser(ctx context.Context, userID string, change humanau
 		return humanauth.User{}, humanauth.ErrNotFound
 	}
 	err := h.inTx(ctx, func(tx pgx.Tx) error {
-		ownerRows, err := tx.Query(ctx, `SELECT id::text FROM admin_users WHERE role = 'OWNER' AND status = 'ACTIVE' ORDER BY id FOR UPDATE`)
+		ownerRows, err := tx.Query(ctx, `SELECT id::text FROM admin_users WHERE role = 'owner' AND status = 'active' ORDER BY id FOR UPDATE`)
 		if err != nil {
 			return err
 		}
@@ -202,8 +202,8 @@ func (h HumanAuth) ChangeUser(ctx context.Context, userID string, change humanau
 		if change.Status != nil {
 			newStatus = string(*change.Status)
 		}
-		wasActiveOwner := role == "OWNER" && status == "ACTIVE"
-		staysActiveOwner := newRole == "OWNER" && newStatus == "ACTIVE"
+		wasActiveOwner := role == "owner" && status == "active"
+		staysActiveOwner := newRole == "owner" && newStatus == "active"
 		if wasActiveOwner && !staysActiveOwner && len(activeOwners) <= 1 {
 			return humanauth.ErrLastOwner
 		}
@@ -287,7 +287,7 @@ func (h HumanAuth) ConsumeActivation(ctx context.Context, tokenHash []byte, pass
 		err := tx.QueryRow(ctx, `UPDATE admin_activation_tokens t SET used_at = $2
 			FROM admin_users u
 			WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > $2
-			  AND u.id = t.user_id AND u.status = 'PENDING_SETUP'
+			  AND u.id = t.user_id AND u.status = 'pending_setup'
 			RETURNING t.user_id::text`, tokenHash, now).Scan(&userID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return humanauth.ErrActivationInvalid
@@ -516,7 +516,7 @@ func (h HumanAuth) EnableMFA(ctx context.Context, userID string, expectedCiphert
 		if err := replaceCodes(ctx, tx, userID, codeHashes, now); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `UPDATE admin_users SET status = CASE WHEN status = 'PENDING_SETUP' THEN 'ACTIVE' ELSE status END,
+		return tx.QueryRow(ctx, `UPDATE admin_users SET status = CASE WHEN status = 'pending_setup' THEN 'active' ELSE status END,
 			security_version = security_version + 1, updated_at = $2 WHERE id = $1 RETURNING security_version`, userID, now).Scan(&version)
 	})
 	return version, err

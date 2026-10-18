@@ -97,20 +97,20 @@ const (
 
 // Command statuses: PENDING/CANCELLED on the command row.
 const (
-	CommandPending   = "PENDING"
-	CommandCancelled = "CANCELLED"
+	CommandPending   = "pending"
+	CommandCancelled = "cancelled"
 )
 
 // Target statuses: one row per eligible device.
 const (
-	TargetPending           = "PENDING"
-	TargetDelivered         = "DELIVERED"
-	TargetApplied           = "APPLIED"
-	TargetConflict          = "CONFLICT"
-	TargetRejected          = "REJECTED"
-	TargetBlockedCapability = "BLOCKED_CAPABILITY"
-	TargetSkippedRevoked    = "SKIPPED_REVOKED"
-	TargetCancelled         = "CANCELLED"
+	TargetPending           = "pending"
+	TargetDelivered         = "delivered"
+	TargetApplied           = "applied"
+	TargetConflict          = "conflict"
+	TargetRejected          = "rejected"
+	TargetBlockedCapability = "blocked_capability"
+	TargetSkippedRevoked    = "skipped_revoked"
+	TargetCancelled         = "cancelled"
 )
 
 // Aggregate states derived for the dashboard. APPLIED means every
@@ -118,14 +118,14 @@ const (
 // projection to have reached the resulting revision. Creation is never
 // reported as success.
 const (
-	AggregatePending           = "PENDING"
-	AggregateDelivered         = "DELIVERED"
-	AggregateApplied           = "APPLIED"
-	AggregateConverged         = "CONVERGED"
-	AggregatePartial           = "PARTIAL"
-	AggregateConflict          = "CONFLICT"
-	AggregateBlockedCapability = "BLOCKED_CAPABILITY"
-	AggregateCancelled         = "CANCELLED"
+	AggregatePending           = "pending"
+	AggregateDelivered         = "delivered"
+	AggregateApplied           = "applied"
+	AggregateConverged         = "converged"
+	AggregatePartial           = "partial"
+	AggregateConflict          = "conflict"
+	AggregateBlockedCapability = "blocked_capability"
+	AggregateCancelled         = "cancelled"
 )
 
 // EntityKeyOf returns the payload entity-ID field for a type. Create

@@ -29,21 +29,21 @@ describe('DevicesPage', () => {
 	it('renders ONLINE/OFFLINE/NEVER_SEEN with active Sync Now states', async () => {
 		api.devices.mockResolvedValue({
 			devices: [
-				{ device_id: 'd-online', name: 'shop', lifecycle: 'active', connectivity: 'ONLINE', last_seen_at: '2026-09-29T10:00:00Z', active_command: cmd('c1', 'running'), recent_commands: [cmd('c1', 'running')] },
-				{ device_id: 'd-off', lifecycle: 'active', connectivity: 'OFFLINE', last_seen_at: '2026-09-28T10:00:00Z', active_command: null, recent_commands: [] },
-				{ device_id: 'd-new', lifecycle: 'active', connectivity: 'NEVER_SEEN', last_seen_at: null, active_command: null }
+				{ device_id: 'd-online', name: 'shop', lifecycle: 'active', connectivity: 'online', last_seen_at: '2026-09-29T10:00:00Z', active_command: cmd('c1', 'running'), recent_commands: [cmd('c1', 'running')] },
+				{ device_id: 'd-off', lifecycle: 'active', connectivity: 'offline', last_seen_at: '2026-09-28T10:00:00Z', active_command: null, recent_commands: [] },
+				{ device_id: 'd-new', lifecycle: 'active', connectivity: 'never_seen', last_seen_at: null, active_command: null }
 			]
 		});
 		render(DevicesPage);
-		expect(await screen.findByText('ONLINE')).toBeTruthy();
-		expect(await screen.findByText('OFFLINE')).toBeTruthy();
-		expect(await screen.findByText('NEVER_SEEN')).toBeTruthy();
+		expect(await screen.findByText('online')).toBeTruthy();
+		expect(await screen.findByText('offline')).toBeTruthy();
+		expect(await screen.findByText('never_seen')).toBeTruthy();
 		expect(await screen.findByText('Syncing')).toBeTruthy();
 	});
 
 	it('disables Sync Now while a command is active', async () => {
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'ONLINE', active_command: cmd('c1', 'pending'), recent_commands: [cmd('c1', 'pending')] }]
+			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'online', active_command: cmd('c1', 'pending'), recent_commands: [cmd('c1', 'pending')] }]
 		});
 		render(DevicesPage);
 		const btn = (await screen.findByText('Sync Now')) as HTMLButtonElement;
@@ -52,7 +52,7 @@ describe('DevicesPage', () => {
 	});
 
 	it('queues Sync Now for offline device and shows status', async () => {
-		api.devices.mockResolvedValue({ devices: [{ device_id: 'd2', lifecycle: 'active', connectivity: 'OFFLINE', active_command: null, recent_commands: [] }] });
+		api.devices.mockResolvedValue({ devices: [{ device_id: 'd2', lifecycle: 'active', connectivity: 'offline', active_command: null, recent_commands: [] }] });
 		api.syncRequest.mockResolvedValue({ command: { id: 'c9', status: 'pending' }, created: true });
 		render(DevicesPage);
 		const btn = (await screen.findByTestId('sync-now')) as HTMLButtonElement;
@@ -63,7 +63,7 @@ describe('DevicesPage', () => {
 
 	it('shows completed terminal history from recent_commands when idle', async () => {
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd3', lifecycle: 'active', connectivity: 'ONLINE', last_seen_at: '2026-09-29T10:00:00Z', active_command: null, recent_commands: [cmd('c2', 'completed', '2026-09-29T10:00:00Z')] }]
+			devices: [{ device_id: 'd3', lifecycle: 'active', connectivity: 'online', last_seen_at: '2026-09-29T10:00:00Z', active_command: null, recent_commands: [cmd('c2', 'completed', '2026-09-29T10:00:00Z')] }]
 		});
 		render(DevicesPage);
 		expect(await screen.findByText('Last sync: Completed')).toBeTruthy();
@@ -73,7 +73,7 @@ describe('DevicesPage', () => {
 
 	it('shows failed terminal history from recent_commands when idle', async () => {
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd4', lifecycle: 'active', connectivity: 'OFFLINE', active_command: null, recent_commands: [cmd('c3', 'failed', '2026-09-29T08:00:00Z')] }]
+			devices: [{ device_id: 'd4', lifecycle: 'active', connectivity: 'offline', active_command: null, recent_commands: [cmd('c3', 'failed', '2026-09-29T08:00:00Z')] }]
 		});
 		render(DevicesPage);
 		expect(await screen.findByText('Last sync: Failed')).toBeTruthy();
@@ -86,7 +86,7 @@ describe('DevicesPage', () => {
 			cmd('c-old1', 'failed', '2026-09-29T10:00:00Z')
 		];
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd5', lifecycle: 'active', connectivity: 'ONLINE', active_command: cmd('c-active', 'running', '2026-09-29T10:02:00Z'), recent_commands: recent }]
+			devices: [{ device_id: 'd5', lifecycle: 'active', connectivity: 'online', active_command: cmd('c-active', 'running', '2026-09-29T10:02:00Z'), recent_commands: recent }]
 		});
 		render(DevicesPage);
 		// Active visible, terminal history hidden while active.
@@ -97,7 +97,7 @@ describe('DevicesPage', () => {
 	it('lists past history when no command is active', async () => {
 		const recent = [cmd('c2', 'completed', '2026-09-29T10:01:00Z'), cmd('c1', 'failed', '2026-09-29T10:00:00Z')];
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd6', lifecycle: 'active', connectivity: 'ONLINE', active_command: null, recent_commands: recent }]
+			devices: [{ device_id: 'd6', lifecycle: 'active', connectivity: 'online', active_command: null, recent_commands: recent }]
 		});
 		render(DevicesPage);
 		const hist = await screen.findByTestId('sync-history');
@@ -112,7 +112,7 @@ describe('DevicesPage', () => {
 describe('DevicesPage incident badges', () => {
 	it('shows the batched incident badge without extra per-device calls', async () => {
 		api.devices.mockResolvedValue({
-			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'ONLINE', active_command: null, recent_commands: [] }]
+			devices: [{ device_id: 'd1', lifecycle: 'active', connectivity: 'online', active_command: null, recent_commands: [] }]
 		});
 		api.operationsSummary.mockResolvedValue({
 			devices: [{ device_id: 'd1', open_count: 2, max_severity: 'urgent' }]
@@ -128,8 +128,8 @@ describe('DevicesPage store display', () => {
 	it('shows bound store names and unbound markers plus the store list', async () => {
 		api.devices.mockResolvedValue({
 			devices: [
-				{ device_id: 'd1', lifecycle: 'active', connectivity: 'ONLINE', store_id: 's1', store_name: 'Cairo Gallery' },
-				{ device_id: 'd2', lifecycle: 'active', connectivity: 'NEVER_SEEN' },
+				{ device_id: 'd1', lifecycle: 'active', connectivity: 'online', store_id: 's1', store_name: 'Cairo Gallery' },
+				{ device_id: 'd2', lifecycle: 'active', connectivity: 'never_seen' },
 			],
 		});
 		api.stores.mockResolvedValue({

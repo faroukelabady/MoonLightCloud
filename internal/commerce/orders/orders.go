@@ -18,15 +18,15 @@ import (
 type CanonicalStatus string
 
 const (
-	StatusPending    CanonicalStatus = "PENDING"
-	StatusProcessing CanonicalStatus = "PROCESSING"
-	StatusOnHold     CanonicalStatus = "ON_HOLD"
-	StatusCompleted  CanonicalStatus = "COMPLETED"
-	StatusCancelled  CanonicalStatus = "CANCELLED"
-	StatusRefunded   CanonicalStatus = "REFUNDED"
-	StatusFailed     CanonicalStatus = "FAILED"
-	StatusUnknown    CanonicalStatus = "UNKNOWN"
-	StatusDeleted    CanonicalStatus = "DELETED"
+	StatusPending    CanonicalStatus = "pending"
+	StatusProcessing CanonicalStatus = "processing"
+	StatusOnHold     CanonicalStatus = "on_hold"
+	StatusCompleted  CanonicalStatus = "completed"
+	StatusCancelled  CanonicalStatus = "cancelled"
+	StatusRefunded   CanonicalStatus = "refunded"
+	StatusFailed     CanonicalStatus = "failed"
+	StatusUnknown    CanonicalStatus = "unknown"
+	StatusDeleted    CanonicalStatus = "deleted"
 )
 
 // WebhookInsertOutcome makes delivery dedupe explicit: inserted or

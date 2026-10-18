@@ -142,7 +142,7 @@ func (h *human) enroll() []string {
 	}
 	h.secret = secret
 	code, body = h.do("POST", "/api/v1/dashboard/auth/mfa/enroll/confirm", map[string]string{"code": h.totp()})
-	if code != 200 || body["stage"] != "FULL" {
+	if code != 200 || body["stage"] != "full" {
 		h.t.Fatalf("enroll confirm %d %s", code, body["_raw"])
 	}
 	h.csrf = body["csrf_token"].(string)
@@ -158,7 +158,7 @@ func (h *human) verify() {
 	h.t.Helper()
 	h.clk.Advance(30 * time.Second)
 	code, body := h.do("POST", "/api/v1/dashboard/auth/mfa/verify", map[string]string{"code": h.totp()})
-	if code != 200 || body["stage"] != "FULL" {
+	if code != 200 || body["stage"] != "full" {
 		h.t.Fatalf("mfa verify %d %s", code, body["_raw"])
 	}
 	h.csrf = body["csrf_token"].(string)
@@ -169,7 +169,7 @@ func fullOwner(t *testing.T, a *App, srv *httptest.Server, clk *stepClock, login
 	t.Helper()
 	bootstrapOwner(t, a, login, stores...)
 	h := newHuman(t, srv, clk)
-	if code, stage := h.login(login, testPassword); code != 200 || stage != "MFA_SETUP" {
+	if code, stage := h.login(login, testPassword); code != 200 || stage != "mfa_setup" {
 		t.Fatalf("owner login %d %s", code, stage)
 	}
 	h.enroll()
@@ -191,7 +191,7 @@ func (owner *human) createUser(srv *httptest.Server, login, role string, allStor
 	u := newHuman(owner.t, srv, owner.clk)
 	code, body = u.raw("POST", "/api/v1/dashboard/auth/activate", map[string]string{"token": token, "password": testPassword},
 		map[string]string{"Origin": u.base})
-	if code != 200 || body["stage"] != "MFA_SETUP" {
+	if code != 200 || body["stage"] != "mfa_setup" {
 		owner.t.Fatalf("activate %d %s", code, body["_raw"])
 	}
 	u.csrf = body["csrf_token"].(string)

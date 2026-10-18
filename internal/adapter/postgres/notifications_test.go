@@ -289,7 +289,7 @@ func TestNotificationDeliveryOrdering(t *testing.T) {
 	if outcome := apply("delivered", 200); !outcome.HistoryInserted || outcome.CurrentAdvanced {
 		t.Fatalf("older delivered history-only: %+v", outcome)
 	}
-	if status, _ := current(); status != "READ" {
+	if status, _ := current(); status != "read" {
 		t.Fatalf("current READ: %s", status)
 	}
 	// Duplicate read: neither history nor churn.
@@ -300,7 +300,7 @@ func TestNotificationDeliveryOrdering(t *testing.T) {
 	if outcome := apply("failed", 400); !outcome.CurrentAdvanced {
 		t.Fatalf("failed: %+v", outcome)
 	}
-	if status, _ := current(); status != "FAILED" {
+	if status, _ := current(); status != "failed" {
 		t.Fatalf("current FAILED: %s", status)
 	}
 	// UNKNOWN records history only.
@@ -701,7 +701,7 @@ func TestNotificationConcurrentStatusApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Latest timestamp (read at +25s) must win regardless of arrival.
-	if status != "READ" {
+	if status != "read" {
 		t.Fatalf("current READ: %s", status)
 	}
 	if err := env.pool.QueryRow(ctx,
@@ -764,7 +764,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 			t.Fatal("same-second DELIVERED must advance")
 		}
 		status, at := current(id)
-		if status != "DELIVERED" || !at.Equal(providerSecond) {
+		if status != "delivered" || !at.Equal(providerSecond) {
 			t.Fatalf("DELIVERED at provider ts: %s %v", status, at)
 		}
 	})
@@ -778,7 +778,7 @@ func TestNotificationAcceptedBaselineOrdering(t *testing.T) {
 		if outcome := apply(id, "wamid.base2", "sent", earlier); !outcome.CurrentAdvanced {
 			t.Fatal("predated SENT must establish provider state")
 		}
-		if status, _ := current(id); status != "SENT" {
+		if status, _ := current(id); status != "sent" {
 			t.Fatalf("SENT: %s", status)
 		}
 		// Normal ordering resumes after the baseline yields.
@@ -856,7 +856,7 @@ func TestNotificationPacedLifecycle(t *testing.T) {
 	var delivery string
 	if err := env.pool.QueryRow(ctx,
 		`SELECT delivery_status FROM notification_messages WHERE id = $1`,
-		mustPgID(id)).Scan(&delivery); err != nil || delivery != "READ" {
+		mustPgID(id)).Scan(&delivery); err != nil || delivery != "read" {
 		t.Fatalf("paced READ: %s %v", delivery, err)
 	}
 	// Accepted dispatch is terminal for sending: later drains send nothing.
@@ -904,7 +904,7 @@ func TestNotificationFailedErrorCodeNull(t *testing.T) {
 	var status string
 	if err := env.pool.QueryRow(ctx,
 		`SELECT delivery_status FROM notification_messages WHERE id = $1`,
-		mustPgID(id)).Scan(&status); err != nil || status != "FAILED" {
+		mustPgID(id)).Scan(&status); err != nil || status != "failed" {
 		t.Fatalf("current FAILED: %s %v", status, err)
 	}
 }

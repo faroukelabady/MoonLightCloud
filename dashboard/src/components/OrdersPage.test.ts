@@ -8,7 +8,7 @@ const order: OrderSummary = {
 	external_order_id: '800',
 	order_number: '800',
 	provider_status: 'processing',
-	canonical_status: 'PROCESSING',
+	canonical_status: 'processing',
 	currency: 'EGP',
 	total_minor: '9007199254740993',
 	created_at: '2026-09-27T10:00:00Z',
@@ -36,7 +36,7 @@ const base: {
 	detailErr: null;
 } = {
 	orders: [order],
-	counts: [{ canonical_status: 'PROCESSING', total: 1 }],
+	counts: [{ canonical_status: 'processing', total: 1 }],
 	inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null },
 	status: 'loaded',
 	errStatus: null,
@@ -70,7 +70,7 @@ describe('OrdersPage', () => {
 	});
 
 	it('shows the deleted indicator for provider-deleted orders', () => {
-		const deleted = { ...order, provider_deleted: true, canonical_status: 'DELETED' };
+		const deleted = { ...order, provider_deleted: true, canonical_status: 'deleted' };
 		render(OrdersPage, { props: { ...base, orders: [deleted], onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/محذوف/)).toBeTruthy();
 	});
@@ -98,8 +98,8 @@ describe('OrdersPage', () => {
 		const onstatus = vi.fn();
 		render(OrdersPage, { props: { ...base, onstatus, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		const select = screen.getByLabelText(/الحالة \/ Status/) as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: 'COMPLETED' } });
-		expect(onstatus).toHaveBeenCalledWith('COMPLETED');
+		await fireEvent.change(select, { target: { value: 'completed' } });
+		expect(onstatus).toHaveBeenCalledWith('completed');
 	});
 
 	it('renders detail drawer with lines, history, and mapping alert', () => {
@@ -122,7 +122,7 @@ describe('OrdersPage', () => {
 				{ external_line_id: 1, external_product_id: '999', variation_id: 0, sku: 'FOREIGN', name: 'Foreign', quantity: 1, total_minor: '500', moonlight_product_id: null, mapped: false }
 			],
 			addresses: [],
-			status_history: [{ order_revision: 1, provider_status: 'pending', canonical_status: 'PENDING', observed_at: '2026-09-27T10:00:00Z' }]
+			status_history: [{ order_revision: 1, provider_status: 'pending', canonical_status: 'pending', observed_at: '2026-09-27T10:00:00Z' }]
 		} as never;
 		const { container } = render(OrdersPage, { props: { ...base, selected: detail, detailStatus: 'loaded', onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/غير مربوطة بكتالوج/)).toBeTruthy();

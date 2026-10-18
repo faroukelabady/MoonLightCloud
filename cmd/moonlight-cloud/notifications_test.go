@@ -126,7 +126,7 @@ func TestNotificationStatusCLI(t *testing.T) {
 		t.Fatalf("status: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"dispatch=accepted", "delivery=READ", "message_id=wamid.1"} {
+	for _, want := range []string{"dispatch=accepted", "delivery=read", "message_id=wamid.1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status output missing %q: %q", want, got)
 		}

@@ -328,7 +328,7 @@ func TestCommerceOrderReads(t *testing.T) {
 		t.Fatalf("cursor page: %+v", page)
 	}
 	// Status filter.
-	pending, err := store.ListOrderSummaries(ctx, "", "PENDING", 10, nil)
+	pending, err := store.ListOrderSummaries(ctx, "", "pending", 10, nil)
 	if err != nil || len(pending) != 1 || pending[0].ExternalOrderID != "220" {
 		t.Fatalf("status filter: %+v %v", pending, err)
 	}
@@ -352,7 +352,7 @@ func TestCommerceOrderReads(t *testing.T) {
 	for _, count := range counts {
 		byStatus[count.CanonicalStatus] = count.Total
 	}
-	if byStatus["PENDING"] != 1 || byStatus["COMPLETED"] != 1 {
+	if byStatus["pending"] != 1 || byStatus["completed"] != 1 {
 		t.Fatalf("counts: %+v", byStatus)
 	}
 	// Webhook inbox stats shape.
@@ -667,17 +667,17 @@ func TestCommerceOrderPageFilters(t *testing.T) {
 	}
 	// Status filter: website seeds alternate live PROCESSING and
 	// DELETED tombstones (every third). PROCESSING count = 8 of 12.
-	processing := collectPageIDs(t, env, "website", "PROCESSING", 5)
+	processing := collectPageIDs(t, env, "website", "processing", 5)
 	if len(processing) != 8 {
 		t.Fatalf("status filter: %d rows", len(processing))
 	}
 	store := catalogStore(env)
-	page, err := store.ListOrderPage(context.Background(), "website", "PROCESSING", 5, nil)
+	page, err := store.ListOrderPage(context.Background(), "website", "processing", 5, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, item := range page.Items {
-		if item.CanonicalStatus != "PROCESSING" {
+		if item.CanonicalStatus != "processing" {
 			t.Fatalf("status leak: %+v", item)
 		}
 	}

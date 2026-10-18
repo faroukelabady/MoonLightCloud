@@ -247,7 +247,7 @@ check("revision_zero.json", "CatalogTagSnapshotV1", load_fixture("internal/catal
 # 2^53, canonical statuses, mapping completeness, and deletion flags.
 order_summary = {
     "provider_key": "website", "external_order_id": "100", "order_number": "100",
-    "provider_status": "processing", "canonical_status": "PROCESSING",
+    "provider_status": "processing", "canonical_status": "processing",
     "currency": "EGP", "total_minor": "9007199254740993",
     "created_at": "2026-09-27T10:00:00Z", "modified_at": "2026-09-27T11:00:00Z",
     "customer_name": "A B", "mapping_complete": False, "unmapped_line_count": 1,
@@ -256,12 +256,12 @@ order_summary = {
 check("order list", "DashboardOrderList", {
     "orders": [order_summary],
     "next_cursor": "eyJ2IjoxLCJ0IjoiMjAyNi0wOS0yN1QxMTowMDowMFoiLCJwIjoid2Vic2l0ZSIsIm8iOiIxMDAiLCJmcCI6IiIsImZzIjoiIn0",
-    "status_counts": [{"canonical_status": "PROCESSING", "total": 1}],
+    "status_counts": [{"canonical_status": "processing", "total": 1}],
     "webhook_inbox": {"pending": 0, "retry": 1, "blocked": 0, "oldest_pending_at": None}})
 check("order list final page", "DashboardOrderList", {
     "orders": [order_summary],
     "next_cursor": None,
-    "status_counts": [{"canonical_status": "PROCESSING", "total": 1}],
+    "status_counts": [{"canonical_status": "processing", "total": 1}],
     "webhook_inbox": {"pending": 0, "retry": 1, "blocked": 0, "oldest_pending_at": None}})
 check("order detail", "DashboardOrderDetail", {
     "summary": order_summary,
@@ -280,9 +280,9 @@ check("order detail", "DashboardOrderDetail", {
                    "city": "Cairo", "state": "", "postcode": "", "country": "EG",
                    "email": "a@example.com", "phone": "+201000000000"}],
     "status_history": [{"order_revision": 1, "provider_status": "pending",
-                        "canonical_status": "PENDING", "observed_at": "2026-09-27T10:00:00Z"},
+                        "canonical_status": "pending", "observed_at": "2026-09-27T10:00:00Z"},
                        {"order_revision": 2, "provider_status": "processing",
-                        "canonical_status": "PROCESSING", "observed_at": "2026-09-27T11:00:00Z"}]})
+                        "canonical_status": "processing", "observed_at": "2026-09-27T11:00:00Z"}]})
 bad_order = copy.deepcopy(order_summary)
 bad_order["total_minor"] = 9007199254740993
 check("order unsafe money", "DashboardOrderSummary", bad_order, expect_valid=False)

@@ -106,7 +106,7 @@ func TestOwnerFirstUseLoginMFALogoutAndRestart(t *testing.T) {
 	bootstrapOwner(t, e.a, "owner@shop.test")
 	h := newHuman(t, e.srv, e.clk)
 	code, stage := h.login("Owner@Shop.Test ", testPassword) // normalized
-	if code != 200 || stage != "MFA_SETUP" {
+	if code != 200 || stage != "mfa_setup" {
 		t.Fatalf("first login %d %s", code, stage)
 	}
 	// Password-only session cannot reach Admin APIs.
@@ -118,7 +118,7 @@ func TestOwnerFirstUseLoginMFALogoutAndRestart(t *testing.T) {
 		t.Fatal("recovery codes not issued")
 	}
 	code, me := h.do("GET", "/api/v1/dashboard/auth/me", nil)
-	if code != 200 || me["stage"] != "FULL" || !strings.Contains(me["_raw"].(string), "users.manage") {
+	if code != 200 || me["stage"] != "full" || !strings.Contains(me["_raw"].(string), "users.manage") {
 		t.Fatalf("me %d %s", code, me["_raw"])
 	}
 	for _, secretish := range []string{"password", "secret", "hash", "totp"} {
@@ -159,7 +159,7 @@ func TestOwnerFirstUseLoginMFALogoutAndRestart(t *testing.T) {
 	// cookie is rotated away on success.
 	h3 := newHuman(t, e.srv, e.clk)
 	h3.secret = h.secret
-	if code, stage := h3.login("owner@shop.test", testPassword); code != 200 || stage != "MFA_PENDING" {
+	if code, stage := h3.login("owner@shop.test", testPassword); code != 200 || stage != "mfa_pending" {
 		t.Fatalf("second login %d %s", code, stage)
 	}
 	pending := sessionCookie(h3)
@@ -209,8 +209,8 @@ func TestBootstrapIsSingleUnderConcurrency(t *testing.T) {
 			t.Fatalf("unexpected bootstrap error: %v", err)
 		}
 	}
-	if wins != 1 || e.count(`SELECT count(*) FROM admin_users WHERE role = 'OWNER'`) != 1 {
-		t.Fatalf("bootstrap winners=%d owners=%d", wins, e.count(`SELECT count(*) FROM admin_users WHERE role='OWNER'`))
+	if wins != 1 || e.count(`SELECT count(*) FROM admin_users WHERE role = 'owner'`) != 1 {
+		t.Fatalf("bootstrap winners=%d owners=%d", wins, e.count(`SELECT count(*) FROM admin_users WHERE role='owner'`))
 	}
 	if _, err := e.a.HumanAuth.BootstrapOwner(context.Background(), "late@shop.test", "Late", testPassword, nil); !errors.Is(err, humanauth.ErrAlreadyBootstrapped) {
 		t.Fatalf("repeated bootstrap: %v", err)
@@ -292,7 +292,7 @@ func TestMFAAdversarialAndRecoveryCodes(t *testing.T) {
 	var sessions []*human
 	for i := 0; i < 10; i++ {
 		h := newHuman(t, e.srv, e.clk)
-		if code, stage := h.login("owner@shop.test", testPassword); code != 200 || stage != "MFA_PENDING" {
+		if code, stage := h.login("owner@shop.test", testPassword); code != 200 || stage != "mfa_pending" {
 			t.Fatalf("login %d %s", code, stage)
 		}
 		sessions = append(sessions, h)
@@ -387,7 +387,7 @@ func TestSessionRevocationSemantics(t *testing.T) {
 	storeA := uuid.NewString()
 	e.store(storeA)
 	owner := fullOwner(t, e.a, e.srv, e.clk, "owner@shop.test")
-	admin := owner.createUser(e.srv, "admin@shop.test", "ADMIN", false, storeA)
+	admin := owner.createUser(e.srv, "admin@shop.test", "admin", false, storeA)
 	// Random and tampered cookies.
 	for _, v := range []string{"random", strings.Repeat("A", 43), sessionCookie(admin).Value + "x"} {
 		h := withCookie(e.srv.URL, &http.Cookie{Name: sessionCookie(admin).Name, Value: v, Path: "/"})
@@ -410,7 +410,7 @@ func TestSessionRevocationSemantics(t *testing.T) {
 		t.Fatalf("removed membership still honored: %d", code)
 	}
 	// Disabling the ADMIN kills its live session immediately.
-	if code, _ := owner.do("POST", "/api/v1/dashboard/users/"+adminID+"/status", map[string]string{"status": "DISABLED"}); code != 200 {
+	if code, _ := owner.do("POST", "/api/v1/dashboard/users/"+adminID+"/status", map[string]string{"status": "disabled"}); code != 200 {
 		t.Fatalf("disable %d", code)
 	}
 	if code, _ := admin.do("GET", "/api/v1/dashboard/auth/me", nil); code != 401 {
@@ -474,7 +474,7 @@ func (e *authEnv) adminID(login string) string {
 func TestCSRFProtectionOnMutations(t *testing.T) {
 	e := newAuthEnv(t)
 	owner := fullOwner(t, e.a, e.srv, e.clk, "owner@shop.test")
-	body := map[string]any{"login": "admin@shop.test", "display_name": "Admin", "role": "ADMIN", "all_stores": true}
+	body := map[string]any{"login": "admin@shop.test", "display_name": "Admin", "role": "admin", "all_stores": true}
 	for name, headers := range map[string]map[string]string{
 		"no CSRF token":   {"Origin": e.srv.URL},
 		"wrong token":     {"Origin": e.srv.URL, "X-CSRF-Token": "wrong"},
@@ -508,9 +508,9 @@ func TestStoreAuthorizationAcrossHumans(t *testing.T) {
 	e.store(storeA)
 	e.store(storeB)
 	root := fullOwner(t, e.a, e.srv, e.clk, "root@shop.test")
-	ownerA := root.createUser(e.srv, "owner-a@shop.test", "OWNER", false, storeA)
-	adminA := root.createUser(e.srv, "admin-a@shop.test", "ADMIN", false, storeA)
-	ownerB := root.createUser(e.srv, "owner-b@shop.test", "OWNER", false, storeB)
+	ownerA := root.createUser(e.srv, "owner-a@shop.test", "owner", false, storeA)
+	adminA := root.createUser(e.srv, "admin-a@shop.test", "admin", false, storeA)
+	ownerB := root.createUser(e.srv, "owner-b@shop.test", "owner", false, storeB)
 	devA, devB := e.boundDevice("dev-a", storeA), e.boundDevice("dev-b", storeB)
 
 	expect := func(h *human, method, path string, body any, want int) {
@@ -546,10 +546,10 @@ func TestStoreAuthorizationAcrossHumans(t *testing.T) {
 		t.Fatalf("store list leaks Store B: %s", stores["_raw"])
 	}
 	// OwnerA cannot create Store B or ALL rollouts, nor import releases.
-	expect(ownerA, "POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": uuid.NewString(), "scope": "STORE",
-		"store_id": storeB, "mode": "OPTIONAL", "percentage": 10}, 403)
-	expect(ownerA, "POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": uuid.NewString(), "scope": "ALL",
-		"mode": "MANDATORY", "percentage": 100}, 403)
+	expect(ownerA, "POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": uuid.NewString(), "scope": "store",
+		"store_id": storeB, "mode": "optional", "percentage": 10}, 403)
+	expect(ownerA, "POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": uuid.NewString(), "scope": "all",
+		"mode": "mandatory", "percentage": 100}, 403)
 	expect(ownerA, "POST", "/api/v1/dashboard/releases", map[string]any{"envelope": "{}", "artifact_urls": map[string]string{}}, 403)
 	expect(ownerA, "GET", "/api/v1/dashboard/releases", nil, 200) // global read with releases.read
 	// OwnerB cannot access Store A admin data or operations.
@@ -558,14 +558,14 @@ func TestStoreAuthorizationAcrossHumans(t *testing.T) {
 	expect(ownerB, "GET", "/api/v1/dashboard/operations/incidents", nil, 403)
 	expect(ownerB, "GET", "/api/v1/dashboard/orders?store_id="+storeA, nil, 403)
 	// Restricted OWNERs cannot reach beyond their Stores in user admin.
-	expect(ownerA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "x@shop.test", "display_name": "X", "role": "ADMIN", "all_stores": true}, 403)
-	expect(ownerA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "y@shop.test", "display_name": "Y", "role": "ADMIN", "store_ids": []string{storeB}}, 403)
-	expect(ownerA, "POST", "/api/v1/dashboard/users/"+e.adminID("owner-b@shop.test")+"/status", map[string]string{"status": "DISABLED"}, 403)
+	expect(ownerA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "x@shop.test", "display_name": "X", "role": "admin", "all_stores": true}, 403)
+	expect(ownerA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "y@shop.test", "display_name": "Y", "role": "admin", "store_ids": []string{storeB}}, 403)
+	expect(ownerA, "POST", "/api/v1/dashboard/users/"+e.adminID("owner-b@shop.test")+"/status", map[string]string{"status": "disabled"}, 403)
 	// ADMIN cannot administer accounts at all.
 	expect(adminA, "GET", "/api/v1/dashboard/users", nil, 403)
-	expect(adminA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "z@shop.test", "display_name": "Z", "role": "OWNER", "store_ids": []string{storeA}}, 403)
-	expect(adminA, "POST", "/api/v1/dashboard/users/"+e.adminID("root@shop.test")+"/role", map[string]string{"role": "ADMIN"}, 403)
-	expect(adminA, "POST", "/api/v1/dashboard/users/"+e.adminID("admin-a@shop.test")+"/role", map[string]string{"role": "OWNER"}, 403)
+	expect(adminA, "POST", "/api/v1/dashboard/users", map[string]any{"login": "z@shop.test", "display_name": "Z", "role": "owner", "store_ids": []string{storeA}}, 403)
+	expect(adminA, "POST", "/api/v1/dashboard/users/"+e.adminID("root@shop.test")+"/role", map[string]string{"role": "admin"}, 403)
+	expect(adminA, "POST", "/api/v1/dashboard/users/"+e.adminID("admin-a@shop.test")+"/role", map[string]string{"role": "owner"}, 403)
 	if n := e.count(`SELECT count(*) FROM auth_audit_events WHERE outcome = 'denied'`); n == 0 {
 		t.Fatal("sensitive denials must be audited")
 	}
@@ -588,14 +588,14 @@ func TestFinalOwnerProtectionAndConcurrency(t *testing.T) {
 	owner := fullOwner(t, e.a, e.srv, e.clk, "owner@shop.test")
 	ownerID := e.adminID("owner@shop.test")
 	for _, req := range []struct{ path, field, value string }{
-		{"/status", "status", "DISABLED"}, {"/role", "role", "ADMIN"},
+		{"/status", "status", "disabled"}, {"/role", "role", "admin"},
 	} {
 		if code, b := owner.do("POST", "/api/v1/dashboard/users/"+ownerID+req.path, map[string]string{req.field: req.value}); code != 409 || errCode(b) != "LAST_OWNER" {
 			t.Fatalf("final OWNER %s: %d %v", req.path, code, b)
 		}
 	}
 	// Activation tokens are single-use under concurrency.
-	code, body := owner.do("POST", "/api/v1/dashboard/users", map[string]any{"login": "race@shop.test", "display_name": "Race", "role": "ADMIN", "all_stores": true})
+	code, body := owner.do("POST", "/api/v1/dashboard/users", map[string]any{"login": "race@shop.test", "display_name": "Race", "role": "admin", "all_stores": true})
 	if code != 201 {
 		t.Fatalf("create %d", code)
 	}
@@ -622,7 +622,7 @@ func TestFinalOwnerProtectionAndConcurrency(t *testing.T) {
 		t.Fatalf("activation token used %d times", wins)
 	}
 	// Expired activation tokens fail.
-	_, body = owner.do("POST", "/api/v1/dashboard/users", map[string]any{"login": "late@shop.test", "display_name": "Late", "role": "ADMIN", "all_stores": true})
+	_, body = owner.do("POST", "/api/v1/dashboard/users", map[string]any{"login": "late@shop.test", "display_name": "Late", "role": "admin", "all_stores": true})
 	e.clk.Advance(25 * time.Hour)
 	h := newHuman(t, e.srv, e.clk)
 	if c, _ := h.raw("POST", "/api/v1/dashboard/auth/activate", map[string]string{"token": body["activation_token"].(string), "password": testPassword},
@@ -639,11 +639,11 @@ func TestTwoOwnersRemovingEachOtherConcurrently(t *testing.T) {
 		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
 			e := newAuthEnv(t)
 			first := fullOwner(t, e.a, e.srv, e.clk, "first@shop.test")
-			second := first.createUser(e.srv, "second@shop.test", "OWNER", true)
+			second := first.createUser(e.srv, "second@shop.test", "owner", true)
 			ids := []string{e.adminID("first@shop.test"), e.adminID("second@shop.test")}
-			path, field, value := "/status", "status", "DISABLED"
+			path, field, value := "/status", "status", "disabled"
 			if round%2 == 1 {
-				path, field, value = "/role", "role", "ADMIN"
+				path, field, value = "/role", "role", "admin"
 			}
 			var wg sync.WaitGroup
 			codes := make([]int, 2)
@@ -661,7 +661,7 @@ func TestTwoOwnersRemovingEachOtherConcurrently(t *testing.T) {
 					successes++
 				}
 			}
-			if n := e.count(`SELECT count(*) FROM admin_users WHERE role = 'OWNER' AND status = 'ACTIVE'`); n != 1 || successes > 1 {
+			if n := e.count(`SELECT count(*) FROM admin_users WHERE role = 'owner' AND status = 'active'`); n != 1 || successes > 1 {
 				t.Fatalf("active owners=%d successes=%d codes=%v", n, successes, codes)
 			}
 		})

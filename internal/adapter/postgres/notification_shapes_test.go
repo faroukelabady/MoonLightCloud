@@ -33,7 +33,7 @@ func TestNotificationRecipientPurposeIsolation(t *testing.T) {
 	schedule := uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO business_report_schedules
 		(id, name, report_kind, timezone, local_time, next_run_local_date, next_run_at)
-		VALUES ($1, 'daily', 'DAILY', 'Africa/Cairo', '08:00', current_date, now())`, schedule); err != nil {
+		VALUES ($1, 'daily', 'daily', 'Africa/Cairo', '08:00', current_date, now())`, schedule); err != nil {
 		t.Fatal(err)
 	}
 	link := `INSERT INTO business_report_schedule_recipients (schedule_id, recipient_id) VALUES ($1, $2)`

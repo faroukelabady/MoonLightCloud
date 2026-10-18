@@ -19,7 +19,7 @@ RETURNING id, store_id, command_type, command_version, entity_id, target_kind, r
 INSERT INTO catalog_admin_command_targets
     (id, command_id, device_id, status)
 VALUES
-    (@id::uuid, @command_id::uuid, @device_id::uuid, 'PENDING')
+    (@id::uuid, @command_id::uuid, @device_id::uuid, 'pending')
 RETURNING id, command_id, device_id, status, result_code, entity_id, pre_revision, post_revision,
     delivered_at, finished_at, created_at, updated_at;
 
@@ -31,8 +31,8 @@ WHERE id = @id::uuid;
 
 -- name: CancelCatalogAdminCommand :one
 UPDATE catalog_admin_commands
-SET status = 'CANCELLED', updated_at = now()
-WHERE id = @id::uuid AND status = 'PENDING'
+SET status = 'cancelled', updated_at = now()
+WHERE id = @id::uuid AND status = 'pending'
 RETURNING id, status;
 
 -- name: ListCatalogAdminCommands :many
@@ -61,8 +61,8 @@ SELECT t.id, t.command_id, t.device_id, t.status,
 FROM catalog_admin_command_targets t
 JOIN catalog_admin_commands c ON c.id = t.command_id
 WHERE t.device_id = @device_id::uuid
-  AND t.status IN ('PENDING','DELIVERED')
-  AND c.status = 'PENDING'
+  AND t.status IN ('pending','delivered')
+  AND c.status = 'pending'
 ORDER BY c.created_at, c.id
 LIMIT @limit_n::int;
 
@@ -70,23 +70,23 @@ LIMIT @limit_n::int;
 UPDATE catalog_admin_command_targets
 SET status = @status::text, result_code = @result_code::text, entity_id = @entity_id::text,
     pre_revision = @pre_revision::bigint, post_revision = @post_revision::bigint,
-    finished_at = CASE WHEN @status::text IN ('APPLIED','CONFLICT','REJECTED','BLOCKED_CAPABILITY','SKIPPED_REVOKED','CANCELLED') THEN now() ELSE finished_at END,
+    finished_at = CASE WHEN @status::text IN ('applied','conflict','rejected','blocked_capability','skipped_revoked','cancelled') THEN now() ELSE finished_at END,
     delivered_at = COALESCE(delivered_at, now()),
     updated_at = now()
 WHERE id = @id::uuid AND device_id = @device_id::uuid
-  AND status IN ('PENDING','DELIVERED')
+  AND status IN ('pending','delivered')
 RETURNING id, command_id, device_id, status, result_code;
 
 -- name: MarkCatalogAdminTargetDelivered :one
 UPDATE catalog_admin_command_targets
-SET status = 'DELIVERED', delivered_at = COALESCE(delivered_at, now()), updated_at = now()
-WHERE id = @id::uuid AND device_id = @device_id::uuid AND status = 'PENDING'
+SET status = 'delivered', delivered_at = COALESCE(delivered_at, now()), updated_at = now()
+WHERE id = @id::uuid AND device_id = @device_id::uuid AND status = 'pending'
 RETURNING id, status;
 
 -- name: CancelPendingCatalogAdminTargets :exec
 UPDATE catalog_admin_command_targets
-SET status = 'CANCELLED', updated_at = now()
-WHERE command_id = @command_id::uuid AND status IN ('PENDING','DELIVERED');
+SET status = 'cancelled', updated_at = now()
+WHERE command_id = @command_id::uuid AND status IN ('pending','delivered');
 
 -- name: AddDeviceCapability :exec
 INSERT INTO device_capabilities (device_id, capability, updated_at)
@@ -198,7 +198,7 @@ SELECT p.product_id, p.name_ar,
         SELECT 1 FROM catalog_admin_commands c
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = @store_id::uuid AND c.entity_id = p.product_id::text
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
@@ -264,7 +264,7 @@ SELECT c.category_id, c.name_ar, c.name_en, c.status, c.online_enabled,
         SELECT 1 FROM catalog_admin_commands cmd
         JOIN catalog_admin_command_targets t ON t.command_id = cmd.id
         WHERE cmd.store_id = @store_id::uuid AND cmd.entity_id = c.category_id::text
-          AND cmd.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND cmd.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_categories c
 WHERE c.store_id = @store_id::uuid
@@ -277,7 +277,7 @@ SELECT t.tag_id, t.slug, t.name_ar, t.name_en, t.is_active,
         SELECT 1 FROM catalog_admin_commands c
         JOIN catalog_admin_command_targets tgt ON tgt.command_id = c.id
         WHERE c.store_id = @store_id::uuid AND c.entity_id = t.tag_id::text
-          AND c.status = 'PENDING' AND tgt.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND tgt.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_tags t
 WHERE t.store_id::text = @store_id::text
@@ -288,7 +288,7 @@ SELECT EXISTS (
     SELECT 1 FROM catalog_admin_commands c
     JOIN catalog_admin_command_targets t ON t.command_id = c.id
     WHERE c.store_id = @store_id::uuid AND c.entity_id = (@product_id::uuid)::text
-      AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+      AND c.status = 'pending' AND t.status IN ('pending','delivered')
 )::bool AS has_pending;
 
 -- name: AdminProductConfigurations :many
@@ -326,7 +326,7 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = @store_id::uuid
           AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
@@ -346,7 +346,7 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = @store_id::uuid
           AND (c.entity_id = v.variant_id::text OR c.entity_id = v.product_id::text)
-          AND c.status = 'PENDING' AND t.status IN ('PENDING','DELIVERED')
+          AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id

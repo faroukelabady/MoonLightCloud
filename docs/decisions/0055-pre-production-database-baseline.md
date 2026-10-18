@@ -130,12 +130,16 @@ on all money-bearing documents.
   incident/recovery subjects, catalog command entity IDs (create commands
   carry an absent marker) and the recovery verification cursor (compared in
   `COLLATE "C"` order against client-sent IDs, `` = start).
-- Enum casing (step 2f, pending owner confirmation): every UPPER value set is
-  published vocabulary (OpenAPI, dashboard, or the Retail wire such as rollout
-  `mode` and command target statuses). They keep their spelling; codes
-  (currencies, channel, rule/reason/result codes) stay UPPER by design; new
-  value sets use lowercase, and no set mixes cases.
-- Phase 3: `00108_baseline.sql` is the final baseline (TargetVersion 108);
+- Baseline 00109 (step 2f, owner decision 2026-10-18) uses one enum casing:
+  every status-like value set is lowercase in the database, the OpenAPI
+  contract, the dashboard and the Retail wire (roles, session stages, user,
+  rollout, release, target, command, order, notification and connectivity
+  statuses, rollout scope and mode, report kind, Retail update journal
+  states and admin-command receipt statuses), changed in lockstep with
+  Retail. Codes stay UPPER: currencies, the sale channel `STORE`, and
+  rule, reason, result and error codes (including `DEVICE_RECONNECT_SYNC`).
+  Provider vocabularies (Shopify `ACTIVE`/`DRAFT`) are external and unchanged.
+- Phase 3: `00109_baseline.sql` is the final baseline (TargetVersion 109);
   `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
   constraints, indexes, views, functions, triggers) and
   `TestSchemaMatchesReviewedTarget` fails on any drift.

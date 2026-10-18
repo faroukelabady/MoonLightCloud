@@ -429,7 +429,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, CANCELLED]
+            enum: [pending, cancelled]
           description: Optional command status filter.
         - name: limit
           in: query
@@ -1561,7 +1561,7 @@ paths:
               properties:
                 login: {type: string}
                 display_name: {type: string, maxLength: 100}
-                role: {type: string, enum: [OWNER, ADMIN]}
+                role: {type: string, enum: [owner, admin]}
                 all_stores: {type: boolean}
                 store_ids: {type: array, items: {type: string, format: uuid}}
       responses:
@@ -1624,8 +1624,8 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                role: {type: string, enum: [OWNER, ADMIN]}
-                status: {type: string, enum: [ACTIVE, DISABLED]}
+                role: {type: string, enum: [owner, admin]}
+                status: {type: string, enum: [active, disabled]}
                 all_stores: {type: boolean}
                 store_ids: {type: array, items: {type: string, format: uuid}}
       responses:
@@ -2574,7 +2574,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, PROCESSING, ON_HOLD, COMPLETED, CANCELLED, REFUNDED, FAILED, UNKNOWN, DELETED]
+            enum: [pending, processing, on_hold, completed, cancelled, refunded, failed, unknown, deleted]
         - name: limit
           in: query
           schema:
@@ -2984,7 +2984,7 @@ paths:
               additionalProperties: false
               required: [status]
               properties:
-                status: {type: string, enum: [ACTIVE, REVOKED]}
+                status: {type: string, enum: [active, revoked]}
       responses:
         '200':
           description: Updated release.
@@ -3599,7 +3599,7 @@ paths:
                 required: [target_state, release_status]
                 properties:
                   target_state: {type: string}
-                  release_status: {type: string, enum: [ACTIVE, REVOKED]}
+                  release_status: {type: string, enum: [active, revoked]}
         '400':
           description: Invalid body or a report not matching the target release.
           content:
@@ -4295,10 +4295,10 @@ components:
           description: Authenticated operator identity, derived server-side. Never client-supplied.
         status:
           type: string
-          enum: [PENDING, CANCELLED]
+          enum: [pending, cancelled]
         aggregate:
           type: string
-          enum: [PENDING, DELIVERED, APPLIED, CONVERGED, PARTIAL, CONFLICT, BLOCKED_CAPABILITY, CANCELLED]
+          enum: [pending, delivered, applied, converged, partial, conflict, blocked_capability, cancelled]
           description: Store-level state across targets. Creation is never reported as success; CONVERGED requires the projection to reach the resulting revision.
         converged:
           type: boolean
@@ -4329,7 +4329,7 @@ components:
           type: string
         status:
           type: string
-          enum: [PENDING, DELIVERED, APPLIED, CONFLICT, REJECTED, BLOCKED_CAPABILITY, SKIPPED_REVOKED, CANCELLED]
+          enum: [pending, delivered, applied, conflict, rejected, blocked_capability, skipped_revoked, cancelled]
         result_code:
           type: string
           description: Bounded machine code (APPLIED, REVISION_CONFLICT, VALIDATION_FAILED, ENTITY_NOT_FOUND, STORE_SCOPE_CONFLICT, UNSUPPORTED_COMMAND, COMMAND_ID_PAYLOAD_MISMATCH, DEPENDENCY_MISSING, RETRYABLE_FAILURE).
@@ -4377,7 +4377,7 @@ components:
       properties:
         status:
           type: string
-          enum: [APPLIED, CONFLICT, REJECTED]
+          enum: [applied, conflict, rejected]
         result_code:
           type: string
         entity_id:
@@ -4637,7 +4637,7 @@ components:
           description: Canonical device lifecycle (active or revoked).
         connectivity:
           type: string
-          enum: [NEVER_SEEN, ONLINE, OFFLINE]
+          enum: [never_seen, online, offline]
           description: ONLINE means the control plane heard from the Retail app within the freshness window; never proof of data freshness.
         last_seen_at:
           type: string
@@ -5542,7 +5542,7 @@ components:
         external_order_id: {type: string}
         order_number: {type: string}
         provider_status: {type: string}
-        canonical_status: {type: string, enum: [PENDING, PROCESSING, ON_HOLD, COMPLETED, CANCELLED, REFUNDED, FAILED, UNKNOWN, DELETED]}
+        canonical_status: {type: string, enum: [pending, processing, on_hold, completed, cancelled, refunded, failed, unknown, deleted]}
         currency: {type: string}
         total_minor: {type: string, description: Exact minor units.}
         created_at: {type: string, format: date-time}
@@ -5985,7 +5985,7 @@ components:
         build_commit: {type: string}
         min_installed_sequence: {type: integer, format: int64, minimum: 0}
         key_id: {type: string, pattern: '^[0-9a-f]{16}$'}
-        status: {type: string, enum: [ACTIVE, REVOKED]}
+        status: {type: string, enum: [active, revoked]}
         imported_by: {type: string}
         imported_at: {type: string, format: date-time}
         status_changed_by: {type: string}
@@ -6015,10 +6015,10 @@ components:
       required: [release_id, scope, mode, percentage]
       properties:
         release_id: {type: string, format: uuid}
-        scope: {type: string, enum: [DEVICE, STORE, ALL]}
+        scope: {type: string, enum: [device, store, all]}
         store_id: {type: string, format: uuid, description: Required for STORE scope.}
         device_id: {type: string, format: uuid, description: Required for DEVICE scope.}
-        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        mode: {type: string, enum: [optional, mandatory]}
         percentage: {type: integer, minimum: 1, maximum: 100}
         not_before: {type: string, format: date-time, nullable: true}
     RolloutView:
@@ -6029,12 +6029,12 @@ components:
         release_id: {type: string, format: uuid}
         release_version: {type: string}
         release_sequence: {type: integer, format: int64}
-        scope: {type: string, enum: [DEVICE, STORE, ALL]}
+        scope: {type: string, enum: [device, store, all]}
         store_id: {type: string, format: uuid}
         device_id: {type: string, format: uuid}
-        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        mode: {type: string, enum: [optional, mandatory]}
         percentage: {type: integer, minimum: 1, maximum: 100}
-        status: {type: string, enum: [DRAFT, ACTIVE, PAUSED, COMPLETED, CANCELLED]}
+        status: {type: string, enum: [draft, active, paused, completed, cancelled]}
         not_before: {type: string, format: date-time}
         target_count: {type: integer}
         created_by: {type: string}
@@ -6050,7 +6050,7 @@ components:
         Cloud's view of one device target, driven only by authenticated Retail
         reports. SUCCEEDED is recorded only after Retail confirmed healthy
         startup of the new release.
-      enum: [NOT_SELECTED, PENDING, DELIVERED, DOWNLOADING, VERIFIED, WAITING_SAFE_BOUNDARY, INSTALLING, AWAITING_HEALTH, SUCCEEDED, ALREADY_COMPLIANT, FAILED, ROLLED_BACK, MANUAL_ACTION_REQUIRED, SKIPPED_NEWER, UNSUPPORTED, CANCELLED]
+      enum: [not_selected, pending, delivered, downloading, verified, waiting_safe_boundary, installing, awaiting_health, succeeded, already_compliant, failed, rolled_back, manual_action_required, skipped_newer, unsupported, cancelled]
     UpdateTargetView:
       type: object
       required: [id, rollout_id, device_id, device_name, store_id, state, attempt_count, updated_at]
@@ -6131,7 +6131,7 @@ components:
         updater_protocol: {type: integer, minimum: 0}
         updater_capable: {type: boolean}
         unsupported_reason: {type: string, example: UPDATE_PLATFORM_UNSUPPORTED}
-        update_state: {type: string, description: 'Retail journal state (IDLE, DOWNLOADING, … SUCCEEDED, ROLLED_BACK, MANUAL_ACTION_REQUIRED).'}
+        update_state: {type: string, description: 'Retail journal state (idle, downloading, … succeeded, rolled_back, manual_action_required).'}
         update_error: {type: string}
         target_id: {type: string, format: uuid}
     DeviceUpdateCommand:
@@ -6143,11 +6143,11 @@ components:
         version: {type: integer, enum: [1]}
         release_id: {type: string, format: uuid}
         manifest_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
-        mode: {type: string, enum: [OPTIONAL, MANDATORY]}
+        mode: {type: string, enum: [optional, mandatory]}
         not_before: {type: string, format: date-time, nullable: true}
         envelope: {type: string, description: Exact signed envelope bytes as imported; Retail re-verifies them.}
         artifact_url: {type: string, format: uri}
-        release_status: {type: string, enum: [ACTIVE, REVOKED]}
+        release_status: {type: string, enum: [active, revoked]}
     DeviceUpdateTargetReport:
       type: object
       additionalProperties: false
@@ -6169,7 +6169,7 @@ components:
       type: object
       required: [stage, csrf_token]
       properties:
-        stage: {type: string, enum: [MFA_PENDING, MFA_SETUP, FULL]}
+        stage: {type: string, enum: [mfa_pending, mfa_setup, full]}
         csrf_token: {type: string, description: 'Send as X-CSRF-Token on every mutation; keep in memory only.'}
         recovery_codes: {type: array, items: {type: string}, description: 'Present once, after MFA enrollment.'}
     AuthMe:
@@ -6177,7 +6177,7 @@ components:
       required: [authenticated, stage, csrf_token, user, permissions, all_stores, store_ids]
       properties:
         authenticated: {type: boolean}
-        stage: {type: string, enum: [MFA_PENDING, MFA_SETUP, FULL]}
+        stage: {type: string, enum: [mfa_pending, mfa_setup, full]}
         csrf_token: {type: string}
         user:
           type: object
@@ -6185,7 +6185,7 @@ components:
             id: {type: string, format: uuid}
             login: {type: string}
             display_name: {type: string}
-            role: {type: string, enum: [OWNER, ADMIN]}
+            role: {type: string, enum: [owner, admin]}
             mfa_enabled: {type: boolean}
         permissions: {type: array, items: {type: string}, description: 'Empty until the session is FULL.'}
         all_stores: {type: boolean}
@@ -6202,8 +6202,8 @@ components:
         id: {type: string, format: uuid}
         login: {type: string}
         display_name: {type: string}
-        role: {type: string, enum: [OWNER, ADMIN]}
-        status: {type: string, enum: [PENDING_SETUP, ACTIVE, DISABLED]}
+        role: {type: string, enum: [owner, admin]}
+        status: {type: string, enum: [pending_setup, active, disabled]}
         all_stores: {type: boolean}
         store_ids: {type: array, items: {type: string, format: uuid}}
         mfa_enabled: {type: boolean}

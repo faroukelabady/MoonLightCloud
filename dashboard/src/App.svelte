@@ -149,8 +149,8 @@
 			const current = await dashboardApi.me();
 			me = current;
 			operatorName = current.user.display_name;
-			pendingStage = current.stage === 'FULL' ? null : current.stage;
-			authed = current.stage === 'FULL';
+			pendingStage = current.stage === 'full' ? null : current.stage;
+			authed = current.stage === 'full';
 		} catch {
 			me = null;
 			pendingStage = null;

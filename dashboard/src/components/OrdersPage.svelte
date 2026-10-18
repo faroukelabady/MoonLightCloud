@@ -46,7 +46,7 @@
 		onretry: () => void;
 	} = $props();
 
-	const statuses = ['PENDING', 'PROCESSING', 'ON_HOLD', 'COMPLETED', 'CANCELLED', 'REFUNDED', 'FAILED', 'UNKNOWN', 'DELETED'];
+	const statuses = ['pending', 'processing', 'on_hold', 'completed', 'cancelled', 'refunded', 'failed', 'unknown', 'deleted'];
 
 	function money(o: OrderSummary): string {
 		return formatMinor(o.total_minor, o.currency === 'USD' ? 'USD' : 'EGP');

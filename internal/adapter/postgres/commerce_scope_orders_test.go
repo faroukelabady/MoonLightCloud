@@ -319,7 +319,7 @@ func TestOrder_DeletionPreserves(t *testing.T) {
 	}
 	var status string
 	if err := f.pool.QueryRow(ctx,
-		`SELECT canonical_status FROM commerce_online_orders WHERE provider_key='website' AND external_order_id='820'`).Scan(&status); err != nil || status != "DELETED" {
+		`SELECT canonical_status FROM commerce_online_orders WHERE provider_key='website' AND external_order_id='820'`).Scan(&status); err != nil || status != "deleted" {
 		t.Fatalf("deleted status: %q (%v)", status, err)
 	}
 }
@@ -465,7 +465,7 @@ func TestOrder_GhostTombstoneNull(t *testing.T) {
 	}
 	var status string
 	if err := f.pool.QueryRow(ctx,
-		`SELECT canonical_status FROM commerce_online_orders WHERE provider_key='website' AND external_order_id='831'`).Scan(&status); err != nil || status != "DELETED" {
+		`SELECT canonical_status FROM commerce_online_orders WHERE provider_key='website' AND external_order_id='831'`).Scan(&status); err != nil || status != "deleted" {
 		t.Fatalf("deleted status: %q (%v)", status, err)
 	}
 }

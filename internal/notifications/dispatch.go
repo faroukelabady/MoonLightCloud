@@ -38,18 +38,18 @@ type DeliveryStatus string
 
 const (
 	// DeliveryUnknown covers unmapped provider statuses.
-	DeliveryUnknown DeliveryStatus = "UNKNOWN"
+	DeliveryUnknown DeliveryStatus = "unknown"
 	// DeliveryAccepted means the provider acknowledged the send.
-	DeliveryAccepted DeliveryStatus = "ACCEPTED"
+	DeliveryAccepted DeliveryStatus = "accepted"
 	// DeliverySent means the provider sent the message.
-	DeliverySent DeliveryStatus = "SENT"
+	DeliverySent DeliveryStatus = "sent"
 	// DeliveryDelivered means the recipient device received it.
-	DeliveryDelivered DeliveryStatus = "DELIVERED"
+	DeliveryDelivered DeliveryStatus = "delivered"
 	// DeliveryRead means the recipient read it.
-	DeliveryRead DeliveryStatus = "READ"
+	DeliveryRead DeliveryStatus = "read"
 	// DeliveryFailed means provider-reported failure. A delivery
 	// outcome only: it never authorizes another business message.
-	DeliveryFailed DeliveryStatus = "FAILED"
+	DeliveryFailed DeliveryStatus = "failed"
 )
 
 // deliveryPrecedence orders canonical statuses for same-timestamp

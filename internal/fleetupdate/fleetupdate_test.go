@@ -9,18 +9,18 @@ var t0 = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
 
 func TestMapReportIsTruthful(t *testing.T) {
 	cases := map[[2]string]string{
-		{"AVAILABLE", ""}:                                    TargetDelivered,
-		{"STAGED", ""}:                                       TargetVerified,
-		{"SWITCHED", ""}:                                     TargetInstalling,
-		{"AWAITING_STARTUP_HEALTH", ""}:                      TargetAwaitHealth,
-		{"SUCCEEDED", ""}:                                    TargetSucceeded,
-		{"SUCCEEDED", "UPDATE_ALREADY_INSTALLED"}:            TargetCompliant,
-		{"FAILED", "UPDATE_DOWNGRADE_REJECTED"}:              TargetSkippedNewer,
-		{"FAILED", "UPDATE_PLATFORM_UNSUPPORTED"}:            TargetUnsupported,
-		{"FAILED", "UPDATE_SIGNATURE_INVALID"}:               TargetFailed,
-		{"ROLLED_BACK", "UPDATE_HEALTH_FAILED"}:              TargetRolledBack,
-		{"ROLLING_BACK", ""}:                                 TargetInstalling,
-		{"MANUAL_ACTION_REQUIRED", "UPDATE_ROLLBACK_FAILED"}: TargetManual,
+		{"available", ""}:                                    TargetDelivered,
+		{"staged", ""}:                                       TargetVerified,
+		{"switched", ""}:                                     TargetInstalling,
+		{"awaiting_startup_health", ""}:                      TargetAwaitHealth,
+		{"succeeded", ""}:                                    TargetSucceeded,
+		{"succeeded", "UPDATE_ALREADY_INSTALLED"}:            TargetCompliant,
+		{"failed", "UPDATE_DOWNGRADE_REJECTED"}:              TargetSkippedNewer,
+		{"failed", "UPDATE_PLATFORM_UNSUPPORTED"}:            TargetUnsupported,
+		{"failed", "UPDATE_SIGNATURE_INVALID"}:               TargetFailed,
+		{"rolled_back", "UPDATE_HEALTH_FAILED"}:              TargetRolledBack,
+		{"rolling_back", ""}:                                 TargetInstalling,
+		{"manual_action_required", "UPDATE_ROLLBACK_FAILED"}: TargetManual,
 	}
 	for in, want := range cases {
 		got, ok := MapReport(in[0], in[1])

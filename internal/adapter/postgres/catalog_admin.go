@@ -386,7 +386,7 @@ func (d Devices) MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, 
 	if cmdStatus != catalogadmin.CommandPending || lifecycle != "active" || bound != sid {
 		return apperr.New(apperr.Conflict, "command no longer deliverable")
 	}
-	tag, err := tx.Exec(ctx, `UPDATE catalog_admin_command_targets SET status='DELIVERED',delivered_at=COALESCE(delivered_at,now()),updated_at=now() WHERE id=$1 AND device_id=$2 AND status IN ('PENDING','DELIVERED')`, tid, duid)
+	tag, err := tx.Exec(ctx, `UPDATE catalog_admin_command_targets SET status='delivered',delivered_at=COALESCE(delivered_at,now()),updated_at=now() WHERE id=$1 AND device_id=$2 AND status IN ('pending','delivered')`, tid, duid)
 	if err != nil {
 		return catalogAdminErr(err)
 	}
@@ -418,7 +418,7 @@ func (d Devices) CancelCatalogAdminCommand(ctx context.Context, commandID string
 		return false, nil
 	}
 	var unsafe bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_admin_command_targets WHERE command_id=$1 AND status IN ('APPLIED','DELIVERED'))`, cid).Scan(&unsafe); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM catalog_admin_command_targets WHERE command_id=$1 AND status IN ('applied','delivered'))`, cid).Scan(&unsafe); err != nil {
 		return false, catalogAdminErr(err)
 	}
 	// A delivered command may already be executing: cancellation cannot retract it safely.

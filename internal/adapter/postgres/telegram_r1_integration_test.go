@@ -96,7 +96,7 @@ func r1Providers(t *testing.T, fail string) (*notifications.Registry, *[]string,
 }
 
 func TestTelegramR1ReportMatrix(t *testing.T) {
-	for _, kind := range []string{"DAILY", "TEN_DAY"} {
+	for _, kind := range []string{"daily", "ten_day"} {
 		for _, locale := range []string{"ar", "en"} {
 			for _, fail := range []string{"", "telegram-main", "whatsapp-main"} {
 				t.Run(kind+"/"+locale+"/fail="+fail, func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 						t.Fatal(err)
 					}
 					anchor := ""
-					if kind == "TEN_DAY" {
+					if kind == "ten_day" {
 						anchor = "2000-01-01"
 					}
 					schedule := createTestSchedule(t, service, "matrix", kind, "21:00", anchor, tg.ID, wa.ID)
@@ -262,7 +262,7 @@ func r1DatabaseState(t *testing.T, env *saleEnv) map[string]string {
 }
 
 func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
-	for _, kind := range []string{"DAILY", "TEN_DAY"} {
+	for _, kind := range []string{"daily", "ten_day"} {
 		t.Run(kind, func(t *testing.T) {
 			env := openSaleEnv(t)
 			ctx := context.Background()
@@ -316,7 +316,7 @@ func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 				t.Fatal(err)
 			}
 			anchor := ""
-			if kind == "TEN_DAY" {
+			if kind == "ten_day" {
 				anchor = "2000-01-01"
 			}
 			schedule := createTestSchedule(t, service, "sale-seeded", kind, "21:00", anchor, ar.ID, en.ID)

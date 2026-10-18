@@ -76,7 +76,7 @@ func TestReportRunnerCompletes(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, created, err := service.RunNow(context.Background(), schedule.ID, "manual-001")
 	if err != nil || !created {
 		t.Fatalf("run-now: %v %v", runID, err)
@@ -117,7 +117,7 @@ func TestReportRunnerManualIdempotency(t *testing.T) {
 	env := openSaleEnv(t)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	first, created, err := service.RunNow(context.Background(), schedule.ID, "manual-001")
 	if err != nil || !created {
 		t.Fatalf("first: %v %v", first, err)
@@ -182,7 +182,7 @@ func TestReportRunnerBarrierFailureRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", ar.ID, en.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestReportRunnerStaleFencing(t *testing.T) {
 	store := catalogStore(env)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestReportRunnerMultiWorker(t *testing.T) {
 	ctx := context.Background()
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func TestReportRunnerCrashAfterEnqueue(t *testing.T) {
 	store := catalogStore(env)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +367,7 @@ func TestReportSnapshotImmutable(t *testing.T) {
 	first := &stubReportSummary{summary: cannedSummary()}
 	service := reportTestService(t, env, first)
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -406,7 +406,7 @@ func TestReportRecipientSnapshotImmutable(t *testing.T) {
 	store := catalogStore(env)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -439,7 +439,7 @@ func TestReportRunnerBlockedPaths(t *testing.T) {
 	ctx := context.Background()
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	t.Run("no recipients", func(t *testing.T) {
 		if err := catalogStore(env).SetRecipientEnabled(ctx, recipient.ID, false); err != nil {
 			t.Fatal(err)
@@ -569,7 +569,7 @@ func TestReportRunnerLogPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedReportTemplateMapping(t, env)
-	schedule, err := reportService.CreateSchedule(ctx, "owner-daily", "DAILY", "21:00", "", []string{recipient.ID})
+	schedule, err := reportService.CreateSchedule(ctx, "owner-daily", "daily", "21:00", "", []string{recipient.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestReportLateDataInterleaving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", ar.ID, en.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -703,7 +703,7 @@ func TestDeliveryStaleWritesFenced(t *testing.T) {
 	seedReportTemplateMapping(t, env)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -771,7 +771,7 @@ func TestDeliveryMappingRepairRace(t *testing.T) {
 	store := catalogStore(env)
 	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
 	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	runID, _, err := service.RunNow(ctx, schedule.ID, "manual-001")
 	if err != nil {
 		t.Fatal(err)
@@ -841,7 +841,7 @@ func TestReportManualSemanticMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedule := createTestSchedule(t, service, "owner-daily", "DAILY", "21:00", "", ar.ID, en.ID)
+	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", ar.ID, en.ID)
 	first, created, err := service.RunNow(ctx, schedule.ID, "manual-matrix")
 	if err != nil || !created {
 		t.Fatalf("first: %v %v", first, err)

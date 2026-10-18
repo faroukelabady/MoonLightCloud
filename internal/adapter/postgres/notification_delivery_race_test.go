@@ -113,7 +113,7 @@ func TestDeliveryBarrierReadVsDelivered(t *testing.T) {
 				time.Sleep(20 * time.Millisecond)
 				read()
 			}
-			if status := deliveryCurrent(t, env, id); status != "READ" {
+			if status := deliveryCurrent(t, env, id); status != "read" {
 				t.Fatalf("final READ, got %s", status)
 			}
 			if count := deliveryHistoryCount(t, env, id); count != 3 {
@@ -130,7 +130,7 @@ func TestDeliveryBarrierReadVsDelivered(t *testing.T) {
 			statusApplier(env, id, "wamid.barrier2", "read", base, 30),
 			statusApplier(env, id, "wamid.barrier2", "delivered", base, 20),
 		)
-		if status := deliveryCurrent(t, env, id); status != "READ" {
+		if status := deliveryCurrent(t, env, id); status != "read" {
 			t.Fatalf("final READ, got %s", status)
 		}
 		if count := deliveryHistoryCount(t, env, id); count != 3 {
@@ -150,7 +150,7 @@ func TestDeliveryThreeStatusConcurrent(t *testing.T) {
 		statusApplier(env, id, "wamid.three1", "delivered", base, 20),
 		statusApplier(env, id, "wamid.three1", "read", base, 30),
 	)
-	if status := deliveryCurrent(t, env, id); status != "READ" {
+	if status := deliveryCurrent(t, env, id); status != "read" {
 		t.Fatalf("final READ, got %s", status)
 	}
 	if count := deliveryHistoryCount(t, env, id); count != 3 {
@@ -173,7 +173,7 @@ func TestDeliverySameTimestampConcurrent(t *testing.T) {
 			} else {
 				runConcurrent(t, delivered, read)
 			}
-			if status := deliveryCurrent(t, env, id); status != "READ" {
+			if status := deliveryCurrent(t, env, id); status != "read" {
 				t.Fatalf("same-timestamp READ, got %s", status)
 			}
 		})
@@ -196,7 +196,7 @@ func TestDeliveryFailedSameTimestampConcurrent(t *testing.T) {
 			} else {
 				runConcurrent(t, read, failed)
 			}
-			if status := deliveryCurrent(t, env, id); status != "FAILED" {
+			if status := deliveryCurrent(t, env, id); status != "failed" {
 				t.Fatalf("same-timestamp FAILED, got %s", status)
 			}
 			var dispatch string
@@ -232,7 +232,7 @@ func TestDeliveryUnknownConcurrent(t *testing.T) {
 		unknown,
 		statusApplier(env, id, "wamid.unk1", "read", base, 30),
 	)
-	if status := deliveryCurrent(t, env, id); status != "READ" {
+	if status := deliveryCurrent(t, env, id); status != "read" {
 		t.Fatalf("UNKNOWN must not regress: %s", status)
 	}
 	if count := deliveryHistoryCount(t, env, id); count != 2 {
@@ -249,7 +249,7 @@ func TestDeliveryDuplicateRace(t *testing.T) {
 	first := statusApplier(env, id, "wamid.dup1", "delivered", base, 20)
 	second := statusApplier(env, id, "wamid.dup1", "delivered", base, 20)
 	runConcurrent(t, first, second)
-	if status := deliveryCurrent(t, env, id); status != "DELIVERED" {
+	if status := deliveryCurrent(t, env, id); status != "delivered" {
 		t.Fatalf("current: %s", status)
 	}
 	if count := deliveryHistoryCount(t, env, id); count != 1 {
@@ -271,10 +271,10 @@ func TestDeliveryDifferentNotificationsConcurrent(t *testing.T) {
 		statusApplier(env, idA, "wamid.diffA", "sent", base, 10),
 		statusApplier(env, idB, "wamid.diffB", "read", base, 40),
 	)
-	if status := deliveryCurrent(t, env, idA); status != "READ" {
+	if status := deliveryCurrent(t, env, idA); status != "read" {
 		t.Fatalf("A READ: %s", status)
 	}
-	if status := deliveryCurrent(t, env, idB); status != "READ" {
+	if status := deliveryCurrent(t, env, idB); status != "read" {
 		t.Fatalf("B READ: %s", status)
 	}
 }
@@ -302,7 +302,7 @@ func TestDeliveryHighConcurrency(t *testing.T) {
 	}
 	// future_status_x maps to UNKNOWN: history only, never current.
 	runConcurrent(t, callbacks...)
-	if status := deliveryCurrent(t, env, id); status != "READ" {
+	if status := deliveryCurrent(t, env, id); status != "read" {
 		t.Fatalf("domain-max READ, got %s", status)
 	}
 	// Unique events: sent@5,10,12 + delivered@15,20,22 + read@25,28,30
@@ -318,7 +318,7 @@ func TestDeliveryHighConcurrency(t *testing.T) {
 	rows, err := env.pool.Query(context.Background(),
 		`SELECT provider_status_raw, canonical_status, provider_timestamp
 		 FROM notification_delivery_status_history WHERE notification_id = $1
-		 AND canonical_status <> 'UNKNOWN'`, mustPgID(id))
+		 AND canonical_status <> 'unknown'`, mustPgID(id))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestDeliveryAtomicityRollback(t *testing.T) {
 	if _, err := catalogStore(env).ApplyDeliveryStatus(context.Background(), id, event); err == nil {
 		t.Fatal("constraint violation must fail")
 	}
-	if status := deliveryCurrent(t, env, id); status != "SENT" {
+	if status := deliveryCurrent(t, env, id); status != "sent" {
 		t.Fatalf("current intact: %s", status)
 	}
 	if count := deliveryHistoryCount(t, env, id); count != 1 {

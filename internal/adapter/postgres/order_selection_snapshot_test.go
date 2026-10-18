@@ -31,7 +31,7 @@ func TestOrderSelectionSnapshotIsImmutable(t *testing.T) {
 		(provider_key, external_order_id, order_number, provider_status, canonical_status, currency,
 		 discount_minor, shipping_minor, cart_tax_minor, total_tax_minor, total_minor, prices_include_tax,
 		 created_at, modified_at, revision, fingerprint, provider_deleted, mapping_complete, unmapped_lines)
-		VALUES ('website','1001','1001','processing','PROCESSING','EGP',0,0,0,0,130000,false,$1,$1,1,'\\x00',false,true,0)`,
+		VALUES ('website','1001','1001','processing','processing','EGP',0,0,0,0,130000,false,$1,$1,1,'\\x00',false,true,0)`,
 		time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

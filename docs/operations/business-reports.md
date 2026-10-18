@@ -155,8 +155,8 @@ singular.
 ## Notification relationship
 
 Run `completed` means every delivery is durably enqueued in Phase
-7A — not delivered or read. Delivery callbacks (`SENT`/`DELIVERED`/
-`READ`/`FAILED`) never rewrite report runs. A provider `FAILED`
+7A — not delivered or read. Delivery callbacks (`SENT`/`delivered`/
+`READ`/`failed`) never rewrite report runs. A provider `failed`
 later is a 7A delivery outcome, not a reason to resend the report.
 
 ## Delivery-write fencing

@@ -120,7 +120,7 @@ func (f enrollmentFixture) assertPending(t *testing.T, expected humanauth.MFARec
 	}
 	for _, query := range []string{
 		`SELECT count(*) FROM admin_recovery_codes WHERE user_id = $1`,
-		`SELECT count(*) FROM admin_sessions WHERE user_id = $1 AND stage = 'FULL'`,
+		`SELECT count(*) FROM admin_sessions WHERE user_id = $1 AND stage = 'full'`,
 		`SELECT count(*) FROM auth_audit_events WHERE target_user_id = $1 AND action = 'auth.mfa.enrolled'`,
 	} {
 		if f.count(t, query) != 0 {
@@ -259,7 +259,7 @@ func TestMFAEnrollmentConcurrentConfirmationsSingleWinner(t *testing.T) {
 		t.Fatal("concurrent enrollment must activate once and bump security version once")
 	}
 	if f.count(t, `SELECT count(*) FROM admin_recovery_codes WHERE user_id = $1`) != humanauth.RecoveryCodeCount ||
-		f.count(t, `SELECT count(*) FROM admin_sessions WHERE user_id = $1 AND stage = 'FULL'`) != 1 ||
+		f.count(t, `SELECT count(*) FROM admin_sessions WHERE user_id = $1 AND stage = 'full'`) != 1 ||
 		f.count(t, `SELECT count(*) FROM auth_audit_events WHERE target_user_id = $1 AND action = 'auth.mfa.enrolled'`) != 1 {
 		t.Fatal("concurrent enrollment duplicated durable side effects")
 	}

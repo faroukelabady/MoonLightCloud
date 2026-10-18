@@ -532,7 +532,7 @@ Phase 18 updater semantics (preserved):
   forbidden. A deliberate owner restore is a disaster-recovery action
   (§3.3), not a rollback.
 
-Journal corruption: the agent reports `MANUAL_ACTION_REQUIRED`
+Journal corruption: the agent reports `manual_action_required`
 (`UPDATE_JOURNAL_CORRUPT`) and the helper refuses to act. The app
 still starts normally on the current install.
 

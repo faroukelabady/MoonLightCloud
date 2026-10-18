@@ -26,7 +26,7 @@ func TestTelegramReportRunnerEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("telegram recipient: %v", err)
 	}
-	schedule := createTestSchedule(t, service, "owner-daily-tg", "DAILY", "21:00", "", recipient.ID)
+	schedule := createTestSchedule(t, service, "owner-daily-tg", "daily", "21:00", "", recipient.ID)
 	runID, created, err := service.RunNow(ctx, schedule.ID, "manual-tg-001")
 	if err != nil || !created {
 		t.Fatalf("run-now: %v %v", runID, err)

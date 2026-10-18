@@ -445,7 +445,7 @@ var (
 	versionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
 	shortPattern   = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 	commitPattern  = regexp.MustCompile(`^[0-9A-Za-z-]{1,64}$`)
-	statePattern   = regexp.MustCompile(`^[A-Z][A-Z_]{0,63}$`)
+	statePattern   = regexp.MustCompile(`^[a-z][a-z_]{0,63}$`)
 )
 
 // RecordStatus stores the authenticated device's version report. The

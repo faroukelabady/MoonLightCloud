@@ -15,8 +15,8 @@ import "sort"
 type Role string
 
 const (
-	RoleOwner Role = "OWNER"
-	RoleAdmin Role = "ADMIN"
+	RoleOwner Role = "owner"
+	RoleAdmin Role = "admin"
 )
 
 // Valid reports a known role.
@@ -26,9 +26,9 @@ func (r Role) Valid() bool { return r == RoleOwner || r == RoleAdmin }
 type Status string
 
 const (
-	StatusPendingSetup Status = "PENDING_SETUP"
-	StatusActive       Status = "ACTIVE"
-	StatusDisabled     Status = "DISABLED"
+	StatusPendingSetup Status = "pending_setup"
+	StatusActive       Status = "active"
+	StatusDisabled     Status = "disabled"
 )
 
 // Permission is a named capability checked server-side on every route.

@@ -65,12 +65,12 @@ bootstrap and manual recovery runbook is MoonLightRetail
 
 | Target state | Meaning / action |
 |---|---|
-| `PENDING` with a retry time | Retryable failure; Cloud re-offers with backoff (15 min doubling to 12 h, at most 5 attempts) |
-| `WAITING_SAFE_BOUNDARY` | A sale or return is open; the update installs when the shop is idle. No action. |
-| `ROLLED_BACK` | New release failed health; previous release and data restored. Investigate before re-releasing as a higher sequence. |
-| `MANUAL_ACTION_REQUIRED` | Automation stopped deliberately; follow Retail `self-update.md` §8 on that PC |
-| `SKIPPED_NEWER` | Device already has a newer release |
-| `UNSUPPORTED` | Package-manager/AppImage/Windows install, no artifact for its platform, or a build without release keys |
+| `pending` with a retry time | Retryable failure; Cloud re-offers with backoff (15 min doubling to 12 h, at most 5 attempts) |
+| `waiting_safe_boundary` | A sale or return is open; the update installs when the shop is idle. No action. |
+| `rolled_back` | New release failed health; previous release and data restored. Investigate before re-releasing as a higher sequence. |
+| `manual_action_required` | Automation stopped deliberately; follow Retail `self-update.md` §8 on that PC |
+| `skipped_newer` | Device already has a newer release |
+| `unsupported` | Package-manager/AppImage/Windows install, no artifact for its platform, or a build without release keys |
 
 ## Verification and audit
 

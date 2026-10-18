@@ -40,7 +40,7 @@ func fencingSchedule(t *testing.T, env *saleEnv, service *businessreports.Servic
 		}
 		ids = append(ids, recipient.ID)
 	}
-	schedule, err := service.CreateSchedule(ctx, "fencing", "DAILY", "21:00", "", ids)
+	schedule, err := service.CreateSchedule(ctx, "fencing", "daily", "21:00", "", ids)
 	if err != nil {
 		t.Fatalf("schedule: %v", err)
 	}

@@ -64,8 +64,8 @@ it('shows product types with capabilities and queues type changes', async()=>{
 });
 it('distinguishes create intent from result identity', async()=>{
  defaults();const f=fixtures('ready');api.adminProducts.mockResolvedValue({products:f.products,next_cursor:''});
- const pending={id:'cmd-1',store_id:'A',type:'catalog.product-type.create.v1',version:1,entity_id:'',target_kind:'create',requested_key:'book',payload_hash:'0'.repeat(64),expected_revision:0,actor:'op',status:'PENDING',aggregate:'PENDING',converged:false,targets:[],created_at:'',updated_at:''};
- const done={...pending,result_entity_id:'type-9',aggregate:'CONVERGED',converged:true};
+ const pending={id:'cmd-1',store_id:'A',type:'catalog.product-type.create.v1',version:1,entity_id:'',target_kind:'create',requested_key:'book',payload_hash:'0'.repeat(64),expected_revision:0,actor:'op',status:'pending',aggregate:'pending',converged:false,targets:[],created_at:'',updated_at:''};
+ const done={...pending,result_entity_id:'type-9',aggregate:'converged',converged:true};
  api.adminCommands.mockResolvedValue({commands:[pending],next_cursor:''});
  api.adminCommand.mockResolvedValue(pending);
  render(CatalogAdminPage,{store:'A'});

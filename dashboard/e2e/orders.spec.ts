@@ -11,14 +11,14 @@ const ORDERS = {
 	orders: [
 		{
 			provider_key: 'website', external_order_id: '800', order_number: '800',
-			provider_status: 'processing', canonical_status: 'PROCESSING',
+			provider_status: 'processing', canonical_status: 'processing',
 			currency: 'EGP', total_minor: '9007199254740993',
 			created_at: '2026-09-27T10:00:00Z', modified_at: '2026-09-27T11:00:00Z',
 			customer_name: 'A B', mapping_complete: false, unmapped_line_count: 1,
 			provider_deleted: false, revision: 2
 		}
 	],
-	status_counts: [{ canonical_status: 'PROCESSING', total: 1 }],
+	status_counts: [{ canonical_status: 'processing', total: 1 }],
 	webhook_inbox: { pending: 0, retry: 0, blocked: 0, oldest_pending_at: null }
 };
 
@@ -41,7 +41,7 @@ const DETAIL = {
 		{ external_line_id: 1, external_product_id: '999', variation_id: 0, sku: 'FOREIGN', name: 'Foreign', quantity: 1, total_minor: '500', moonlight_product_id: null, mapped: false }
 	],
 	addresses: [],
-	status_history: [{ order_revision: 1, provider_status: 'pending', canonical_status: 'PENDING', observed_at: '2026-09-27T10:00:00Z' }]
+	status_history: [{ order_revision: 1, provider_status: 'pending', canonical_status: 'pending', observed_at: '2026-09-27T10:00:00Z' }]
 };
 
 async function mockOrders(page: Page) {

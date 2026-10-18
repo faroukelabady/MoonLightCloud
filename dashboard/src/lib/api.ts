@@ -835,7 +835,7 @@ export interface ReleaseView {
 	build_commit: string;
 	min_installed_sequence: number;
 	key_id: string;
-	status: 'ACTIVE' | 'REVOKED';
+	status: 'active' | 'revoked';
 	imported_by: string;
 	imported_at: string;
 	status_changed_by: string;
@@ -848,12 +848,12 @@ export interface RolloutView {
 	release_id: string;
 	release_version: string;
 	release_sequence: number;
-	scope: 'DEVICE' | 'STORE' | 'ALL';
+	scope: 'device' | 'store' | 'all';
 	store_id?: string;
 	device_id?: string;
-	mode: 'OPTIONAL' | 'MANDATORY';
+	mode: 'optional' | 'mandatory';
 	percentage: number;
-	status: 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+	status: 'draft' | 'active' | 'paused' | 'completed' | 'cancelled';
 	not_before?: string;
 	target_count: number;
 	created_by: string;
@@ -905,10 +905,10 @@ export interface FleetDeviceRow {
 
 export interface CreateRolloutRequest {
 	release_id: string;
-	scope: 'DEVICE' | 'STORE' | 'ALL';
+	scope: 'device' | 'store' | 'all';
 	store_id?: string;
 	device_id?: string;
-	mode: 'OPTIONAL' | 'MANDATORY';
+	mode: 'optional' | 'mandatory';
 	percentage: number;
 	not_before?: string;
 }
@@ -924,7 +924,7 @@ export const updatesApi = {
 	releases: (s?: AbortSignal) => get<{ releases: ReleaseView[] }>('/api/v1/dashboard/releases', s),
 	importRelease: (envelope: string, artifactURLs: Record<string, string>) =>
 		postJson<ReleaseView>('/api/v1/dashboard/releases', { envelope, artifact_urls: artifactURLs }),
-	setReleaseStatus: (id: string, status: 'ACTIVE' | 'REVOKED') =>
+	setReleaseStatus: (id: string, status: 'active' | 'revoked') =>
 		postJson<ReleaseView>(`/api/v1/dashboard/releases/${encodeURIComponent(id)}/status`, { status }),
 	rollouts: (storeID: string, cursor?: string, s?: AbortSignal) =>
 		get<{ rollouts: RolloutView[]; next_cursor: string }>(`/api/v1/dashboard/rollouts${q({ store_id: storeID, cursor })}`, s),
@@ -948,37 +948,37 @@ export function updateStateLabel(state: string | undefined): string {
 		case undefined:
 		case '':
 			return 'غير مستهدف / Not targeted';
-		case 'NOT_SELECTED':
+		case 'not_selected':
 			return 'خارج المرحلة الحالية / Not in current stage';
-		case 'PENDING':
+		case 'pending':
 			return 'بانتظار التسليم / Pending';
-		case 'DELIVERED':
+		case 'delivered':
 			return 'تم التسليم / Delivered';
-		case 'DOWNLOADING':
+		case 'downloading':
 			return 'جارٍ التنزيل / Downloading';
-		case 'VERIFIED':
+		case 'verified':
 			return 'تم التحقق / Verified';
-		case 'WAITING_SAFE_BOUNDARY':
+		case 'waiting_safe_boundary':
 			return 'بانتظار نقطة آمنة / Waiting for safe boundary';
-		case 'INSTALLING':
+		case 'installing':
 			return 'جارٍ التثبيت / Installing';
-		case 'AWAITING_HEALTH':
+		case 'awaiting_health':
 			return 'فحص التشغيل / Checking health';
-		case 'SUCCEEDED':
+		case 'succeeded':
 			return 'تم التحديث / Succeeded';
-		case 'ALREADY_COMPLIANT':
+		case 'already_compliant':
 			return 'محدَّث مسبقًا / Already compliant';
-		case 'FAILED':
+		case 'failed':
 			return 'فشل / Failed';
-		case 'ROLLED_BACK':
+		case 'rolled_back':
 			return 'تم التراجع / Rolled back';
-		case 'MANUAL_ACTION_REQUIRED':
+		case 'manual_action_required':
 			return 'يتطلب تدخلًا يدويًا / Manual action required';
-		case 'SKIPPED_NEWER':
+		case 'skipped_newer':
 			return 'إصدار أحدث مثبت / Skipped (newer installed)';
-		case 'UNSUPPORTED':
+		case 'unsupported':
 			return 'غير مدعوم / Unsupported';
-		case 'CANCELLED':
+		case 'cancelled':
 			return 'أُلغي / Cancelled';
 		default:
 			return state;
@@ -1007,13 +1007,13 @@ export function previewEnvelope(text: string): { version: string; sequence: numb
 // Every response carrying a session also carries the CSRF token, kept in
 // memory only. Nothing here is persisted in browser storage.
 
-export type AuthStage = 'MFA_PENDING' | 'MFA_SETUP' | 'FULL';
+export type AuthStage = 'mfa_pending' | 'mfa_setup' | 'full';
 
 export interface Me {
 	authenticated: boolean;
 	stage: AuthStage;
 	csrf_token: string;
-	user: { id: string; login: string; display_name: string; role: 'OWNER' | 'ADMIN'; mfa_enabled: boolean };
+	user: { id: string; login: string; display_name: string; role: 'owner' | 'admin'; mfa_enabled: boolean };
 	permissions: string[];
 	all_stores: boolean;
 	store_ids: string[];
@@ -1030,8 +1030,8 @@ export interface UserView {
 	id: string;
 	login: string;
 	display_name: string;
-	role: 'OWNER' | 'ADMIN';
-	status: 'PENDING_SETUP' | 'ACTIVE' | 'DISABLED';
+	role: 'owner' | 'admin';
+	status: 'pending_setup' | 'active' | 'disabled';
 	all_stores: boolean;
 	store_ids: string[];
 	mfa_enabled: boolean;
@@ -1076,7 +1076,7 @@ export type UserAction = 'activation' | 'role' | 'status' | 'memberships' | 'mfa
 export const usersApi = {
 	list: (after = '', s?: AbortSignal) =>
 		get<{ users: UserView[]; next_cursor: string }>(`/api/v1/dashboard/users${after ? `?after=${encodeURIComponent(after)}` : ''}`, s),
-	create: (req: { login: string; display_name: string; role: 'OWNER' | 'ADMIN'; all_stores: boolean; store_ids: string[] }) =>
+	create: (req: { login: string; display_name: string; role: 'owner' | 'admin'; all_stores: boolean; store_ids: string[] }) =>
 		postJson<{ user: UserView; activation_token: string }>('/api/v1/dashboard/users', req),
 	action: <T = UserView>(id: string, action: UserAction, body: Record<string, unknown> = {}) =>
 		postJson<T>(`/api/v1/dashboard/users/${encodeURIComponent(id)}/${action}`, body),

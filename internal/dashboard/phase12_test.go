@@ -45,11 +45,11 @@ func analyticsRequest() report.Request {
 // visible only in the breakdown.
 func TestOrderAnalyticsStatusAndCurrencyRules(t *testing.T) {
 	repo := &stubAnalyticsRepo{orders: []OrderAnalyticsRowRaw{
-		{ProviderKey: "shopify-main", CanonicalStatus: "COMPLETED", Currency: "EGP", Orders: 2, ValueMinor: 100},
-		{ProviderKey: "shopify-main", CanonicalStatus: "CANCELLED", Currency: "EGP", Orders: 1, ValueMinor: 500},
-		{ProviderKey: "shopify-main", CanonicalStatus: "REFUNDED", Currency: "EGP", Orders: 1, ValueMinor: 700},
-		{ProviderKey: "woo-main", CanonicalStatus: "PROCESSING", Currency: "EGP", Orders: 1, ValueMinor: 300},
-		{ProviderKey: "woo-main", CanonicalStatus: "PENDING", Currency: "USD", Orders: 1, ValueMinor: 900},
+		{ProviderKey: "shopify-main", CanonicalStatus: "completed", Currency: "EGP", Orders: 2, ValueMinor: 100},
+		{ProviderKey: "shopify-main", CanonicalStatus: "cancelled", Currency: "EGP", Orders: 1, ValueMinor: 500},
+		{ProviderKey: "shopify-main", CanonicalStatus: "refunded", Currency: "EGP", Orders: 1, ValueMinor: 700},
+		{ProviderKey: "woo-main", CanonicalStatus: "processing", Currency: "EGP", Orders: 1, ValueMinor: 300},
+		{ProviderKey: "woo-main", CanonicalStatus: "pending", Currency: "USD", Orders: 1, ValueMinor: 900},
 	}}
 	svc := NewService(report.NewService(repo, clock.System{}, time.UTC), repo, nil, clock.System{})
 	out, err := svc.OrderAnalytics(context.Background(), analyticsRequest(), "")
@@ -90,7 +90,7 @@ func TestOrderAnalyticsStatusAndCurrencyRules(t *testing.T) {
 	for _, s := range out.StatusCounts {
 		statuses[s.CanonicalStatus] = s.Orders
 	}
-	if statuses["CANCELLED"] != 1 || statuses["REFUNDED"] != 1 || statuses["COMPLETED"] != 2 {
+	if statuses["cancelled"] != 1 || statuses["refunded"] != 1 || statuses["completed"] != 2 {
 		t.Fatalf("status breakdown: %v", statuses)
 	}
 	// Providers never merge into one flag.

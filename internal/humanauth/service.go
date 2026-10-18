@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
@@ -205,7 +206,7 @@ func (s *Service) Login(ctx context.Context, login, password, clientIP string) (
 		return LoginResult{}, err
 	}
 	s.audit(ctx, AuditEvent{OccurredAt: now, ActorUserID: user.ID, TargetUserID: user.ID, Action: "auth.login",
-		Outcome: "success", Reason: "PRIMARY_" + string(stage), ClientIP: boundedIP(clientIP)})
+		Outcome: "success", Reason: "PRIMARY_" + strings.ToUpper(string(stage)), ClientIP: boundedIP(clientIP)})
 	return LoginResult{Session: issued, UserID: user.ID}, nil
 }
 

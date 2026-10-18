@@ -15,7 +15,7 @@ Cloud schema is 18 (migration 00018 enforces the pending/lease
 invariant; see below). Migrations 00009–00017 are frozen.
 
 Disabled (default): device-control poll/accept/status routes are 404; the
-dashboard device list still reads (all `NEVER_SEEN` until enabled).
+dashboard device list still reads (all `never_seen` until enabled).
 
 ## Enable Retail polling
 
@@ -39,9 +39,9 @@ accepted/running/terminal contact preserves it, and it stays NULL until
 the first poll. Dashboards derive connectivity from `last_seen_at` only;
 `last_poll_at` is auxiliary poll history.
 
-- `NEVER_SEEN`: no successful control contact ever.
-- `ONLINE`: contact within `DEVICE_ONLINE_WINDOW`.
-- `OFFLINE`: previously seen, window elapsed.
+- `never_seen`: no successful control contact ever.
+- `online`: contact within `DEVICE_ONLINE_WINDOW`.
+- `offline`: previously seen, window elapsed.
 
 ONLINE means the Cloud control plane heard from the Retail application
 recently. It does NOT prove the PC is healthy, data is current, or every

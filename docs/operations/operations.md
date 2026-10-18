@@ -130,7 +130,7 @@ incident arms exactly one `DEVICE_RECONNECT_SYNC` action (deterministic
 key `ops-reconnect-sync:<incident>`). The worker queues one canonical
 `sync_now.v1` through Phase 7C: an existing active command satisfies the
 action instead (manual/auto races converge, never duplicate). First-ever
-contacts (`NEVER_SEEN`) never heal. If the auto command later fails, a
+contacts (`never_seen`) never heal. If the auto command later fails, a
 normal `DEVICE_SYNC_FAILED` incident opens and the chain stops — no
 recursion, no repeated commands. Revocation before recovery runs blocks
 the action.

@@ -92,7 +92,7 @@ func pagingFixture(count int) []orders.OrderSummary {
 		items = append(items, orders.OrderSummary{
 			ProviderKey: "website", ExternalOrderID: fmt.Sprintf("07%03d", i),
 			OrderNumber: fmt.Sprintf("07%03d", i), ProviderStatus: "processing",
-			CanonicalStatus: "PROCESSING", Currency: "EGP", TotalMinor: "68000",
+			CanonicalStatus: "processing", Currency: "EGP", TotalMinor: "68000",
 			CreatedAt:    time.Date(2026, 9, 27, 12, 0, count-i, 0, time.UTC).Format(time.RFC3339),
 			ModifiedAt:   "2026-09-27T12:00:00Z",
 			CustomerName: "A B", MappingComplete: true,
@@ -189,11 +189,11 @@ func TestOrderCursorCodec(t *testing.T) {
 	}
 	storeA := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	storeB := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	token, err := encodeOrderCursor(cursor, "website", "PROCESSING", storeA)
+	token, err := encodeOrderCursor(cursor, "website", "processing", storeA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeOrderCursor(token, "website", "PROCESSING", storeA)
+	decoded, err := decodeOrderCursor(token, "website", "processing", storeA)
 	if err != nil {
 		t.Fatalf("round-trip: %v", err)
 	}
@@ -202,27 +202,27 @@ func TestOrderCursorCodec(t *testing.T) {
 	}
 	// Store-scope matrix: same scope valid, every cross-scope rejected.
 	for name, filters := range map[string][3]string{
-		"other provider": {"other", "PROCESSING", storeA},
-		"other status":   {"website", "PENDING", storeA},
-		"other store":    {"website", "PROCESSING", storeB},
-		"store to all":   {"website", "PROCESSING", ""},
+		"other provider": {"other", "processing", storeA},
+		"other status":   {"website", "pending", storeA},
+		"other store":    {"website", "processing", storeB},
+		"store to all":   {"website", "processing", ""},
 	} {
 		if _, err := decodeOrderCursor(token, filters[0], filters[1], filters[2]); err == nil {
 			t.Fatalf("%s must fail", name)
 		}
 	}
 	// All-scope tokens reject Store-scoped use and vice versa.
-	global, err := encodeOrderCursor(cursor, "website", "PROCESSING", "")
+	global, err := encodeOrderCursor(cursor, "website", "processing", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := decodeOrderCursor(global, "website", "PROCESSING", ""); err != nil {
+	if _, err := decodeOrderCursor(global, "website", "processing", ""); err != nil {
 		t.Fatalf("global round-trip: %v", err)
 	}
-	if _, err := decodeOrderCursor(global, "website", "PROCESSING", storeA); err == nil {
+	if _, err := decodeOrderCursor(global, "website", "processing", storeA); err == nil {
 		t.Fatal("global under store must fail")
 	}
-	if _, err := decodeOrderCursor(token, "website", "PROCESSING", ""); err == nil {
+	if _, err := decodeOrderCursor(token, "website", "processing", ""); err == nil {
 		t.Fatal("store under global must fail")
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(token)

@@ -156,7 +156,7 @@ automatic retry — human assessment, then a NEW notification).
 
 Accepted means Telegram accepted `sendMessage`. It is recorded as
 delivery `ACCEPTED` at most: MoonLight never fabricates
-`DELIVERED`/`READ` — Telegram supplies no delivery callbacks in this
+`delivered`/`READ` — Telegram supplies no delivery callbacks in this
 phase. `message_id` 0 (ephemeral/unsendable) cannot prove durable
 uniqueness and ambiguates. A `migrate_to_chat_id` response blocks
 with a stable operator-action code and never rewrites the

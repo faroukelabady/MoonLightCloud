@@ -29,9 +29,9 @@ const (
 
 // Derived connectivity (never stored as a mutable flag).
 const (
-	ConnectivityNeverSeen = "NEVER_SEEN"
-	ConnectivityOnline    = "ONLINE"
-	ConnectivityOffline   = "OFFLINE"
+	ConnectivityNeverSeen = "never_seen"
+	ConnectivityOnline    = "online"
+	ConnectivityOffline   = "offline"
 )
 
 // Bounded machine result codes. Cloud never accepts free-form text.

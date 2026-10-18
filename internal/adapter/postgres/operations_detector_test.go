@@ -296,7 +296,7 @@ func TestDetectorReports(t *testing.T) {
 	sched := ids.System{}.New()
 	run := ids.System{}.New()
 	if _, err := env.pool.Exec(ctx, `INSERT INTO business_report_schedules (id, name, report_kind, timezone, local_time, enabled, revision, next_run_local_date, next_run_at, created_at, updated_at)
-		VALUES ($1, 'ops-test', 'DAILY', 'Africa/Cairo', '08:00', TRUE, 1, CURRENT_DATE, now(), now(), now())`, mustOpsUUID(t, sched)); err != nil {
+		VALUES ($1, 'ops-test', 'daily', 'Africa/Cairo', '08:00', TRUE, 1, CURRENT_DATE, now(), now(), now())`, mustOpsUUID(t, sched)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.pool.Exec(ctx, `INSERT INTO business_report_runs (id, schedule_id, run_kind, slot_local_date, scheduled_for, period_start, period_end, schedule_revision, status, created_at, updated_at)
@@ -355,7 +355,7 @@ func opsSeedNotification(t *testing.T, env *opsDetectorEnv, key, status string, 
 	if _, err := env.pool.Exec(context.Background(), `INSERT INTO notification_messages
 		(id, provider_key, idempotency_key, semantic_fingerprint, recipient, template_key, locale,
 		 ext_template_name, ext_language_code, dispatch_status, delivery_status)
-		VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', $3, 'ar', 'ext', 'ar', $4, 'UNKNOWN')`,
+		VALUES ($1, 'whatsapp-main', $2, '\x01', '201012345678', $3, 'ar', 'ext', 'ar', $4, 'unknown')`,
 		mustOpsUUID(t, id), idem, tpl, status); err != nil {
 		t.Fatal(err)
 	}

@@ -29,9 +29,9 @@ const online: OrderAnalyticsResponse = {
 	generated_at: '2026-10-03T00:00:00Z',
 	store_id: null,
 	provider_key: '',
-	active_statuses: ['PENDING', 'PROCESSING', 'ON_HOLD', 'COMPLETED'],
+	active_statuses: ['pending', 'processing', 'on_hold', 'completed'],
 	currency_totals: [{ currency: 'EGP', orders: 1, value_minor: '100', active_orders: 1, active_value_minor: '100' }],
-	status_counts: [{ canonical_status: 'CANCELLED', orders: 1 }],
+	status_counts: [{ canonical_status: 'cancelled', orders: 1 }],
 	provider_totals: [{ provider_key: 'shopify-main', currency: 'EGP', orders: 1, value_minor: '100' }]
 };
 
@@ -68,7 +68,7 @@ describe('Phase12 widgets', () => {
 		expect(text).toMatch(/Online Orders/);
 		expect(text).toMatch(/may not represent additional recognized revenue beyond finalized Retail Sales/i);
 		// Cancelled orders stay visible in the status breakdown.
-		expect(text).toMatch(/CANCELLED/);
+		expect(text).toMatch(/cancelled/);
 	});
 
 	it('CatalogHealthCard is diagnostic-only and shows stable reason codes', () => {

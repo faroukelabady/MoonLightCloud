@@ -151,8 +151,8 @@ func TestUpdateRoutesAuthorizationBoundary(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal([]byte(body), &rel)
-	code, body = h.do("POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": rel.ID, "scope": "STORE", "store_id": storeA,
-		"mode": "MANDATORY", "percentage": 100}, map[string]string{"Origin": h.srv.URL}, h.client)
+	code, body = h.do("POST", "/api/v1/dashboard/rollouts", map[string]any{"release_id": rel.ID, "scope": "store", "store_id": storeA,
+		"mode": "mandatory", "percentage": 100}, map[string]string{"Origin": h.srv.URL}, h.client)
 	if code != 201 {
 		t.Fatalf("rollout %d %s", code, body)
 	}
@@ -164,7 +164,7 @@ func TestUpdateRoutesAuthorizationBoundary(t *testing.T) {
 		t.Fatalf("start %d %s", code, body)
 	}
 	status := map[string]any{"version": "1.0.0", "build_commit": strings.Repeat("a", 40), "release_sequence": 10, "os": "linux", "arch": "amd64",
-		"updater_protocol": 1, "updater_capable": true, "update_state": "IDLE"}
+		"updater_protocol": 1, "updater_capable": true, "update_state": "idle"}
 	for _, d := range []auth.Provisioned{devA, devB} {
 		if code, body := h.do("POST", "/api/v1/device-control/update/status", status, bearer(d), nil); code != 200 {
 			t.Fatalf("status %d %s", code, body)
@@ -196,7 +196,7 @@ func TestUpdateRoutesAuthorizationBoundary(t *testing.T) {
 	if !bytes.Equal([]byte(poll.Command.Envelope), env) {
 		t.Fatal("Cloud must relay the exact signed envelope bytes")
 	}
-	report := map[string]any{"state": "DOWNLOADING", "retryable": false, "release_sequence": 11}
+	report := map[string]any{"state": "downloading", "retryable": false, "release_sequence": 11}
 	if code, _ := h.do("POST", "/api/v1/device-control/update/targets/"+poll.Command.TargetID+"/report", report, bearer(devB), nil); code != 404 {
 		t.Fatalf("foreign device result accepted: %d", code)
 	}
@@ -223,7 +223,7 @@ func TestDeviceRolloutSelectedStoreAuthorization(t *testing.T) {
 	storeA, storeB := uuid.NewString(), uuid.NewString()
 	devA := h.bound("device-rollout-a", storeA)
 	devB := h.bound("device-rollout-b", storeB)
-	admin := h.owner.createUser(h.srv, "rollout-admin.test", "ADMIN", false, storeA)
+	admin := h.owner.createUser(h.srv, "rollout-admin.test", "admin", false, storeA)
 	m := release.Manifest{ReleaseSequence: 11, Version: "1.1.0", BuildCommit: strings.Repeat("b", 40),
 		Artifacts: []release.Artifact{{OS: "linux", Arch: "amd64", Package: "tar.gz", FileName: "r.tar.gz", Size: 10, SHA256: strings.Repeat("c", 64)}}}
 	env, _, err := release.Sign(m, h.priv)
@@ -238,8 +238,8 @@ func TestDeviceRolloutSelectedStoreAuthorization(t *testing.T) {
 	}
 	releaseID := body["id"].(string)
 	request := func(store, device string) map[string]any {
-		return map[string]any{"release_id": releaseID, "scope": "DEVICE", "store_id": store,
-			"device_id": device, "mode": "OPTIONAL", "percentage": 100}
+		return map[string]any{"release_id": releaseID, "scope": "device", "store_id": store,
+			"device_id": device, "mode": "optional", "percentage": 100}
 	}
 	code, body = admin.do("POST", "/api/v1/dashboard/rollouts", request(storeA, devA.Device.ID))
 	if code != http.StatusCreated {

@@ -1227,7 +1227,7 @@ type OrderAnalytics struct {
 // "active operational value" metrics. Cancelled/deleted/refunded/failed/
 // unknown orders are excluded from active value but always visible in the
 // status breakdown — no single invented "sales" number.
-var ActiveOrderStatuses = []string{"PENDING", "PROCESSING", "ON_HOLD", "COMPLETED"}
+var ActiveOrderStatuses = []string{"pending", "processing", "on_hold", "completed"}
 
 func activeOrderStatus(status string) bool {
 	for _, s := range ActiveOrderStatuses {

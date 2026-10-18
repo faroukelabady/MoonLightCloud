@@ -380,7 +380,7 @@ func TestRunCommerceSyncOrderSuccess(t *testing.T) {
 	output := out.String()
 	for _, want := range []string{
 		"provider=website", "order=700", "revision=1", "changed=true",
-		"status=PROCESSING", "mapping_complete=true", "unmapped_lines=0", "deleted=false",
+		"status=processing", "mapping_complete=true", "unmapped_lines=0", "deleted=false",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q: %q", want, output)

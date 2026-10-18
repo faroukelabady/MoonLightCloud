@@ -485,7 +485,7 @@ CREATE TABLE commerce_online_orders (
     order_number       TEXT NOT NULL DEFAULT '' CHECK (char_length(order_number) <= 64),
     provider_status    TEXT NOT NULL DEFAULT '' CHECK (char_length(provider_status) <= 32),
     canonical_status   TEXT NOT NULL CHECK (canonical_status IN
-        ('PENDING', 'PROCESSING', 'ON_HOLD', 'COMPLETED', 'CANCELLED', 'REFUNDED', 'FAILED', 'UNKNOWN', 'DELETED')),
+        ('pending', 'processing', 'on_hold', 'completed', 'cancelled', 'refunded', 'failed', 'unknown', 'deleted')),
     currency           TEXT NOT NULL DEFAULT '' CHECK (char_length(currency) <= 8),
     discount_minor     BIGINT NOT NULL,
     shipping_minor     BIGINT NOT NULL,
@@ -559,7 +559,7 @@ CREATE TABLE commerce_online_order_status_history (
     order_revision     BIGINT NOT NULL CHECK (order_revision >= 1),
     provider_status    TEXT NOT NULL DEFAULT '' CHECK (char_length(provider_status) <= 32),
     canonical_status   TEXT NOT NULL CHECK (canonical_status IN
-        ('PENDING', 'PROCESSING', 'ON_HOLD', 'COMPLETED', 'CANCELLED', 'REFUNDED', 'FAILED', 'UNKNOWN', 'DELETED')),
+        ('pending', 'processing', 'on_hold', 'completed', 'cancelled', 'refunded', 'failed', 'unknown', 'deleted')),
     provider_modified_at TIMESTAMPTZ,
     observed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (provider_key, external_order_id, order_revision)
@@ -635,8 +635,8 @@ CREATE TABLE notification_messages (
     lease_generation       BIGINT NOT NULL DEFAULT 0 CHECK (lease_generation >= 0),
     send_started_at        TIMESTAMPTZ,
     provider_message_id    TEXT CHECK (provider_message_id IS NULL OR char_length(provider_message_id) BETWEEN 1 AND 256),
-    delivery_status        TEXT NOT NULL DEFAULT 'UNKNOWN'
-                           CHECK (delivery_status IN ('UNKNOWN', 'ACCEPTED', 'SENT', 'DELIVERED', 'READ', 'FAILED')),
+    delivery_status        TEXT NOT NULL DEFAULT 'unknown'
+                           CHECK (delivery_status IN ('unknown', 'accepted', 'sent', 'delivered', 'read', 'failed')),
     delivery_status_at     TIMESTAMPTZ,
     last_error_code        TEXT,
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -653,7 +653,7 @@ CREATE TABLE notification_delivery_status_history (
     provider_message_id  TEXT NOT NULL,
     provider_status_raw  TEXT NOT NULL CHECK (char_length(provider_status_raw) BETWEEN 1 AND 64),
     canonical_status     TEXT NOT NULL
-                         CHECK (canonical_status IN ('UNKNOWN', 'ACCEPTED', 'SENT', 'DELIVERED', 'READ', 'FAILED')),
+                         CHECK (canonical_status IN ('unknown', 'accepted', 'sent', 'delivered', 'read', 'failed')),
     provider_timestamp   TIMESTAMPTZ,
     event_fingerprint    BYTEA NOT NULL,
     provider_error_code  TEXT CHECK (provider_error_code IS NULL OR char_length(provider_error_code) BETWEEN 1 AND 64),
@@ -692,7 +692,7 @@ CREATE INDEX idx_notification_recipients_purpose ON notification_recipients (pur
 CREATE TABLE business_report_schedules (
     id                  UUID PRIMARY KEY,
     name                TEXT NOT NULL UNIQUE CHECK (char_length(name) BETWEEN 1 AND 64),
-    report_kind         TEXT NOT NULL CHECK (report_kind IN ('DAILY', 'TEN_DAY')),
+    report_kind         TEXT NOT NULL CHECK (report_kind IN ('daily', 'ten_day')),
     timezone            TEXT NOT NULL CHECK (timezone = 'Africa/Cairo'),
     local_time          TEXT NOT NULL CHECK (local_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
     anchor_local_date   DATE,
@@ -702,8 +702,8 @@ CREATE TABLE business_report_schedules (
     next_run_at         TIMESTAMPTZ NOT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((report_kind = 'TEN_DAY' AND anchor_local_date IS NOT NULL) OR
-           (report_kind = 'DAILY'))
+    CHECK ((report_kind = 'ten_day' AND anchor_local_date IS NOT NULL) OR
+           (report_kind = 'daily'))
 );
 CREATE INDEX idx_report_schedules_due ON business_report_schedules (enabled, next_run_at);
 
@@ -1399,7 +1399,7 @@ CREATE TABLE catalog_admin_commands (
     payload_hash TEXT NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
     expected_revision BIGINT NOT NULL CHECK (expected_revision >= 0),
     actor TEXT NOT NULL CHECK (char_length(actor) BETWEEN 1 AND 128),
-    status TEXT NOT NULL CHECK (status IN ('PENDING','CANCELLED')) DEFAULT 'PENDING',
+    status TEXT NOT NULL CHECK (status IN ('pending','cancelled')) DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -1407,7 +1407,7 @@ CREATE TABLE catalog_admin_command_targets (
     id UUID PRIMARY KEY,
     command_id UUID NOT NULL REFERENCES catalog_admin_commands(id) ON DELETE RESTRICT,
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE RESTRICT,
-    status TEXT NOT NULL CHECK (status IN ('PENDING','DELIVERED','APPLIED','CONFLICT','REJECTED','BLOCKED_CAPABILITY','SKIPPED_REVOKED','CANCELLED')),
+    status TEXT NOT NULL CHECK (status IN ('pending','delivered','applied','conflict','rejected','blocked_capability','skipped_revoked','cancelled')),
     result_code TEXT CHECK (result_code IS NULL OR result_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
     entity_id TEXT NOT NULL DEFAULT '',
     pre_revision BIGINT NOT NULL DEFAULT 0,
@@ -1429,7 +1429,7 @@ CREATE TABLE device_capabilities (
 );
 CREATE INDEX idx_catalog_admin_commands_store ON catalog_admin_commands(store_id, created_at DESC, id);
 CREATE INDEX idx_catalog_admin_commands_entity ON catalog_admin_commands(store_id, entity_id, created_at DESC);
-CREATE INDEX idx_catalog_admin_targets_device ON catalog_admin_command_targets(device_id, status, created_at, id) WHERE status IN ('PENDING','DELIVERED');
+CREATE INDEX idx_catalog_admin_targets_device ON catalog_admin_command_targets(device_id, status, created_at, id) WHERE status IN ('pending','delivered');
 CREATE INDEX idx_catalog_admin_targets_command ON catalog_admin_command_targets(command_id);
 
 -- ==== 00033_product_variants ====
@@ -1840,7 +1840,7 @@ CREATE TABLE releases (
     min_installed_sequence BIGINT NOT NULL CHECK (min_installed_sequence >= 0 AND min_installed_sequence < release_sequence),
     key_id TEXT NOT NULL CHECK (key_id ~ '^[0-9a-f]{16}$'),
     envelope TEXT NOT NULL CHECK (char_length(envelope) BETWEEN 1 AND 65536),
-    status TEXT NOT NULL CHECK (status IN ('ACTIVE','REVOKED')),
+    status TEXT NOT NULL CHECK (status IN ('active','revoked')),
     imported_by TEXT NOT NULL CHECK (char_length(imported_by) BETWEEN 1 AND 128),
     imported_at TIMESTAMPTZ NOT NULL,
     status_changed_by TEXT NOT NULL CHECK (char_length(status_changed_by) BETWEEN 1 AND 128),
@@ -1892,20 +1892,20 @@ CREATE TRIGGER release_artifacts_immutable BEFORE UPDATE OR DELETE ON release_ar
 CREATE TABLE update_rollouts (
     id UUID PRIMARY KEY,
     release_id UUID NOT NULL REFERENCES releases(id) ON DELETE RESTRICT,
-    scope TEXT NOT NULL CHECK (scope IN ('DEVICE','STORE','ALL')),
+    scope TEXT NOT NULL CHECK (scope IN ('device','store','all')),
     store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
     device_id UUID REFERENCES devices(id) ON DELETE RESTRICT,
-    mode TEXT NOT NULL CHECK (mode IN ('OPTIONAL','MANDATORY')),
+    mode TEXT NOT NULL CHECK (mode IN ('optional','mandatory')),
     percentage INT NOT NULL CHECK (percentage BETWEEN 1 AND 100),
-    status TEXT NOT NULL CHECK (status IN ('DRAFT','ACTIVE','PAUSED','COMPLETED','CANCELLED')),
+    status TEXT NOT NULL CHECK (status IN ('draft','active','paused','completed','cancelled')),
     not_before TIMESTAMPTZ,
     target_count INT NOT NULL CHECK (target_count >= 0),
     created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 128),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    CHECK ((scope = 'DEVICE' AND device_id IS NOT NULL AND store_id IS NOT NULL)
-        OR (scope = 'STORE' AND store_id IS NOT NULL AND device_id IS NULL)
-        OR (scope = 'ALL' AND store_id IS NULL AND device_id IS NULL))
+    CHECK ((scope = 'device' AND device_id IS NOT NULL AND store_id IS NOT NULL)
+        OR (scope = 'store' AND store_id IS NOT NULL AND device_id IS NULL)
+        OR (scope = 'all' AND store_id IS NULL AND device_id IS NULL))
 );
 CREATE INDEX idx_update_rollouts_created ON update_rollouts (created_at DESC, id DESC);
 
@@ -1918,9 +1918,9 @@ CREATE TABLE update_rollout_targets (
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE RESTRICT,
     store_id UUID NOT NULL REFERENCES stores(id) ON DELETE RESTRICT,
     bucket INT NOT NULL CHECK (bucket BETWEEN 0 AND 99),
-    state TEXT NOT NULL CHECK (state IN ('NOT_SELECTED','PENDING','DELIVERED','DOWNLOADING','VERIFIED',
-        'WAITING_SAFE_BOUNDARY','INSTALLING','AWAITING_HEALTH','SUCCEEDED','ALREADY_COMPLIANT','FAILED',
-        'ROLLED_BACK','MANUAL_ACTION_REQUIRED','SKIPPED_NEWER','UNSUPPORTED','CANCELLED')),
+    state TEXT NOT NULL CHECK (state IN ('not_selected','pending','delivered','downloading','verified',
+        'waiting_safe_boundary','installing','awaiting_health','succeeded','already_compliant','failed',
+        'rolled_back','manual_action_required','skipped_newer','unsupported','cancelled')),
     attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     next_attempt_at TIMESTAMPTZ,
     last_error TEXT CHECK (last_error IS NULL OR last_error ~ '^[A-Z][A-Z0-9_]{0,63}$'),
@@ -1932,7 +1932,7 @@ CREATE TABLE update_rollout_targets (
     UNIQUE (rollout_id, device_id)
 );
 CREATE INDEX idx_update_targets_device_open ON update_rollout_targets (device_id, next_attempt_at)
-    WHERE state IN ('PENDING','DELIVERED');
+    WHERE state IN ('pending','delivered');
 CREATE INDEX idx_update_targets_rollout ON update_rollout_targets (rollout_id, store_id, device_id);
 
 -- Trusted per-device version/updater report (authenticated device only).
@@ -1946,7 +1946,7 @@ CREATE TABLE device_update_status (
     updater_protocol INT NOT NULL CHECK (updater_protocol BETWEEN 0 AND 100),
     updater_capable BOOLEAN NOT NULL,
     unsupported_reason TEXT CHECK (unsupported_reason IS NULL OR unsupported_reason ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    update_state TEXT NOT NULL CHECK (update_state ~ '^[A-Z][A-Z_]{0,63}$'),
+    update_state TEXT NOT NULL CHECK (update_state ~ '^[a-z][a-z_]{0,63}$'),
     update_error TEXT CHECK (update_error IS NULL OR update_error ~ '^[A-Z][A-Z0-9_]{0,63}$'),
     reported_at TIMESTAMPTZ NOT NULL
 );
@@ -1956,7 +1956,7 @@ CREATE TABLE update_target_events (
     id BIGSERIAL PRIMARY KEY,
     target_id UUID NOT NULL REFERENCES update_rollout_targets(id) ON DELETE RESTRICT,
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE RESTRICT,
-    reported_state TEXT NOT NULL CHECK (reported_state ~ '^[A-Z][A-Z_]{0,63}$'),
+    reported_state TEXT NOT NULL CHECK (reported_state ~ '^[a-z][a-z_]{0,63}$'),
     target_state TEXT NOT NULL,
     error_code TEXT CHECK (error_code IS NULL OR error_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
     retryable BOOLEAN NOT NULL,
@@ -2002,8 +2002,8 @@ CREATE TABLE admin_users (
     login TEXT NOT NULL UNIQUE
         CHECK (login = lower(login) AND char_length(login) BETWEEN 3 AND 254 AND login ~ '^[a-z0-9][a-z0-9._@+-]*$'),
     display_name TEXT NOT NULL CHECK (char_length(btrim(display_name)) BETWEEN 1 AND 100),
-    role TEXT NOT NULL CHECK (role IN ('OWNER', 'ADMIN')),
-    status TEXT NOT NULL CHECK (status IN ('PENDING_SETUP', 'ACTIVE', 'DISABLED')),
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin')),
+    status TEXT NOT NULL CHECK (status IN ('pending_setup', 'active', 'disabled')),
     -- Access to every Store (present and future) instead of explicit
     -- memberships. Restricted users list their Stores below.
     all_stores BOOLEAN NOT NULL DEFAULT false,
@@ -2015,7 +2015,7 @@ CREATE TABLE admin_users (
     created_by UUID REFERENCES admin_users(id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    CHECK (status = 'PENDING_SETUP' OR password_hash IS NOT NULL)
+    CHECK (status = 'pending_setup' OR password_hash IS NOT NULL)
 );
 
 -- First-owner bootstrap happens exactly once in the life of a database:
@@ -2072,7 +2072,7 @@ CREATE TABLE admin_sessions (
     token_hash BYTEA NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32),
     csrf_hash BYTEA NOT NULL CHECK (octet_length(csrf_hash) = 32),
     user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
-    stage TEXT NOT NULL CHECK (stage IN ('MFA_PENDING', 'MFA_SETUP', 'FULL')),
+    stage TEXT NOT NULL CHECK (stage IN ('mfa_pending', 'mfa_setup', 'full')),
     security_version BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     last_seen_at TIMESTAMPTZ NOT NULL,
@@ -2082,7 +2082,7 @@ CREATE TABLE admin_sessions (
     revoked_at TIMESTAMPTZ,
     revoke_reason TEXT CHECK (revoke_reason IS NULL OR revoke_reason ~ '^[a-z_]{1,32}$'),
     CHECK (absolute_expires_at > created_at),
-    CHECK (stage <> 'FULL' OR mfa_verified_at IS NOT NULL)
+    CHECK (stage <> 'full' OR mfa_verified_at IS NOT NULL)
 );
 CREATE INDEX idx_admin_sessions_user ON admin_sessions (user_id) WHERE revoked_at IS NULL;
 
@@ -2131,7 +2131,7 @@ CREATE TRIGGER auth_audit_append_only BEFORE UPDATE OR DELETE ON auth_audit_even
 CREATE FUNCTION admin_users_keep_owner() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF EXISTS (SELECT 1 FROM admin_users)
-       AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'OWNER' AND status = 'ACTIVE') THEN
+       AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'owner' AND status = 'active') THEN
         RAISE EXCEPTION 'at least one active OWNER must remain' USING ERRCODE = 'check_violation';
     END IF;
     RETURN NULL;

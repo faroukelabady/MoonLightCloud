@@ -116,12 +116,12 @@
 		}
 	}
 
-	async function setStatus(r: ReleaseView, status: 'ACTIVE' | 'REVOKED') {
-		if (status === 'REVOKED' && !confirm(`Revoke release ${r.version}? Devices that have not installed it will not receive it.`)) return;
+	async function setStatus(r: ReleaseView, status: 'active' | 'revoked') {
+		if (status === 'revoked' && !confirm(`Revoke release ${r.version}? Devices that have not installed it will not receive it.`)) return;
 		busy = true;
 		try {
 			await updatesApi.setReleaseStatus(r.id, status);
-			notice = { kind: 'ok', text: status === 'REVOKED' ? 'تم إلغاء الإصدار / Release revoked' : 'تمت إعادة التفعيل / Release reactivated' };
+			notice = { kind: 'ok', text: status === 'revoked' ? 'تم إلغاء الإصدار / Release revoked' : 'تمت إعادة التفعيل / Release reactivated' };
 			await loadReleases();
 		} catch (e) {
 			notice = { kind: 'err', text: errText(e, 'فشل التغيير / Change failed') };
@@ -134,7 +134,7 @@
 	let rollouts: RolloutView[] = $state([]);
 	let rolloutsCursor = $state('');
 	let rolloutsState = $state<'idle' | 'loading' | 'loaded' | 'error'>('idle');
-	let form = $state({ release_id: '', scope: 'STORE' as 'DEVICE' | 'STORE' | 'ALL', device_id: '', mode: 'OPTIONAL' as 'OPTIONAL' | 'MANDATORY', percentage: 10 });
+	let form = $state({ release_id: '', scope: 'store' as 'device' | 'store' | 'all', device_id: '', mode: 'optional' as 'optional' | 'mandatory', percentage: 10 });
 	let openTargets = $state<{ id: string; rows: UpdateTargetView[] } | null>(null);
 
 	async function loadRollouts(reset: boolean) {
@@ -152,10 +152,10 @@
 	}
 
 	async function createRollout() {
-		if (busy || !form.release_id || (form.scope !== 'ALL' && !store) || (form.scope === 'DEVICE' && !form.device_id.trim())) return;
+		if (busy || !form.release_id || (form.scope !== 'all' && !store) || (form.scope === 'device' && !form.device_id.trim())) return;
 		if (
-			form.mode === 'MANDATORY' &&
-			form.scope === 'ALL' &&
+			form.mode === 'mandatory' &&
+			form.scope === 'all' &&
 			!confirm('Create a MANDATORY update rollout for ALL eligible devices in every Store? Devices install it automatically at their next safe point.')
 		)
 			return;
@@ -164,8 +164,8 @@
 			const r = await updatesApi.createRollout({
 				release_id: form.release_id,
 				scope: form.scope,
-				store_id: form.scope !== 'ALL' ? store : undefined,
-				device_id: form.scope === 'DEVICE' ? form.device_id.trim() : undefined,
+				store_id: form.scope !== 'all' ? store : undefined,
+				device_id: form.scope === 'device' ? form.device_id.trim() : undefined,
 				mode: form.mode,
 				percentage: Number(form.percentage)
 			});
@@ -179,7 +179,7 @@
 	}
 
 	async function act(r: RolloutView, action: 'start' | 'pause' | 'resume' | 'cancel') {
-		if (action === 'start' && r.mode === 'MANDATORY' && !confirm(`Start MANDATORY rollout of ${r.release_version} to ${r.target_count} device(s)?`)) return;
+		if (action === 'start' && r.mode === 'mandatory' && !confirm(`Start MANDATORY rollout of ${r.release_version} to ${r.target_count} device(s)?`)) return;
 		if (action === 'cancel' && !confirm('Cancel this rollout? Devices already installing will finish or roll back safely.')) return;
 		busy = true;
 		try {
@@ -250,7 +250,7 @@
 		});
 	});
 
-	let activeReleases = $derived(releases.filter((r) => r.status === 'ACTIVE'));
+	let activeReleases = $derived(releases.filter((r) => r.status === 'active'));
 </script>
 
 <section class="updates" data-testid="updates-page">
@@ -333,10 +333,10 @@
 							<td>{r.status}</td>
 							<td>{when(r.imported_at)} · {r.imported_by}</td>
 							<td>
-								{#if r.status === 'ACTIVE'}
-									<button onclick={() => setStatus(r, 'REVOKED')} disabled={busy}>إلغاء / Revoke</button>
+								{#if r.status === 'active'}
+									<button onclick={() => setStatus(r, 'revoked')} disabled={busy}>إلغاء / Revoke</button>
 								{:else}
-									<button onclick={() => setStatus(r, 'ACTIVE')} disabled={busy}>تفعيل / Reactivate</button>
+									<button onclick={() => setStatus(r, 'active')} disabled={busy}>تفعيل / Reactivate</button>
 								{/if}
 							</td>
 						</tr>
@@ -359,28 +359,28 @@
 			<label>
 				النطاق / Scope
 				<select bind:value={form.scope} data-testid="rollout-scope">
-					<option value="STORE">المتجر المحدد / Selected Store</option>
-					<option value="DEVICE">جهاز / Device</option>
-					<option value="ALL">كل الأجهزة / All devices</option>
+					<option value="store">المتجر المحدد / Selected Store</option>
+					<option value="device">جهاز / Device</option>
+					<option value="all">كل الأجهزة / All devices</option>
 				</select>
 			</label>
-			{#if form.scope === 'DEVICE'}
+			{#if form.scope === 'device'}
 				<label>Device ID <input bind:value={form.device_id} /></label>
 			{/if}
 			<label>
 				الوضع / Mode
 				<select bind:value={form.mode}>
-					<option value="OPTIONAL">اختياري / Optional</option>
-					<option value="MANDATORY">إلزامي / Mandatory</option>
+					<option value="optional">اختياري / Optional</option>
+					<option value="mandatory">إلزامي / Mandatory</option>
 				</select>
 			</label>
 			<label>% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
-			{#if form.scope !== 'ALL' && !store}
+			{#if form.scope !== 'all' && !store}
 				<p class="muted">اختر متجرًا أولاً / Choose a Store first.</p>
 			{/if}
 			<button
 				onclick={createRollout}
-				disabled={busy || !form.release_id || (form.scope !== 'ALL' && !store) || (form.scope === 'DEVICE' && !form.device_id.trim())}
+				disabled={busy || !form.release_id || (form.scope !== 'all' && !store) || (form.scope === 'device' && !form.device_id.trim())}
 				data-testid="create-rollout">إنشاء مسودة / Create draft</button
 			>
 		</fieldset>
@@ -403,13 +403,13 @@
 								{#each Object.entries(r.counts ?? {}) as [state, n]}<span class="chip">{updateStateLabel(state)}: {n}</span>{/each}
 							</td>
 							<td class="actions">
-								{#if r.status === 'DRAFT'}<button onclick={() => act(r, 'start')} disabled={busy}>بدء / Start</button>{/if}
-								{#if r.status === 'ACTIVE'}<button onclick={() => act(r, 'pause')} disabled={busy}>إيقاف مؤقت / Pause</button>{/if}
-								{#if r.status === 'PAUSED'}<button onclick={() => act(r, 'resume')} disabled={busy}>استئناف / Resume</button>{/if}
-								{#if (r.status === 'ACTIVE' || r.status === 'PAUSED' || r.status === 'DRAFT') && r.percentage < 100}
+								{#if r.status === 'draft'}<button onclick={() => act(r, 'start')} disabled={busy}>بدء / Start</button>{/if}
+								{#if r.status === 'active'}<button onclick={() => act(r, 'pause')} disabled={busy}>إيقاف مؤقت / Pause</button>{/if}
+								{#if r.status === 'paused'}<button onclick={() => act(r, 'resume')} disabled={busy}>استئناف / Resume</button>{/if}
+								{#if (r.status === 'active' || r.status === 'paused' || r.status === 'draft') && r.percentage < 100}
 									<button onclick={() => widen(r)} disabled={busy}>توسيع / Widen</button>
 								{/if}
-								{#if r.status !== 'COMPLETED' && r.status !== 'CANCELLED'}
+								{#if r.status !== 'completed' && r.status !== 'cancelled'}
 									<button onclick={() => act(r, 'cancel')} disabled={busy}>إلغاء / Cancel</button>
 								{/if}
 								<button class="link" onclick={() => showTargets(r)}>الأجهزة / Devices</button>
