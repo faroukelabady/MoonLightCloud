@@ -14,6 +14,11 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
+func businessReportStore(env *saleEnv) BusinessReports {
+	store := catalogStore(env)
+	return NewBusinessReports(store.pool, store.timeout)
+}
+
 // reportTestService wires the business-report service over the real
 // store with a stub canonical report source and the real Phase 7A
 // enqueue service (no provider sends: the 7A dispatcher never runs).
@@ -25,7 +30,7 @@ func reportTestService(t *testing.T, env *saleEnv, source businessreports.Report
 	if err != nil {
 		panic(err)
 	}
-	return businessreports.NewService(store, store, store, store,
+	return businessreports.NewService(NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout),
 		source, notificationService, businessreports.SystemClock{}, loc,
 		5*time.Minute, 25, nilLogger())
 }
@@ -122,7 +127,7 @@ func TestReportPlannerMaterializesDue(t *testing.T) {
 	recipient := addTestRecipient(t, service, "owner")
 	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(0))
-	planner := businessreports.NewPlanner(catalogStore(env),
+	planner := businessreports.NewPlanner(businessReportStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	planner.TickForTest(context.Background())
 	runs, err := service.ListRuns(context.Background(), 10)
@@ -147,7 +152,7 @@ func TestReportPlannerMaterializesDue(t *testing.T) {
 		t.Fatalf("snapshot: %+v", delivery)
 	}
 	// Cursor advanced exactly one calendar day.
-	updated, found, err := catalogStore(env).GetSchedule(context.Background(), schedule.ID)
+	updated, found, err := businessReportStore(env).GetSchedule(context.Background(), schedule.ID)
 	if err != nil || !found || updated.NextRunLocalDate != pastSlotDate(-1) {
 		t.Fatalf("advanced: %+v %v %v", updated, found, err)
 	}
@@ -162,8 +167,8 @@ func TestReportPlannerTwoInstances(t *testing.T) {
 	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(0))
 	store := catalogStore(env)
-	plannerA := businessreports.NewPlanner(store, businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
-	plannerB := businessreports.NewPlanner(store, businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
+	plannerA := businessreports.NewPlanner(NewBusinessReports(store.pool, store.timeout), businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
+	plannerB := businessreports.NewPlanner(NewBusinessReports(store.pool, store.timeout), businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	start := make(chan struct{})
 	done := make(chan struct{}, 2)
 	for _, planner := range []*businessreports.Planner{plannerA, plannerB} {
@@ -190,7 +195,7 @@ func TestReportPlannerCatchUp(t *testing.T) {
 	recipient := addTestRecipient(t, service, "owner")
 	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(4))
-	planner := businessreports.NewPlanner(catalogStore(env),
+	planner := businessreports.NewPlanner(businessReportStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	for i := 0; i < 3; i++ {
 		planner.TickForTest(context.Background())
@@ -208,7 +213,7 @@ func TestReportPlannerCatchUp(t *testing.T) {
 			t.Fatalf("gap: %v", slots)
 		}
 	}
-	updated, _, err := catalogStore(env).GetSchedule(context.Background(), schedule.ID)
+	updated, _, err := businessReportStore(env).GetSchedule(context.Background(), schedule.ID)
 	if err != nil || updated.NextRunLocalDate != pastSlotDate(1) {
 		t.Fatalf("cursor after catch-up: %+v %v", updated, err)
 	}
@@ -225,7 +230,7 @@ func TestReportPlannerDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(0))
-	planner := businessreports.NewPlanner(catalogStore(env),
+	planner := businessreports.NewPlanner(businessReportStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	planner.TickForTest(context.Background())
 	runs, err := service.ListRuns(context.Background(), 10)
@@ -280,7 +285,7 @@ func TestReportTenDaySchedule(t *testing.T) {
 	}
 	// Backdate the cursor to the anchor slot (overdue by construction).
 	backdateSchedule(t, env, schedule.ID, anchor)
-	planner := businessreports.NewPlanner(catalogStore(env),
+	planner := businessreports.NewPlanner(businessReportStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	planner.TickForTest(context.Background())
 	runs, err := service.ListRuns(context.Background(), 10)
@@ -302,7 +307,7 @@ func TestReportTenDaySchedule(t *testing.T) {
 		detail.Deliveries[0].TemplateKey != "ten_day_business_report_v1" {
 		t.Fatalf("ten-day delivery: %+v %v", detail, err)
 	}
-	updated, _, err := catalogStore(env).GetSchedule(context.Background(), schedule.ID)
+	updated, _, err := businessReportStore(env).GetSchedule(context.Background(), schedule.ID)
 	if err != nil || updated.NextRunLocalDate != anchorPlus(anchor, 10) {
 		t.Fatalf("anchor +10: %+v %v", updated, err)
 	}
@@ -381,7 +386,7 @@ func TestReportEnableOverduePreserved(t *testing.T) {
 	recipient := addTestRecipient(t, service, "owner")
 	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	backdateSchedule(t, env, schedule.ID, pastSlotDate(3))
-	before, _, err := catalogStore(env).GetSchedule(ctx, schedule.ID)
+	before, _, err := businessReportStore(env).GetSchedule(ctx, schedule.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +398,7 @@ func TestReportEnableOverduePreserved(t *testing.T) {
 		t.Fatalf("no-op enable: %+v vs %+v", again, before)
 	}
 	// Backlog still materializes exactly.
-	planner := businessreports.NewPlanner(catalogStore(env),
+	planner := businessreports.NewPlanner(businessReportStore(env),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	planner.TickForTest(ctx)
 	runs, err := service.ListRuns(ctx, 10)
@@ -442,7 +447,7 @@ func TestReportConcurrentEnable(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("both callers succeed: %d", count)
 	}
-	final, _, err := catalogStore(env).GetSchedule(ctx, schedule.ID)
+	final, _, err := businessReportStore(env).GetSchedule(ctx, schedule.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +496,7 @@ func TestReportScheduleCreateAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetRecipientEnabled(ctx, disabled.ID, false); err != nil {
+	if err := NewBusinessReports(store.pool, store.timeout).SetRecipientEnabled(ctx, disabled.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := newSchedule("s-off", disabled.ID); err == nil {
@@ -510,7 +515,7 @@ func TestReportScheduleCreateAtomic(t *testing.T) {
 	// Concurrent planner visibility: a racing planner tick during a
 	// second creation observes either zero or one complete schedule,
 	// never a partial link set.
-	planner := businessreports.NewPlanner(store,
+	planner := businessreports.NewPlanner(NewBusinessReports(store.pool, store.timeout),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25, nilLogger())
 	planner.TickForTest(ctx)
 	if schedules, _ := counts(); schedules != 1 {
@@ -575,7 +580,7 @@ func TestReportScheduleCreateRaces(t *testing.T) {
 		}()
 		// Race the disable against validation/linking; either order
 		// is a deterministic safe outcome.
-		_ = catalogStore(env).SetRecipientEnabled(ctx, victim.ID, false)
+		_ = businessReportStore(env).SetRecipientEnabled(ctx, victim.ID, false)
 		err = <-done
 		var schedules, links int
 		if err := env.pool.QueryRow(ctx, `SELECT count(*) FROM business_report_schedules WHERE name='s-victim'`).Scan(&schedules); err != nil {
@@ -641,7 +646,7 @@ func TestReportAggregateConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimed, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}

@@ -62,7 +62,7 @@ func mapDeliveryFields(id, runID pgtype.UUID, recipientID pgtype.UUID, providerK
 // CreateManualRun inserts one manual run with its recipient snapshot
 // deliveries atomically. Same key + same semantics returns the
 // existing run; changed semantics conflict without overwriting.
-func (d Devices) CreateManualRun(ctx context.Context, run businessreports.Run, deliveries []businessreports.Delivery) (string, bool, error) {
+func (d BusinessReports) CreateManualRun(ctx context.Context, run businessreports.Run, deliveries []businessreports.Delivery) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -171,7 +171,7 @@ func insertDelivery(ctx context.Context, q *sqlcgen.Queries, runID string, deliv
 // ClaimDueSchedules lists enabled schedules due at or before now,
 // oldest first, skipping rows locked by in-flight planner
 // transactions on other instances.
-func (d Devices) ClaimDueSchedules(ctx context.Context, limit int32) ([]businessreports.Schedule, error) {
+func (d BusinessReports) ClaimDueSchedules(ctx context.Context, limit int32) ([]businessreports.Schedule, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if limit <= 0 || limit > 100 {
@@ -196,7 +196,7 @@ func (d Devices) ClaimDueSchedules(ctx context.Context, limit int32) ([]business
 // advance next_run. Run creation and advancement commit together: a
 // crash before commit leaves neither a run nor an advanced cursor,
 // and a conflict means another instance already covered the slot.
-func (d Devices) MaterializeNextSlot(ctx context.Context, scheduleID string, now time.Time, loc *time.Location) (businessreports.MaterializeOutcome, error) {
+func (d BusinessReports) MaterializeNextSlot(ctx context.Context, scheduleID string, now time.Time, loc *time.Location) (businessreports.MaterializeOutcome, error) {
 	none := businessreports.MaterializeOutcome{}
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -298,7 +298,7 @@ func (d Devices) MaterializeNextSlot(ctx context.Context, scheduleID string, now
 }
 
 // GetRun resolves one run or reports found=false.
-func (d Devices) GetRun(ctx context.Context, id string) (businessreports.Run, bool, error) {
+func (d BusinessReports) GetRun(ctx context.Context, id string) (businessreports.Run, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -319,7 +319,7 @@ func (d Devices) GetRun(ctx context.Context, id string) (businessreports.Run, bo
 }
 
 // ListRuns returns recent runs, newest first.
-func (d Devices) ListRuns(ctx context.Context, limit int32) ([]businessreports.Run, error) {
+func (d BusinessReports) ListRuns(ctx context.Context, limit int32) ([]businessreports.Run, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if limit <= 0 || limit > 100 {
@@ -340,7 +340,7 @@ func (d Devices) ListRuns(ctx context.Context, limit int32) ([]businessreports.R
 }
 
 // ListRunDeliveries returns one run's deliveries in creation order.
-func (d Devices) ListRunDeliveries(ctx context.Context, runID string) ([]businessreports.Delivery, error) {
+func (d BusinessReports) ListRunDeliveries(ctx context.Context, runID string) ([]businessreports.Delivery, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(runID)
@@ -364,7 +364,7 @@ func (d Devices) ListRunDeliveries(ctx context.Context, runID string) ([]busines
 // ClaimRun leases one due run. Row-level SKIP LOCKED keeps
 // multi-instance workers apart; the bounded lease (not a permanent
 // state) makes crashed claims eligible again.
-func (d Devices) ClaimRun(ctx context.Context, owner string, lease time.Duration, now time.Time) (businessreports.Run, bool, error) {
+func (d BusinessReports) ClaimRun(ctx context.Context, owner string, lease time.Duration, now time.Time) (businessreports.Run, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	leaseUntil := pgtype.Timestamptz{Time: now.Add(lease).UTC(), Valid: true}
@@ -384,7 +384,7 @@ func (d Devices) ClaimRun(ctx context.Context, owner string, lease time.Duration
 }
 
 // FinishRunCompleted records full enqueue convergence.
-func (d Devices) FinishRunCompleted(ctx context.Context, id, owner string, generation int64) (businessreports.RunFinish, error) {
+func (d BusinessReports) FinishRunCompleted(ctx context.Context, id, owner string, generation int64) (businessreports.RunFinish, error) {
 	return d.fencedRunFinish(ctx, id, owner, generation, "complete",
 		func(q *sqlcgen.Queries) (int64, error) {
 			return q.FinishRunCompleted(ctx, sqlcgen.FinishRunCompletedParams{
@@ -394,7 +394,7 @@ func (d Devices) FinishRunCompleted(ctx context.Context, id, owner string, gener
 }
 
 // FinishRunRetry records a temporary failure with backoff metadata.
-func (d Devices) FinishRunRetry(ctx context.Context, id, owner string, generation int64, next time.Time, code string) (businessreports.RunFinish, error) {
+func (d BusinessReports) FinishRunRetry(ctx context.Context, id, owner string, generation int64, next time.Time, code string) (businessreports.RunFinish, error) {
 	return d.fencedRunFinish(ctx, id, owner, generation, "retry",
 		func(q *sqlcgen.Queries) (int64, error) {
 			return q.FinishRunRetry(ctx, sqlcgen.FinishRunRetryParams{
@@ -405,7 +405,7 @@ func (d Devices) FinishRunRetry(ctx context.Context, id, owner string, generatio
 }
 
 // FinishRunBlocked records a terminal run outcome.
-func (d Devices) FinishRunBlocked(ctx context.Context, id, owner string, generation int64, code string) (businessreports.RunFinish, error) {
+func (d BusinessReports) FinishRunBlocked(ctx context.Context, id, owner string, generation int64, code string) (businessreports.RunFinish, error) {
 	return d.fencedRunFinish(ctx, id, owner, generation, "block",
 		func(q *sqlcgen.Queries) (int64, error) {
 			return q.FinishRunBlocked(ctx, sqlcgen.FinishRunBlockedParams{
@@ -417,7 +417,7 @@ func (d Devices) FinishRunBlocked(ctx context.Context, id, owner string, generat
 
 // fencedRunFinish runs one fenced terminal transition against a
 // non-terminal run. Stale claims affect zero rows: safe no-op.
-func (d Devices) fencedRunFinish(ctx context.Context, id, owner string, generation int64, op string,
+func (d BusinessReports) fencedRunFinish(ctx context.Context, id, owner string, generation int64, op string,
 	exec func(q *sqlcgen.Queries) (int64, error)) (businessreports.RunFinish, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -444,7 +444,7 @@ func (d Devices) fencedRunFinish(ctx context.Context, id, owner string, generati
 // Commit explicitly. Time-based lease validity is enforced by the
 // guarded UPDATE itself using clock_timestamp(), which evaluates
 // after lock acquisition rather than at transaction start.
-func (d Devices) lockRunForDeliveryMutation(ctx context.Context, runID, owner string, generation int64) (context.Context, context.CancelFunc, pgx.Tx, error) {
+func (d BusinessReports) lockRunForDeliveryMutation(ctx context.Context, runID, owner string, generation int64) (context.Context, context.CancelFunc, pgx.Tx, error) {
 	ctx, cancel := d.ctx(ctx)
 	run, err := parseUUID(runID)
 	if err != nil {
@@ -478,7 +478,7 @@ func (d Devices) lockRunForDeliveryMutation(ctx context.Context, runID, owner st
 // map it to a stale/false result, never an error.
 var errStaleRunLease = errors.New("stale run lease")
 
-func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID, owner string, generation int64, body string, fingerprint []byte) (bool, error) {
+func (d BusinessReports) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID, owner string, generation int64, body string, fingerprint []byte) (bool, error) {
 	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
 	if err != nil {
 		if errors.Is(err, errStaleRunLease) {
@@ -524,7 +524,7 @@ func (d Devices) PersistDeliverySnapshot(ctx context.Context, runID, deliveryID,
 // transition requires pending status plus the current run lease
 // (owner, generation, unexpired) on a non-terminal run: stale owners
 // affect zero rows and must treat that as no convergence.
-func (d Devices) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, owner string, generation int64, notificationID string) (bool, error) {
+func (d BusinessReports) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, owner string, generation int64, notificationID string) (bool, error) {
 	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
 	if err != nil {
 		if errors.Is(err, errStaleRunLease) {
@@ -570,7 +570,7 @@ func (d Devices) FinishDeliveryEnqueued(ctx context.Context, runID, deliveryID, 
 // FinishDeliveryBlocked marks one delivery permanently un-sendable.
 // Same run-lease fencing as enqueued finishes: stale owners affect
 // zero rows.
-func (d Devices) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, owner string, generation int64, code string) (bool, error) {
+func (d BusinessReports) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, owner string, generation int64, code string) (bool, error) {
 	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
 	if err != nil {
 		if errors.Is(err, errStaleRunLease) {
@@ -616,7 +616,7 @@ func (d Devices) FinishDeliveryBlocked(ctx context.Context, runID, deliveryID, o
 // body (partial pre-existing state), the whole barrier rolls back and
 // reports incomplete: the runner blocks the run instead of mixing
 // canonical bases.
-func (d Devices) PersistRunDeliverySnapshots(ctx context.Context, runID, owner string, generation int64, snapshots map[string]businessreports.SnapshotBody) (bool, error) {
+func (d BusinessReports) PersistRunDeliverySnapshots(ctx context.Context, runID, owner string, generation int64, snapshots map[string]businessreports.SnapshotBody) (bool, error) {
 	ctx, cancel, tx, err := d.lockRunForDeliveryMutation(ctx, runID, owner, generation)
 	if err != nil {
 		if errors.Is(err, errStaleRunLease) {

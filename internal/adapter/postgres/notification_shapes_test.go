@@ -16,7 +16,7 @@ func TestNotificationRecipientPurposeIsolation(t *testing.T) {
 	ctx := context.Background()
 	d := NewDevices(pool, 5*time.Second)
 	reportID, alertID := uuid.NewString(), uuid.NewString()
-	if err := d.CreateRecipient(ctx, reportID, "report", "telegram-main", "@report", "en", true); err != nil {
+	if err := NewBusinessReports(d.pool, d.timeout).CreateRecipient(ctx, reportID, "report", "telegram-main", "@report", "en", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.CreateOpsRecipient(ctx, alertID, "alert", "telegram-main", "@alert", "en", time.Now()); err != nil {
@@ -26,7 +26,7 @@ func TestNotificationRecipientPurposeIsolation(t *testing.T) {
 	if err != nil || len(alerts) != 1 || alerts[0].ID != alertID {
 		t.Fatalf("alert recipients: %+v %v", alerts, err)
 	}
-	if _, found, err := d.GetRecipient(ctx, alertID); err != nil || found {
+	if _, found, err := NewBusinessReports(d.pool, d.timeout).GetRecipient(ctx, alertID); err != nil || found {
 		t.Fatalf("an alert recipient must not read as a business-report recipient: found=%v %v", found, err)
 	}
 

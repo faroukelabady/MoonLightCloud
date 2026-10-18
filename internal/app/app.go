@@ -287,14 +287,15 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			return nil, err
 		}
 		notificationService := notifications.NewService(notificationStore, notificationStore, log)
-		a.ReportService = businessreports.NewService(store, store, store, store,
+		reportStore := postgres.NewBusinessReports(pool, cfg.DBQueryTimeout)
+		a.ReportService = businessreports.NewService(reportStore, reportStore, reportStore, reportStore,
 			a.Reports, notificationService,
 			businessreports.SystemClock{}, loc,
 			cfg.BusinessReports.LeaseDuration, cfg.BusinessReports.BatchSize, log)
-		a.ReportPlanner = businessreports.NewPlanner(store,
+		a.ReportPlanner = businessreports.NewPlanner(reportStore,
 			businessreports.SystemClock{}, loc,
 			cfg.BusinessReports.PollInterval, cfg.BusinessReports.BatchSize, log)
-		a.ReportRunner = businessreports.NewRunner(store, store, a.Reports, notificationService,
+		a.ReportRunner = businessreports.NewRunner(reportStore, reportStore, a.Reports, notificationService,
 			businessreports.SystemClock{}, loc, cfg.BusinessReports.PollInterval, 25,
 			commerceOwner(), cfg.BusinessReports.LeaseDuration, log)
 	}

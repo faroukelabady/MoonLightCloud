@@ -30,7 +30,7 @@ func testRunnerNoSeed(t *testing.T, env *saleEnv, source businessreports.ReportS
 
 func makeRunner(t *testing.T, env *saleEnv, store Devices, source businessreports.ReportSource) *businessreports.Runner {
 	t.Helper()
-	return businessreports.NewRunner(store, store, source,
+	return businessreports.NewRunner(NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), source,
 		notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger()),
 		businessreports.SystemClock{}, mustCairo(), time.Minute, 25,
 		"worker-A", 5*time.Minute, nilLogger())
@@ -129,7 +129,7 @@ func TestReportRunnerManualIdempotency(t *testing.T) {
 	other := addTestRecipient(t, service, "second")
 	_ = other
 	// Disable the only recipient: semantics change → conflict.
-	if err := catalogStore(env).SetRecipientEnabled(context.Background(), recipient.ID, false); err != nil {
+	if err := businessReportStore(env).SetRecipientEnabled(context.Background(), recipient.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := service.RunNow(context.Background(), schedule.ID, "manual-001"); err == nil {
@@ -238,7 +238,7 @@ func TestReportRunnerStaleFencing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok || claimedA.ID != runID {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -252,7 +252,7 @@ func TestReportRunnerStaleFencing(t *testing.T) {
 	if err != nil || detail.Run.Status != businessreports.RunCompleted {
 		t.Fatalf("B completes: %+v %v", detail.Run, err)
 	}
-	result, err := store.FinishRunRetry(ctx, runID,
+	result, err := NewBusinessReports(store.pool, store.timeout).FinishRunRetry(ctx, runID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, time.Now().UTC().Add(time.Minute), "x")
 	if err != nil || result != businessreports.RunFinishStale {
 		t.Fatalf("stale: %v %v", result, err)
@@ -318,7 +318,7 @@ func TestReportRunnerCrashAfterEnqueue(t *testing.T) {
 	}
 	delivery := detail.Deliveries[0]
 	// Recompute the exact crashed payload deterministically.
-	run, found, err := store.GetRun(ctx, runID)
+	run, found, err := NewBusinessReports(store.pool, store.timeout).GetRun(ctx, runID)
 	if err != nil || !found {
 		t.Fatalf("run: %v %v", found, err)
 	}
@@ -412,7 +412,7 @@ func TestReportRecipientSnapshotImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Disable + relocale the recipient before processing.
-	if err := store.SetRecipientEnabled(ctx, recipient.ID, false); err != nil {
+	if err := NewBusinessReports(store.pool, store.timeout).SetRecipientEnabled(ctx, recipient.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	drainRunner(t, testRunner(t, env, &stubReportSummary{summary: cannedSummary()}))
@@ -441,7 +441,7 @@ func TestReportRunnerBlockedPaths(t *testing.T) {
 	recipient := addTestRecipient(t, service, "owner")
 	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
 	t.Run("no recipients", func(t *testing.T) {
-		if err := catalogStore(env).SetRecipientEnabled(ctx, recipient.ID, false); err != nil {
+		if err := businessReportStore(env).SetRecipientEnabled(ctx, recipient.ID, false); err != nil {
 			t.Fatal(err)
 		}
 		runID, _, err := service.RunNow(ctx, schedule.ID, "manual-norecip")
@@ -456,7 +456,7 @@ func TestReportRunnerBlockedPaths(t *testing.T) {
 		if detail.Run.Status != businessreports.RunBlocked || detail.Run.LastErrorCode != businessreports.CodeNoRecipients {
 			t.Fatalf("blocked no recipients: %+v", detail.Run)
 		}
-		if err := catalogStore(env).SetRecipientEnabled(ctx, recipient.ID, true); err != nil {
+		if err := businessReportStore(env).SetRecipientEnabled(ctx, recipient.ID, true); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -561,7 +561,7 @@ func TestReportRunnerLogPrivacy(t *testing.T) {
 	store := catalogStore(env)
 	loc := mustCairo()
 	notificationService := notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), logger)
-	reportService := businessreports.NewService(store, store, store, store,
+	reportService := businessreports.NewService(NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout),
 		&stubReportSummary{summary: cannedSummary()}, notificationService,
 		businessreports.SystemClock{}, loc, 5*time.Minute, 25, logger)
 	recipient, err := reportService.AddRecipient(ctx, "owner", "whatsapp-main", "201012345678", "ar")
@@ -577,7 +577,7 @@ func TestReportRunnerLogPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := businessreports.NewRunner(store, store, &stubReportSummary{summary: cannedSummary()},
+	runner := businessreports.NewRunner(NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), &stubReportSummary{summary: cannedSummary()},
 		notificationService, businessreports.SystemClock{}, loc,
 		time.Minute, 25, "worker-A", 5*time.Minute, logger)
 	runner.DrainForTest(ctx)
@@ -616,7 +616,7 @@ func TestReportLateDataInterleaving(t *testing.T) {
 	}
 	// Phase 1: barrier snapshots both deliveries from S1 (direct store
 	// calls mirror the runner barrier exactly).
-	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimed, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
@@ -634,7 +634,7 @@ func TestReportLateDataInterleaving(t *testing.T) {
 		}
 		snapshots[delivery.ID] = businessreports.SnapshotBody{Body: body, Fingerprint: fp[:]}
 	}
-	persisted, err := store.PersistRunDeliverySnapshots(ctx, runID,
+	persisted, err := NewBusinessReports(store.pool, store.timeout).PersistRunDeliverySnapshots(ctx, runID,
 		claimed.LeaseOwner, claimed.LeaseGeneration, snapshots)
 	if err != nil || !persisted {
 		t.Fatalf("barrier: %v %v", persisted, err)
@@ -655,7 +655,7 @@ func TestReportLateDataInterleaving(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := store.FinishDeliveryEnqueued(ctx, runID, arabicID,
+	if ok, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryEnqueued(ctx, runID, arabicID,
 		claimed.LeaseOwner, claimed.LeaseGeneration, res.ID); err != nil || !ok {
 		t.Fatalf("A finish: %v %v", ok, err)
 	}
@@ -708,7 +708,7 @@ func TestDeliveryStaleWritesFenced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -717,7 +717,7 @@ func TestDeliveryStaleWritesFenced(t *testing.T) {
 		mustReportPgID(runID)); err != nil {
 		t.Fatal(err)
 	}
-	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	claimedB, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim B: %v %v", ok, err)
 	}
@@ -730,20 +730,20 @@ func TestDeliveryStaleWritesFenced(t *testing.T) {
 	}
 	deliveryID := detail.Deliveries[0].ID
 	// Stale snapshot persist.
-	ok, err = store.PersistRunDeliverySnapshots(ctx, runID,
+	ok, err = NewBusinessReports(store.pool, store.timeout).PersistRunDeliverySnapshots(ctx, runID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration,
 		map[string]businessreports.SnapshotBody{deliveryID: {Body: "x", Fingerprint: []byte{1}}})
 	if err != nil || ok {
 		t.Fatalf("stale snapshot: %v %v", ok, err)
 	}
 	// Stale blocked write.
-	applied, err := store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, deliveryID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, "x")
 	if err != nil || applied {
 		t.Fatalf("stale blocked: %v %v", applied, err)
 	}
 	// Stale enqueued write.
-	applied, err = store.FinishDeliveryEnqueued(ctx, runID, deliveryID,
+	applied, err = NewBusinessReports(store.pool, store.timeout).FinishDeliveryEnqueued(ctx, runID, deliveryID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, "00000000-0000-4000-8000-000000000000")
 	if err != nil || applied {
 		t.Fatalf("stale enqueued: %v %v", applied, err)
@@ -754,7 +754,7 @@ func TestDeliveryStaleWritesFenced(t *testing.T) {
 		mustReportPgID(runID)); err != nil {
 		t.Fatal(err)
 	}
-	applied, err = store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+	applied, err = NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, deliveryID,
 		claimedB.LeaseOwner, claimedB.LeaseGeneration, "x")
 	if err != nil || applied {
 		t.Fatalf("expired lease blocked: %v %v", applied, err)
@@ -776,7 +776,7 @@ func TestDeliveryMappingRepairRace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -792,7 +792,7 @@ func TestDeliveryMappingRepairRace(t *testing.T) {
 	// Mapping repaired; B claims (generation advances past A), then
 	// releases so the drain converges under a fresh claim.
 	seedReportTemplateMapping(t, env)
-	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	claimedB, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim B: %v %v", ok, err)
 	}
@@ -808,7 +808,7 @@ func TestDeliveryMappingRepairRace(t *testing.T) {
 	if err != nil || len(detail.Deliveries) != 1 {
 		t.Fatalf("one delivery: %+v %v", detail, err)
 	}
-	applied, err := store.FinishDeliveryBlocked(ctx, runID, detail.Deliveries[0].ID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, detail.Deliveries[0].ID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, businessreports.CodeNotificationMappingMissing)
 	if err != nil || applied {
 		t.Fatalf("stale blocked loses: %v %v", applied, err)

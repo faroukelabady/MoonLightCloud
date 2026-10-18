@@ -131,7 +131,7 @@ func TestDeliveryFencingExpiredSnapshot(t *testing.T) {
 	scheduleID := fencingSchedule(t, env, service, 2)
 	seedReportTemplateMapping(t, env)
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-a")
-	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimed, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
@@ -141,7 +141,7 @@ func TestDeliveryFencingExpiredSnapshot(t *testing.T) {
 	for _, id := range deliveryIDs {
 		snapshots[id] = businessreports.SnapshotBody{Body: "x", Fingerprint: []byte{1}}
 	}
-	applied, err := store.PersistRunDeliverySnapshots(ctx, runID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).PersistRunDeliverySnapshots(ctx, runID,
 		claimed.LeaseOwner, claimed.LeaseGeneration, snapshots)
 	if err != nil {
 		t.Fatalf("stale persist must not error: %v", err)
@@ -169,19 +169,19 @@ func TestDeliveryFencingSupersededSnapshot(t *testing.T) {
 	scheduleID := fencingSchedule(t, env, service, 1)
 	seedReportTemplateMapping(t, env)
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-b")
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
 	expireRunLease(t, env, runID)
-	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	claimedB, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim B: %v %v", ok, err)
 	}
 	if claimedB.LeaseGeneration != claimedA.LeaseGeneration+1 {
 		t.Fatalf("generation advanced: %+v %+v", claimedA, claimedB)
 	}
-	applied, err := store.PersistRunDeliverySnapshots(ctx, runID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).PersistRunDeliverySnapshots(ctx, runID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration,
 		map[string]businessreports.SnapshotBody{deliveryIDs[0]: {Body: "stale", Fingerprint: []byte{9}}})
 	if err != nil {
@@ -207,18 +207,18 @@ func TestDeliveryFencingSnapshotRollback(t *testing.T) {
 	scheduleID := fencingSchedule(t, env, service, 2)
 	seedReportTemplateMapping(t, env)
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-c")
-	claimed, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimed, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
 	// Pre-existing body on the second delivery (legacy partial state).
-	pre, err := store.PersistDeliverySnapshot(ctx, runID, deliveryIDs[1],
+	pre, err := NewBusinessReports(store.pool, store.timeout).PersistDeliverySnapshot(ctx, runID, deliveryIDs[1],
 		claimed.LeaseOwner, claimed.LeaseGeneration, "original", []byte{2})
 	if err != nil || !pre {
 		t.Fatalf("pre-persist: %v %v", pre, err)
 	}
 	// Barrier over both deliveries must fail atomically.
-	applied, err := store.PersistRunDeliverySnapshots(ctx, runID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).PersistRunDeliverySnapshots(ctx, runID,
 		claimed.LeaseOwner, claimed.LeaseGeneration,
 		map[string]businessreports.SnapshotBody{
 			deliveryIDs[0]: {Body: "new-a", Fingerprint: []byte{1}},
@@ -261,7 +261,7 @@ func TestDeliveryFencingDelayedBlocked(t *testing.T) {
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-d")
 	deliveryID := deliveryIDs[0]
 	claimTime := time.Now().UTC()
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 2*time.Second, claimTime)
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 2*time.Second, claimTime)
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -282,7 +282,7 @@ func TestDeliveryFencingDelayedBlocked(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		applied, err := store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+		applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, deliveryID,
 			claimedA.LeaseOwner, claimedA.LeaseGeneration, "BLOCKED_FOR_TEST")
 		done <- outcome{applied, err}
 	}()
@@ -308,11 +308,11 @@ func TestDeliveryFencingDelayedBlocked(t *testing.T) {
 		t.Fatalf("delivery still pending: %q %v", status, err)
 	}
 	// B claims the next generation and finishes normally.
-	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	claimedB, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok || claimedB.LeaseGeneration != claimedA.LeaseGeneration+1 {
 		t.Fatalf("claim B: %v %v %+v", ok, err, claimedB)
 	}
-	applied, err := store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, deliveryID,
 		claimedB.LeaseOwner, claimedB.LeaseGeneration, "BLOCKED_FOR_TEST")
 	if err != nil || !applied {
 		t.Fatalf("current owner applies: %v %v", applied, err)
@@ -331,7 +331,7 @@ func TestDeliveryFencingDelayedEnqueued(t *testing.T) {
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-e")
 	deliveryID := deliveryIDs[0]
 	claimTime := time.Now().UTC()
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 2*time.Second, claimTime)
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 2*time.Second, claimTime)
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -352,7 +352,7 @@ func TestDeliveryFencingDelayedEnqueued(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		applied, err := store.FinishDeliveryEnqueued(ctx, runID, deliveryID,
+		applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryEnqueued(ctx, runID, deliveryID,
 			claimedA.LeaseOwner, claimedA.LeaseGeneration, wamid)
 		done <- outcome{applied, err}
 	}()
@@ -391,7 +391,7 @@ func TestDeliveryFencingParentLockExpiry(t *testing.T) {
 	seedReportTemplateMapping(t, env)
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-f")
 	deliveryID := deliveryIDs[0]
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 1500*time.Millisecond, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 1500*time.Millisecond, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -413,7 +413,7 @@ func TestDeliveryFencingParentLockExpiry(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		applied, err := store.FinishDeliveryBlocked(ctx, runID, deliveryID,
+		applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryBlocked(ctx, runID, deliveryID,
 			claimedA.LeaseOwner, claimedA.LeaseGeneration, "BLOCKED_FOR_TEST")
 		done <- outcome{applied, err}
 	}()
@@ -454,7 +454,7 @@ func TestDeliveryFencingAdoptionAfterLeaseLoss(t *testing.T) {
 	scheduleID := fencingSchedule(t, env, service, 1)
 	runID, deliveryIDs := fencingFixture(t, env, service, scheduleID, "manual-g")
 	deliveryID := deliveryIDs[0]
-	claimedA, ok, err := store.ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
+	claimedA, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-A", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim A: %v %v", ok, err)
 	}
@@ -474,12 +474,12 @@ func TestDeliveryFencingAdoptionAfterLeaseLoss(t *testing.T) {
 	}
 	// A loses the lease before storing notification_id.
 	expireRunLease(t, env, runID)
-	claimedB, ok, err := store.ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
+	claimedB, ok, err := NewBusinessReports(store.pool, store.timeout).ClaimRun(ctx, "worker-B", 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok || claimedB.LeaseGeneration != claimedA.LeaseGeneration+1 {
 		t.Fatalf("claim B: %v %v %+v", ok, err, claimedB)
 	}
 	// A's late store attempt affects zero rows.
-	applied, err := store.FinishDeliveryEnqueued(ctx, runID, deliveryID,
+	applied, err := NewBusinessReports(store.pool, store.timeout).FinishDeliveryEnqueued(ctx, runID, deliveryID,
 		claimedA.LeaseOwner, claimedA.LeaseGeneration, first.ID)
 	if err != nil {
 		t.Fatalf("stale store must not error: %v", err)
@@ -499,7 +499,7 @@ func TestDeliveryFencingAdoptionAfterLeaseLoss(t *testing.T) {
 	if second.ID != first.ID {
 		t.Fatalf("same notification adopted: %q vs %q", second.ID, first.ID)
 	}
-	applied, err = store.FinishDeliveryEnqueued(ctx, runID, deliveryID,
+	applied, err = NewBusinessReports(store.pool, store.timeout).FinishDeliveryEnqueued(ctx, runID, deliveryID,
 		claimedB.LeaseOwner, claimedB.LeaseGeneration, second.ID)
 	if err != nil || !applied {
 		t.Fatalf("B stores under gen2: %v %v", applied, err)

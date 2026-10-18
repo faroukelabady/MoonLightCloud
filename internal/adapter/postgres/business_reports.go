@@ -8,6 +8,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
@@ -15,9 +16,28 @@ import (
 )
 
 // Scheduled business-report recipients, schedules, runs, and
-// deliveries live on Devices (shared pool + timeouts). They are
+// deliveries live on BusinessReports (shared pool + timeouts). They are
 // Cloud-only durable business state: no catalog/policy/inventory/
 // order/sale rebuild path touches these tables.
+
+type BusinessReports struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ businessreports.RecipientStore = BusinessReports{}
+var _ businessreports.ScheduleStore = BusinessReports{}
+var _ businessreports.SchedulePlannerStore = BusinessReports{}
+var _ businessreports.RunStore = BusinessReports{}
+
+// NewBusinessReports shares the application's pool without owning its lifecycle.
+func NewBusinessReports(pool *pgxpool.Pool, timeout time.Duration) BusinessReports {
+	return BusinessReports{pool: pool, timeout: timeout}
+}
+
+func (d BusinessReports) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 func businessReportID() pgtype.UUID {
 	id, err := parseUUID(ids.System{}.New())
@@ -43,7 +63,7 @@ func businessReportDateString(date pgtype.Date) string {
 }
 
 // CreateRecipient stores one enabled report destination.
-func (d Devices) CreateRecipient(ctx context.Context, id, label, providerKey, recipient, locale string, enabled bool) error {
+func (d BusinessReports) CreateRecipient(ctx context.Context, id, label, providerKey, recipient, locale string, enabled bool) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -63,7 +83,7 @@ func (d Devices) CreateRecipient(ctx context.Context, id, label, providerKey, re
 }
 
 // GetRecipient resolves one recipient or reports found=false.
-func (d Devices) GetRecipient(ctx context.Context, id string) (businessreports.Recipient, bool, error) {
+func (d BusinessReports) GetRecipient(ctx context.Context, id string) (businessreports.Recipient, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -84,7 +104,7 @@ func (d Devices) GetRecipient(ctx context.Context, id string) (businessreports.R
 }
 
 // ListRecipients returns configured destinations in creation order.
-func (d Devices) ListRecipients(ctx context.Context) ([]businessreports.Recipient, error) {
+func (d BusinessReports) ListRecipients(ctx context.Context) ([]businessreports.Recipient, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListRecipients(ctx)
@@ -103,7 +123,7 @@ func (d Devices) ListRecipients(ctx context.Context) ([]businessreports.Recipien
 
 // SetRecipientEnabled toggles one destination. Materialized runs keep
 // their snapshots; only future runs observe the change.
-func (d Devices) SetRecipientEnabled(ctx context.Context, id string, enabled bool) error {
+func (d BusinessReports) SetRecipientEnabled(ctx context.Context, id string, enabled bool) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -135,7 +155,7 @@ func mapScheduleFields(id pgtype.UUID, name, kind, timezone, localTime string, a
 
 // CreateSchedule stores one cadence. The schedule row type name below
 // follows sqlc generation for business_report_schedules.
-func (d Devices) CreateSchedule(ctx context.Context, schedule businessreports.Schedule) error {
+func (d BusinessReports) CreateSchedule(ctx context.Context, schedule businessreports.Schedule) error {
 	return d.CreateScheduleWithRecipients(ctx, schedule, nil)
 }
 
@@ -144,7 +164,7 @@ func (d Devices) CreateSchedule(ctx context.Context, schedule businessreports.Sc
 // any failure rolls back schedule, links, and the unique name claim.
 // Recipient rows are locked so a concurrent disable commits to one
 // deterministic outcome.
-func (d Devices) CreateScheduleWithRecipients(ctx context.Context, schedule businessreports.Schedule, recipientIDs []string) error {
+func (d BusinessReports) CreateScheduleWithRecipients(ctx context.Context, schedule businessreports.Schedule, recipientIDs []string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(schedule.ID)
@@ -215,7 +235,7 @@ func (d Devices) CreateScheduleWithRecipients(ctx context.Context, schedule busi
 }
 
 // GetSchedule resolves one schedule or reports found=false.
-func (d Devices) GetSchedule(ctx context.Context, id string) (businessreports.Schedule, bool, error) {
+func (d BusinessReports) GetSchedule(ctx context.Context, id string) (businessreports.Schedule, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -235,7 +255,7 @@ func (d Devices) GetSchedule(ctx context.Context, id string) (businessreports.Sc
 }
 
 // ListSchedules returns configured cadences in creation order.
-func (d Devices) ListSchedules(ctx context.Context) ([]businessreports.Schedule, error) {
+func (d BusinessReports) ListSchedules(ctx context.Context) ([]businessreports.Schedule, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListSchedules(ctx)
@@ -254,7 +274,7 @@ func (d Devices) ListSchedules(ctx context.Context) ([]businessreports.Schedule,
 // UpdateScheduleEnablement flips one schedule with a revision bump and
 // an explicitly computed next slot. Disabling keeps the cursor (never
 // due while disabled); enabling positions the first future slot.
-func (d Devices) UpdateScheduleEnablement(ctx context.Context, id string, enabled bool, revision int64, nextDate string, nextAt time.Time) error {
+func (d BusinessReports) UpdateScheduleEnablement(ctx context.Context, id string, enabled bool, revision int64, nextDate string, nextAt time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -277,7 +297,7 @@ func (d Devices) UpdateScheduleEnablement(ctx context.Context, id string, enable
 // EnableScheduleIfDisabled performs the disabled→enabled transition
 // atomically: exactly one concurrent caller wins; losers re-read the
 // winner's state. Returns applied=false when already enabled.
-func (d Devices) EnableScheduleIfDisabled(ctx context.Context, id string, nextDate string, nextAt time.Time) (businessreports.Schedule, bool, error) {
+func (d BusinessReports) EnableScheduleIfDisabled(ctx context.Context, id string, nextDate string, nextAt time.Time) (businessreports.Schedule, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(id)
@@ -304,7 +324,7 @@ func (d Devices) EnableScheduleIfDisabled(ctx context.Context, id string, nextDa
 
 // LinkScheduleRecipient attaches one recipient to a schedule.
 // Idempotent: duplicates are no-ops, never errors.
-func (d Devices) LinkScheduleRecipient(ctx context.Context, scheduleID, recipientID string) error {
+func (d BusinessReports) LinkScheduleRecipient(ctx context.Context, scheduleID, recipientID string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	schedule, err := parseUUID(scheduleID)
@@ -324,7 +344,7 @@ func (d Devices) LinkScheduleRecipient(ctx context.Context, scheduleID, recipien
 }
 
 // ListScheduleRecipients returns linked recipients in creation order.
-func (d Devices) ListScheduleRecipients(ctx context.Context, scheduleID string) ([]businessreports.Recipient, error) {
+func (d BusinessReports) ListScheduleRecipients(ctx context.Context, scheduleID string) ([]businessreports.Recipient, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	parsed, err := parseUUID(scheduleID)
