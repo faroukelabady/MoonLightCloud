@@ -135,5 +135,9 @@ on all money-bearing documents.
   `mode` and command target statuses). They keep their spelling; codes
   (currencies, channel, rule/reason/result codes) stay UPPER by design; new
   value sets use lowercase, and no set mixes cases.
-- Remaining model steps are tracked in the paired Retail baseline plan;
-  this checkpoint does not claim that the whole plan is complete.
+- Phase 3: `00108_baseline.sql` is the final baseline (TargetVersion 108);
+  `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
+  constraints, indexes, views, functions, triggers) and
+  `TestSchemaMatchesReviewedTarget` fails on any drift.
+- Every model step in the paired Retail baseline plan is done except the
+  enum-casing confirmation noted under step 2f.
