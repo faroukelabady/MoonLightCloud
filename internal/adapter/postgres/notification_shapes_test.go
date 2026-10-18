@@ -19,10 +19,10 @@ func TestNotificationRecipientPurposeIsolation(t *testing.T) {
 	if err := NewBusinessReports(d.pool, d.timeout).CreateRecipient(ctx, reportID, "report", "telegram-main", "@report", "en", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateOpsRecipient(ctx, alertID, "alert", "telegram-main", "@alert", "en", time.Now()); err != nil {
+	if _, err := NewOperations(d.pool, d.timeout).CreateOpsRecipient(ctx, alertID, "alert", "telegram-main", "@alert", "en", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	alerts, err := d.ListOpsRecipients(ctx)
+	alerts, err := NewOperations(d.pool, d.timeout).ListOpsRecipients(ctx)
 	if err != nil || len(alerts) != 1 || alerts[0].ID != alertID {
 		t.Fatalf("alert recipients: %+v %v", alerts, err)
 	}

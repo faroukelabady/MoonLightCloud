@@ -127,7 +127,7 @@ func markResolvedFlag(ctx context.Context, q *sqlcgen.Queries, id pgtype.UUID, a
 
 // OpenStatefulAtomic opens (or adopts) the stateful incident and
 // materializes its opened-event deliveries in one transaction.
-func (d Devices) OpenStatefulAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, episode int, deliveries []operations.Delivery, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) OpenStatefulAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, episode int, deliveries []operations.Delivery, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -188,7 +188,7 @@ func (d Devices) OpenStatefulAtomic(ctx context.Context, id, rule, subjectType, 
 
 // OpenEventAtomic opens (or adopts) the terminal-event incident and
 // materializes its opened-event deliveries in one transaction.
-func (d Devices) OpenEventAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, deliveries []operations.Delivery, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) OpenEventAtomic(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, deliveries []operations.Delivery, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -244,7 +244,7 @@ func (d Devices) OpenEventAtomic(ctx context.Context, id, rule, subjectType, sub
 	return incident, true, nil
 }
 
-func (d Devices) adoptActiveTx(ctx context.Context, q *sqlcgen.Queries, rule, subjectType, subjectID string) (operations.Incident, bool, error) {
+func (d Operations) adoptActiveTx(ctx context.Context, q *sqlcgen.Queries, rule, subjectType, subjectID string) (operations.Incident, bool, error) {
 	row, err := q.GetActiveIncident(ctx, sqlcgen.GetActiveIncidentParams{
 		RuleKey: rule, SubjectType: subjectType, SubjectID: subjectID,
 	})
@@ -257,7 +257,7 @@ func (d Devices) adoptActiveTx(ctx context.Context, q *sqlcgen.Queries, rule, su
 	return toOpsIncident(row), true, nil
 }
 
-func (d Devices) adoptEventTx(ctx context.Context, q *sqlcgen.Queries, sourceKey string) (operations.Incident, bool, error) {
+func (d Operations) adoptEventTx(ctx context.Context, q *sqlcgen.Queries, sourceKey string) (operations.Incident, bool, error) {
 	row, err := q.GetIncidentByEventKey(ctx, pgText(sourceKey))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -272,7 +272,7 @@ func (d Devices) adoptEventTx(ctx context.Context, q *sqlcgen.Queries, sourceKey
 // resolved-event deliveries plus an optional reconnect recovery in one
 // transaction. Only the committing scanner gets won=true; losers create
 // nothing and must not proceed to metrics or further work.
-func (d Devices) ResolveAtomic(ctx context.Context, id, code string, deliveries []operations.Delivery, recovery *operations.RecoveryIntent, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) ResolveAtomic(ctx context.Context, id, code string, deliveries []operations.Delivery, recovery *operations.RecoveryIntent, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -365,7 +365,7 @@ func (d Devices) ResolveAtomic(ctx context.Context, id, code string, deliveries 
 	return incident, true, nil
 }
 
-func (d Devices) incidentByIDTx(ctx context.Context, q *sqlcgen.Queries, uid pgtype.UUID) (operations.Incident, bool, error) {
+func (d Operations) incidentByIDTx(ctx context.Context, q *sqlcgen.Queries, uid pgtype.UUID) (operations.Incident, bool, error) {
 	row, err := q.GetIncident(ctx, uid)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -379,7 +379,7 @@ func (d Devices) incidentByIDTx(ctx context.Context, q *sqlcgen.Queries, uid pgt
 // MaterializeOpen fills missing opened-event deliveries for an incident
 // whose open transition committed without its intent (pre-atomic rows),
 // then sets the flag. Existing snapshots are never touched.
-func (d Devices) MaterializeOpen(ctx context.Context, id string, deliveries []operations.Delivery, at time.Time) error {
+func (d Operations) MaterializeOpen(ctx context.Context, id string, deliveries []operations.Delivery, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -407,7 +407,7 @@ func (d Devices) MaterializeOpen(ctx context.Context, id string, deliveries []op
 // MaterializeResolved fills missing resolved-event deliveries (and an
 // optional reconnect recovery for still-active devices) for an incident
 // whose resolution committed without its intent, then sets the flag.
-func (d Devices) MaterializeResolved(ctx context.Context, id string, deliveries []operations.Delivery, recovery *operations.RecoveryIntent, at time.Time) error {
+func (d Operations) MaterializeResolved(ctx context.Context, id string, deliveries []operations.Delivery, recovery *operations.RecoveryIntent, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -451,7 +451,7 @@ func (d Devices) MaterializeResolved(ctx context.Context, id string, deliveries 
 }
 
 // DeliveryByIdentity loads one delivery by its natural identity.
-func (d Devices) DeliveryByIdentity(ctx context.Context, incidentID, event, recipientID string) (operations.Delivery, bool, error) {
+func (d Operations) DeliveryByIdentity(ctx context.Context, incidentID, event, recipientID string) (operations.Delivery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	iid, err := opsUUID(incidentID)
@@ -491,7 +491,7 @@ func mustParseOpsUUID(id string) pgtype.UUID {
 // means the row did not transition; callers re-read to distinguish
 // already-resolved (no-op success) from still-active (409). Unknown
 // rules and non-UUID subjects fail closed.
-func (d Devices) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, deliveries []operations.Delivery, offlineEdge, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) ResolveStatefulIfClear(ctx context.Context, id, rule, subjectID, code string, deliveries []operations.Delivery, offlineEdge, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)

@@ -17,13 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func openOpsStore(t *testing.T) (Devices, *pgxpool.Pool) {
+func openOpsStore(t *testing.T) (Operations, *pgxpool.Pool) {
 	t.Helper()
 	pool, _ := openTestRepo(t)
-	return NewDevices(pool, 5*time.Second), pool
+	return NewOperations(pool, 5*time.Second), pool
 }
 
-func opsService(store Devices) *operations.Service {
+func opsService(store Operations) *operations.Service {
 	return operations.NewService(store, ids.System{}.New, time.Now)
 }
 
@@ -45,7 +45,7 @@ func testOpsLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func seedOpsMapping(t *testing.T, store Devices) {
+func seedOpsMapping(t *testing.T, store Operations) {
 	t.Helper()
 	ctx := context.Background()
 	for _, locale := range []string{"ar", "en"} {
@@ -61,7 +61,7 @@ func seedOpsMapping(t *testing.T, store Devices) {
 	}
 }
 
-func opsSeedRecipient(t *testing.T, store Devices, locale string) operations.Recipient {
+func opsSeedRecipient(t *testing.T, store Operations, locale string) operations.Recipient {
 	t.Helper()
 	rec, err := store.CreateOpsRecipient(context.Background(), ids.System{}.New(),
 		"ops-"+locale, "whatsapp-main", "201012345678", locale, time.Now().UTC())
@@ -292,12 +292,12 @@ func TestOpsAlertCrashAdoption(t *testing.T) {
 	}
 }
 
-func newOpsNotifier(store Devices) *opsNotifier {
+func newOpsNotifier(store Operations) *opsNotifier {
 	return &opsNotifier{store: store}
 }
 
 type opsNotifier struct {
-	store Devices
+	store Operations
 }
 
 func (n *opsNotifier) EnqueueTemplate(ctx context.Context, req notifications.EnqueueTemplateRequest) (notifications.EnqueueResult, error) {

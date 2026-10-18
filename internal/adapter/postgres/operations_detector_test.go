@@ -15,7 +15,7 @@ import (
 )
 
 type opsDetectorEnv struct {
-	store    Devices
+	store    Operations
 	pool     *pgxpool.Pool
 	svc      *operations.Service
 	detector *operations.Detector

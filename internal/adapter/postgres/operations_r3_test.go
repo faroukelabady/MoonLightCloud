@@ -13,13 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func r3ManualReader(store Devices, svc *operations.Service) *operations.OpsReader {
+func r3ManualReader(store Operations, svc *operations.Service) *operations.OpsReader {
 	reader := operations.NewOpsReader(store, svc, operations.NewMetrics())
 	reader.SetManualGuard(5 * time.Minute)
 	return reader
 }
 
-func r3ManualIncident(t *testing.T, store Devices, pool *pgxpool.Pool, event, stale bool) operations.Incident {
+func r3ManualIncident(t *testing.T, store Operations, pool *pgxpool.Pool, event, stale bool) operations.Incident {
 	t.Helper()
 	ctx := context.Background()
 	if event {
@@ -48,7 +48,7 @@ func r3ManualIncident(t *testing.T, store Devices, pool *pgxpool.Pool, event, st
 	return incident
 }
 
-func r3ResolvedDeliveries(t *testing.T, store Devices, id string) []operations.Delivery {
+func r3ResolvedDeliveries(t *testing.T, store Operations, id string) []operations.Delivery {
 	t.Helper()
 	all, err := store.DeliveriesForIncident(context.Background(), id)
 	if err != nil {

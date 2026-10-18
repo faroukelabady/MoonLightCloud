@@ -161,7 +161,7 @@ func detectorTestConfig(autoHeal bool) operations.DetectorConfig {
 	}
 }
 
-func newAlertProcessorReal(t *testing.T, store Devices, svc *operations.Service) *operations.AlertProcessor {
+func newAlertProcessorReal(t *testing.T, store Operations, svc *operations.Service) *operations.AlertProcessor {
 	t.Helper()
 	return operations.NewAlertProcessor(store, svc, newOpsNotifier(store), ids.System{}.New, time.Now, operations.NewMetrics())
 }
@@ -409,7 +409,7 @@ func TestDetectorResolveStarvationBounded(t *testing.T) {
 	}
 }
 
-func mustActiveID(t *testing.T, store Devices, ctx context.Context, dev string) string {
+func mustActiveID(t *testing.T, store Operations, ctx context.Context, dev string) string {
 	t.Helper()
 	in, ok, err := store.ActiveIncident(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev)
 	if err != nil || !ok {
@@ -424,7 +424,7 @@ func mustActiveID(t *testing.T, store Devices, ctx context.Context, dev string) 
 	return in.ID
 }
 
-func batchDetector(t *testing.T, store Devices, svc *operations.Service, batch int, autoHeal bool) *operations.Detector {
+func batchDetector(t *testing.T, store Operations, svc *operations.Service, batch int, autoHeal bool) *operations.Detector {
 	t.Helper()
 	metrics := operations.NewMetrics()
 	return operations.NewDetector(store, svc,
@@ -502,7 +502,7 @@ func TestDetectorLeasedStale(t *testing.T) {
 	}
 }
 
-func mustActiveOrResolvedID(t *testing.T, store Devices, ctx context.Context, cmd string) string {
+func mustActiveOrResolvedID(t *testing.T, store Operations, ctx context.Context, cmd string) string {
 	t.Helper()
 	if in, ok, _ := store.ActiveIncident(ctx, operations.RuleDeviceSyncStale, operations.SubjectSyncCommand, cmd); ok {
 		return in.ID
@@ -698,7 +698,7 @@ func TestDetectorScanPlansIndexed(t *testing.T) {
 
 // deliverySnapshot renders an incident's deliveries deterministically for
 // byte-for-byte stability assertions.
-func deliverySnapshot(t *testing.T, store Devices, ctx context.Context, incidentID string) string {
+func deliverySnapshot(t *testing.T, store Operations, ctx context.Context, incidentID string) string {
 	t.Helper()
 	dels, err := store.DeliveriesForIncident(ctx, incidentID)
 	if err != nil {

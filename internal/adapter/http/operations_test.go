@@ -20,7 +20,7 @@ import (
 type opsHTTPEnv struct {
 	handlers *OperationsHandlers
 	svc      *operations.Service
-	store    postgres.Devices
+	store    postgres.Operations
 	pool     *pgxpool.Pool
 	auth     auth.Service
 }
@@ -33,7 +33,7 @@ func openOpsHTTP(t *testing.T) *opsHTTPEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	store := postgres.NewDevices(pool, 5*time.Second)
+	store := postgres.NewOperations(pool, 5*time.Second)
 	pepper := make([]byte, 32)
 	for i := range pepper {
 		pepper[i] = 'o'
@@ -42,7 +42,7 @@ func openOpsHTTP(t *testing.T) *opsHTTPEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authSvc := auth.NewService(store, h, "", 1, clock.System{}, ids.System{})
+	authSvc := auth.NewService(postgres.NewDevices(pool, 5*time.Second), h, "", 1, clock.System{}, ids.System{})
 	svc := operations.NewService(store, ids.System{}.New, time.Now)
 	reader := operations.NewOpsReader(store, svc, operations.NewMetrics())
 	reader.SetManualGuard(5 * time.Minute)

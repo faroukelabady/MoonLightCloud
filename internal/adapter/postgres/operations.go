@@ -11,7 +11,26 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Operations persists incidents, their atomic delivery/recovery intents and
+// detector reads. External enqueue/control work stays outside these transactions.
+type Operations struct {
+	pool    *pgxpool.Pool
+	timeout time.Duration
+}
+
+var _ operations.Store = Operations{}
+
+// NewOperations shares the application's pool without owning its lifecycle.
+func NewOperations(pool *pgxpool.Pool, timeout time.Duration) Operations {
+	return Operations{pool: pool, timeout: timeout}
+}
+
+func (d Operations) ctx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d.timeout)
+}
 
 func toOpsIncident(r sqlcgen.OperationalIncident) operations.Incident {
 	in := operations.Incident{
@@ -69,7 +88,7 @@ func toOpsDelivery(r sqlcgen.OperationalAlertDelivery) operations.Delivery {
 }
 
 // CreateRecipient persists one alert recipient (full address at rest).
-func (d Devices) CreateOpsRecipient(ctx context.Context, id, label, provider, recipient, locale string, at time.Time) (operations.Recipient, error) {
+func (d Operations) CreateOpsRecipient(ctx context.Context, id, label, provider, recipient, locale string, at time.Time) (operations.Recipient, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -90,7 +109,7 @@ func (d Devices) CreateOpsRecipient(ctx context.Context, id, label, provider, re
 }
 
 // ListRecipients returns all recipients (caller masks addresses).
-func (d Devices) ListOpsRecipients(ctx context.Context) ([]operations.Recipient, error) {
+func (d Operations) ListOpsRecipients(ctx context.Context) ([]operations.Recipient, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListAlertRecipients(ctx)
@@ -105,7 +124,7 @@ func (d Devices) ListOpsRecipients(ctx context.Context) ([]operations.Recipient,
 }
 
 // ListEnabledRecipients returns enabled recipients for alert fan-out.
-func (d Devices) ListEnabledOpsRecipients(ctx context.Context) ([]operations.Recipient, error) {
+func (d Operations) ListEnabledOpsRecipients(ctx context.Context) ([]operations.Recipient, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListEnabledAlertRecipients(ctx)
@@ -120,7 +139,7 @@ func (d Devices) ListEnabledOpsRecipients(ctx context.Context) ([]operations.Rec
 }
 
 // DisableRecipient flips one recipient off.
-func (d Devices) DisableOpsRecipient(ctx context.Context, id string, at time.Time) (bool, error) {
+func (d Operations) DisableOpsRecipient(ctx context.Context, id string, at time.Time) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -142,7 +161,7 @@ func opsUUID(id string) (pgtype.UUID, error) {
 
 // OpenStateful inserts or adopts the active stateful incident. The partial
 // unique index arbitrates multi-instance races (created=false on adopt).
-func (d Devices) OpenStateful(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, episode int, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) OpenStateful(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, episode int, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -171,7 +190,7 @@ func (d Devices) OpenStateful(ctx context.Context, id, rule, subjectType, subjec
 }
 
 // OpenEvent inserts or adopts the all-time terminal-event incident.
-func (d Devices) OpenEvent(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) OpenEvent(ctx context.Context, id, rule, subjectType, subjectID, severity, sourceKey string, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -199,7 +218,7 @@ func (d Devices) OpenEvent(ctx context.Context, id, rule, subjectType, subjectID
 }
 
 // ActiveIncident loads the open/acknowledged incident for rule+subject.
-func (d Devices) ActiveIncident(ctx context.Context, rule, subjectType, subjectID string) (operations.Incident, bool, error) {
+func (d Operations) ActiveIncident(ctx context.Context, rule, subjectType, subjectID string) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).GetActiveIncident(ctx, sqlcgen.GetActiveIncidentParams{
@@ -215,7 +234,7 @@ func (d Devices) ActiveIncident(ctx context.Context, rule, subjectType, subjectI
 }
 
 // IncidentByEventKey loads any incident for a stable event key.
-func (d Devices) IncidentByEventKey(ctx context.Context, key string) (operations.Incident, bool, error) {
+func (d Operations) IncidentByEventKey(ctx context.Context, key string) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).GetIncidentByEventKey(ctx, pgText(key))
@@ -229,7 +248,7 @@ func (d Devices) IncidentByEventKey(ctx context.Context, key string) (operations
 }
 
 // IncidentByID loads one incident by ID.
-func (d Devices) IncidentByID(ctx context.Context, id string) (operations.Incident, bool, error) {
+func (d Operations) IncidentByID(ctx context.Context, id string) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -247,7 +266,7 @@ func (d Devices) IncidentByID(ctx context.Context, id string) (operations.Incide
 }
 
 // TouchObserved refreshes last_observed on active incidents.
-func (d Devices) TouchObserved(ctx context.Context, id string, at time.Time) error {
+func (d Operations) TouchObserved(ctx context.Context, id string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -263,7 +282,7 @@ func (d Devices) TouchObserved(ctx context.Context, id string, at time.Time) err
 }
 
 // Acknowledge transitions open → acknowledged (idempotent past that).
-func (d Devices) Acknowledge(ctx context.Context, id string, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) Acknowledge(ctx context.Context, id string, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -290,7 +309,7 @@ func (d Devices) Acknowledge(ctx context.Context, id string, at time.Time) (oper
 }
 
 // Resolve transitions open/acknowledged → resolved (first writer wins).
-func (d Devices) Resolve(ctx context.Context, id, code string, at time.Time) (operations.Incident, bool, error) {
+func (d Operations) Resolve(ctx context.Context, id, code string, at time.Time) (operations.Incident, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -317,7 +336,7 @@ func (d Devices) Resolve(ctx context.Context, id, code string, at time.Time) (op
 }
 
 // MaxEpisode returns the highest episode for rule+subject (recurrence).
-func (d Devices) MaxEpisode(ctx context.Context, rule, subjectType, subjectID string) (int, error) {
+func (d Operations) MaxEpisode(ctx context.Context, rule, subjectType, subjectID string) (int, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	n, err := sqlcgen.New(d.pool).MaxEpisodeForSubject(ctx, sqlcgen.MaxEpisodeForSubjectParams{
@@ -330,7 +349,7 @@ func (d Devices) MaxEpisode(ctx context.Context, rule, subjectType, subjectID st
 }
 
 // ListPage returns one bounded incident page (keyset on opened_at,id).
-func (d Devices) ListPage(ctx context.Context, state, severity, rule string, cursorAt *time.Time, cursorID string, limit int) ([]operations.Incident, error) {
+func (d Operations) ListPage(ctx context.Context, state, severity, rule string, cursorAt *time.Time, cursorID string, limit int) ([]operations.Incident, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if limit <= 0 || limit > 100 {
@@ -362,7 +381,7 @@ func (d Devices) ListPage(ctx context.Context, state, severity, rule string, cur
 }
 
 // DeviceSummary aggregates active device incidents in one query.
-func (d Devices) DeviceSummary(ctx context.Context) ([]operations.DeviceSummary, error) {
+func (d Operations) DeviceSummary(ctx context.Context) ([]operations.DeviceSummary, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CountActiveIncidentsByDevice(ctx)
@@ -383,7 +402,7 @@ func (d Devices) DeviceSummary(ctx context.Context) ([]operations.DeviceSummary,
 }
 
 // CreateDelivery persists one delivery snapshot (pending).
-func (d Devices) CreateDelivery(ctx context.Context, del operations.Delivery, at time.Time) (operations.Delivery, error) {
+func (d Operations) CreateDelivery(ctx context.Context, del operations.Delivery, at time.Time) (operations.Delivery, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(del.ID)
@@ -415,7 +434,7 @@ func (d Devices) CreateDelivery(ctx context.Context, del operations.Delivery, at
 }
 
 // ClaimDelivery takes the oldest pending delivery (multi-instance safe).
-func (d Devices) ClaimDelivery(ctx context.Context) (operations.Delivery, bool, error) {
+func (d Operations) ClaimDelivery(ctx context.Context) (operations.Delivery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -438,7 +457,7 @@ func (d Devices) ClaimDelivery(ctx context.Context) (operations.Delivery, bool, 
 }
 
 // FinishDeliverySent records durable enqueue with the adopted ID.
-func (d Devices) FinishOpsDeliverySent(ctx context.Context, id, notificationID string, at time.Time) error {
+func (d Operations) FinishOpsDeliverySent(ctx context.Context, id, notificationID string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -462,7 +481,7 @@ func (d Devices) FinishOpsDeliverySent(ctx context.Context, id, notificationID s
 }
 
 // FinishDeliveryBlocked records a terminally blocked delivery.
-func (d Devices) FinishOpsDeliveryBlocked(ctx context.Context, id, code string, at time.Time) error {
+func (d Operations) FinishOpsDeliveryBlocked(ctx context.Context, id, code string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -482,7 +501,7 @@ func (d Devices) FinishOpsDeliveryBlocked(ctx context.Context, id, code string, 
 }
 
 // DeliveriesForIncident lists deliveries with live notification state.
-func (d Devices) DeliveriesForIncident(ctx context.Context, incidentID string) ([]operations.Delivery, error) {
+func (d Operations) DeliveriesForIncident(ctx context.Context, incidentID string) ([]operations.Delivery, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(incidentID)
@@ -519,7 +538,7 @@ func (d Devices) DeliveriesForIncident(ctx context.Context, incidentID string) (
 }
 
 // CreateRecovery inserts or adopts the one recovery action per incident.
-func (d Devices) CreateRecovery(ctx context.Context, incidentID, idempotencyKey string, at time.Time) (operations.Recovery, bool, error) {
+func (d Operations) CreateRecovery(ctx context.Context, incidentID, idempotencyKey string, at time.Time) (operations.Recovery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	iid, err := opsUUID(incidentID)
@@ -551,7 +570,7 @@ func (d Devices) CreateRecovery(ctx context.Context, incidentID, idempotencyKey 
 }
 
 // RecoveryForIncident loads the incident's reconnect action, if any.
-func (d Devices) RecoveryForIncident(ctx context.Context, incidentID string) (operations.Recovery, bool, error) {
+func (d Operations) RecoveryForIncident(ctx context.Context, incidentID string) (operations.Recovery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	iid, err := opsUUID(incidentID)
@@ -571,7 +590,7 @@ func (d Devices) RecoveryForIncident(ctx context.Context, incidentID string) (op
 }
 
 // ClaimRecovery takes one due pending action (multi-instance safe).
-func (d Devices) ClaimRecovery(ctx context.Context, now time.Time) (operations.Recovery, bool, error) {
+func (d Operations) ClaimRecovery(ctx context.Context, now time.Time) (operations.Recovery, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -594,7 +613,7 @@ func (d Devices) ClaimRecovery(ctx context.Context, now time.Time) (operations.R
 }
 
 // FinishRecoveryCompleted records a queued-or-satisfied recovery.
-func (d Devices) FinishRecoveryCompleted(ctx context.Context, id, target, result string, at time.Time) error {
+func (d Operations) FinishRecoveryCompleted(ctx context.Context, id, target, result string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -614,7 +633,7 @@ func (d Devices) FinishRecoveryCompleted(ctx context.Context, id, target, result
 }
 
 // RetryRecoveryLater backs off a transiently failed action.
-func (d Devices) RetryRecoveryLater(ctx context.Context, id, code string, next, at time.Time) error {
+func (d Operations) RetryRecoveryLater(ctx context.Context, id, code string, next, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -634,7 +653,7 @@ func (d Devices) RetryRecoveryLater(ctx context.Context, id, code string, next, 
 }
 
 // FinishRecoveryBlocked terminally blocks a recovery action.
-func (d Devices) FinishRecoveryBlocked(ctx context.Context, id, code string, at time.Time) error {
+func (d Operations) FinishRecoveryBlocked(ctx context.Context, id, code string, at time.Time) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(id)
@@ -654,7 +673,7 @@ func (d Devices) FinishRecoveryBlocked(ctx context.Context, id, code string, at 
 }
 
 // RecoveriesForIncident lists an incident's recovery actions.
-func (d Devices) RecoveriesForIncident(ctx context.Context, incidentID string) ([]operations.Recovery, error) {
+func (d Operations) RecoveriesForIncident(ctx context.Context, incidentID string) ([]operations.Recovery, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(incidentID)
@@ -699,7 +718,7 @@ func toOpsRecovery(r sqlcgen.OperationalRecoveryAction) operations.Recovery {
 
 // ActiveByRule lists open/acknowledged incidents for one rule (bounded,
 // oldest first) for resolution checks.
-func (d Devices) ActiveByRule(ctx context.Context, rule string, limit int) ([]operations.Incident, error) {
+func (d Operations) ActiveByRule(ctx context.Context, rule string, limit int) ([]operations.Incident, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ListActiveByRule(ctx, sqlcgen.ListActiveByRuleParams{

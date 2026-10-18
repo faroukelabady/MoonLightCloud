@@ -321,7 +321,7 @@ func TestTelegramR1UsernamePersistence(t *testing.T) {
 	if _, err = reports.AddRecipient(ctx, "too long", "telegram-main", over, "ar"); err == nil {
 		t.Fatal("report administration accepted max+1")
 	}
-	ops := catalogStore(env)
+	ops := NewOperations(env.pool, 5*time.Second)
 	alertRecipient, err := ops.CreateOpsRecipient(ctx, ids.System{}.New(), "max username", "telegram-main", username, "en", time.Now())
 	if err != nil {
 		t.Fatal(err)

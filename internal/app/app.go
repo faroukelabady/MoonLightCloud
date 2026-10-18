@@ -300,7 +300,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			commerceOwner(), cfg.BusinessReports.LeaseDuration, log)
 	}
 	a.Log.Info("business reports", "enabled", cfg.BusinessReports.Enabled)
-	opsStore := store
+	opsStore := postgres.NewOperations(pool, cfg.DBQueryTimeout)
 	opsService := operations.NewService(opsStore, ids.System{}.New, time.Now)
 	opsMetrics := operations.NewMetrics()
 	opsReader := operations.NewOpsReader(opsStore, opsService, opsMetrics)

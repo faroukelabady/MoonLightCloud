@@ -167,7 +167,7 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 func r1OpsLifecycle(t *testing.T, env *saleEnv, recipient string) {
 	t.Helper()
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := NewOperations(env.pool, 5*time.Second)
 	service := opsService(store)
 	if _, err := store.CreateOpsRecipient(ctx, ids.System{}.New(), "TG ops", "telegram-main", recipient, "en", time.Now()); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,7 @@ func operationsCmd(args []string, stdout, stderr io.Writer) error {
 }
 
 type opsEnv struct {
-	store   postgres.Devices
+	store   postgres.Operations
 	service *operations.Service
 	reader  *operations.OpsReader
 	close   func()
@@ -49,7 +49,7 @@ func openOpsEnv(stderr io.Writer) (*opsEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	store := postgres.NewOperations(pool, cfg.DBQueryTimeout)
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	_ = logger
 	service := operations.NewService(store, ids.System{}.New, nil)

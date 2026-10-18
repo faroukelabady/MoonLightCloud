@@ -19,7 +19,7 @@ func opsLimit(limit int) int32 {
 }
 
 // ScanOffline scans active devices unseen since the threshold (server time).
-func (d Devices) ScanOffline(ctx context.Context, olderThan time.Time, limit int) ([]operations.OfflineCandidate, error) {
+func (d Operations) ScanOffline(ctx context.Context, olderThan time.Time, limit int) ([]operations.OfflineCandidate, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanOfflineDevices(ctx, sqlcgen.ScanOfflineDevicesParams{
@@ -38,7 +38,7 @@ func (d Devices) ScanOffline(ctx context.Context, olderThan time.Time, limit int
 }
 
 // ScanFailedCommands lists failed sync commands (bounded, oldest first).
-func (d Devices) ScanFailedCommands(ctx context.Context, limit int) ([]operations.FailedCommand, error) {
+func (d Operations) ScanFailedCommands(ctx context.Context, limit int) ([]operations.FailedCommand, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanFailedCommands(ctx, opsLimit(limit))
@@ -62,7 +62,7 @@ func (d Devices) ScanFailedCommands(ctx context.Context, limit int) ([]operation
 }
 
 // ScanStaleCommands lists non-terminal commands older than the threshold.
-func (d Devices) ScanStaleCommands(ctx context.Context, pendingEdge, runningEdge time.Time, limit int) ([]operations.StaleCommand, error) {
+func (d Operations) ScanStaleCommands(ctx context.Context, pendingEdge, runningEdge time.Time, limit int) ([]operations.StaleCommand, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanStaleCommands(ctx, sqlcgen.ScanStaleCommandsParams{
@@ -82,7 +82,7 @@ func (d Devices) ScanStaleCommands(ctx context.Context, pendingEdge, runningEdge
 }
 
 // ScanBlockedRuns lists terminally blocked report runs.
-func (d Devices) ScanBlockedRuns(ctx context.Context, limit int) ([]operations.BlockedRun, error) {
+func (d Operations) ScanBlockedRuns(ctx context.Context, limit int) ([]operations.BlockedRun, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanBlockedRuns(ctx, opsLimit(limit))
@@ -105,7 +105,7 @@ func (d Devices) ScanBlockedRuns(ctx context.Context, limit int) ([]operations.B
 }
 
 // ScanStaleRuns lists pending/retry report runs older than the threshold.
-func (d Devices) ScanStaleRuns(ctx context.Context, olderThan time.Time, limit int) ([]operations.StaleRun, error) {
+func (d Operations) ScanStaleRuns(ctx context.Context, olderThan time.Time, limit int) ([]operations.StaleRun, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanStaleRuns(ctx, sqlcgen.ScanStaleRunsParams{
@@ -130,7 +130,7 @@ func toOpsBadNotification(r sqlcgen.ScanBlockedNotificationsRow) operations.BadN
 }
 
 // ScanBlockedNotifications lists non-7D blocked notifications.
-func (d Devices) ScanBlockedNotifications(ctx context.Context, limit int) ([]operations.BadNotification, error) {
+func (d Operations) ScanBlockedNotifications(ctx context.Context, limit int) ([]operations.BadNotification, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanBlockedNotifications(ctx, opsLimit(limit))
@@ -145,7 +145,7 @@ func (d Devices) ScanBlockedNotifications(ctx context.Context, limit int) ([]ope
 }
 
 // ScanAmbiguousNotifications lists non-7D ambiguous notifications.
-func (d Devices) ScanAmbiguousNotifications(ctx context.Context, limit int) ([]operations.BadNotification, error) {
+func (d Operations) ScanAmbiguousNotifications(ctx context.Context, limit int) ([]operations.BadNotification, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanAmbiguousNotifications(ctx, opsLimit(limit))
@@ -162,7 +162,7 @@ func (d Devices) ScanAmbiguousNotifications(ctx context.Context, limit int) ([]o
 }
 
 // ScanRetryStaleNotifications lists non-7D retry notifications past the age.
-func (d Devices) ScanRetryStaleNotifications(ctx context.Context, olderThan time.Time, limit int) ([]operations.BadNotification, error) {
+func (d Operations) ScanRetryStaleNotifications(ctx context.Context, olderThan time.Time, limit int) ([]operations.BadNotification, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).ScanRetryStaleNotifications(ctx, sqlcgen.ScanRetryStaleNotificationsParams{
@@ -181,7 +181,7 @@ func (d Devices) ScanRetryStaleNotifications(ctx context.Context, olderThan time
 }
 
 // CommandTerminal reads one command's status for stale resolution.
-func (d Devices) CommandTerminal(ctx context.Context, commandID string) (string, bool, error) {
+func (d Operations) CommandTerminal(ctx context.Context, commandID string) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(commandID)
@@ -199,7 +199,7 @@ func (d Devices) CommandTerminal(ctx context.Context, commandID string) (string,
 }
 
 // RunStatus reads one report run's status for stale resolution.
-func (d Devices) RunStatus(ctx context.Context, runID string) (string, bool, error) {
+func (d Operations) RunStatus(ctx context.Context, runID string) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(runID)
@@ -217,7 +217,7 @@ func (d Devices) RunStatus(ctx context.Context, runID string) (string, bool, err
 }
 
 // NotificationDispatch reads one notification's dispatch status.
-func (d Devices) NotificationDispatch(ctx context.Context, notificationID string) (string, bool, error) {
+func (d Operations) NotificationDispatch(ctx context.Context, notificationID string) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(notificationID)
@@ -235,7 +235,7 @@ func (d Devices) NotificationDispatch(ctx context.Context, notificationID string
 }
 
 // DeviceStatus reads one device's lifecycle status.
-func (d Devices) DeviceStatus(ctx context.Context, deviceID string) (string, bool, error) {
+func (d Operations) DeviceStatus(ctx context.Context, deviceID string) (string, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(deviceID)
@@ -253,7 +253,7 @@ func (d Devices) DeviceStatus(ctx context.Context, deviceID string) (string, boo
 }
 
 // Presence reads one device's last_seen_at.
-func (d Devices) Presence(ctx context.Context, deviceID string) (*time.Time, bool, error) {
+func (d Operations) Presence(ctx context.Context, deviceID string) (*time.Time, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := opsUUID(deviceID)
