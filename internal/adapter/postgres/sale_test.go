@@ -166,8 +166,18 @@ func (e *saleEnv) drain(t *testing.T) {
 	defer cancel()
 	done := make(chan struct{})
 	go func() { defer close(done); e.proj.Run(ctx) }()
-	// Let the projector scan and settle, then stop it.
-	time.Sleep(2 * time.Second)
+	// Stop once the projector's own discovery query finds no due work (an
+	// in-flight event stays visible until its transaction commits). The old
+	// fixed 2s settle remains the upper bound, so events that never settle
+	// (not-due pending, failing loads) behave exactly as before.
+	pending := NewSaleProjection(e.pool, 5*time.Second)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ids, err := pending.PendingSaleV3Events(context.Background(), 1); err == nil && len(ids) == 0 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 	cancel()
 	<-done
 }

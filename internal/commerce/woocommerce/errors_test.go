@@ -92,10 +92,7 @@ func TestWooMalformedSuccess(t *testing.T) {
 // TestWooTimeout proves client timeouts surface as temporary failures.
 func TestWooTimeout(t *testing.T) {
 	harness := newWooHarness(t, testConsumerKey, testConsumerSec)
-	harness.setIntercept(func(record wooRecordedRequest) (int, any, bool) {
-		time.Sleep(2 * time.Second)
-		return http.StatusOK, map[string]any{"id": float64(500)}, true
-	})
+	harness.setIntercept(holdResponse(t))
 	cfg := testConfig(harness)
 	cfg.HTTPTimeout = 200 * time.Millisecond
 	provider, err := NewWooCommerceProvider(cfg, harness.server.Client())
@@ -112,10 +109,7 @@ func TestWooTimeout(t *testing.T) {
 // TestWooContextCancel proves caller cancellation is preserved unwrapped.
 func TestWooContextCancel(t *testing.T) {
 	harness := newWooHarness(t, testConsumerKey, testConsumerSec)
-	harness.setIntercept(func(record wooRecordedRequest) (int, any, bool) {
-		time.Sleep(2 * time.Second)
-		return http.StatusOK, map[string]any{"id": float64(500)}, true
-	})
+	harness.setIntercept(holdResponse(t))
 	provider := testProvider(t, harness)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -189,5 +183,20 @@ func TestWooResponseBodyBound(t *testing.T) {
 	}
 	if strings.Contains(providerErr.Error(), strings.Repeat("x", 100)) {
 		t.Fatal("body must not leak into the error")
+	}
+}
+
+// holdResponse delays the intercepted response until the test ends (at
+// most 2s), so the client deadline or cancellation always fires first and
+// the server shuts down without waiting out a fixed sleep.
+func holdResponse(t *testing.T) func(wooRecordedRequest) (int, any, bool) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	return func(wooRecordedRequest) (int, any, bool) {
+		select {
+		case <-release:
+		case <-time.After(2 * time.Second):
+		}
+		return http.StatusOK, map[string]any{"id": float64(500)}, true
 	}
 }

@@ -80,7 +80,12 @@ func (h *botHarness) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sleep > 0 {
-		time.Sleep(sleep)
+		// Hold the response until the client gives up (its timeout closes
+		// the connection) so teardown never waits out the full delay.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(sleep):
+		}
 	}
 	var status int
 	var body any
