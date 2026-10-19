@@ -101,7 +101,11 @@ func r1Eligible(t *testing.T, env *saleEnv, id string) {
 }
 
 func TestTelegramR1DurableNoResend(t *testing.T) {
-	cases := r1Envelopes()
+	// No-resend durability depends only on the ambiguous classification,
+	// which TestR1IncompleteEnvelope pins for every malformed body; one
+	// malformed envelope plus the oversized body (rejected in transport)
+	// exercise the durable path.
+	cases := []string{`{}`, strings.Repeat("x", (1<<20)+1)}
 	cases = append(cases, r1Success, `{"ok":false,"error_code":429,"description":"retry","parameters":{"retry_after":1}}`, `{"ok":false,"error_code":403,"description":"blocked"}`)
 	for index, body := range cases {
 		t.Run(fmt.Sprintf("envelope-%02d", index), func(t *testing.T) {
