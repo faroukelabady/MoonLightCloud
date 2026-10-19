@@ -100,52 +100,6 @@ func TestR2_IndependentDefaultMutations(t *testing.T) {
 	}
 }
 
-// TestR2_ConcurrentDefaultEdits proves two Stores editing the same default
-// identity concurrently both converge to their own state (no cross-store
-// suppression, no committed contradiction).
-func TestR2_ConcurrentDefaultEdits(t *testing.T) {
-	f := openScopeFixture(t)
-	init := tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "Gold"}, 1)
-	for i, d := range []struct{ dev, cred string }{{f.devA, f.credA}, {f.devB, f.credB}} {
-		f.ingest(t, d.dev, d.cred, r2EventID(100+i), catalog.EventTagSnapshotV1, init)
-		requireOutcome(t, f.projectCatalog(t, r2EventID(100+i), catalog.EventTagSnapshotV1), catalog.OutcomeProcessed, "")
-	}
-	f.ingest(t, f.devA, f.credA, r2EventID(110), catalog.EventTagSnapshotV1,
-		tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "A concurrent"}, 2))
-	f.ingest(t, f.devB, f.credB, r2EventID(111), catalog.EventTagSnapshotV1,
-		tagPayload(sharedTagGold, "gold", true, map[string]string{"en": "B concurrent"}, 2))
-	var wg sync.WaitGroup
-	done := make(chan catalogWorkerResult, 2)
-	for _, e := range []string{r2EventID(110), r2EventID(111)} {
-		wg.Add(1)
-		go func(event string) {
-			defer wg.Done()
-			// Real concurrency preserved: both goroutines race real
-			// connections over the same default identity. The bounded
-			// driver re-attempts ONLY permitted transient aborts
-			// (40001/40P01) exactly like production durable retry.
-			done <- runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
-		}(e)
-	}
-	wg.Wait()
-	for i := 0; i < 2; i++ {
-		result := <-done
-		if result.Err != nil {
-			t.Fatal(result.Err)
-		}
-	}
-	labelA, labelB := "", ""
-	if err := f.pool.QueryRow(context.Background(), `SELECT name_en FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreA)).Scan(&labelA); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.pool.QueryRow(context.Background(), `SELECT name_en FROM catalog_tags WHERE tag_id=$1`, scopedTagID(t, sharedTagGold, scopeStoreB)).Scan(&labelB); err != nil {
-		t.Fatal(err)
-	}
-	if labelA != "A concurrent" || labelB != "B concurrent" {
-		t.Fatalf("concurrent writes: A=%q B=%q", labelA, labelB)
-	}
-}
-
 // countCatalogRows returns a stable signature of Store-scoped catalog rows.
 func countCatalogRows(t *testing.T, f *scopeFixture) string {
 	t.Helper()

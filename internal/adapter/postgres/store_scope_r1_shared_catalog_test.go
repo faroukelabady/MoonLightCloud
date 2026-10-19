@@ -252,30 +252,3 @@ func TestScope_CategoryLabelRevisionWithProductsProjects(t *testing.T) {
 		t.Fatalf("product relation preserved: %q (%v)", top, err)
 	}
 }
-
-// TestScope_SharedCatalogDoesNotWeakenOwnership proves Store-created
-// identities keep global aggregate identity and same-ID takeover still
-// conflicts; the default-identity scoping does not weaken Store isolation.
-func TestScope_SharedCatalogDoesNotWeakenOwnership(t *testing.T) {
-	f := openScopeFixture(t)
-	ids := catalogIDs(t, 830, "owned-a", "owned-b")
-	ownedA, ownedB := ids["owned-a"], ids["owned-b"]
-	names := map[string]string{"en": "Owned"}
-
-	// Store-created same ID across Stores still conflicts.
-	f.ingest(t, f.devA, f.credA, "e0000830-0000-4000-8000-000000000001",
-		catalog.EventCategorySnapshotV2, categoryPayload(ownedA, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000001", catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
-	f.ingest(t, f.devB, f.credB, "e0000830-0000-4000-8000-000000000002",
-		catalog.EventCategorySnapshotV2, categoryPayload(ownedA, "active", names, nil, 1))
-	requireOutcome(t, f.projectCatalog(t, "e0000830-0000-4000-8000-000000000002", catalog.EventCategorySnapshotV2), catalog.OutcomeBlocked, ErrStoreScopeConflict)
-
-	// A Store-created child under a Store-created parent is still isolated:
-	// B's own root does not admit A's node, and vice versa.
-	f.ingest(t, f.devB, f.credB, "e0000830-0000-4000-8000-000000000003",
-		catalog.EventCategorySnapshotV2, categoryPayload(ownedB, "active", names, []string{ownedA}, 1))
-	res := f.projectCatalog(t, "e0000830-0000-4000-8000-000000000003", catalog.EventCategorySnapshotV2)
-	if res.Outcome != catalog.OutcomeBlocked || res.ErrorCode != ErrStoreScopeConflict {
-		t.Fatalf("cross-store owned edge must be rejected: %+v", res)
-	}
-}

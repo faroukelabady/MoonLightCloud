@@ -2,12 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
-	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
@@ -318,20 +318,28 @@ func TestControlActiveUniquenessRace(t *testing.T) {
 	}
 	wg.Wait()
 	close(out)
-	ids := map[string]int{}
+	winner, created := "", 0
 	for r := range out {
 		if r.err != nil {
+			var appErr *apperr.Error
+			if !errors.As(r.err, &appErr) || appErr.Message != "DEVICE_SYNC_ALREADY_ACTIVE" {
+				t.Fatalf("loser must get the deterministic already-active conflict: %v", r.err)
+			}
 			continue
 		}
-		ids[r.id]++
+		if !r.created {
+			t.Fatalf("a different key never adopts another command: %+v", r)
+		}
+		created++
+		winner = r.id
 	}
-	_ = ids
+	if created != 1 {
+		t.Fatalf("exactly one active command may be created, got %d", created)
+	}
 	active, ok, err := ctl.Active(ctx, dev)
-	if err != nil || !ok {
-		t.Fatalf("one active must exist: %v %v", ok, err)
+	if err != nil || !ok || active.ID != winner {
+		t.Fatalf("the winner is the active command: %+v %v %v (winner %s)", active, ok, err, winner)
 	}
-	_ = active
-	_ = auth.StatusActive
 }
 
 // F03: synchronized concurrent completed/failed → one terminal outcome,

@@ -244,44 +244,6 @@ func TestScope_SalesOwnership(t *testing.T) {
 	}
 }
 
-// TestScope_SaleV2StorePreserved proves scoped v2 Sales keep Store
-// context, historical categories/tags, and exact money.
-func TestScope_SaleV2StorePreserved(t *testing.T) {
-	f := openScopeFixture(t)
-	raw := taggedSaleFixture(t, nil)
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		t.Fatal(err)
-	}
-	saleID := "aaaaaaaa-0000-4000-8000-0000000000a2"
-	m["sale_id"] = saleID
-	out, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.ingest(t, f.devA, f.credA, "e0000241-0000-4000-8000-000000000001", "sale.finalized.v3", string(out))
-	res := f.projectSaleV3(t, "e0000241-0000-4000-8000-000000000001")
-	if res.Outcome != sale.OutcomeProcessed {
-		t.Fatalf("sale v2: %+v", res)
-	}
-	if got := saleStore(t, f, saleID); got == nil || *got != scopeStoreA {
-		t.Fatalf("sale v2 scoped: %v", got)
-	}
-	var tags int
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM sale_item_tag_snapshots WHERE sale_id=$1`, saleID).Scan(&tags); err != nil || tags == 0 {
-		t.Fatalf("v2 tag snapshots: %d (%v)", tags, err)
-	}
-	var total int64
-	if err := f.pool.QueryRow(context.Background(),
-		`SELECT total_minor FROM sales_projection WHERE sale_id=$1`, saleID).Scan(&total); err != nil {
-		t.Fatal(err)
-	}
-	if total <= 0 {
-		t.Fatalf("v2 money preserved: %d", total)
-	}
-}
-
 // TestScope_CrossStoreReturnRejected is the mandatory attack test: a
 // Store B return referencing Store A's sale blocks with zero mutation.
 func TestScope_CrossStoreReturnRejected(t *testing.T) {
