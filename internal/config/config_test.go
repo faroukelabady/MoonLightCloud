@@ -11,11 +11,19 @@ func setenv(t *testing.T, k, v string) {
 	t.Setenv(k, v)
 }
 
+// unsetenv removes k for this test only: t.Setenv registers the restore of
+// the original value, so later tests never see it missing.
+func unsetenv(t *testing.T, k string) {
+	t.Helper()
+	t.Setenv(k, "")
+	_ = os.Unsetenv(k)
+}
+
 // setReportingToken pins a valid token so tests focus on other settings.
 func setReportingToken(t *testing.T) {
 	t.Helper()
 	t.Setenv("REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
-	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+	unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 }
 
 // testMFAKey is a synthetic, test-only AUTH_MFA_ENCRYPTION_KEY (32 bytes of
@@ -36,7 +44,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 	setReportingToken(t)
 	setenv(t, "ENVIRONMENT", "development")
 	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
-	os.Unsetenv("HTTP_ADDR")
+	unsetenv(t, "HTTP_ADDR")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +56,7 @@ func TestLoadDevelopmentDefaults(t *testing.T) {
 
 func TestMissingDatabaseURL(t *testing.T) {
 	setenv(t, "ENVIRONMENT", "development")
-	os.Unsetenv("DATABASE_URL")
+	unsetenv(t, "DATABASE_URL")
 	if _, err := Load(); err == nil {
 		t.Fatal("want error for missing DATABASE_URL")
 	}
@@ -77,7 +85,7 @@ func TestProductionValid(t *testing.T) {
 	setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 	setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 	setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
-	os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+	unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -120,9 +128,9 @@ func TestStoreTimezoneMatrix(t *testing.T) {
 			}
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
-			os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+			unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 			if tc.tz == "" {
-				os.Unsetenv("STORE_TIMEZONE")
+				unsetenv(t, "STORE_TIMEZONE")
 			} else {
 				setenv(t, "STORE_TIMEZONE", tc.tz)
 			}
@@ -168,7 +176,7 @@ func TestReportingTokenMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.env == "" {
-				os.Unsetenv("ENVIRONMENT")
+				unsetenv(t, "ENVIRONMENT")
 				setenv(t, "DATABASE_URL", devURL)
 			} else {
 				setenv(t, "ENVIRONMENT", tc.env)
@@ -181,12 +189,12 @@ func TestReportingTokenMatrix(t *testing.T) {
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 			if tc.token == "" {
-				os.Unsetenv("REPORTING_API_TOKEN")
+				unsetenv(t, "REPORTING_API_TOKEN")
 			} else {
 				setenv(t, "REPORTING_API_TOKEN", tc.token)
 			}
 			if tc.open == "" {
-				os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+				unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 			} else {
 				setenv(t, "ALLOW_UNAUTHENTICATED_REPORTING", tc.open)
 			}
@@ -229,13 +237,13 @@ func TestPepperMatrix(t *testing.T) {
 				setenv(t, "DATABASE_URL", validProdURL)
 			}
 			if tc.pepper == "" {
-				os.Unsetenv("DEVICE_SECRET_PEPPER")
+				unsetenv(t, "DEVICE_SECRET_PEPPER")
 			} else {
 				setenv(t, "DEVICE_SECRET_PEPPER", tc.pepper)
 			}
 			// Pepper matrix predates reporting config; hold those constant.
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
-			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
+			setReportingToken(t)
 			_, err := Load()
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("wantErr=%v got %v", tc.wantErr, err)
@@ -260,7 +268,7 @@ func pepperB64short() string {
 func TestPortOverride(t *testing.T) {
 	setenv(t, "ENVIRONMENT", "development")
 	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
-	os.Unsetenv("HTTP_ADDR")
+	unsetenv(t, "HTTP_ADDR")
 	setReportingToken(t)
 	setenv(t, "PORT", "1234")
 	c, err := Load()
@@ -280,11 +288,11 @@ func TestTrustedProxyCIDRs(t *testing.T) {
 		setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 		setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 		setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
-		os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+		unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 	}
 	t.Run("empty trusts none", func(t *testing.T) {
 		base(t)
-		os.Unsetenv("TRUSTED_PROXY_CIDRS")
+		unsetenv(t, "TRUSTED_PROXY_CIDRS")
 		c, err := Load()
 		if err != nil {
 			t.Fatal(err)
@@ -345,7 +353,7 @@ func TestAuthConfigMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.env == "∅" {
-				os.Unsetenv("ENVIRONMENT")
+				unsetenv(t, "ENVIRONMENT")
 				setenv(t, "DATABASE_URL", devURL)
 			} else {
 				setenv(t, "ENVIRONMENT", tc.env)
@@ -358,7 +366,7 @@ func TestAuthConfigMatrix(t *testing.T) {
 			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 			setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 			setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
-			os.Unsetenv("ALLOW_UNAUTHENTICATED_REPORTING")
+			unsetenv(t, "ALLOW_UNAUTHENTICATED_REPORTING")
 			if tc.key == "∅" {
 				t.Setenv("AUTH_MFA_ENCRYPTION_KEY", "")
 			} else {
