@@ -7,17 +7,17 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
-	"github.com/faroukelabady/MoonLightCloud/internal/sale"
+	"github.com/faroukelabady/MoonLightCloud/internal/projection"
 )
 
 // Processing statuses mirror the shared sync_event_processing CHECK
 // constraint (same values as the sale processor; one table, two
 // processor names).
 const (
-	ProcPending   = "pending"
-	ProcRetry     = "retry"
-	ProcBlocked   = "blocked"
-	ProcProcessed = "processed"
+	ProcPending   = projection.Pending
+	ProcRetry     = projection.Retry
+	ProcBlocked   = projection.Blocked
+	ProcProcessed = projection.Processed
 )
 
 // Processor name for durable return processing state. Independent from
@@ -56,10 +56,8 @@ type EventRecord struct {
 	StoreID *string
 }
 
-// Stats reuses the frozen sale processing-stats shape: one generic
-// operational model across processors, so operator tooling and the postgres
-// adapter stay unified.
-type Stats = sale.Stats
+// Stats uses the neutral processing diagnostics shape across processors.
+type Stats = projection.Stats
 
 // Store is the durable projector boundary, implemented by the postgres
 // adapter. One ProjectReturn call arbitrates durably, then projects one
@@ -72,9 +70,9 @@ type Store interface {
 	ResetProcessing(ctx context.Context, processor, eventID string) error
 }
 
-// Backoff reuses the frozen sale backoff policy (5s x 2^attempt, 1h cap,
+// Backoff uses the shared projection backoff policy (5s x 2^attempt, 1h cap,
 // overflow-safe) so both processors share one retry schedule.
-func Backoff(attempt int) time.Duration { return sale.Backoff(attempt) }
+func Backoff(attempt int) time.Duration { return projection.Backoff(attempt) }
 
 // Projector is the in-process PostgreSQL-backed worker. Wake model: local
 // Notify after ingestion plus a periodic durable safety scan plus a startup
