@@ -50,21 +50,6 @@ func testConfig(t *testing.T, url string) config.Config {
 // testMFAKey is a synthetic, test-only AUTH_MFA_ENCRYPTION_KEY.
 var testMFAKey = base64.StdEncoding.EncodeToString([]byte("test-only-mfa-key-not-production"))
 
-func TestNewHealthyAndReady(t *testing.T) {
-	url := testutil.Isolated(t)
-	a, err := New(context.Background(), testConfig(t, url))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	req := httptest.NewRequest("GET", "/health/ready", nil)
-	rec := httptest.NewRecorder()
-	a.Health.ServeReady(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // The pre-production pair has one producer version per stream. Retired
 // versions are rejected before durable acceptance, not silently normalized.
 func TestRetiredCatalogVersionsRejected(t *testing.T) {

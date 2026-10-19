@@ -2,11 +2,12 @@ package postgres
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"testing"
-	"time"
 )
 
 func TestR3ConfigurationOrderHistory(t *testing.T) {

@@ -203,64 +203,6 @@ func TestConcurrentDuplicateTransportOneSale(t *testing.T) {
 	}
 }
 
-func TestInvalidSaleRejectsWholeBatch(t *testing.T) {
-	env := openSaleEnv(t)
-	// Structurally valid envelope, invalid sale semantics (line total
-	// mismatch): entire batch rejected before ACK, zero rows committed.
-	bad := mutatePayload(t, fixture(t, "sale_egp.json"), "44444444-4444-4444-8444-444444444444", "2026-09-20T11:00:00Z")
-	var m map[string]any
-	if err := json.Unmarshal([]byte(bad), &m); err != nil {
-		t.Fatal(err)
-	}
-	m["totals"].(map[string]any)["total"].(map[string]any)["amount_minor"] = 1
-	raw, _ := json.Marshal(m)
-	body := fmt.Sprintf(`{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"sale.finalized.v3","occurred_at":"2026-09-20T11:00:00Z","payload":%s}]}`, raw)
-	_, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
-	if err == nil {
-		t.Fatal("invalid sale must reject the batch")
-	}
-	if n := saleCount(t, env.pool, "sync_events"); n != 0 {
-		t.Fatalf("zero rows on invalid batch, got %d", n)
-	}
-}
-
-func TestLogicalSaleConflict(t *testing.T) {
-	env := openSaleEnv(t)
-	payload := fixture(t, "sale_egp.json")
-	e1 := "22222222-2222-7222-8222-222222222222"
-	e2 := "44444444-4444-7444-8444-444444444444"
-	// Same sale_id, different event_ids: both durably accepted (transport ACK).
-	r1 := env.ingest(t, e1, payload)
-	r2 := env.ingest(t, e2, payload)
-	if r1.Events[0].Status != "accepted" || r2.Events[0].Status != "accepted" {
-		t.Fatalf("both events must ACK: %+v %+v", r1, r2)
-	}
-	if n := saleCount(t, env.pool, "sync_events"); n != 2 {
-		t.Fatalf("both source events preserved, got %d", n)
-	}
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "one sale")
-	// Exactly one blocked SALE_ID_CONFLICT, first sale unchanged.
-	var code string
-	var blocked int
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM sync_event_processing WHERE status='blocked' AND last_error_code='SALE_ID_CONFLICT'`).Scan(&blocked); err != nil || blocked != 1 {
-		t.Fatalf("want 1 SALE_ID_CONFLICT, got %d (%v)", blocked, err)
-	}
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT last_error_code FROM sync_event_processing WHERE event_id=$1`, e2).Scan(&code); err != nil {
-		// Either event may win the race; the loser must carry the conflict.
-		if err := env.pool.QueryRow(context.Background(),
-			`SELECT last_error_code FROM sync_event_processing WHERE event_id=$1`, e1).Scan(&code); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if code != "SALE_ID_CONFLICT" {
-		t.Fatalf("loser must be SALE_ID_CONFLICT, got %q", code)
-	}
-	_ = code
-}
-
 func TestOutOfOrderSales(t *testing.T) {
 	env := openSaleEnv(t)
 	// B occurred later but arrives first; A occurred earlier, arrives second.

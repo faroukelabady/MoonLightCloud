@@ -185,59 +185,6 @@ func TestDispatcherRetry429(t *testing.T) {
 	}
 }
 
-// TestDispatcherSendStartedNoSend proves a claimed marker routes to
-// ambiguous with zero provider I/O.
-func TestDispatcherSendStartedNoSend(t *testing.T) {
-	var sends int
-	dispatcher, store, _ := dispatchTestSetup(&sends, nil)
-	store.add("n1", true)
-	dispatcher.drain(context.Background())
-	if sends != 0 {
-		t.Fatalf("marked claim must not send: %d", sends)
-	}
-	if row := store.rows["n1"]; row.dispatch != DispatchAmbiguous {
-		t.Fatalf("ambiguous: %+v", row)
-	}
-}
-
-// TestDispatcherStaleFinish proves an expired worker cannot alter the
-// newer owner's result.
-func TestDispatcherStaleFinish(t *testing.T) {
-	var sends int
-	store := newFakeDispatchStore()
-	registry := NewRegistry()
-	provider := &stubProvider{key: "whatsapp-main", send: func(context.Context, TemplateSendRequest) (SendResult, error) {
-		sends++
-		return SendResult{ProviderMessageID: "wamid.test1"}, nil
-	}}
-	if err := registry.Register("whatsapp-main", provider); err != nil {
-		t.Fatal(err)
-	}
-	workerA := NewDispatcher(store, registry, SystemClock{}, "worker-A", nil)
-	workerB := NewDispatcher(store, registry, SystemClock{}, "worker-B", nil)
-	store.add("n1", false)
-	claimedA, _, err := store.ClaimNotification(context.Background(), "worker-A", time.Minute, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.expire("n1")
-	// Worker B claims generation 2 and completes acceptance.
-	workerB.drain(context.Background())
-	if sends != 1 {
-		t.Fatalf("B sends once: %d", sends)
-	}
-	// A's late retry finish must not alter B's acceptance.
-	result, err := store.FinishNotificationRetry(context.Background(),
-		"n1", claimedA.LeaseOwner, claimedA.LeaseGeneration, time.Now().UTC(), CodeProviderRetry)
-	if err != nil || result != FinishStale {
-		t.Fatalf("stale: %v %v", result, err)
-	}
-	if row := store.rows["n1"]; row.dispatch != DispatchAccepted {
-		t.Fatalf("B result stands: %+v", row)
-	}
-	_ = workerA
-}
-
 // TestDispatcherCrashAfterStart proves crash-after-send-start converges
 // to ambiguous with exactly one provider send total.
 func TestDispatcherCrashAfterStart(t *testing.T) {

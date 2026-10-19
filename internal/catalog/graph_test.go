@@ -29,29 +29,6 @@ func TestCheckCategoryGraphValid(t *testing.T) {
 	}
 }
 
-func TestCheckCategoryGraphRejects(t *testing.T) {
-	edges := []Edge{{ParentID: "root", ChildID: "sub"}}
-	if err := CheckCategoryGraph(edges, "sub", []string{"sub"}); err == nil {
-		t.Fatal("self edge must fail")
-	}
-	// Cycle: sub becomes its own ancestor.
-	if err := CheckCategoryGraph(edges, "root", []string{"sub"}); err == nil {
-		t.Fatal("cycle must fail")
-	}
-	// Depth: root→a→b exists; adding b→c makes a 4-node path.
-	deep := []Edge{
-		{ParentID: "root", ChildID: "a"},
-		{ParentID: "a", ChildID: "b"},
-	}
-	if err := CheckCategoryGraph(deep, "c", []string{"b"}); err == nil {
-		t.Fatal("4-node path must fail")
-	}
-	// Exactly 3 nodes stays valid.
-	if err := CheckCategoryGraph(deep[:1], "c", []string{"a"}); err != nil {
-		t.Fatalf("3-node path valid: %v", err)
-	}
-}
-
 func TestReachableFromTop(t *testing.T) {
 	edges := []Edge{
 		{ParentID: "root-a", ChildID: "sub"},

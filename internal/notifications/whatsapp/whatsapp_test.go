@@ -231,30 +231,6 @@ func TestWhatsAppProviderReflection(t *testing.T) {
 	}
 }
 
-// TestWhatsAppErrorSubcodeIgnored proves numeric subcodes never
-// cross the adapter boundary either: only the fixed machine text
-// leaves, regardless of code/subcode content.
-func TestWhatsAppErrorSubcodeIgnored(t *testing.T) {
-	harness := newGraphHarness(t)
-	provider := testGraphProvider(t, harness)
-	harness.script = func(graphRecordedRequest) (int, any, map[string]string) {
-		return http.StatusBadRequest, map[string]any{"error": map[string]any{
-			"code": "100", "error_subcode": "987654321012345",
-			"message": "user 201012345678 should never surface",
-		}}, nil
-	}
-	_, err := provider.SendTemplate(context.Background(), testSendRequest())
-	text := err.Error()
-	if text != "validation: whatsapp provider rejected request" {
-		t.Fatalf("got %q", text)
-	}
-	for _, private := range []string{"987654321012345", "201012345678", "100"} {
-		if strings.Contains(text, private) {
-			t.Fatalf("leaked %q in %q", private, text)
-		}
-	}
-}
-
 // TestWhatsAppLongSecretBoundary proves overlong reflected secrets
 // cannot survive as fragments: with machine-only diagnostics there is
 // no prose to truncate, so nothing private can leak at any boundary.

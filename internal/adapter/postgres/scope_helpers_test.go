@@ -3,21 +3,11 @@ package postgres
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/google/uuid"
 )
 
 // Shared Store-scope fixture helpers.
-
-func r4Exec(t *testing.T, f *scopeFixture, want int64, query string, args ...any) {
-	t.Helper()
-	result, err := f.pool.Exec(context.Background(), query, args...)
-	if err != nil || result.RowsAffected() != want {
-		t.Fatalf("fixture affected=%d want=%d: %v", result.RowsAffected(), want, err)
-	}
-}
 
 func r4Payloads(t *testing.T, f *scopeFixture) string {
 	t.Helper()
@@ -26,35 +16,6 @@ func r4Payloads(t *testing.T, f *scopeFixture) string {
 		t.Fatal(err)
 	}
 	return state
-}
-
-func r3Converge(t *testing.T, f *scopeFixture) {
-	t.Helper()
-	ctx := context.Background()
-	d := NewDevices(f.pool, 5*time.Second)
-	for attempt := 0; attempt < 30; attempt++ {
-		if _, err := f.pool.Exec(ctx, `UPDATE sync_event_processing SET next_attempt_at=now()-interval '1 second' WHERE status='retry' AND processor LIKE 'catalog_%'`); err != nil {
-			t.Fatal(err)
-		}
-		remaining := 0
-		for _, p := range []struct{ processor, typ string }{{catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV2}, {catalog.ProcessorTagProjectionV1, catalog.EventTagSnapshotV1}, {catalog.ProcessorProductProjectionV1, catalog.EventProductSnapshotV2}} {
-			events, err := NewCatalogProjection(d.pool, d.timeout).PendingCatalogEvents(ctx, p.processor, p.typ, 100, time.Now())
-			if err != nil {
-				t.Fatal(err)
-			}
-			remaining += len(events)
-			for _, e := range events {
-				res := r3Project(t, f, e, p.typ)
-				if res.Outcome == catalog.OutcomeBlocked {
-					t.Fatalf("convergence blocked %s: %+v", e, res)
-				}
-			}
-		}
-		if remaining == 0 {
-			return
-		}
-	}
-	t.Fatal("catalog did not reach terminal convergence")
 }
 
 // seedStoreProduct projects minimal Store-owned catalog products (with one

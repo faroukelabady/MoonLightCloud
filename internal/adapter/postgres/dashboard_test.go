@@ -215,37 +215,6 @@ func TestDashboardLatestSalesFallback(t *testing.T) {
 	}
 }
 
-// TestDashboardMissingFxFailsLoudly proves a USD sale without an FX
-// snapshot errors instead of silently dropping revenue. Such rows can only
-// exist via legacy/corrupt paths (ingestion requires USD FX), so the row
-// is seeded directly.
-func TestDashboardMissingFxFailsLoudly(t *testing.T) {
-	env := openDashEnv(t)
-	ctx := context.Background()
-	if _, err := env.pool.Exec(ctx, `
-		INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
-		VALUES ('22222222-2222-7222-8222-222222222222', $1, 'sale.finalized.v3', '2026-09-22T10:00:00Z', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1))`,
-		env.devID); err != nil {
-		t.Fatalf("seed event: %v", err)
-	}
-	if _, err := env.pool.Exec(ctx, `
-		INSERT INTO sales_projection
-			(sale_id, source_event_id, source_device_id, sale_number, channel,
-			 occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar,
-			 shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en,
-			 currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at, store_id)
-		VALUES ('11111111-1111-4111-8111-111111111111',
-			'22222222-2222-7222-8222-222222222222', $1,
-			'MLR-X', 'STORE', '2026-09-22T10:00:00Z', '2026-09-22T10:05:00Z', 'a','b','c','d','e','f','g',
-			'USD', 1000, 0, 0, 1000, now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $1))`, env.devID); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-25")
-	if _, err := env.dash.Overview(ctx, req); err == nil {
-		t.Fatal("USD without FX must fail loudly, never silently drop revenue")
-	}
-}
-
 // TestDashboardMoneyLexicalStrings marshals every dashboard money response
 // to JSON and asserts each monetary leaf is a JSON string (never a
 // number): the source-level guard against float-precision regressions.

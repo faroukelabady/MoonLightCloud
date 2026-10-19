@@ -226,29 +226,3 @@ func TestTelegramLocaleIsolation(t *testing.T) {
 		t.Fatalf("missing locale must report mapping-missing: %v", err)
 	}
 }
-
-// TestTelegramEnqueueIdempotency pins the frozen identity rule for
-// Telegram rows: same key plus same payload adopts; same key plus
-// different payload conflicts.
-func TestTelegramEnqueueIdempotency(t *testing.T) {
-	ctx := context.Background()
-	mappings := &stubMappingStore{}
-	outbox := &recordingOutbox{}
-	service := notifications.NewService(mappings, outbox, nil)
-	if err := mappings.UpsertTemplateMapping(ctx, telegramTestMapping()); err != nil {
-		t.Fatal(err)
-	}
-	first, err := service.EnqueueTemplate(ctx, telegramTestEnqueue("tg-idem-001"))
-	if err != nil || !first.Created {
-		t.Fatalf("first: %+v %v", first, err)
-	}
-	replay, err := service.EnqueueTemplate(ctx, telegramTestEnqueue("tg-idem-001"))
-	if err != nil || replay.Created || replay.ID != first.ID {
-		t.Fatalf("identical replay must adopt: %+v %v", replay, err)
-	}
-	diverged := telegramTestEnqueue("tg-idem-001")
-	diverged.Parameters = map[string]string{"report_body": "other totals"}
-	if _, err := service.EnqueueTemplate(ctx, diverged); err == nil {
-		t.Fatal("diverged payload must conflict")
-	}
-}

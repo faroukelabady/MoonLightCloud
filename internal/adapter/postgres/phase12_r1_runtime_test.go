@@ -7,12 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
-	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
-	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
-	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
-	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"net"
 	"net/http"
@@ -24,6 +18,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
+	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPhase12R1Runtime(t *testing.T) {

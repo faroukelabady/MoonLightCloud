@@ -51,28 +51,6 @@ func signWebhook(secret, body string) string {
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func webhookRequest(t *testing.T, secret, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
-	t.Helper()
-	return webhookRequestWith(t, secret, body, "delivery-1", mutate)
-}
-
-func webhookRequestWith(t *testing.T, secret, body, delivery string, mutate func(*http.Request)) *httptest.ResponseRecorder {
-	t.Helper()
-	request := httptest.NewRequest(http.MethodPost,
-		"/api/v1/commerce/webhooks/woocommerce/website", strings.NewReader(body))
-	request.SetPathValue("provider_key", "website")
-	request.Header.Set("X-WC-Webhook-Signature", signWebhook(secret, body))
-	request.Header.Set("X-WC-Webhook-Topic", "order.created")
-	request.Header.Set("X-WC-Webhook-Resource", "order")
-	request.Header.Set("X-WC-Webhook-Delivery-ID", delivery)
-	if mutate != nil {
-		mutate(request)
-	}
-	recorder := httptest.NewRecorder()
-	_ = recorder
-	return recorder
-}
-
 func webhookHandler(secret string, inbox *memWebhookInbox, notified *int) (*CommerceWebhookHandlers, *httptest.ResponseRecorder) {
 	resolve := func(providerKey string) (string, bool) {
 		if providerKey == "website" {

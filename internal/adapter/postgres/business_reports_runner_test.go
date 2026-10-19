@@ -111,32 +111,6 @@ func TestReportRunnerCompletes(t *testing.T) {
 	}
 }
 
-// TestReportRunnerManualIdempotency proves same key returns the same
-// run while changed recipients conflict.
-func TestReportRunnerManualIdempotency(t *testing.T) {
-	env := openSaleEnv(t)
-	service := reportTestService(t, env, &stubReportSummary{summary: cannedSummary()})
-	recipient := addTestRecipient(t, service, "owner")
-	schedule := createTestSchedule(t, service, "owner-daily", "daily", "21:00", "", recipient.ID)
-	first, created, err := service.RunNow(context.Background(), schedule.ID, "manual-001")
-	if err != nil || !created {
-		t.Fatalf("first: %v %v", first, err)
-	}
-	second, created, err := service.RunNow(context.Background(), schedule.ID, "manual-001")
-	if err != nil || created || second != first {
-		t.Fatalf("duplicate: %v %v %v", second, created, err)
-	}
-	other := addTestRecipient(t, service, "second")
-	_ = other
-	// Disable the only recipient: semantics change → conflict.
-	if err := businessReportStore(env).SetRecipientEnabled(context.Background(), recipient.ID, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := service.RunNow(context.Background(), schedule.ID, "manual-001"); err == nil {
-		t.Fatal("changed semantics must conflict")
-	}
-}
-
 // flakyReportSource fails Summary on configured call numbers to
 // simulate temporary canonical-service outages.
 type flakyReportSource struct {

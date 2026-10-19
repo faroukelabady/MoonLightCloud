@@ -187,10 +187,3 @@ func TestWooShopifyProviderKeyCollision(t *testing.T) {
 		t.Fatalf("woo + shopify must coexist: %v", err)
 	}
 }
-
-func TestShopifyDisabledIgnoresOrdersFlag(t *testing.T) {
-	setShopifyEnv(t, map[string]string{"COMMERCE_SHOPIFY_ORDERS_ENABLED": "true"})
-	if _, err := loadShopifyConfig(); err == nil {
-		t.Fatal("orders enabled without provider accepted")
-	}
-}

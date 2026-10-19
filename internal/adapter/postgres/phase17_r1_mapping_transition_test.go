@@ -2,9 +2,10 @@ package postgres
 
 import (
 	"context"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"sync"
 	"testing"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 )
 
 func TestPhase17R1VariantMappingTransitionCAS(t *testing.T) {

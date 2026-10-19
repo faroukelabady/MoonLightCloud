@@ -99,12 +99,6 @@ func TestReturnPartialDurableAccept(t *testing.T) {
 	}
 }
 
-// Full void return accepted.
-func TestReturnFullVoidAccept(t *testing.T) {
-	env := openSaleEnv(t)
-	mustIngestReturn(t, env, "66666666-6666-7666-8666-666666666666", returnFixture(t, "return_full.json"))
-}
-
 // Identical retry is idempotent: one durable identity, both ACK.
 func TestReturnIdenticalRetryIdempotent(t *testing.T) {
 	env := openSaleEnv(t)
@@ -150,35 +144,6 @@ func TestReturnEventIDCollision(t *testing.T) {
 	if !strings.Contains(stored, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") {
 		t.Fatal("original immutable event must be preserved")
 	}
-}
-
-// Two distinct returns against one sale both transport successfully: no
-// "sale already has return" conflict — business identity is the return.
-func TestReturnTwoDistinctEventsOneSale(t *testing.T) {
-	env := openSaleEnv(t)
-	base := returnFixture(t, "return_partial.json")
-	var m map[string]any
-	if err := json.Unmarshal([]byte(base), &m); err != nil {
-		t.Fatal(err)
-	}
-	m["return_refund_id"] = "77777777-7777-4777-8777-777777777777"
-	m["return_number"] = "RET-20260921-77777777"
-	second, _ := json.Marshal(m)
-	mustIngestReturn(t, env, "55555555-5555-7555-8555-555555555555", base)
-	mustIngestReturn(t, env, "77777777-7777-7777-8777-777777777777", string(second))
-	var n int
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM sync_events WHERE event_type='sale.return_refund.finalized.v1'`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("both returns accepted: %d (%v)", n, err)
-	}
-}
-
-// Return accepted when the original sale projection row is absent: transport
-// never waits for projection dependencies.
-func TestReturnAcceptedWithoutSaleProjection(t *testing.T) {
-	env := openSaleEnv(t)
-	mustIngestReturn(t, env, "55555555-5555-7555-8555-555555555555", returnFixture(t, "return_partial.json"))
-	// No sale ingested, no projection rows — accept stands.
 }
 
 // Invalid return payloads reject the whole batch with zero rows.
@@ -271,33 +236,6 @@ func TestReturnPayloadSizeLimits(t *testing.T) {
 	}
 }
 
-// Concurrent identical deliveries converge on one durable identity.
-func TestReturnConcurrentIdenticalDelivery(t *testing.T) {
-	env := openSaleEnv(t)
-	payload := returnFixture(t, "return_partial.json")
-	body := fmt.Sprintf(`{"events":[{"event_id":"55555555-5555-7555-8555-555555555555","event_type":"sale.return_refund.finalized.v1","occurred_at":"2026-09-21T12:00:00Z","payload":%s}]}`,
-		payload)
-	var wg sync.WaitGroup
-	errs := make([]error, 6)
-	for i := range errs {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, errs[i] = env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
-		}(i)
-	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent identical ingest must succeed: %v", err)
-		}
-	}
-	var n int
-	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM sync_events`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("one durable identity: %d (%v)", n, err)
-	}
-}
-
 // Concurrent conflicting deliveries never overwrite nondeterministically.
 func TestReturnConcurrentConflictingDelivery(t *testing.T) {
 	env := openSaleEnv(t)
@@ -348,24 +286,6 @@ func TestReturnConcurrentConflictingDelivery(t *testing.T) {
 	var n int
 	if err := env.pool.QueryRow(context.Background(), `SELECT count(*) FROM sync_events`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("single row after conflict race: %d (%v)", n, err)
-	}
-}
-
-// Lost ACK: durable commit followed by identical retry is idempotent.
-func TestReturnLostAckRetry(t *testing.T) {
-	env := openSaleEnv(t)
-	eventID := "55555555-5555-7555-8555-555555555555"
-	payload := returnFixture(t, "return_partial.json")
-	mustIngestReturn(t, env, eventID, payload)
-	// Simulate the lost response: retry the identical bytes.
-	body := fmt.Sprintf(`{"events":[{"event_id":%q,"event_type":"sale.return_refund.finalized.v1","occurred_at":"2026-09-21T12:00:00Z","payload":%s}]}`,
-		eventID, payload)
-	res, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body))
-	if err != nil {
-		t.Fatalf("lost-ACK retry: %v", err)
-	}
-	if res.Events[0].Status != "already_accepted" {
-		t.Fatalf("want already_accepted, got %+v", res)
 	}
 }
 

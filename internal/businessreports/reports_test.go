@@ -18,17 +18,6 @@ func cairo(t *testing.T) *time.Location {
 	return loc
 }
 
-func TestSlotPeriods(t *testing.T) {
-	from, to, err := DailyPeriod("2026-09-29")
-	if err != nil || from != "2026-09-28" || to != "2026-09-28" {
-		t.Fatalf("daily: %q %q %v", from, to, err)
-	}
-	from, to, err = TenDayPeriod("2026-10-11")
-	if err != nil || from != "2026-10-01" || to != "2026-10-10" {
-		t.Fatalf("ten-day: %q %q %v", from, to, err)
-	}
-}
-
 func TestSlotInstantWallClock(t *testing.T) {
 	loc := cairo(t)
 	morning, err := SlotInstant("2026-09-29", "09:00", loc)

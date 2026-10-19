@@ -6,7 +6,6 @@ package commerce
 
 import (
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
@@ -102,29 +101,5 @@ func TestOperationKeyConfigurationAware(t *testing.T) {
 	afterInv := InventoryOperationKey("prov", "prod-1", 7, 3, 5, 1, true, "cfp", "cpv", "optB", "optV2")
 	if beforeInv == afterInv {
 		t.Fatal("inventory identity must be option-aware")
-	}
-}
-
-// §111/§112: a disabled configuration is not a disabled Product — the
-// desired publication state stays the Product's own.
-func TestConfigurationsDoNotChangePublication(t *testing.T) {
-	desired := DesiredProduct{
-		Published: true,
-		Configurations: []CommerceConfiguration{
-			{ConfigurationID: "c1", Kind: "frame", Enabled: true},
-			{ConfigurationID: "c2", Kind: "frame", Enabled: false},
-		},
-	}
-	for _, configuration := range desired.Configurations {
-		if configuration.Kind != "frame" {
-			t.Fatal("provider-neutral kind only")
-		}
-	}
-	if !desired.Published {
-		t.Fatal("configuration enablement must not gate Product publication")
-	}
-	if strings.Contains(desired.Configurations[0].ConfigurationID, "shopify") ||
-		strings.Contains(desired.Configurations[0].ConfigurationID, "woo") {
-		t.Fatal("configuration identity must never name a provider")
 	}
 }

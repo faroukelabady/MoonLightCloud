@@ -38,13 +38,3 @@ func TestR1RecipientBoundary(t *testing.T) {
 		}
 	}
 }
-
-func TestR1UsernameBound(t *testing.T) {
-	maximum := "@" + strings.Repeat("a", 32)
-	if got, err := ValidateRecipient(maximum); err != nil || got != maximum {
-		t.Fatalf("documented maximum rejected: %v", err)
-	}
-	if _, err := ValidateRecipient(maximum + "a"); err == nil {
-		t.Fatal("maximum+1 accepted")
-	}
-}

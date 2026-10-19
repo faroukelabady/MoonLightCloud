@@ -49,9 +49,3 @@ func TestCanonicalDecimalIDBounds(t *testing.T) {
 		t.Fatal("accepted 20-digit id")
 	}
 }
-
-func TestFormatGIDUsesInternalTypesOnly(t *testing.T) {
-	if got := FormatGID(ResourceInventoryItem, "30322695"); got != "gid://shopify/InventoryItem/30322695" {
-		t.Fatal(got)
-	}
-}

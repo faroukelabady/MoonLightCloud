@@ -5,10 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
-	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +12,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
+	"github.com/faroukelabady/MoonLightCloud/internal/config"
 )
 
 type r1ShopifyTransport struct {

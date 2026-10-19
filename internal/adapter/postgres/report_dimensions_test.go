@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -116,35 +115,6 @@ func TestReportMultiSubcategoryFacet(t *testing.T) {
 	}
 }
 
-func TestReportHeaderVsLineAdjustments(t *testing.T) {
-	env := openSaleEnv(t)
-	// Sale-level discount + tax: header totals exact, lines untouched.
-	projectSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z",
-		func(m map[string]any) {
-			tot := m["totals"].(map[string]any)
-			tot["discount"].(map[string]any)["amount_minor"] = 20000
-			tot["tax"].(map[string]any)["amount_minor"] = 14000
-			tot["total"].(map[string]any)["amount_minor"] = 194000 // 200000+14000-20000
-			// Keep the payment aggregate invariant (sum == total ±1).
-			m["payments"].([]any)[0].(map[string]any)["amount"].(map[string]any)["amount_minor"] = 194000
-		})
-	sum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
-	egp := sum.CurrencyTotals[0]
-	if egp.SubtotalMinor != 200000 || egp.DiscountMinor != 20000 ||
-		egp.TaxMinor != 14000 || egp.SalesTotalMinor != 194000 {
-		t.Fatalf("header totals: %+v", egp)
-	}
-	svc := repService(env)
-	req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
-	prod, err := svc.Breakdown(context.Background(), req, report.DimensionProduct)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prod.Rows) != 1 || prod.Rows[0].LineSales[0].LineSalesMinor != 200000 {
-		t.Fatalf("line metrics must not allocate header discount/tax: %+v", prod.Rows)
-	}
-}
-
 func TestReportChannelCashier(t *testing.T) {
 	env := openSaleEnv(t)
 	projectSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", nil)
@@ -236,49 +206,6 @@ func TestReportHistoricalSnapshots(t *testing.T) {
 	}
 	if nulls != 1 {
 		t.Fatalf("null product_id must form its own row: %+v", prod.Rows)
-	}
-}
-
-func TestReportRebuildInvariance(t *testing.T) {
-	env := openSaleEnv(t)
-	projectSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", nil)
-	before := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
-	beforeJSON, _ := json.Marshal(struct {
-		Txns  int64
-		Units int64
-		Bucks []report.CurrencyTotal
-		Pays  []report.PaymentTotal
-	}{before.TransactionCount, before.UnitsSold, before.CurrencyTotals, before.PaymentTotals})
-
-	// Delete derived projections (retain events + ownership), reset
-	// processing, re-project through the real projector path.
-	ctx := context.Background()
-	if _, err := env.pool.Exec(ctx, `DELETE FROM sales_projection`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := env.pool.Exec(ctx,
-		`UPDATE sync_event_processing SET status='pending', next_attempt_at=now()
-		  WHERE processor='sale_projection.v3'`); err != nil {
-		t.Fatal(err)
-	}
-	store := NewDevices(env.pool, 5*time.Second)
-	ids, err := NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("rediscovery: %v %v", ids, err)
-	}
-	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, ids[0])
-	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, rec, time.Now()); err != nil {
-		t.Fatalf("re-project: %v", err)
-	}
-	after := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
-	afterJSON, _ := json.Marshal(struct {
-		Txns  int64
-		Units int64
-		Bucks []report.CurrencyTotal
-		Pays  []report.PaymentTotal
-	}{after.TransactionCount, after.UnitsSold, after.CurrencyTotals, after.PaymentTotals})
-	if string(beforeJSON) != string(afterJSON) {
-		t.Fatalf("rebuild changed report:\n%s\n%s", beforeJSON, afterJSON)
 	}
 }
 

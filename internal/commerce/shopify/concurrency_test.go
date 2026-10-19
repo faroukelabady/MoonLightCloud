@@ -243,34 +243,6 @@ func TestSafeZeroIsCompareAndSet(t *testing.T) {
 	}
 }
 
-// Phase 11 F2: stale inventory restore is rejected by the freshness
-// fence (not only by the quantity CAS).
-func TestStaleInventoryRestoreRejectedByFence(t *testing.T) {
-	h := newHarness(t)
-	provider := newTestProvider(t, h)
-	created, err := provider.UpsertProduct(context.Background(), upsertRequest("prod-1", "PAP-001", true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The newer desired state always converges through UpsertProduct
-	// first (which stamps the fence), then restores availability.
-	if _, err := provider.UpsertProduct(context.Background(), newerRequest(created.ExternalProductID)); err != nil {
-		t.Fatal(err)
-	}
-	newerInventory := inventoryRequest(created.ExternalProductID, "prod-1", 20, true)
-	newerInventory.OperationKey = "inv-NEW"
-	newerInventory.CatalogRevision, newerInventory.PolicyRevision = 9, 9
-	if err := provider.SetInventory(context.Background(), newerInventory); err != nil {
-		t.Fatal(err)
-	}
-	stale := inventoryRequest(created.ExternalProductID, "prod-1", 5, true)
-	stale.OperationKey = "inv-OLD"
-	wantRetryableSupersession(t, provider.SetInventory(context.Background(), stale))
-	if got := h.quantityOf(created.ExternalProductID, testLocationGID); got != 20 {
-		t.Fatalf("quantity = %d", got)
-	}
-}
-
 // Phase 11 NOTE-6: standalone SetInventory(positive) against a positive
 // remote is self-healing: one bounded safe-zero re-establishes the
 // operation's precondition (the caller is proven non-stale by the

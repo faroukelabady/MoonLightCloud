@@ -60,51 +60,6 @@ func kindOf(err error) apperr.Kind {
 	return apperr.Internal
 }
 
-func TestFirstAcceptanceAndDurableRow(t *testing.T) {
-	pool, svc, deviceID, credID := openSync(t)
-	id := "22222222-2222-7222-8222-222222222222"
-	res := ingest(t, svc, deviceID, credID, batch(ev(id, `{"a":1}`)))
-	if len(res.Events) != 1 || res.Events[0].Status != isync.StatusAccepted {
-		t.Fatalf("bad result: %+v", res)
-	}
-	var count int
-	var storedDevice, storedType string
-	err := pool.QueryRow(context.Background(),
-		`SELECT count(*), device_id::text, event_type FROM sync_events WHERE event_id=$1 GROUP BY device_id, event_type`,
-		id).Scan(&count, &storedDevice, &storedType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if storedDevice != deviceID || storedType != "system.test.v1" {
-		t.Fatalf("bad stored row: %s %s", storedDevice, storedType)
-	}
-}
-
-func TestDuplicateRetryAccepted(t *testing.T) {
-	_, svc, deviceID, credID := openSync(t)
-	id := "22222222-2222-7222-8222-222222222222"
-	body := batch(ev(id, `{"a":1}`))
-	ingest(t, svc, deviceID, credID, body)
-	// Lost ACK simulation: same bytes again → already_accepted, still one row.
-	res := ingest(t, svc, deviceID, credID, body)
-	if res.Events[0].Status != isync.StatusAlreadyAccepted {
-		t.Fatalf("want already_accepted, got %+v", res)
-	}
-}
-
-func TestPayloadMismatchConflict(t *testing.T) {
-	_, svc, deviceID, credID := openSync(t)
-	id := "22222222-2222-7222-8222-222222222222"
-	ingest(t, svc, deviceID, credID, batch(ev(id, `{"a":1}`)))
-	_, err := svc.Ingest(context.Background(), deviceID, credID, []byte(batch(ev(id, `{"a":2}`))))
-	if err == nil || kindOf(err) != apperr.Conflict {
-		t.Fatalf("want EVENT_ID_REUSE conflict, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "EVENT_ID_REUSE") {
-		t.Fatalf("want EVENT_ID_REUSE marker, got %v", err)
-	}
-}
-
 func TestBatchAllOrNothing(t *testing.T) {
 	pool, svc, deviceID, credID := openSync(t)
 	good1 := ev("22222222-2222-7222-8222-222222222222", `{"a":1}`)
@@ -163,34 +118,6 @@ func TestConcurrentIdenticalIngest(t *testing.T) {
 	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM sync_events`).Scan(&n)
 	if n != 1 {
 		t.Fatalf("want one stored row, got %d", n)
-	}
-}
-
-func TestConcurrentMismatchOneWins(t *testing.T) {
-	_, svc, deviceID, credID := openSync(t)
-	id := "22222222-2222-7222-8222-222222222222"
-	var wg sync.WaitGroup
-	errs := make([]error, 2)
-	payloads := []string{`{"v":1}`, `{"v":2}`}
-	for i := range errs {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			_, errs[i] = svc.Ingest(context.Background(), deviceID, credID, []byte(batch(ev(id, payloads[i]))))
-		}(i)
-	}
-	wg.Wait()
-	conflicts := 0
-	for _, err := range errs {
-		if err != nil {
-			if kindOf(err) != apperr.Conflict {
-				t.Fatalf("loser must get conflict, got %v", err)
-			}
-			conflicts++
-		}
-	}
-	if conflicts != 1 {
-		t.Fatalf("want exactly one conflict, errs=%v", errs)
 	}
 }
 

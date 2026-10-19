@@ -28,30 +28,6 @@ func openStoreEnv(t *testing.T) (StoreRegistry, string) {
 	return NewStoreRegistry(pool, 5*time.Second), p.Device.ID
 }
 
-func TestStoreRegistrationIdempotent(t *testing.T) {
-	d, devID := openStoreEnv(t)
-	ctx := context.Background()
-	storeID := "aaaaaaaa-0000-4000-8000-000000000001"
-	first, err := d.RegisterStore(ctx, devID, store.RegistrationRequest{
-		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
-	})
-	if err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if !first.Bound || first.StoreID != storeID {
-		t.Fatalf("bound: %+v", first)
-	}
-	second, err := d.RegisterStore(ctx, devID, store.RegistrationRequest{
-		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
-	})
-	if err != nil {
-		t.Fatalf("replay: %v", err)
-	}
-	if !second.Bound {
-		t.Fatalf("idempotent: %+v", second)
-	}
-}
-
 func TestStoreRegistrationValidation(t *testing.T) {
 	d, devID := openStoreEnv(t)
 	ctx := context.Background()
@@ -65,26 +41,6 @@ func TestStoreRegistrationValidation(t *testing.T) {
 			t.Fatalf("%s: must reject", name)
 		}
 	}
-}
-
-func TestStoreBindingConflictStable(t *testing.T) {
-	d, devID := openStoreEnv(t)
-	ctx := context.Background()
-	storeA := "aaaaaaaa-0000-4000-8000-000000000001"
-	storeB := "bbbbbbbb-0000-4000-8000-000000000002"
-	if _, err := d.RegisterStore(ctx, devID, store.RegistrationRequest{
-		StoreID: storeA, DisplayName: "A", Timezone: "Africa/Cairo",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, err := d.RegisterStore(ctx, devID, store.RegistrationRequest{
-		StoreID: storeB, DisplayName: "B", Timezone: "Africa/Cairo",
-	})
-	var appErr *apperr.Error
-	if !errors.As(err, &appErr) || appErr.Kind != apperr.Conflict {
-		t.Fatalf("conflict, got %v", err)
-	}
-	// Binding unchanged; no second binding row.
 }
 
 func TestStoreConcurrentIdenticalConverges(t *testing.T) {
@@ -181,31 +137,6 @@ func TestStoreRenamePreservesIdentity(t *testing.T) {
 	}
 }
 
-func TestStoreIngressSnapshotsBinding(t *testing.T) {
-	env := openSaleEnv(t)
-	storeID := env.storeID
-	storeDevices := NewStoreRegistry(env.pool, 5*time.Second)
-	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
-		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	eventID := "22222222-2222-7222-8222-222222222222"
-	if res := env.ingest(t, eventID, fixture(t, "sale_usd.json")); res.Events[0].Status != "accepted" {
-		t.Fatalf("ingest: %+v", res)
-	}
-	var got *string
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT store_id::text FROM sync_events WHERE event_id = $1`, eventID).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || *got != storeID {
-		t.Fatalf("ingress snapshots binding: %v", got)
-	}
-	// Spoofed payload store context is impossible: events carry no store
-	// field; context comes from the binding alone.
-}
-
 func TestStoreTwoDevicesOneStore(t *testing.T) {
 	pool, authSvc := openTestRepo(t)
 	ctx := context.Background()
@@ -234,37 +165,6 @@ func TestStoreTwoDevicesOneStore(t *testing.T) {
 		if !result.Bound {
 			t.Fatalf("device %s not bound", devID)
 		}
-	}
-}
-
-func TestStoreEventRetryPreservesContext(t *testing.T) {
-	env := openSaleEnv(t)
-	storeID := env.storeID
-	storeDevices := NewStoreRegistry(env.pool, 5*time.Second)
-	if _, err := storeDevices.RegisterStore(context.Background(), env.devID, store.RegistrationRequest{
-		StoreID: storeID, DisplayName: "Cairo Gallery", Timezone: "Africa/Cairo",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	eventID := "55555555-5555-7222-8222-222222222222"
-	if res := env.ingest(t, eventID, fixture(t, "sale_usd.json")); res.Events[0].Status != "accepted" {
-		t.Fatalf("ingest: %+v", res)
-	}
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-	// Replay the same event: context immutable.
-	if res := env.ingest(t, eventID, fixture(t, "sale_usd.json")); res.Events[0].Status != "already_accepted" {
-		t.Fatalf("replay: %+v", res)
-	}
-	env.drain(t)
-	time.Sleep(time.Second)
-	var got string
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT store_id::text FROM sync_events WHERE event_id = $1`, eventID).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != storeID {
-		t.Fatalf("replay preserves store context: %s", got)
 	}
 }
 

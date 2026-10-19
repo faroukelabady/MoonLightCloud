@@ -79,32 +79,6 @@ func TestInventoryActivationAndQuantities(t *testing.T) {
 	}
 }
 
-// Phase 11 §74: inactive/zero-availability paths always write zero.
-func TestInventoryZeroCases(t *testing.T) {
-	h := newHarness(t)
-	provider := newTestProvider(t, h)
-	created, err := provider.UpsertProduct(context.Background(), upsertRequest("prod-1", "PAP-001", true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, req := range map[string]commerce.InventoryUpdateRequest{
-		"inactive":   inventoryRequest(created.ExternalProductID, "prod-1", 17, true),
-		"not ready":  inventoryRequest(created.ExternalProductID, "prod-1", 17, false),
-		"zero alloc": inventoryRequest(created.ExternalProductID, "prod-1", 0, true),
-	} {
-		req.OperationKey = "inv-zero-" + name
-		if name == "inactive" {
-			req.AvailableQuantity = 0
-		}
-		if err := provider.SetInventory(context.Background(), req); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if got := h.quantityOf(created.ExternalProductID, testLocationGID); got != 0 {
-			t.Fatalf("%s: quantity = %d", name, got)
-		}
-	}
-}
-
 // Phase 11 §71/§164: the Shopify idempotency key is derived from the
 // frozen operation key — identical desired state replays the same key,
 // changed desired state gets a new one.

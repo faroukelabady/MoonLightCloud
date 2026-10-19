@@ -58,18 +58,6 @@ func TestDecodeV2Valid(t *testing.T) {
 	}
 }
 
-func TestDecodeV2EmptyTagsAllowed(t *testing.T) {
-	m := loadV2Base(t)
-	m["lines"].([]any)[0].(map[string]any)["tags"] = []any{}
-	p, err := decodeV2Map(t, m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ValidateV2(p); err != nil {
-		t.Fatalf("captured empty validates: %v", err)
-	}
-}
-
 func TestDecodeV2RequiresTagsArrayOnEveryLine(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

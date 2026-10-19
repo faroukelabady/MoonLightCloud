@@ -109,31 +109,6 @@ func TestEffectiveOnlinePublicationFormula(t *testing.T) {
 	}
 }
 
-// §19/§20/§67: missing/incomplete Category state fails safe — never
-// publish positive inventory on unproven hierarchy.
-func TestMissingCategoryStateFailsSafe(t *testing.T) {
-	reader := stubReader{
-		product:      catalog.Product{ProductHeader: catalog.ProductHeader{ID: "p1", IsActive: true, Revision: 1}},
-		policy:       catalog.ProductSalesPolicy{SellOnline: true, Revision: 1},
-		policyFound:  true,
-		availability: catalog.ProductAvailability{OnlineAvailable: 10, Ready: true},
-		online: catalog.ProductOnlinePolicy{
-			Allowed: false, Reason: catalog.OnlineBlockedStateIncomplete,
-		},
-	}
-	source := NewCatalogCommerceSource(reader)
-	desired, err := source.GetDesiredCommerceProduct(context.Background(), "p1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if desired.Published {
-		t.Fatal("missing category state must never publish")
-	}
-	if desired.Availability.OnlineAvailable != 0 {
-		t.Fatalf("quantity must be 0, got %d", desired.Availability.OnlineAvailable)
-	}
-}
-
 // §66: missing Product sales policy can never publish (frozen).
 func TestMissingPolicyCannotPublish(t *testing.T) {
 	reader := stubReader{

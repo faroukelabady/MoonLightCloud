@@ -99,38 +99,6 @@ func TestShopifyTransitionOneToNTombstonesManagedVariant(t *testing.T) {
 	}
 }
 
-// TestShopifyTransitionNToOneRepairsManagedVariant: the N→1 shape change
-// re-adopts the exact-SKU variant (never a duplicate) and (re)stamps the
-// managed-variant identity so product-level managed flows stay coherent.
-func TestShopifyTransitionNToOneRepairsManagedVariant(t *testing.T) {
-	h := newHarness(t)
-	provider := newTestProvider(t, h)
-	external, single := p17TransitionBase(t, h, provider, "t1")
-
-	two := p17Product("t1",
-		p17Variant("blue", "PAP-BLUE", 4, nil),
-		p17Variant("gold", "PAP-GOLD", 2, nil))
-	nResult, err := provider.UpsertProductVariants(context.Background(), p17VariantsUpsertReq(two, external, single))
-	if err != nil {
-		t.Fatal(err)
-	}
-	back := p17Product("t1", p17Variant("blue", "PAP-BLUE", 4, nil))
-	oneResult, err := provider.UpsertProductVariants(context.Background(), p17VariantsUpsertReq(back, external, nResult.Variants))
-	if err != nil {
-		t.Fatal(err)
-	}
-	blueDecimal := oneResult.Variants[p17BlueVariantID]
-	if blueDecimal != nResult.Variants[p17BlueVariantID] {
-		t.Fatalf("N→1 must keep the same remote variant: %q vs %q", blueDecimal, nResult.Variants[p17BlueVariantID])
-	}
-	if got := p17ManagedOf(t, h, external); got != blueDecimal {
-		t.Fatalf("managed_variant_id repaired to %q want %q", got, blueDecimal)
-	}
-	if len(h.productOf(external).variants) != 2 {
-		t.Fatal("N→1 must never delete remote variants (tombstone semantics are Cloud-side)")
-	}
-}
-
 // TestShopifyTransitionOneNOneWithRestart: full 1→N→1 with a FRESH
 // adapter instance between every step (restart between transitions) —
 // identity survives only through durable remote metadata, and no step

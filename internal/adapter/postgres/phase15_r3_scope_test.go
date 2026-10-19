@@ -2,9 +2,10 @@ package postgres
 
 import (
 	"context"
-	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"testing"
 	"time"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 )
 
 func TestR3UnusedConfigurationIDTwoStoreRace(t *testing.T) {

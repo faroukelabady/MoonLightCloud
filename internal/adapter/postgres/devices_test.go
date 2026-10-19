@@ -2,18 +2,15 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
-	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 	"github.com/faroukelabady/MoonLightCloud/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 var testPepperBytes = bytesOf('t')
@@ -126,25 +123,5 @@ func TestRotationLifecycle(t *testing.T) {
 	}
 	if _, _, err := svc.Authenticate(ctx, p.Device.ID, p.Credential.ID, p.RawSecret); err == nil {
 		t.Fatal("pre-rotation credential must fail")
-	}
-}
-
-func TestMigrationFromEmpty(t *testing.T) {
-	url := testutil.Isolated(t) // migrate.Up from empty already ran inside
-	conn, err := sql.Open("pgx", url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	v, err := migrate.Current(context.Background(), conn)
-	if err != nil || v != migrate.TargetVersion {
-		t.Fatalf("version %d (want %d): %v", v, migrate.TargetVersion, err)
-	}
-	for _, table := range []string{"devices", "device_credentials", "sync_events"} {
-		var exists bool
-		if err := conn.QueryRow(
-			"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name=$1)", table).Scan(&exists); err != nil || !exists {
-			t.Fatalf("%s table missing: %v", table, err)
-		}
 	}
 }

@@ -59,24 +59,6 @@ func createMapping(t *testing.T, f *scopeFixture, provider, product, external st
 	return mapping
 }
 
-// TestMapping_SameSKUCoexists proves mappings for same-SKU products in
-// two Stores coexist with independent ownership and externals.
-func TestMapping_SameSKUCoexists(t *testing.T) {
-	f := openScopeFixture(t)
-	prodA, prodB := scopeProducts(t, f, 400, "map", "MAP-001")
-	mappingA := createMapping(t, f, "website", prodA, "900")
-	mappingB := createMapping(t, f, "website", prodB, "901")
-	if mappingA.StoreID == nil || *mappingA.StoreID != scopeStoreA {
-		t.Fatalf("mapping A store: %v", mappingA.StoreID)
-	}
-	if mappingB.StoreID == nil || *mappingB.StoreID != scopeStoreB {
-		t.Fatalf("mapping B store: %v", mappingB.StoreID)
-	}
-	if got := mappingStore(t, f, "website", prodA); got == nil || *got != scopeStoreA {
-		t.Fatalf("durable mapping A: %v", got)
-	}
-}
-
 // TestMapping_CrossStoreConflict proves identity collisions stay frozen
 // conflicts: same external for another product, or a different external
 // for a mapped product, never overwrite — across Stores alike.

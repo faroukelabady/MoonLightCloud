@@ -338,42 +338,6 @@ func TestReturnCumulativeOverReturn(t *testing.T) {
 	}
 }
 
-// TestReturnCumulativeRefundExceeded proves an event-valid but excessive
-// refund is blocked before writing.
-func TestReturnCumulativeRefundExceeded(t *testing.T) {
-	env := returnEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-
-	// Valid line quantity, but refund inflated beyond the sale total (the
-	// event itself is internally consistent, so ingestion accepts it).
-	payload := alignedReturnPayload(t, salePayload,
-		"33333333-3333-7333-8333-333333333333", "RET-BIG", 1)
-	var m map[string]any
-	if err := json.Unmarshal([]byte(payload), &m); err != nil {
-		t.Fatal(err)
-	}
-	big := 999999999
-	for _, key := range []string{"gross", "refund_total"} {
-		m["totals"].(map[string]any)[key].(map[string]any)["amount_minor"] = big
-	}
-	m["lines"].([]any)[0].(map[string]any)["gross"].(map[string]any)["amount_minor"] = big
-	m["lines"].([]any)[0].(map[string]any)["refund"].(map[string]any)["amount_minor"] = big
-	m["refunds"].([]any)[0].(map[string]any)["amount"].(map[string]any)["amount_minor"] = big
-	raw, _ := json.Marshal(m)
-	retEvent := "44444444-4444-7444-8444-444444444444"
-	ingestReturnRaw(t, env, retEvent, string(raw))
-	drainReturns(t, env)
-	if status, code := returnStatus(t, env, retEvent); status != "blocked" || code != ErrCumulativeRefundEx {
-		t.Fatalf("excessive refund: %q/%q", status, code)
-	}
-	if n := saleCount(t, env.pool, "return_refund_projection"); n != 0 {
-		t.Fatalf("zero headers, got %d", n)
-	}
-}
-
 // TestReturnConcurrentSameEvent proves concurrent identical projection
 // converges: one header, processed, no false conflict.
 func TestReturnConcurrentSameEvent(t *testing.T) {

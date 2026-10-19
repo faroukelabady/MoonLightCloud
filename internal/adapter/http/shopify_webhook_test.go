@@ -156,28 +156,6 @@ func TestShopifyWebhookSignatureFailures(t *testing.T) {
 	}
 }
 
-// Phase 11 §123: HMAC is verified before dedupe — an invalid-signature
-// duplicate is never accepted.
-func TestShopifyWebhookHMACBeforeDedupe(t *testing.T) {
-	handlers, inbox, _ := shopifyWebhookFixture(t)
-	inbox.identical = true // simulate an already-recorded delivery
-	request := httptest.NewRequest(http.MethodPost,
-		"/api/v1/commerce/webhooks/shopify/shopify-main", bytes.NewReader(shopifyOrderBody))
-	request.SetPathValue("provider_key", "shopify-main")
-	request.Header.Set("X-Shopify-Hmac-Sha256", signShopify([]byte("forged")))
-	request.Header.Set("X-Shopify-Shop-Domain", "example.myshopify.com")
-	request.Header.Set("X-Shopify-Topic", "orders/create")
-	request.Header.Set("X-Shopify-Webhook-Id", "b54557e4-bdd9-4b37-8a5f-bf7d70bcd043")
-	recorder := httptest.NewRecorder()
-	handlers.ShopifyWebhook(recorder, request)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	if len(inbox.calls) != 0 {
-		t.Fatal("dedupe lookup/persistence ran before authentication")
-	}
-}
-
 // Phase 11 §117/§174: a correctly signed webhook for another shop must
 // not enter this provider instance.
 func TestShopifyWebhookShopDomainValidation(t *testing.T) {

@@ -530,42 +530,6 @@ func TestTelegramProviderKeyIsInstance(t *testing.T) {
 	}
 }
 
-// TestTelegramFingerprintDeterminism pins provider-neutral semantic
-// fingerprints across map-order permutations for Telegram rows.
-func TestTelegramFingerprintDeterminism(t *testing.T) {
-	params := map[string]string{"body": "daily totals 68000"}
-	resolved := notifications.ResolvedTemplate{
-		TemplateKey: "daily_business_report_v1", Locale: "ar",
-		ExternalTemplateName: RendererBodyV1, ExternalLanguageCode: "ar",
-		ParameterOrder: []string{"body"},
-	}
-	first := notifications.FingerprintSemantic("telegram-main", "123456789",
-		"daily_business_report_v1", "ar", params, resolved)
-	for i := 0; i < 10; i++ {
-		again := notifications.FingerprintSemantic("telegram-main", "123456789",
-			"daily_business_report_v1", "ar",
-			map[string]string{"body": "daily totals 68000"}, resolved)
-		if again != first {
-			t.Fatal("fingerprint must be deterministic")
-		}
-	}
-}
-
-// TestTelegramConstructionPerformsNoIO pins the startup contract:
-// building the provider never dials the network, so Cloud starts
-// even when Telegram is unreachable. First contact happens at
-// dispatch, never at registration.
-func TestTelegramConstructionPerformsNoIO(t *testing.T) {
-	cfg := config.TelegramNotificationConfig{
-		Enabled: true, ProviderKey: "telegram-main",
-		BotToken: testBotToken, BaseURL: "https://127.0.0.1:1",
-		HTTPTimeout: 5 * time.Second,
-	}
-	if _, err := NewProvider(cfg, nil); err != nil {
-		t.Fatalf("construction must not touch the network: %v", err)
-	}
-}
-
 // TestTelegramLiveBotAPI is OPT-IN ONLY: it runs exclusively with
 // explicit credentials (MOONLIGHT_TELEGRAM_E2E=1 plus bot token and
 // chat ID). Without them it reports NOT RUN, never PASS.

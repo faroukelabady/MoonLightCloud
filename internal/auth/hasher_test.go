@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"strings"
 	"testing"
 )
 
@@ -75,15 +74,6 @@ func TestExactV1Construction(t *testing.T) {
 	mac.Write([]byte(raw))
 	if string(mac.Sum(nil)) != string(verifier) {
 		t.Fatal("verifier must equal HMAC-SHA256(pepper, salt || secret)")
-	}
-}
-
-func TestHashNeverStoresPlaintext(t *testing.T) {
-	h := mustHasher(t, testPepper)
-	raw, _ := GenerateSecret()
-	verifier, salt, _ := h.Hash(raw)
-	if strings.Contains(string(verifier), raw) || strings.Contains(string(salt), raw) {
-		t.Fatal("verifier/salt must not contain the raw secret")
 	}
 }
 

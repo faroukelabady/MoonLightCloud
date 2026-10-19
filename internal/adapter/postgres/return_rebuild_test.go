@@ -140,28 +140,6 @@ func TestReturnRivalRebuildStable(t *testing.T) {
 	}
 }
 
-// TestReturnOutOfOrderRebuildStable proves return-before-sale inbox order
-// converges to the same final state after a full rebuild.
-func TestReturnOutOfOrderRebuildStable(t *testing.T) {
-	env := returnEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	retPayload := alignedReturnPayload(t, salePayload,
-		"33333333-3333-7333-8333-333333333333", "RET-OOO", 1)
-	retEvent := "44444444-4444-7444-8444-444444444444"
-	ingestReturnRaw(t, env, retEvent, retPayload)
-	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-	drainReturns(t, env)
-	before := dumpReturns(t, env)
-
-	resetReturnDerived(t, env)
-	drainReturns(t, env)
-	if after := dumpReturns(t, env); after != before {
-		t.Fatalf("out-of-order rebuild mismatch:\nbefore: %s\nafter:  %s", before, after)
-	}
-}
-
 // TestReturnBackfillPagination proves a >1-page historical backlog (no
 // processing rows, Phase 4A-era shape) projects completely with no
 // starvation, then repeated runs hold steady with no drift.

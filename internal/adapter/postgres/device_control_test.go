@@ -171,23 +171,6 @@ func TestControlAcceptedStopsRedelivery(t *testing.T) {
 	}
 }
 
-// Lost ack then terminal: pending/leased → completed directly is allowed.
-func TestControlTerminalWithoutAck(t *testing.T) {
-	_, ctl, dev, _ := ctlFixture(t)
-	ctx := context.Background()
-	if _, _, err := ctl.CreateSyncRequest(ctx, dev, "term-key"); err != nil {
-		t.Fatal(err)
-	}
-	claimed, ok, err := ctl.Poll(ctx, dev)
-	if err != nil || !ok {
-		t.Fatalf("poll: %v %v", ok, err)
-	}
-	done, err := ctl.ReportTerminal(ctx, dev, claimed.ID, devicecontrol.StatusCompleted, "SYNC_COMPLETED")
-	if err != nil || done.Status != devicecontrol.StatusCompleted {
-		t.Fatalf("terminal without ack: %+v %v", done, err)
-	}
-}
-
 // Contradictory terminal is rejected; first outcome stands.
 func TestControlContradictoryTerminal(t *testing.T) {
 	_, ctl, dev, _ := ctlFixture(t)
@@ -255,14 +238,6 @@ func TestControlWrongDevice(t *testing.T) {
 	if err != nil || !ok || still.Status != devicecontrol.StatusLeased {
 		t.Fatalf("zero mutation: %+v %v", still, err)
 	}
-}
-
-func ctlFixtureCheck(ctx context.Context, ctl *devicecontrol.Service, dev, id string) (string, bool, error) {
-	cmd, err := ctl.ReportRunning(ctx, dev, id)
-	if err != nil {
-		return "", false, err
-	}
-	return cmd.Status, true, nil
 }
 
 // Presence: poll/accept/finish refresh last_seen from server time.

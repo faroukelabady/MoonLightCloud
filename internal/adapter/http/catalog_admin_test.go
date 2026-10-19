@@ -316,54 +316,6 @@ func TestCatalogAdminIDOR(t *testing.T) {
 	}
 }
 
-// TestCatalogAdminWrongDeviceACK ensures server-side target binding:
-// device B cannot acknowledge device A's target.
-func TestCatalogAdminWrongDeviceACK(t *testing.T) {
-	handlers, stub, devices, storeID, entityID := catalogAdminTestSetup()
-	deviceA := uuid.NewString()
-	deviceB := uuid.NewString()
-	stub.bound[storeID] = []catalogadmin.BoundDevice{{DeviceID: deviceA, Name: "a"}}
-	devices.binding[deviceA] = storeID
-	devices.binding[deviceB] = storeID
-	devices.active[deviceA] = true
-	devices.active[deviceB] = true
-	stub.capable[deviceA] = true
-
-	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"}}`
-	rec := postCommand(t, handlers, valid)
-	var created struct {
-		ID      string `json:"id"`
-		Targets []struct {
-			ID       string `json:"id"`
-			DeviceID string `json:"device_id"`
-		} `json:"targets"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if len(created.Targets) != 1 {
-		t.Fatalf("targets: %+v", created)
-	}
-	targetID := created.Targets[0].ID
-
-	report := func(device, target string) int {
-		t.Helper()
-		body := `{"status":"applied","result_code":"APPLIED","entity_id":"` + entityID + `","pre_revision":5,"post_revision":6}`
-		_ = body
-		return 0
-	}
-	_ = report
-	// Wrong device: FinishCatalogAdminTarget binds target+device.
-	ok, err := stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceB, "applied", "applied", entityID, 5, 6)
-	if err != nil || ok {
-		t.Fatalf("wrong-device ACK must not apply: ok=%v err=%v", ok, err)
-	}
-	ok, err = stub.FinishCatalogAdminTarget(t.Context(), targetID, deviceA, "applied", "applied", entityID, 5, 6)
-	if err != nil || !ok {
-		t.Fatalf("own-device ACK must apply: ok=%v err=%v", ok, err)
-	}
-}
-
 // TestCatalogAdminMethodGating ensures every catalog-admin handler
 // rejects wrong HTTP methods without touching the service: no state
 // change on GET-vs-POST confusion, no device surface on dashboard

@@ -248,19 +248,6 @@ func TestTelegramR1OperationalAlerts(t *testing.T) {
 	}
 }
 
-func r1DatabaseState(t *testing.T, env *saleEnv) map[string]string {
-	t.Helper()
-	result := map[string]string{}
-	for _, table := range []string{"notification_messages", "notification_template_mappings", "notification_delivery_status_history", "notification_recipients", "business_report_schedules", "business_report_schedule_recipients", "business_report_runs", "business_report_deliveries", "operational_incidents", "operational_alert_deliveries", "operational_recovery_actions", "sales_projection", "sale_lines_projection", "sale_payments_projection"} {
-		var state string
-		if err := env.pool.QueryRow(context.Background(), `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]')::text FROM `+table+` t`).Scan(&state); err != nil {
-			t.Fatal(err)
-		}
-		result[table] = state
-	}
-	return result
-}
-
 func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 	for _, kind := range []string{"daily", "ten_day"} {
 		t.Run(kind, func(t *testing.T) {

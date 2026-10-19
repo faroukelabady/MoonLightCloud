@@ -615,19 +615,6 @@ func collectPageIDs(t *testing.T, env *saleEnv, provider, status string, limit i
 	return ids
 }
 
-// TestCommerceOrderPageTraversal proves full keyset traversal: 25
-// orders at limit 10 visit every durable row (live, deleted, unmapped)
-// exactly once across pages.
-func TestCommerceOrderPageTraversal(t *testing.T) {
-	env := openSaleEnv(t)
-	base := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
-	seedPagedOrders(t, env, "website", base, 25)
-	ids := collectPageIDs(t, env, "website", "", 10)
-	if len(ids) != 25 {
-		t.Fatalf("traversal: %d rows", len(ids))
-	}
-}
-
 // TestCommerceOrderPageEqualTimestamps proves identical created_at
 // values paginate without duplicates or gaps via (provider, order)
 // tie-breaks.

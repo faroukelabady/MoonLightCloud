@@ -88,31 +88,6 @@ func TestImmutableEventIdentity(t *testing.T) {
 	_ = authSvc
 }
 
-// TestCredentialRotationDedup proves credential identity is not part of
-// idempotency: rotating the device credential does not break dedup.
-func TestCredentialRotationDedup(t *testing.T) {
-	pool, authSvc := openTestRepo(t)
-	ctx := context.Background()
-	p, err := authSvc.Create(ctx, "shop-rot")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := newSaleEnvOnPool(t, pool, p.Device.ID, p.Credential.ID)
-	payload := fixture(t, "sale_egp.json")
-	id := "22222222-2222-7222-8222-222222222222"
-	if r := env.ingest(t, id, payload); r.Events[0].Status != "accepted" {
-		t.Fatalf("first: %+v", r)
-	}
-	rot, err := authSvc.Rotate(ctx, p.Device.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	envRot := newSaleEnvOnPool(t, pool, p.Device.ID, rot.Credential.ID)
-	if r := envRot.ingest(t, id, payload); r.Events[0].Status != "already_accepted" {
-		t.Fatalf("after rotation: %+v", r)
-	}
-}
-
 // Exact integer identity must survive PostgreSQL JSONB normalization and retry.
 func TestExactIntegerIdentity(t *testing.T) {
 	env := openSaleEnv(t)

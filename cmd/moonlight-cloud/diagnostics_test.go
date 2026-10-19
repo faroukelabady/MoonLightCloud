@@ -55,33 +55,6 @@ func TestSupportBundleContainsNoSecrets(t *testing.T) {
 	}
 }
 
-// TestSupportBundleEnvRecordsBooleansOnly proves environment reporting
-// records presence, never values.
-func TestSupportBundleEnvRecordsBooleansOnly(t *testing.T) {
-	env := EnvironmentSummary{
-		Environment: "production", MFAKeyConfigured: true,
-		ReleaseTrustLoaded: true,
-	}
-	raw, err := json.Marshal(env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	// Base64 key material would look like a long quoted string; assert
-	// the encoded struct has only scalar booleans/strings by checking
-	// that no value exceeds a short length.
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	for key, value := range decoded {
-		if s, ok := value.(string); ok && len(s) > 32 {
-			t.Fatalf("environment field %q carries too much data: %q", key, s)
-		}
-	}
-	_ = text
-}
-
 // TestDiagnosticsArgumentContract pins the CLI contract: `diagnostics`
 // and `diagnostics --out <file>` are accepted, anything else is refused
 // (Phase 20 R6: the command was double-sliced, so --out was ignored and

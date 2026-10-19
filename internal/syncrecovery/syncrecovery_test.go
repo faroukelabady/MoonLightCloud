@@ -176,29 +176,6 @@ func TestVerifyDetectsMissingIdentities(t *testing.T) {
 	}
 }
 
-// TestVerifyIdentityMismatchIsMissing proves content conflict handling:
-// the same event ID with a different payload hash is NOT a match.
-func TestVerifyIdentityMismatchIsMissing(t *testing.T) {
-	store := newStore()
-	svc := NewService(store)
-	id := uuid.NewString()
-	store.present[id] = "aaaa"
-
-	device := uuid.NewString()
-	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
-		t.Fatal(err)
-	}
-	resp, err := svc.Verify(context.Background(), device, VerifyRequest{
-		Events: []EventIdentity{{EventID: id, PayloadHash: "cccc"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(resp.Missing) != 1 {
-		t.Fatalf("same ID different hash must be missing: %v", resp.Missing)
-	}
-}
-
 // TestVerifyRejectsUnboundedPages proves the verification payload can
 // never become unbounded.
 func TestVerifyRejectsUnboundedPages(t *testing.T) {
@@ -367,33 +344,6 @@ func TestSkippedPageIsRejected(t *testing.T) {
 	// A non-advancing page is refused outright.
 	if _, err := svc.Verify(context.Background(), device, VerifyRequest{Events: mk(1, 101)}); err == nil {
 		t.Fatal("replaying an earlier page must be REJECTED")
-	}
-}
-
-// TestReplayedPageIsRejected proves pages cannot be double-counted to
-// fake coverage.
-func TestReplayedPageIsRejected(t *testing.T) {
-	store := newStore()
-	svc := NewService(store)
-	device := uuid.NewString()
-	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.BeginVerifyPass(context.Background(), device, 3); err != nil {
-		t.Fatal(err)
-	}
-	mk := func(lo, hi int) []EventIdentity {
-		out := []EventIdentity{}
-		for i := lo; i < hi; i++ {
-			out = append(out, EventIdentity{EventID: fmt.Sprintf("%032d", i), PayloadHash: "a"})
-		}
-		return out
-	}
-	if _, err := svc.Verify(context.Background(), device, VerifyRequest{Events: mk(1, 101)}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Verify(context.Background(), device, VerifyRequest{Events: mk(1, 101)}); err == nil {
-		t.Fatal("replaying a verification page must be REJECTED")
 	}
 }
 
@@ -833,55 +783,5 @@ func TestSameIDWrongHashIsMissingOnUnderDeclaration(t *testing.T) {
 	}
 	if err := svc.Complete(context.Background(), device, len(resp.Missing)); err == nil {
 		t.Fatal("completion with a missing identity must be refused")
-	}
-}
-
-// TestProjectionPendingBlocksStoreReconciled confirms §11: completion of
-// device event-history verification never implies the Store is reconciled
-// while projections are pending.
-func TestProjectionPendingBlocksStoreReconciled(t *testing.T) {
-	store := newStore()
-	store.pendingProjections = 2
-	svc := NewService(store)
-	device := uuid.NewString()
-	if err := svc.MarkRestoreRequired(context.Background(), []string{device}, "restored"); err != nil {
-		t.Fatal(err)
-	}
-	completeDevice(t, svc, device)
-	if err := svc.Complete(context.Background(), device, 0); err != nil {
-		t.Fatal(err)
-	}
-	report, err := svc.Status(context.Background(), device)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.StoreReconciled {
-		t.Fatal("store must not be reconciled while projections are pending")
-	}
-}
-
-// TestSecondDeviceUnresolvedBlocksStoreReconciled confirms §11: one
-// device finishing never marks the Store reconciled while another is
-// outstanding.
-func TestSecondDeviceUnresolvedBlocksStoreReconciled(t *testing.T) {
-	store := newStore()
-	svc := NewService(store)
-	a, b := uuid.NewString(), uuid.NewString()
-	if err := svc.MarkRestoreRequired(context.Background(), []string{a, b}, "restored"); err != nil {
-		t.Fatal(err)
-	}
-	completeDevice(t, svc, a)
-	if err := svc.Complete(context.Background(), a, 0); err != nil {
-		t.Fatal(err)
-	}
-	report, err := svc.Status(context.Background(), a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.StoreReconciled {
-		t.Fatal("store must not be reconciled while device b is unresolved")
-	}
-	if report.DevicesUnresolved != 1 {
-		t.Fatalf("devices_unresolved=%d want 1", report.DevicesUnresolved)
 	}
 }

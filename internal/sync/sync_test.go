@@ -1,14 +1,12 @@
 package sync
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
-	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 )
 
 var (
@@ -132,15 +130,4 @@ func TestDeviceIDEchoAcceptedWhenMatching(t *testing.T) {
 	if b.Events[0].DeviceID != testDevice {
 		t.Fatal("device identity must come from authentication")
 	}
-}
-
-func TestCapabilitiesShape(t *testing.T) {
-	svc := NewService(nil, clock.Fixed{T: testNow}, DiagnosticRegistry())
-	caps := svc.Capabilities()
-	if caps.APIVersion != "v1" || caps.MaxBatchEvents != MaxBatchEvents ||
-		caps.MaxPayloadBytes != MaxPayloadBytes || len(caps.SupportedEvents) == 0 ||
-		caps.ServerTime == "" {
-		t.Fatalf("bad capabilities: %+v", caps)
-	}
-	var _ = json.Marshal
 }

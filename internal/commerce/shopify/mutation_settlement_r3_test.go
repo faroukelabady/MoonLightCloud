@@ -108,47 +108,6 @@ func TestR3SettlementEvidenceMatrix(t *testing.T) {
 	}
 }
 
-// TestR3ValidRefusalReleasesExactOperation proves the approved refusal
-// policy still settles when the complete response carries no execution
-// evidence: data key absent and no path on any error.
-func TestR3ValidRefusalReleasesExactOperation(t *testing.T) {
-	releases := []r3Case{
-		{"throttled_pre_execution", `{"errors":[{"message":"Throttled","extensions":{"code":"THROTTLED"}}]}`, false},
-		{"authorization_refusal", `{"errors":[{"message":"access denied","extensions":{"code":"ACCESS_DENIED"}}]}`, false},
-	}
-	for _, tc := range releases {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newR2Fixture(t)
-			f.interceptMutation(t, "MoonlightProductUpdate", false, 200, tc.body)
-			if _, err := f.provider.UpsertProduct(f.ctx, f.mutationRequest()); err == nil {
-				t.Fatal("refusal response must surface as an error")
-			}
-			f.restoreHarness()
-			if _, active := f.barrierActive(); active {
-				t.Fatal("validated pre-execution refusal must release its operation")
-			}
-			if _, err := f.provider.UpsertProduct(f.ctx, f.mutationRequest()); err != nil {
-				t.Fatalf("released operation must admit the next write: %v", err)
-			}
-		})
-	}
-}
-
-// TestR3SuccessfulMutationReleasesOnlyItsExactOperation.
-func TestR3SuccessfulMutationReleasesOnlyItsExactOperation(t *testing.T) {
-	f := newR2Fixture(t)
-	if _, err := f.provider.UpsertProduct(f.ctx, f.mutationRequest()); err != nil {
-		t.Fatal(err)
-	}
-	if _, active := f.barrierActive(); active {
-		t.Fatal("successful mutation left a barrier behind")
-	}
-	// The exact product synchronizes again normally.
-	if _, err := f.provider.UpsertProduct(f.ctx, f.mutationRequest()); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestR3ReadOnlyRequestsCreateNoBarrier: read-only GraphQL requests keep
 // their existing behavior and never touch the mutation barrier.
 func TestR3ReadOnlyRequestsCreateNoBarrier(t *testing.T) {

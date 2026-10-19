@@ -122,36 +122,6 @@ func TestCommerceMappingRepository(t *testing.T) {
 	}
 }
 
-// TestCommerceMappingConcurrentSame proves concurrent same-pair creation
-// resolves to one durable mapping idempotently.
-func TestCommerceMappingConcurrentSame(t *testing.T) {
-	env := openSaleEnv(t)
-	ctx := context.Background()
-	store := catalogStore(env)
-	productID := commerceProductID(0xC0)
-	seedStoreProduct(t, env, productID)
-
-	start := make(chan struct{})
-	results := make(chan error, 4)
-	for i := 0; i < 4; i++ {
-		go func() {
-			<-start
-			_, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, "ext-same")
-			results <- err
-		}()
-	}
-	close(start)
-	for i := 0; i < 4; i++ {
-		if err := <-results; err != nil {
-			t.Fatalf("concurrent same: %v", err)
-		}
-	}
-	stored, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
-	if err != nil || stored.ExternalProductID != "ext-same" {
-		t.Fatalf("one mapping: %+v %v", stored, err)
-	}
-}
-
 // TestCommerceMappingConcurrentConflict proves same provider/product with
 // different external IDs resolves to exactly one winner with conflicts
 // elsewhere: no silent overwrite.

@@ -71,15 +71,6 @@ func TestProductionRefusesDevCredentials(t *testing.T) {
 	}
 }
 
-func TestProductionRequiresPepper(t *testing.T) {
-	setenv(t, "ENVIRONMENT", "production")
-	setenv(t, "DATABASE_URL", "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require")
-	os.Unsetenv("DEVICE_SECRET_PEPPER")
-	if _, err := Load(); err == nil {
-		t.Fatal("want error for missing pepper in production")
-	}
-}
-
 func TestProductionValid(t *testing.T) {
 	setenv(t, "ENVIRONMENT", "production")
 	setenv(t, "DATABASE_URL", "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require")

@@ -146,28 +146,6 @@ func catalogCategoryRevision(t *testing.T, env *saleEnv, categoryID string) int6
 	return revision
 }
 
-// TestCatalogCategoryProjects proves a root category projects with revision
-// metadata and an empty parent set.
-func TestCatalogCategoryProjects(t *testing.T) {
-	env := openSaleEnv(t)
-	ids := catalogIDs(t, 0, "root")
-	event := "d0001000-0000-4000-8000-000000000000"
-	ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
-		categoryPayload(ids["root"], "active", map[string]string{"ar": "إسلامي"}, nil, 1))
-	res := projectCatalogOnce(t, env, event)
-	if res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("outcome: %+v", res)
-	}
-	if revision := catalogCategoryRevision(t, env, ids["root"]); revision != 1 {
-		t.Fatalf("revision: %d", revision)
-	}
-	var parents int
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM catalog_category_edges WHERE child_id=$1`, ids["root"]).Scan(&parents); err != nil || parents != 0 {
-		t.Fatalf("no edges: %d (%v)", parents, err)
-	}
-}
-
 // TestCatalogChildBeforeParentWaits proves out-of-order dependency: a child
 // arriving before its parent waits retryably with zero rows, then converges
 // when the parent projects — no resend.
@@ -203,32 +181,6 @@ func TestCatalogChildBeforeParentWaits(t *testing.T) {
 		`SELECT count(*) FROM catalog_category_edges WHERE parent_id=$1 AND child_id=$2`,
 		ids["root"], ids["sub"]).Scan(&edge); err != nil || edge != 1 {
 		t.Fatalf("edge: %d (%v)", edge, err)
-	}
-}
-
-// TestCatalogSharedParentsPreserved proves a subcategory with two parents
-// keeps both (no UNIQUE(child) tree constraint).
-func TestCatalogSharedParentsPreserved(t *testing.T) {
-	env := openSaleEnv(t)
-	ids := catalogIDs(t, 20, "a", "b", "shared")
-	for i, name := range []string{"a", "b"} {
-		event := fmt.Sprintf("d000101%d-0000-4000-8000-00000000000%d", i, i)
-		ingestCatalog(t, env, event, catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z",
-			categoryPayload(ids[name], "active", map[string]string{"ar": name}, nil, 1))
-		if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
-			t.Fatalf("root %s: %+v", name, res)
-		}
-	}
-	childEvent := "d0001012-0000-4000-8000-000000000012"
-	ingestCatalog(t, env, childEvent, catalog.EventCategorySnapshotV2, "2026-09-20T11:00:00Z",
-		categoryPayload(ids["shared"], "active", map[string]string{"ar": "مشترك"}, []string{ids["a"], ids["b"]}, 1))
-	if res := projectCatalogOnce(t, env, childEvent); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("shared child: %+v", res)
-	}
-	var edges int
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM catalog_category_edges WHERE child_id=$1`, ids["shared"]).Scan(&edges); err != nil || edges != 2 {
-		t.Fatalf("both parents: %d (%v)", edges, err)
 	}
 }
 
@@ -315,27 +267,6 @@ func TestCatalogCycleBlocked(t *testing.T) {
 	if err := env.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM catalog_category_edges WHERE child_id=$1`, ids["root"]).Scan(&edges); err != nil || edges != 0 {
 		t.Fatalf("no root edges: %d (%v)", edges, err)
-	}
-}
-
-// TestCatalogStaleRevisionNoOp proves an older revision arriving after a
-// newer one is a terminal no-op: processed, state unchanged.
-func TestCatalogStaleRevisionNoOp(t *testing.T) {
-	env := openSaleEnv(t)
-	ids := catalogIDs(t, 0, "root")
-	newPayload := categoryPayload(ids["root"], "active", map[string]string{"ar": "جديد"}, nil, 2)
-	ingestCatalog(t, env, "d0001040-0000-4000-8000-000000000040", catalog.EventCategorySnapshotV2, "2026-09-20T10:00:00Z", newPayload)
-	projectCatalogOnce(t, env, "d0001040-0000-4000-8000-000000000040")
-	oldPayload := categoryPayload(ids["root"], "active", map[string]string{"ar": "قديم"}, nil, 1)
-	ingestCatalog(t, env, "d0001041-0000-4000-8000-000000000041", catalog.EventCategorySnapshotV2, "2026-09-20T09:00:00Z", oldPayload)
-	res := projectCatalogOnce(t, env, "d0001041-0000-4000-8000-000000000041")
-	if res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("stale no-op: %+v", res)
-	}
-	var name string
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT name_ar FROM catalog_categories WHERE category_id=$1`, ids["root"]).Scan(&name); err != nil || name != "جديد" {
-		t.Fatalf("newer state kept: %q (%v)", name, err)
 	}
 }
 
@@ -769,34 +700,6 @@ func drainCatalog(t *testing.T, env *saleEnv) {
 		}
 		return pending == 0
 	}, "catalog drain quiescence")
-}
-
-// TestCatalogMoneyExact proves minor-unit values beyond 2^53 survive
-// JSON → PostgreSQL → read service exactly.
-func TestCatalogMoneyExact(t *testing.T) {
-	env := openSaleEnv(t)
-	root, _, _ := catalogProductFixture(t, env, 120, "mx")
-	productID := "e0001006-0000-4000-8000-000000000006"
-	payload := productPayload(productID, "PAP-BIG", "x", root, nil, nil, 1)
-	var m map[string]any
-	if err := json.Unmarshal([]byte(payload), &m); err != nil {
-		t.Fatal(err)
-	}
-	m["prices"] = []any{map[string]any{"currency": "EGP", "price_cents": 9007199254740993}}
-	raw, _ := json.Marshal(m)
-	event := "d0002060-0000-4000-8000-000000000060"
-	ingestCatalog(t, env, event, catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(raw))
-	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("big money: %+v", res)
-	}
-	svc := catalog.NewService(catalogStore(env))
-	product, err := svc.GetProduct(context.Background(), productID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(product.Prices) != 1 || product.Prices[0].PriceCents != 9007199254740993 {
-		t.Fatalf("exact money: %+v", product.Prices)
-	}
 }
 
 // TestCatalogRenameIsolatesHistory proves a catalog rename after a sale

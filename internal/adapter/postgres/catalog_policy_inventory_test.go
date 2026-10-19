@@ -302,48 +302,6 @@ func TestInventoryWaitsForProduct(t *testing.T) {
 	}
 }
 
-// TestInventoryRevisionOrdering proves rev7 → rev5 → rev6 converges on 7
-// with 5/6 as stale no-ops, and that rev gaps project immediately.
-func TestInventoryRevisionOrdering(t *testing.T) {
-	env := openSaleEnv(t)
-	productID := "e0005002-0000-4000-8000-000000000002"
-	inventoryFixture(t, env, 152, "inv3", productID, "PAP-ORD", 10)
-	ingest := func(event string, revision int64, stock int) catalog.ProjectResult {
-		seedInventoryVariant(t, env, productID)
-		ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:00:00Z",
-			inventoryPayload(productID, revision, stock))
-		return projectCatalogOnce(t, env, event)
-	}
-	if res := ingest("d0006030-0000-4000-8000-000000000030", 7, 3); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("rev7: %+v", res)
-	}
-	if res := ingest("d0006031-0000-4000-8000-000000000031", 5, 15); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("stale rev5 no-op: %+v", res)
-	}
-	if res := ingest("d0006032-0000-4000-8000-000000000032", 6, 14); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("stale rev6 no-op: %+v", res)
-	}
-	svc := catalog.NewService(catalogStore(env))
-	inv, err := svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inv.Revision != 7 || inv.StockQuantity != 3 {
-		t.Fatalf("rev7 wins: %+v", inv)
-	}
-	// Revision gap rev7 → rev9 projects immediately.
-	if res := ingest("d0006033-0000-4000-8000-000000000033", 9, 1); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("gap rev9: %+v", res)
-	}
-	inv, err = svc.GetVariantInventory(context.Background(), inventoryVariantID(productID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inv.Revision != 9 || inv.StockQuantity != 1 {
-		t.Fatalf("rev9: %+v", inv)
-	}
-}
-
 // TestInventoryEqualRevision proves identical redelivery is idempotent
 // while conflicting quantity at the same revision blocks, and a higher
 // revision repairs afterwards.

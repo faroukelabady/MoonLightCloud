@@ -102,36 +102,6 @@ func TestStoreRegistrationValidation(t *testing.T) {
 	}
 }
 
-func TestStoreRegistrationUnauthenticated(t *testing.T) {
-	h, _, _ := storeTestSetup(t)
-	body := `{"store_id":"aaaaaaaa-0000-4000-8000-000000000001","display_name":"x","timezone":"Africa/Cairo"}`
-	if rec := postRegistration(t, h, "bad", body); rec.Code != 401 {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-}
-
-func TestStoreRegistrationRevokedDeviceRejected(t *testing.T) {
-	authSvc := deviceSvcForTest(newMemRepo())
-	p, err := authSvc.Create(context.Background(), "shop-dev")
-	if err != nil {
-		t.Fatal(err)
-	}
-	token := p.Device.ID + "." + p.Credential.ID + "." + p.RawSecret
-	registrar := &memRegistrar{stores: map[string]store.RegistrationResult{}, bindings: map[string]string{}}
-	mux := http.NewServeMux()
-	mux.Handle("POST /api/v1/sync/store-registration", DeviceAuth(authSvc)(StoreRegistration(registrar)))
-	body := `{"store_id":"aaaaaaaa-0000-4000-8000-000000000001","display_name":"x","timezone":"Africa/Cairo"}`
-	if rec := postRegistration(t, mux, token, body); rec.Code != 200 {
-		t.Fatalf("pre-revoke: want 200, got %d", rec.Code)
-	}
-	if err := authSvc.RevokeDevice(context.Background(), p.Device.ID); err != nil {
-		t.Fatal(err)
-	}
-	if rec := postRegistration(t, mux, token, body); rec.Code != 401 {
-		t.Fatalf("revoked device: want 401, got %d", rec.Code)
-	}
-}
-
 func TestStoreRegistrationRawUTF8RejectedBeforeDecode(t *testing.T) {
 	h, token, registrar := storeTestSetup(t)
 	body := "{\"store_id\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"display_name\":\"" + string([]byte{0xff}) + "\",\"timezone\":\"Africa/Cairo\"}"

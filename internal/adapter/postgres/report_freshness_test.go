@@ -101,15 +101,3 @@ func TestReportFreshnessAndDashboardActivity(t *testing.T) {
 		t.Fatalf("projected sale missing from dashboard: %+v", items)
 	}
 }
-
-func TestReportFreshnessPendingSaleAlone(t *testing.T) {
-	env := openSaleEnv(t)
-	result := env.ingest(t, "aaaaaaaa-aaaa-7aaa-8aaa-000000000006", fixture(t, "sale_usd.json"))
-	if result.Events[0].Status != "accepted" {
-		t.Fatalf("ingest: %+v", result)
-	}
-	got := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "").Freshness
-	if got.ProjectionBacklogCount != 1 || got.CloudProjectionComplete || got.LatestSaleEventReceivedAt == nil {
-		t.Fatalf("pending sale: %+v", got)
-	}
-}

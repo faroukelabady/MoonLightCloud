@@ -100,21 +100,6 @@ func (e *opsDetectorEnv) scan(t *testing.T) {
 	}
 }
 
-func (e *opsDetectorEnv) drainAlerts(t *testing.T) {
-	t.Helper()
-	ctx := context.Background()
-	for i := 0; i < 50; i++ {
-		more, err := e.alerts.ProcessOne(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !more {
-			return
-		}
-	}
-	t.Fatal("alert drain did not converge")
-}
-
 func (e *opsDetectorEnv) drainRecovery(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()

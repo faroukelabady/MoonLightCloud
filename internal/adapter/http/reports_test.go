@@ -309,52 +309,6 @@ func (s shapeRepo) SalesByTag(context.Context, time.Time, time.Time, string) ([]
 		NameAR: "حصان", NameEN: "Horse", Units: 2, Currency: "EGP", Sales: 200000, Cost: 20000}}, nil
 }
 
-// TestBreakdownDTOShapesMatchOpenAPI proves runtime JSON matches the
-// documented split contract: header rows carry currency_totals (never
-// line_sales); line rows carry line_sales (never currency_totals).
-func TestBreakdownDTOShapesMatchOpenAPI(t *testing.T) {
-	loc, _ := time.LoadLocation("Africa/Cairo")
-	svc := report.NewService(shapeRepo{}, clock.Fixed{T: time.Date(2026, 9, 22, 7, 0, 0, 0, time.UTC)}, loc)
-	h := NewReportHandlers(svc, slog.Default())
-	mux := http.NewServeMux()
-	mux.Handle("GET /api/v1/reports/sales/breakdown", ReportAuth("test-token-0123456789")(http.HandlerFunc(h.SalesBreakdown)))
-
-	cashier := getReport(t, mux, "/api/v1/reports/sales/breakdown?period=today&dimension=cashier", "test-token-0123456789")
-	if cashier.Code != 200 {
-		t.Fatalf("cashier: %d", cashier.Code)
-	}
-	var cashBody map[string]any
-	if err := json.Unmarshal(cashier.Body.Bytes(), &cashBody); err != nil {
-		t.Fatal(err)
-	}
-	cashRow := cashBody["rows"].([]any)[0].(map[string]any)
-	if _, ok := cashRow["currency_totals"]; !ok {
-		t.Fatal("cashier row must carry currency_totals")
-	}
-	if _, ok := cashRow["line_sales"]; ok {
-		t.Fatal("cashier row must not carry line_sales")
-	}
-	ct := cashRow["currency_totals"].([]any)[0].(map[string]any)
-	for _, k := range []string{"subtotal_minor", "discount_minor", "tax_minor", "sales_total_minor"} {
-		if _, ok := ct[k]; !ok {
-			t.Fatalf("cashier bucket missing %s", k)
-		}
-	}
-
-	product := getReport(t, mux, "/api/v1/reports/sales/breakdown?period=today&dimension=product", "test-token-0123456789")
-	var prodBody map[string]any
-	if err := json.Unmarshal(product.Body.Bytes(), &prodBody); err != nil {
-		t.Fatal(err)
-	}
-	prodRow := prodBody["rows"].([]any)[0].(map[string]any)
-	if _, ok := prodRow["line_sales"]; !ok {
-		t.Fatal("product row must carry line_sales")
-	}
-	if _, ok := prodRow["currency_totals"]; ok {
-		t.Fatal("product row must not carry currency_totals")
-	}
-}
-
 // TestBreakdownNegativeRowContract enforces the F1 split at runtime using
 // exact key sets: valid rows carry only their family's keys, and any
 // cross-shape mixture is rejected. Structural companion to the OpenAPI

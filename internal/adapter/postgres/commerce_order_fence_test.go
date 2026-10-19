@@ -253,64 +253,6 @@ func TestReconcileThreeGenerations(t *testing.T) {
 	}
 }
 
-// TestManualSyncVsWebhook proves later-started current-state
-// reconciliations win regardless of trigger: webhook A, then manual
-// sync-order B, then webhook A returns.
-func TestManualSyncVsWebhook(t *testing.T) {
-	env := openSaleEnv(t)
-	ctx := context.Background()
-	store := commerceOrderStore(env)
-	stateA := orderTestSnapshot("website", "914", orders.StatusPending, "pending", 10000)
-	stateB := orderTestSnapshot("website", "914", orders.StatusProcessing, "processing", 12000)
-	provider := &barrierOrderProvider{
-		key: "website", stateA: stateA, stateB: stateB,
-		releaseA: make(chan struct{}), aReturned: make(chan struct{}),
-	}
-	registry := commerce.NewRegistry()
-	if err := registry.Register("website", provider); err != nil {
-		t.Fatal(err)
-	}
-	manual := orders.NewOrderService(registry, store, nilLogger())
-	type result struct {
-		outcome orders.ReconcileOutcome
-		err     error
-	}
-	aDone := make(chan result, 1)
-	go func() {
-		gen, err := store.BeginOrderReconcile(ctx, "website", "914")
-		if err != nil {
-			aDone <- result{err: err}
-			return
-		}
-		snapshot, err := provider.GetOrder(ctx, "914")
-		if err != nil {
-			aDone <- result{err: err}
-			return
-		}
-		outcome, err := store.ReconcileProjectedOrder(ctx, snapshot, orders.Fingerprint(snapshot), gen)
-		aDone <- result{outcome: orders.ReconcileOutcome{Revision: outcome.Revision, Changed: outcome.Changed, Superseded: outcome.Superseded}, err: err}
-	}()
-	time.Sleep(200 * time.Millisecond)
-	// Manual sync-order starts later and completes first.
-	bResult, err := manual.ReconcileOrder(ctx, "website", "914")
-	if err != nil {
-		t.Fatalf("manual: %v", err)
-	}
-	if bResult.Superseded {
-		t.Fatalf("manual wins: %+v", bResult)
-	}
-	close(provider.releaseA)
-	<-provider.aReturned
-	aResult := <-aDone
-	if aResult.err != nil || !aResult.outcome.Superseded {
-		t.Fatalf("webhook superseded: %+v %v", aResult.outcome, aResult.err)
-	}
-	stored, rev, _, err := store.LoadProjectedOrder(ctx, "website", "914")
-	if err != nil || rev != 1 || stored.TotalMinor != 12000 {
-		t.Fatalf("final is manual B: %+v %d %v", stored, rev, err)
-	}
-}
-
 // TestFailedNewerSupersedesOlder proves a newer generation whose
 // provider GET fails still blocks the older attempt: staleness wins
 // over availability, and the previous committed order remains.

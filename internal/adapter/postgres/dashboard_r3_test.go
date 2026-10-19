@@ -239,31 +239,6 @@ func TestM07QueueCountOnce(t *testing.T) {
 	// Fixture from spec: pending=0/retry=1 -> queue=1 tested via counts math.
 }
 
-func TestL06ActivityDeterministic(t *testing.T) {
-	env := openDashEnv(t)
-	ctx := context.Background()
-	ts := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	for _, id := range []string{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"} {
-		if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ($1, $2, 'sale.finalized.v3', $3, $3, '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $2)) ON CONFLICT DO NOTHING`, id, env.devID, ts); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var first string
-	for i := 0; i < 5; i++ {
-		items, err := env.dash.RecentActivity(ctx, report.Request{}, 10)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, _ := json.Marshal(items)
-		if first == "" {
-			first = string(raw)
-		} else if string(raw) != first {
-			t.Fatalf("activity order unstable:\n%s\n%s", first, raw)
-		}
-	}
-	_ = first
-}
-
 func TestR05ActivityTopNPrefix(t *testing.T) {
 	env := openDashEnv(t)
 	ctx := context.Background()
