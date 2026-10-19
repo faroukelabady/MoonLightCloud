@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { productClassificationCommand, productOnlinePolicyCommand, categoryOnlinePolicyCommand } from '../lib/catalogCommands.js';
+	import { productClassificationCommand, productOnlinePolicyCommand, categoryOnlinePolicyCommand, productDetailsCommand, categoryDetailsCommand, categoryParentsCommand, tagDetailsCommand, productTypeDetailsCommand, productTypeStatusCommand, productTypeCreateCommand, productTypeAssignmentCommand } from '../lib/catalogCommands.js';
 	import { dashboardApi, ApiError } from '../lib/api.js';
 	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration } from '../lib/api.js';
 
@@ -91,10 +91,6 @@
 		}
 	}
 
-	function productPayloadBase(extra: Record<string, unknown>, revKey: string, rev: number) {
-		return { ...extra, [revKey]: rev };
-	}
-
 	async function saveProductDetails() {
 		if (!selectedProduct || !store || saving) return;
 		const p = selectedProduct;
@@ -110,27 +106,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product.details.update.v1',
-				entity_id: p.product_id,
-				expected_revision: p.catalog_revision,
-				payload: productPayloadBase({
-					product_id: p.product_id,
-					arabic_name: ar,
-					arabic_description: p.description_ar,
-					english_name: en,
-					english_description: p.description_en,
-					width_cm: p.width_cm ?? 1,
-					height_cm: p.height_cm ?? 1,
-					egp_price_cents: egp,
-					usd_price_cents: usd,
-					cost_cents: cost,
-					top_category_id: p.top_category_id,
-					subcategory_ids: p.subcategory_ids,
-					tag_ids: p.tag_ids
-				}, 'expected_catalog_revision', p.catalog_revision)
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productDetailsCommand(store, p, { arabic_name: ar, english_name: en, egp_price_cents: egp, usd_price_cents: usd, cost_cents: cost }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -238,13 +214,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.category.details.update.v1',
-				entity_id: c.category_id,
-				expected_revision: c.catalog_revision,
-				payload: { category_id: c.category_id, name_ar: ar, name_en: en, status, expected_catalog_revision: c.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(categoryDetailsCommand(store, c, { name_ar: ar, name_en: en, status }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -263,13 +233,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.category.parents.update.v1',
-				entity_id: c.category_id,
-				expected_revision: c.catalog_revision,
-				payload: { category_id: c.category_id, parent_ids: checked, expected_catalog_revision: c.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(categoryParentsCommand(store, c, checked));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — يتحقق الكاشير من عدم وجود دورات. الأمر ${cmd.id.slice(0, 8)}… / Change queued — Retail validates the graph.`);
 			void loadCommands();
@@ -312,13 +276,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.tag.details.update.v1',
-				entity_id: t.tag_id,
-				expected_revision: t.catalog_revision,
-				payload: { tag_id: t.tag_id, name_ar: ar, name_en: en, is_active: active, expected_catalog_revision: t.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(tagDetailsCommand(store, t, { name_ar: ar, name_en: en, is_active: active }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -360,19 +318,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product-type.details.update.v1',
-				entity_id: t.type_id,
-				expected_revision: t.type_revision,
-				payload: {
-					product_type_id: t.type_id, name_ar: ar, name_en: en,
-					description_ar: t.description_ar ?? '', description_en: t.description_en ?? '',
-					position: t.position,
-					dimensions: t.dimensions, capabilities: t.capabilities,
-					expected_type_revision: t.type_revision
-				}
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productTypeDetailsCommand(store, t, { name_ar: ar, name_en: en }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -390,13 +336,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product-type.status.update.v1',
-				entity_id: t.type_id,
-				expected_revision: t.type_revision,
-				payload: { product_type_id: t.type_id, is_active: next, expected_type_revision: t.type_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productTypeStatusCommand(store, t, next));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -418,17 +358,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product-type.create.v1',
-				entity_id: '',
-				expected_revision: 0,
-				payload: {
-					code, name_ar: ar, name_en: en,
-					position: productTypes.length, dimensions: [], capabilities: [],
-					expected_type_revision: 0
-				}
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productTypeCreateCommand(store, { code, name_ar: ar, name_en: en, position: productTypes.length }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -449,13 +379,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product.type.assign.v1',
-				entity_id: p.product_id,
-				expected_revision: p.catalog_revision,
-				payload: { product_id: p.product_id, product_type_id: typeId, expected_catalog_revision: p.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productTypeAssignmentCommand(store, p, typeId));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();

@@ -9,6 +9,7 @@ export * from './authApi';
 
 import { ApiError, get, mutationHeaders, postJson, query, setCSRFToken, type PeriodParams } from './http';
 import type { Me } from './authApi';
+import type { CatalogCommandRequest } from './catalogCommands';
 import type {
 	OverviewResponse,
 	DailyResponse,
@@ -136,7 +137,7 @@ export const dashboardApi = {
 	},
 	adminCommand: (store: string, id: string, s?: AbortSignal) =>
 		get<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}&payload=1`, s),
-	adminCreateCommand: (req: { store_id: string; type: string; entity_id: string; expected_revision: number; payload: Record<string, unknown> }, s?: AbortSignal) =>
+	adminCreateCommand: (req: CatalogCommandRequest, s?: AbortSignal) =>
 		postJson<AdminCommand>('/api/v1/dashboard/catalog-admin/commands', req, s),
 	adminCancelCommand: (store: string, id: string, s?: AbortSignal) =>
 		postJson<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}/cancel?store_id=${encodeURIComponent(store)}`, {}, s),

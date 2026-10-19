@@ -122,3 +122,28 @@ it('keeps category disable confirmation before catalog-revision command submissi
   await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.category.online-policy.update.v1',entity_id:'category-1',expected_revision:31,payload:{category_id:'category-1',online_enabled:false,expected_catalog_revision:31}}));
  } finally { confirm.mockRestore(); }
 });
+
+
+it('submits Product detail strings and preserved metadata without numeric conversion', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ const detail={...productDetail('ready'),catalog_revision:17,sales_policy_revision:29,description_ar:null,description_en:'Description',width_cm:null,height_cm:7};
+ api.adminProduct.mockResolvedValue(detail);api.adminConfigurations.mockResolvedValue({configurations:[]});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await screen.findByRole('button',{name:/Queue details change/});
+ await fireEvent.input(document.querySelector('#pd-ar')!,{target:{value:'  كتاب  '}});
+ await fireEvent.input(document.querySelector('#pd-en')!,{target:{value:' Book '}});
+ await fireEvent.input(document.querySelector('#pd-egp')!,{target:{value:'9007199254740993'}});
+ await fireEvent.input(document.querySelector('#pd-usd')!,{target:{value:'0'}});
+ await fireEvent.click(screen.getByRole('button',{name:/Queue details change/}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.details.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',arabic_name:'كتاب',arabic_description:null,english_name:'Book',english_description:'Description',width_cm:1,height_cm:7,egp_price_cents:'9007199254740993',usd_price_cents:'0',cost_cents:'0',top_category_id:'c-ready',subcategory_ids:[],tag_ids:[],expected_catalog_revision:17}}));
+});
+
+it('submits ProductType creation as key intent with no fabricated entity identity', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:[],next_cursor:''});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'الأنواع / Types'}));await screen.findByText('برديات');
+ await fireEvent.input(document.querySelector('#nt-code')!,{target:{value:' BOOK '}});
+ await fireEvent.input(document.querySelector('#nt-ar')!,{target:{value:' كتاب '}});
+ await fireEvent.input(document.querySelector('#nt-en')!,{target:{value:' Book '}});
+ await fireEvent.click(screen.getByRole('button',{name:/Queue type creation/}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product-type.create.v1',entity_id:'',expected_revision:0,payload:{code:'book',name_ar:'كتاب',name_en:'Book',position:1,dimensions:[],capabilities:[],expected_type_revision:0}}));
+});
