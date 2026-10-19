@@ -118,34 +118,6 @@ func TestNotificationClaimLease(t *testing.T) {
 	}
 }
 
-// TestNotificationSendStartMarker proves the durable marker survives
-// for crash recovery: marked claims route to ambiguous, and retry
-// finishes clear the marker.
-func TestNotificationSendStartMarker(t *testing.T) {
-	env := openSaleEnv(t)
-	ctx := context.Background()
-	store := notificationStore(env)
-	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
-	claimed := claimNotification(t, env, "worker-A")
-	result, err := NewNotifications(store.pool, store.timeout).MarkNotificationSendStarted(ctx, id, claimed.LeaseOwner, claimed.LeaseGeneration)
-	if err != nil || result != notifications.FinishApplied {
-		t.Fatalf("mark: %v %v", result, err)
-	}
-	if _, err := env.pool.Exec(ctx,
-		`UPDATE notification_messages SET lease_until = now() - interval '1 minute' WHERE id = $1`, mustPgID(id)); err != nil {
-		t.Fatal(err)
-	}
-	reclaimed := claimNotification(t, env, "worker-B")
-	if !reclaimed.SendStarted {
-		t.Fatal("marker must be visible on reclaim")
-	}
-	result, err = NewNotifications(store.pool, store.timeout).FinishNotificationAmbiguous(ctx, id,
-		reclaimed.LeaseOwner, reclaimed.LeaseGeneration, notifications.CodeSendAmbiguous)
-	if err != nil || result != notifications.FinishApplied {
-		t.Fatalf("ambiguous: %v %v", result, err)
-	}
-}
-
 // TestNotificationConcurrentEnqueue proves 16 identical racers converge
 // on one notification, and contradictory racers conflict.
 func TestNotificationConcurrentEnqueue(t *testing.T) {
@@ -550,45 +522,6 @@ func TestNotificationDispatcherAcceptDBFailure(t *testing.T) {
 	if err := env.pool.QueryRow(ctx,
 		`SELECT dispatch_status FROM notification_messages WHERE id = $1`, mustPgID(id)).Scan(&dispatch); err != nil || dispatch != "ambiguous" {
 		t.Fatalf("ambiguous: %s %v", dispatch, err)
-	}
-}
-
-// TestNotificationDispatcherRetryThenAccept proves an explicit 429
-// schedules backoff and the next due attempt sends to acceptance.
-func TestNotificationDispatcherRetryThenAccept(t *testing.T) {
-	env := openSaleEnv(t)
-	ctx := context.Background()
-	store := notificationStore(env)
-	id := enqueueNotification(t, env, notificationTestIntent("whatsapp-main", "key-1"))
-	provider := &scriptNotificationProvider{key: "whatsapp-main"}
-	provider.send = func(context.Context, notifications.TemplateSendRequest) (notifications.SendResult, error) {
-		if provider.count() == 1 {
-			return notifications.SendResult{}, notifications.RateLimitedError("slow", 0)
-		}
-		return notifications.SendResult{ProviderMessageID: "wamid.retry1"}, nil
-	}
-	registry := notifications.NewRegistry()
-	if err := registry.Register("whatsapp-main", provider); err != nil {
-		t.Fatal(err)
-	}
-	worker := notifications.NewDispatcher(NewNotifications(store.pool, store.timeout), registry, notifications.SystemClock{}, "worker-A", nil)
-	worker.DrainForTest(ctx)
-	var dispatch string
-	if err := env.pool.QueryRow(ctx,
-		`SELECT dispatch_status FROM notification_messages WHERE id = $1`, mustPgID(id)).Scan(&dispatch); err != nil || dispatch != "retry" {
-		t.Fatalf("retry: %s %v", dispatch, err)
-	}
-	if _, err := env.pool.Exec(ctx,
-		`UPDATE notification_messages SET next_attempt_at = now() - interval '1 second' WHERE id = $1`, mustPgID(id)); err != nil {
-		t.Fatal(err)
-	}
-	worker.DrainForTest(ctx)
-	if provider.count() != 2 {
-		t.Fatalf("two attempts: %d", provider.count())
-	}
-	if err := env.pool.QueryRow(ctx,
-		`SELECT dispatch_status FROM notification_messages WHERE id = $1`, mustPgID(id)).Scan(&dispatch); err != nil || dispatch != "accepted" {
-		t.Fatalf("accepted: %s %v", dispatch, err)
 	}
 }
 

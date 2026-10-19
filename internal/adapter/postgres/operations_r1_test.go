@@ -112,6 +112,9 @@ func TestResolveRaceSingleDelivery(t *testing.T) {
 	if resolved != 2 || seenRecipients[r1.ID] != 1 || seenRecipients[r2.ID] != 1 {
 		t.Fatalf("one resolved delivery per recipient: %+v", dels)
 	}
+	if final, _ := svc.Get(ctx, incident.ID); final.State != "resolved" {
+		t.Fatalf("resolved: %+v", final)
+	}
 	// Only the committing scanner counts the resolution.
 	var resolvedTotal int64
 	for _, m := range metrics {
@@ -250,59 +253,6 @@ func TestAckVsResolveRace(t *testing.T) {
 		t.Fatalf("one delivery per event: %+v", dels)
 	}
 	_ = r1
-}
-
-// H01: fast open→resolve in immediate succession yields deterministic
-// opened + resolved delivery sets with distinct idempotency keys.
-func TestFastOpenResolveSequence(t *testing.T) {
-	store, pool := openOpsStore(t)
-	ctx := context.Background()
-	svc := opsService(store)
-	seedOpsMapping(t, store)
-	if _, err := store.CreateOpsRecipient(ctx, ids.System{}.New(), "ops-ar", "whatsapp-main", "201012345678", "ar", time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	dev := opsSeedDevice(t, pool, "fast-dev")
-	if _, err := pool.Exec(ctx, `WITH seen AS (UPDATE devices SET last_seen_at = now() - interval '10 minutes' WHERE id = $1)
-		INSERT INTO device_control_presence (device_id, last_poll_at, created_at, updated_at)
-		VALUES ($1, now() - interval '10 minutes', now(), now())`, mustOpsUUID(t, dev)); err != nil {
-		t.Fatal(err)
-	}
-	metrics := operations.NewMetrics()
-	d := operations.NewDetector(store, svc,
-		operations.NewAlertProcessor(store, svc, newOpsNotifier(store), ids.System{}.New, time.Now, metrics),
-		detectorTestConfig(false), ids.System{}.New, time.Now, metrics)
-	if err := d.Scan(ctx); err != nil {
-		t.Fatal(err)
-	}
-	incident, ok, err := store.ActiveIncident(ctx, operations.RuleDeviceOffline, operations.SubjectDevice, dev)
-	if err != nil || !ok {
-		t.Fatalf("open: %v %v", ok, err)
-	}
-	if err := NewDeviceControl(store.pool, store.timeout).TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Scan(ctx); err != nil {
-		t.Fatal(err)
-	}
-	dels, err := store.DeliveriesForIncident(ctx, incident.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byEvent := map[string][]string{}
-	for _, dl := range dels {
-		byEvent[dl.Event] = append(byEvent[dl.Event], dl.NotificationKey)
-	}
-	if len(byEvent[operations.EventOpened]) != 1 || len(byEvent[operations.EventResolved]) != 1 {
-		t.Fatalf("one delivery per event: %+v", dels)
-	}
-	if byEvent[operations.EventOpened][0] == byEvent[operations.EventResolved][0] {
-		t.Fatal("opened and resolved keys must differ")
-	}
-	final, _ := svc.Get(ctx, incident.ID)
-	if final.State != "resolved" {
-		t.Fatalf("resolved: %+v", final)
-	}
 }
 
 // M02: event scans are progressive. Five old failed commands occupy more

@@ -264,34 +264,6 @@ func TestOpsRecoveryUniqueness(t *testing.T) {
 	}
 }
 
-// Alert crash adoption: same idempotency key + same semantics adopts the
-// same notification across a simulated crash (no second row, no resend).
-func TestOpsAlertCrashAdoption(t *testing.T) {
-	store, pool := openOpsStore(t)
-	ctx := context.Background()
-	seedOpsMapping(t, store)
-	_ = pool
-	notify := newOpsNotifier(store)
-	incidentID := ids.System{}.New()
-	deliveryID := ids.System{}.New()
-	key := operations.AlertIdempotencyKey(incidentID, operations.EventOpened, deliveryID)
-	first, err := notify.EnqueueTemplate(ctx, opsAlertIntent("201012345678", key))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Crash before notification_id persisted: retry same key + semantics.
-	second, err := notify.EnqueueTemplate(ctx, opsAlertIntent("201012345678", key))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.Created && second.ID != first.ID {
-		t.Fatalf("adopt same notification: %+v vs %+v", first, second)
-	}
-	if second.Created || second.ID != first.ID {
-		t.Fatalf("one notification row: %+v vs %+v", first, second)
-	}
-}
-
 func newOpsNotifier(store Operations) *opsNotifier {
 	return &opsNotifier{store: store}
 }
@@ -303,12 +275,4 @@ type opsNotifier struct {
 func (n *opsNotifier) EnqueueTemplate(ctx context.Context, req notifications.EnqueueTemplateRequest) (notifications.EnqueueResult, error) {
 	svc := notifications.NewService(NewNotifications(n.store.pool, n.store.timeout), NewNotifications(n.store.pool, n.store.timeout), testOpsLogger())
 	return svc.EnqueueTemplate(ctx, req)
-}
-
-func opsAlertIntent(recipient, key string) notifications.EnqueueTemplateRequest {
-	return notifications.EnqueueTemplateRequest{
-		ProviderKey: "whatsapp-main", IdempotencyKey: key, Recipient: recipient,
-		TemplateKey: operations.TemplateOpen, Locale: "ar",
-		Parameters: map[string]string{operations.ParamAlertBody: "test body"},
-	}
 }

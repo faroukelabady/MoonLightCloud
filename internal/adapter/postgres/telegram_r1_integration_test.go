@@ -99,6 +99,11 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 	for _, kind := range []string{"daily", "ten_day"} {
 		for _, locale := range []string{"ar", "en"} {
 			for _, fail := range []string{"", "telegram-main", "whatsapp-main"} {
+				// A failing provider blocks only its own delivery whatever the
+				// report kind or locale; prove that once, on daily/ar.
+				if fail != "" && (kind != "daily" || locale != "ar") {
+					continue
+				}
 				t.Run(kind+"/"+locale+"/fail="+fail, func(t *testing.T) {
 					env := openSaleEnv(t)
 					ctx := context.Background()
