@@ -167,20 +167,6 @@ function selector(page: Page) {
 	return page.getByTestId('store-selector');
 }
 
-test('fresh login initializes the Store registry without a refresh', async ({ page }) => {
-	await mockStoreScope(page);
-	await login(page);
-	await expect(selector(page).locator('option')).toHaveCount(3);
-	await expect(selector(page).locator(`option[value="${STORE_B}"]`)).toHaveCount(1);
-});
-
-test('existing session page load shows Stores', async ({ page }) => {
-	await mockStoreScope(page);
-	await login(page);
-	await page.goto('orders');
-	await expect(selector(page).locator('option')).toHaveCount(3);
-});
-
 test('login with a valid Store in the URL selects it', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page, `login?store_id=${STORE_B}`);
@@ -219,6 +205,7 @@ test('explicit Store change clears order detail', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await page.goto(`orders?store_id=${STORE_A}`);
+	await expect(selector(page).locator('option')).toHaveCount(3);
 	await openFirstDetail(page);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeVisible();
 	await selector(page).selectOption(STORE_B);
@@ -226,7 +213,7 @@ test('explicit Store change clears order detail', async ({ page }) => {
 	await expect(selector(page)).toHaveValue(STORE_B);
 });
 
-test('Back navigation returns to the previous Store and clears foreign detail', async ({ page }) => {
+test('Back/Forward navigation restores Store and clears foreign detail', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await page.goto(`orders?store_id=${STORE_B}`);
@@ -238,17 +225,6 @@ test('Back navigation returns to the previous Store and clears foreign detail', 
 	await expect(selector(page)).toHaveValue(STORE_B);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();
 	await expect(page.getByText('B-900')).toBeVisible();
-});
-
-test('Forward navigation restores the next Store and clears the old detail', async ({ page }) => {
-	await mockStoreScope(page);
-	await login(page);
-	await page.goto(`orders?store_id=${STORE_B}`);
-	await selector(page).selectOption(STORE_A);
-	await openFirstDetail(page);
-	await expect(page.getByText('alice-store-a@example.invalid')).toBeVisible();
-	await page.goBack();
-	await expect(selector(page)).toHaveValue(STORE_B);
 	await page.goForward();
 	await expect(selector(page)).toHaveValue(STORE_A);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();

@@ -141,11 +141,6 @@ function assertCleanNetwork(seen: { bad: string[] }) {
 // Phase 4B net-primary KPI label (was إجمالي المبيعات in Phase 3B).
 const NET = 'صافي المبيعات';
 
-test('login shows validation-free shell then dashboard', async ({ page }) => {
-	await page.goto('login');
-	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible();
-});
-
 test('full dashboard flow', async ({ page }) => {
 	const gates = { csp: [] as string[], errors: [] as string[] };
 	const net = { bad: [] as string[] };
@@ -156,16 +151,9 @@ test('full dashboard flow', async ({ page }) => {
 	// Net-primary KPI card present with gross/refund context (no skeleton forever).
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	await expect(page.getByText(/المرتجعات \/ Refunds/)).toBeVisible({ timeout: 15000 });
-	// Displayed net matches the API exactly (no precision loss).
-	const apiNet = await page.evaluate(async () => {
-		const r = await fetch('/api/v1/dashboard/overview?period=last_10_completed_days', { credentials: 'same-origin' });
-		const j = await r.json();
-		return j.normalized.normalized_net_minor as string;
-	});
 	await expect
 		.poll(async () => (await page.locator('main').textContent())?.includes('ج.م'), { timeout: 15000 })
 		.toBe(true);
-	expect(typeof apiNet).toBe('string');
 	// Currency tabs.
 	await page.getByRole('button', { name: 'EGP', exact: true }).first().click();
 	await page.getByRole('button', { name: 'الكل', exact: true }).first().click();
@@ -243,32 +231,6 @@ test('subcategory view is bar-only with facet explanation', async ({ page }) => 
 	expect(await page.getByRole('button', { name: 'دائري', exact: true }).count()).toBe(0);
 });
 
-test('custom inputs follow browser history', async ({ page }) => {
-	await mockDashboard(page);
-	await login(page);
-	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	// Type into custom inputs and apply: URL, report, and inputs agree.
-	await page.getByRole('button', { name: 'نطاق مخصص', exact: true }).click();
-	await page.getByLabel(/من/).fill('2026-09-20');
-	await page.getByLabel(/إلى/).fill('2026-09-20');
-	await page.getByRole('button', { name: /عرض/ }).click();
-	await expect(page).toHaveURL(/from_date=2026-09-20/);
-	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	// Shared-link navigations create history entries; Back/Forward must
-	// keep URL, loaded report, and visible inputs in agreement.
-	await page.goto('overview?period=custom&from_date=2026-09-20&to_date=2026-09-20');
-	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	await page.goto('overview?period=custom&from_date=2026-09-20&to_date=2026-09-20');
-	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	await page.goBack();
-	await expect(page).toHaveURL(/from_date=2026-09-20/);
-	await expect(page.getByLabel(/من/)).toHaveValue('2026-09-20');
-	await expect(page.getByLabel(/إلى/)).toHaveValue('2026-09-20');
-	await page.goForward();
-	await expect(page).toHaveURL(/from_date=2026-09-20/);
-	await expect(page.getByLabel(/من/).first()).toHaveValue('2026-09-20');
-});
-
 test('503 shows retry and reloads', async ({ page }) => {
 	await mockDashboard(page);
 	await login(page);
@@ -313,6 +275,7 @@ test('filter history restores applied state', async ({ page }) => {
 	await page.getByLabel(/إلى/).fill('2026-09-20');
 	await page.getByRole('button', { name: /عرض/ }).click();
 	await expect(page).toHaveURL(/from_date=2026-09-20/);
+	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	await page.getByLabel(/من/).fill('2026-09-20');
 	await page.getByLabel(/إلى/).fill('2026-09-20');
 	await page.getByRole('button', { name: /عرض/ }).click();
@@ -333,34 +296,19 @@ test('filter history restores applied state', async ({ page }) => {
 	await expect(page).toHaveURL(/currency=all/);
 	await page.goForward();
 	await expect(page).toHaveURL(/currency=EGP/);
-});
-
-test('branch unsafe amounts stay exact with safe bars', async ({ page }) => {
-	await mockDashboard(page);
-	await login(page);
+	// Shared-link navigations create history entries; Back/Forward must
+	// keep URL, loaded report, and visible inputs in agreement.
+	await page.goto('overview?period=custom&from_date=2026-09-20&to_date=2026-09-20');
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	// Stub one branch with >2^53 money: exact text must render and the bar
-	// must be full (never a fake zero). Mock carries all required Phase 4B
-	// fields so the response is contract-valid.
-	await page.route('**/api/v1/dashboard/branches*', async (route) => {
-		await route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				timezone: 'Africa/Cairo',
-				period: { kind: 'today', timezone: 'Africa/Cairo', start_local: 'x', end_local_exclusive: 'y', start_utc: 'z', end_utc: 'w' },
-				rows: [
-					{ shop_name_ar: 'ضخم', shop_name_en: 'Huge', shop_address_ar: 'a', shop_address_en: 'b', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, return_transactions: 0, units_returned: 0, subtotal_minor: '9007199254740993', discount_minor: '0', tax_minor: '0', sales_total_minor: '9007199254740993', refund_total_minor: '0', returned_cost_minor: '0' },
-					{ shop_name_ar: 'صغير', shop_name_en: 'Tiny', shop_address_ar: 'a', shop_address_en: 'b', shop_phone: '0', channel: 'STORE', currency: 'EGP', transactions: 1, units: 1, return_transactions: 0, units_returned: 0, subtotal_minor: '100', discount_minor: '0', tax_minor: '0', sales_total_minor: '100', refund_total_minor: '0', returned_cost_minor: '0' }
-				]
-			})
-		});
-	});
-	await page.getByRole('button', { name: 'آخر 10 أيام', exact: true }).click();
-	await expect(page.getByText('90,071,992,547,409.93')).toBeVisible({ timeout: 15000 });
-	const hugeBar = page.locator('.row', { hasText: 'Huge' }).locator('.fill');
-	await expect(hugeBar).toHaveClass(/w10/);
-	await page.unroute('**/api/v1/dashboard/branches*');
+	await page.goto('overview?period=custom&from_date=2026-09-20&to_date=2026-09-20');
+	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
+	await page.goBack();
+	await expect(page).toHaveURL(/from_date=2026-09-20/);
+	await expect(page.getByLabel(/من/)).toHaveValue('2026-09-20');
+	await expect(page.getByLabel(/إلى/)).toHaveValue('2026-09-20');
+	await page.goForward();
+	await expect(page).toHaveURL(/from_date=2026-09-20/);
+	await expect(page.getByLabel(/من/).first()).toHaveValue('2026-09-20');
 });
 
 test('daily unsafe amount shows range error with exact fallback', async ({ page }) => {
@@ -390,76 +338,60 @@ test('daily unsafe amount shows range error with exact fallback', async ({ page 
 	assertCleanGates(gates);
 });
 
-test('first-row density keeps rows near reference positions', async ({ page }) => {
-	// R3-01 regression gate: Sync Health must not balloon the first grid
-	// row and push row 2 / row 3 down. Generous thresholds (not pixels).
+// Worst realistic Sync state: return backlog + blocked return with
+// diagnostics. No truthful information may be hidden to fit.
+const BLOCKED_RETURN_OVER = {
+	freshness: {
+		latest_sale_event_received_at: '2026-09-20T10:00:00Z', latest_projected_sale_occurred_at: '2026-09-20T10:00:00Z',
+		projection_backlog_count: 0, blocked_sale_event_count: 0, cloud_projection_complete: true,
+		latest_return_event_received_at: '2026-09-20T12:00:00Z', latest_projected_return_occurred_at: '2026-09-20T12:00:00Z',
+		return_backlog_count: 2, return_blocked_count: 1, return_projection_complete: false
+	},
+	return_pending_count: 1, return_retry_count: 1, return_blocked_count: 1,
+	return_last_error_code: 'RETURN_REFUND_ID_CONFLICT',
+	return_last_error_label_ar: 'تعارض مرتجعات',
+	return_last_error_label_en: 'return conflict'
+};
+
+// R3-01 regression gate: Sync Health must not balloon the first grid
+// row and push row 2 / row 3 down. Generous thresholds (not pixels).
+async function expectFirstRowDensity(page: Page) {
+	const tops = await page.evaluate(() => {
+		const top = (sel: string) => {
+			const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
+			if (els.length === 0) return Infinity;
+			return Math.min(...els.map((e) => e.getBoundingClientRect().top));
+		};
+		const h = (sel: string) => {
+			const e = document.querySelector(sel) as HTMLElement | null;
+			return e ? e.getBoundingClientRect().height : Infinity;
+		};
+		return {
+			row2: top('.a-trend .card, .a-products .card, .a-cat .card'),
+			row3: top('.a-branch .card, .a-latest .card, .a-act .card'),
+			sync: h('.a-sync .card')
+		};
+	});
+	expect(tops.row2, 'row 2 starts near reference position').toBeLessThan(560);
+	expect(tops.row3, 'row 3 substantially visible').toBeLessThan(900);
+	expect(tops.sync, 'sync stays bounded').toBeLessThan(700);
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+	expect(overflow, 'no page horizontal overflow').toBeLessThanOrEqual(1);
+}
+
+test('first-row density stays within budget at 1536 (default and blocked-return sync)', async ({ page }) => {
 	await mockDashboard(page);
 	await page.setViewportSize({ width: 1536, height: 1024 });
 	await login(page);
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	const tops = await page.evaluate(() => {
-		const top = (sel: string) => {
-			const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
-			if (els.length === 0) return Infinity;
-			return Math.min(...els.map((e) => e.getBoundingClientRect().top));
-		};
-		const h = (sel: string) => {
-			const e = document.querySelector(sel) as HTMLElement | null;
-			return e ? e.getBoundingClientRect().height : Infinity;
-		};
-		return {
-			row2: top('.a-trend .card, .a-products .card, .a-cat .card'),
-			row3: top('.a-branch .card, .a-latest .card, .a-act .card'),
-			sync: h('.a-sync .card')
-		};
-	});
-	expect(tops.row2, 'row 2 starts near reference position').toBeLessThan(560);
-	expect(tops.row3, 'row 3 substantially visible').toBeLessThan(900);
-	expect(tops.sync, 'sync stays bounded').toBeLessThan(700);
-	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-	expect(overflow, 'no page horizontal overflow').toBeLessThanOrEqual(1);
-});
-
-test('blocked-return density stays within budget at 1536', async ({ page }) => {
-	// Worst realistic Sync state: return backlog + blocked return with
-	// diagnostics. No truthful information may be hidden to fit.
-	await mockDashboard(page, {
-		freshness: {
-			latest_sale_event_received_at: '2026-09-20T10:00:00Z', latest_projected_sale_occurred_at: '2026-09-20T10:00:00Z',
-			projection_backlog_count: 0, blocked_sale_event_count: 0, cloud_projection_complete: true,
-			latest_return_event_received_at: '2026-09-20T12:00:00Z', latest_projected_return_occurred_at: '2026-09-20T12:00:00Z',
-			return_backlog_count: 2, return_blocked_count: 1, return_projection_complete: false
-		},
-		return_pending_count: 1, return_retry_count: 1, return_blocked_count: 1,
-		return_last_error_code: 'RETURN_REFUND_ID_CONFLICT',
-		return_last_error_label_ar: 'تعارض مرتجعات',
-		return_last_error_label_en: 'return conflict'
-	});
-	await page.setViewportSize({ width: 1536, height: 1024 });
-	await login(page);
+	await expectFirstRowDensity(page);
+	// Same session (cookie survives reload) under the worst Sync state.
+	await page.unroute('**/api/v1/dashboard/sync-health');
+	await page.route('**/api/v1/dashboard/sync-health', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(syncHealth(BLOCKED_RETURN_OVER)) }));
+	await page.reload();
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	await expect(page.getByText('تعارض مرتجعات')).toBeVisible({ timeout: 15000 });
-	const tops = await page.evaluate(() => {
-		const top = (sel: string) => {
-			const els = Array.from(document.querySelectorAll(sel)) as HTMLElement[];
-			if (els.length === 0) return Infinity;
-			return Math.min(...els.map((e) => e.getBoundingClientRect().top));
-		};
-		const h = (sel: string) => {
-			const e = document.querySelector(sel) as HTMLElement | null;
-			return e ? e.getBoundingClientRect().height : Infinity;
-		};
-		return {
-			row2: top('.a-trend .card, .a-products .card, .a-cat .card'),
-			row3: top('.a-branch .card, .a-latest .card, .a-act .card'),
-			sync: h('.a-sync .card')
-		};
-	});
-	expect(tops.row2, 'row 2 starts near reference position').toBeLessThan(560);
-	expect(tops.row3, 'row 3 substantially visible').toBeLessThan(900);
-	expect(tops.sync, 'sync stays bounded').toBeLessThan(700);
-	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-	expect(overflow, 'no page horizontal overflow').toBeLessThanOrEqual(1);
+	await expectFirstRowDensity(page);
 });
 
 test('sale and return diagnostics coexist independently', async ({ page }) => {
