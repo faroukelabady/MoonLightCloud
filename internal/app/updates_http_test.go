@@ -81,8 +81,6 @@ func (h *updateHTTP) do(method, path string, body any, header map[string]string,
 }
 
 // login is a no-op: the OWNER fixture already holds a FULL MFA session.
-func (h *updateHTTP) login() { h.t.Helper() }
-
 func (h *updateHTTP) bound(name, storeID string) auth.Provisioned {
 	h.t.Helper()
 	ctx := context.Background()
@@ -123,7 +121,6 @@ func TestUpdateRoutesAuthorizationBoundary(t *testing.T) {
 	if code, _ := h.do("GET", "/api/v1/device-control/update/command", nil, nil, nil); code != 401 {
 		t.Fatalf("unauthenticated device poll: %d", code)
 	}
-	h.login()
 	if code, _ := h.do("GET", "/api/v1/device-control/update/command", nil, nil, h.client); code != 401 {
 		t.Fatalf("operator session accepted on device route: %d", code)
 	}

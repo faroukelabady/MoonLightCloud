@@ -1,7 +1,6 @@
 package returnrefund
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -29,7 +28,6 @@ func TestOpenAPIEventModel(t *testing.T) {
 		}
 	}
 
-	matches := 0
 	for _, name := range []string{"return_partial.json", "return_full.json"} {
 		fix := loadFixture(t, name)
 		p, err := Decode(fix)
@@ -39,15 +37,6 @@ func TestOpenAPIEventModel(t *testing.T) {
 		if _, err := Validate(p); err != nil {
 			t.Fatalf("%s: must validate as ReturnRefundFinalizedV1: %v", name, err)
 		}
-		var m map[string]any
-		if err := json.Unmarshal(fix, &m); err != nil {
-			t.Fatal(err)
-		}
-		matches++
-		_ = m
-	}
-	if matches != 2 {
-		t.Fatal("both return fixtures must match the ReturnRefundFinalizedV1 branch")
 	}
 	bad := mutate(t, loadFixture(t, "return_partial.json"), func(m map[string]any) {
 		m["lines"] = []any{}

@@ -38,7 +38,6 @@ func TestOpenAPIEventModel(t *testing.T) {
 
 	// Exactly one branch matches a real sale fixture: it decodes +
 	// validates as SaleFinalizedV3 and is not a SystemTest event.
-	matches := 0
 	for _, name := range []string{"sale_usd.json", "sale_egp.json"} {
 		fix := loadFixture(t, name)
 		p, err := DecodeV3(fix)
@@ -48,15 +47,6 @@ func TestOpenAPIEventModel(t *testing.T) {
 		if _, err := ValidateV3(p); err != nil {
 			t.Fatalf("%s: must validate as SaleFinalizedV3: %v", name, err)
 		}
-		var m map[string]any
-		if err := json.Unmarshal(fix, &m); err != nil {
-			t.Fatal(err)
-		}
-		matches++
-		_ = m
-	}
-	if matches != 2 {
-		t.Fatal("both sale fixtures must match the SaleFinalizedV3 branch")
 	}
 	// A malformed Sale (no roots) is rejected by the modeled contract.
 	bad := mutate(t, loadFixture(t, "sale_usd.json"), func(m map[string]any) {
