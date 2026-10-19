@@ -141,103 +141,107 @@ func TestOpsHTTPList(t *testing.T) {
 	}
 }
 
-// Acknowledge is idempotent; resolved incidents read back unchanged.
-func TestOpsHTTPAcknowledge(t *testing.T) {
+// TestOpsHTTPIncidentActions runs the incident actions on one database;
+// each subtest uses its own incident. List and Summary keep fresh
+// databases because they count every incident.
+func TestOpsHTTPIncidentActions(t *testing.T) {
 	env := openOpsHTTP(t)
-	in := env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, "d-ack", "")
-	rec := httptest.NewRecorder()
-	env.handlers.Acknowledge(rec, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+in.ID+"/acknowledge", nil))
-	if rec.Code != 200 {
-		t.Fatalf("ack: %d %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Incident struct {
-			State string `json:"state"`
-		} `json:"incident"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if body.Incident.State != "acknowledged" {
-		t.Fatalf("state: %s", rec.Body.String())
-	}
-	again := httptest.NewRecorder()
-	env.handlers.Acknowledge(again, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+in.ID+"/acknowledge", nil))
-	if again.Code != 200 {
-		t.Fatalf("re-ack: %d", again.Code)
-	}
-	missing := httptest.NewRecorder()
-	env.handlers.Acknowledge(missing, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/00000000-0000-4000-8000-000000000000/acknowledge", nil))
-	if missing.Code != 404 {
-		t.Fatalf("unknown: %d", missing.Code)
-	}
-}
 
-// Resolve closes events; active stateful conditions conflict.
-func TestOpsHTTPResolve(t *testing.T) {
-	env := openOpsHTTP(t)
-	ctx := context.Background()
-	event := env.incident(t, operations.RuleDeviceSyncFailed, operations.SubjectSyncCommand, "cmd-r", "sync-command:cmd-r")
-	rec := httptest.NewRecorder()
-	env.handlers.Resolve(rec, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+event.ID+"/resolve", nil))
-	if rec.Code != 200 {
-		t.Fatalf("event resolve: %d %s", rec.Code, rec.Body.String())
-	}
-	dev := env.device(t, "still-off")
-	if err := postgres.NewDeviceControl(env.pool, 5*time.Second).TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
-		t.Fatal(err)
-	}
-	active := env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
-	conflict := httptest.NewRecorder()
-	env.handlers.Resolve(conflict, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+active.ID+"/resolve", nil))
-	if conflict.Code != 409 {
-		t.Fatalf("active stateful must conflict: %d %s", conflict.Code, conflict.Body.String())
-	}
-	var env2 struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	_ = json.Unmarshal(conflict.Body.Bytes(), &env2)
-	if env2.Error.Message != "CONDITION_STILL_ACTIVE" {
-		t.Fatalf("code: %s", conflict.Body.String())
-	}
-}
+	// Acknowledge is idempotent; resolved incidents read back unchanged.
+	t.Run("acknowledge", func(t *testing.T) {
+		in := env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, "d-ack", "")
+		rec := httptest.NewRecorder()
+		env.handlers.Acknowledge(rec, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+in.ID+"/acknowledge", nil))
+		if rec.Code != 200 {
+			t.Fatalf("ack: %d %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Incident struct {
+				State string `json:"state"`
+			} `json:"incident"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if body.Incident.State != "acknowledged" {
+			t.Fatalf("state: %s", rec.Body.String())
+		}
+		again := httptest.NewRecorder()
+		env.handlers.Acknowledge(again, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+in.ID+"/acknowledge", nil))
+		if again.Code != 200 {
+			t.Fatalf("re-ack: %d", again.Code)
+		}
+		missing := httptest.NewRecorder()
+		env.handlers.Acknowledge(missing, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/00000000-0000-4000-8000-000000000000/acknowledge", nil))
+		if missing.Code != 404 {
+			t.Fatalf("unknown: %d", missing.Code)
+		}
+	})
 
-// Detail exposes masked deliveries and recovery state, never recipients.
-func TestOpsHTTPDetailPrivacy(t *testing.T) {
-	env := openOpsHTTP(t)
-	ctx := context.Background()
-	rec, err := env.store.CreateOpsRecipient(ctx, ids.System{}.New(), "ops", "whatsapp-main", "201012345678", "ar", time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	in := env.incident(t, operations.RuleNotificationAmb, operations.SubjectNotification, "n-priv", "notification-ambiguous:n-priv")
-	if _, err := env.store.CreateDelivery(ctx, operations.Delivery{
-		ID: ids.System{}.New(), IncidentID: in.ID, RecipientID: rec.ID, Event: operations.EventOpened,
-		ProviderKey: "whatsapp-main", RecipientSnapshot: "201012345678", Locale: "ar",
-		TemplateKey: operations.TemplateOpen, Body: "body", Fingerprint: []byte{1},
-		NotificationKey: operations.AlertIdempotencyKey(in.ID, operations.EventOpened, ids.System{}.New()),
-	}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	got := httptest.NewRecorder()
-	env.handlers.IncidentDetail(got, httptest.NewRequest("GET", "/api/v1/dashboard/operations/incidents/"+in.ID, nil))
-	if got.Code != 200 {
-		t.Fatalf("detail: %d %s", got.Code, got.Body.String())
-	}
-	body := got.Body.String()
-	if strings.Contains(body, "201012345678") {
-		t.Fatal("full recipient must never appear")
-	}
-	var detail struct {
-		Deliveries []struct {
-			RecipientMasked string `json:"recipient_masked"`
-			Recipient       string `json:"recipient"`
-		} `json:"deliveries"`
-	}
-	_ = json.Unmarshal([]byte(body), &detail)
-	if len(detail.Deliveries) != 1 || detail.Deliveries[0].RecipientMasked != "...5678" || detail.Deliveries[0].Recipient != "" {
-		t.Fatalf("masked delivery: %s", body)
-	}
+	// Resolve closes events; active stateful conditions conflict.
+	t.Run("resolve", func(t *testing.T) {
+		ctx := context.Background()
+		event := env.incident(t, operations.RuleDeviceSyncFailed, operations.SubjectSyncCommand, "cmd-r", "sync-command:cmd-r")
+		rec := httptest.NewRecorder()
+		env.handlers.Resolve(rec, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+event.ID+"/resolve", nil))
+		if rec.Code != 200 {
+			t.Fatalf("event resolve: %d %s", rec.Code, rec.Body.String())
+		}
+		dev := env.device(t, "still-off")
+		if err := postgres.NewDeviceControl(env.pool, 5*time.Second).TouchSeen(ctx, dev, time.Now().UTC().Add(-time.Hour), true); err != nil {
+			t.Fatal(err)
+		}
+		active := env.incident(t, operations.RuleDeviceOffline, operations.SubjectDevice, dev, "")
+		conflict := httptest.NewRecorder()
+		env.handlers.Resolve(conflict, httptest.NewRequest("POST", "/api/v1/dashboard/operations/incidents/"+active.ID+"/resolve", nil))
+		if conflict.Code != 409 {
+			t.Fatalf("active stateful must conflict: %d %s", conflict.Code, conflict.Body.String())
+		}
+		var env2 struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(conflict.Body.Bytes(), &env2)
+		if env2.Error.Message != "CONDITION_STILL_ACTIVE" {
+			t.Fatalf("code: %s", conflict.Body.String())
+		}
+	})
+
+	// Detail exposes masked deliveries and recovery state, never recipients.
+	t.Run("detail_privacy", func(t *testing.T) {
+		ctx := context.Background()
+		rec, err := env.store.CreateOpsRecipient(ctx, ids.System{}.New(), "ops", "whatsapp-main", "201012345678", "ar", time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := env.incident(t, operations.RuleNotificationAmb, operations.SubjectNotification, "n-priv", "notification-ambiguous:n-priv")
+		if _, err := env.store.CreateDelivery(ctx, operations.Delivery{
+			ID: ids.System{}.New(), IncidentID: in.ID, RecipientID: rec.ID, Event: operations.EventOpened,
+			ProviderKey: "whatsapp-main", RecipientSnapshot: "201012345678", Locale: "ar",
+			TemplateKey: operations.TemplateOpen, Body: "body", Fingerprint: []byte{1},
+			NotificationKey: operations.AlertIdempotencyKey(in.ID, operations.EventOpened, ids.System{}.New()),
+		}, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		got := httptest.NewRecorder()
+		env.handlers.IncidentDetail(got, httptest.NewRequest("GET", "/api/v1/dashboard/operations/incidents/"+in.ID, nil))
+		if got.Code != 200 {
+			t.Fatalf("detail: %d %s", got.Code, got.Body.String())
+		}
+		body := got.Body.String()
+		if strings.Contains(body, "201012345678") {
+			t.Fatal("full recipient must never appear")
+		}
+		var detail struct {
+			Deliveries []struct {
+				RecipientMasked string `json:"recipient_masked"`
+				Recipient       string `json:"recipient"`
+			} `json:"deliveries"`
+		}
+		_ = json.Unmarshal([]byte(body), &detail)
+		if len(detail.Deliveries) != 1 || detail.Deliveries[0].RecipientMasked != "...5678" || detail.Deliveries[0].Recipient != "" {
+			t.Fatalf("masked delivery: %s", body)
+		}
+	})
 }
 
 // Summary carries counters and the batched device rollup.

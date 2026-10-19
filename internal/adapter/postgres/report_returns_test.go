@@ -186,45 +186,167 @@ func reportBreakdown(t *testing.T, env *saleEnv, kind, from, to, currency, dim s
 	return out
 }
 
-// TestReportSummaryNet verifies summary gross/refund/net, counts, costs,
-// and freshness with return projection state.
-func TestReportSummaryNet(t *testing.T) {
+// TestReportNetReturnScenario checks summary, daily and breakdown net
+// reporting against one shared return scenario (read-only after setup).
+func TestReportNetReturnScenario(t *testing.T) {
 	env := openSaleEnv(t)
 	returnScenario(t, env)
 
-	sum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
-	// Sales: A(200000) + B(1250 USD) + C(200000). Returns: A1+A2(200000) + B1(1250).
-	// Sales A, B, C; returns A1, A2, B1, D1 (D1 falls on 09-20 too).
-	if sum.TransactionCount != 3 || sum.ReturnTransactionCount != 4 {
-		t.Fatalf("counts: %+v", sum)
-	}
-	if sum.UnitsSold != 5 || sum.UnitsReturned != 4 {
-		t.Fatalf("units: %+v", sum)
-	}
-	if len(sum.CurrencyTotals) != 2 {
-		t.Fatalf("buckets: %+v", sum.CurrencyTotals)
-	}
-	egp, usd := sum.CurrencyTotals[0], sum.CurrencyTotals[1]
-	if egp.Currency != "EGP" || egp.SalesTotalMinor != 400000 || egp.RefundTotalMinor != 300000 || egp.NetSalesMinor != 100000 {
-		t.Fatalf("egp bucket: %+v", egp)
-	}
-	// Fixture EGP sale lines carry no cost snapshot; return costs (3x400)
-	// still reverse exactly, driving net cost negative here.
-	if egp.ReturnedUnits != 3 || egp.ReturnedCostMinor != 1200 || egp.LineCostMinor != 0 || egp.NetCostMinor != -1200 {
-		t.Fatalf("egp cost/units: %+v", egp)
-	}
-	if usd.Currency != "USD" || usd.SalesTotalMinor != 1250 || usd.RefundTotalMinor != 1250 || usd.NetSalesMinor != 0 {
-		t.Fatalf("usd bucket: %+v", usd)
-	}
-	if usd.ReturnedUnits != 1 || usd.ReturnedCostMinor != 400 || usd.NetCostMinor != 0 {
-		t.Fatalf("usd cost/units: %+v", usd)
-	}
-	if !sum.Freshness.ReturnProjectionComplete || sum.Freshness.ReturnBacklogCount != 0 {
-		t.Fatalf("return freshness: %+v", sum.Freshness)
-	}
-	if sum.Freshness.LatestReturnEventReceivedAt == nil || sum.Freshness.LatestProjectedReturnOccurredAt == nil {
-		t.Fatalf("return timestamps: %+v", sum.Freshness)
-	}
+	// Verifies summary gross/refund/net, counts, costs,
+	// and freshness with return projection state.
+	t.Run("summary", func(t *testing.T) {
+		sum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
+		// Sales: A(200000) + B(1250 USD) + C(200000). Returns: A1+A2(200000) + B1(1250).
+		// Sales A, B, C; returns A1, A2, B1, D1 (D1 falls on 09-20 too).
+		if sum.TransactionCount != 3 || sum.ReturnTransactionCount != 4 {
+			t.Fatalf("counts: %+v", sum)
+		}
+		if sum.UnitsSold != 5 || sum.UnitsReturned != 4 {
+			t.Fatalf("units: %+v", sum)
+		}
+		if len(sum.CurrencyTotals) != 2 {
+			t.Fatalf("buckets: %+v", sum.CurrencyTotals)
+		}
+		egp, usd := sum.CurrencyTotals[0], sum.CurrencyTotals[1]
+		if egp.Currency != "EGP" || egp.SalesTotalMinor != 400000 || egp.RefundTotalMinor != 300000 || egp.NetSalesMinor != 100000 {
+			t.Fatalf("egp bucket: %+v", egp)
+		}
+		// Fixture EGP sale lines carry no cost snapshot; return costs (3x400)
+		// still reverse exactly, driving net cost negative here.
+		if egp.ReturnedUnits != 3 || egp.ReturnedCostMinor != 1200 || egp.LineCostMinor != 0 || egp.NetCostMinor != -1200 {
+			t.Fatalf("egp cost/units: %+v", egp)
+		}
+		if usd.Currency != "USD" || usd.SalesTotalMinor != 1250 || usd.RefundTotalMinor != 1250 || usd.NetSalesMinor != 0 {
+			t.Fatalf("usd bucket: %+v", usd)
+		}
+		if usd.ReturnedUnits != 1 || usd.ReturnedCostMinor != 400 || usd.NetCostMinor != 0 {
+			t.Fatalf("usd cost/units: %+v", usd)
+		}
+		if !sum.Freshness.ReturnProjectionComplete || sum.Freshness.ReturnBacklogCount != 0 {
+			t.Fatalf("return freshness: %+v", sum.Freshness)
+		}
+		if sum.Freshness.LatestReturnEventReceivedAt == nil || sum.Freshness.LatestProjectedReturnOccurredAt == nil {
+			t.Fatalf("return timestamps: %+v", sum.Freshness)
+		}
+	})
+
+	// Verifies per-day gross/refund/net with sale and
+	// return dates kept distinct (Sale D on 09-19, its return on 09-20).
+	t.Run("daily", func(t *testing.T) {
+		daily := reportDaily(t, env, "custom", "2026-09-19", "2026-09-20", "")
+		if len(daily.Days) != 2 {
+			t.Fatalf("two days: %+v", daily.Days)
+		}
+		day19, day20 := daily.Days[0], daily.Days[1]
+		if day19.Date != "2026-09-19" || day20.Date != "2026-09-20" {
+			t.Fatalf("ascending dates: %+v", daily.Days)
+		}
+		// 09-19: only Sale D gross, no refunds.
+		if day19.Transactions != 1 || day19.ReturnTransactions != 0 {
+			t.Fatalf("day19 counts: %+v", day19)
+		}
+		// 09-20: 3 sales + 4 returns (A1, A2, B1, D1).
+		if day20.Transactions != 3 || day20.ReturnTransactions != 4 {
+			t.Fatalf("day20 counts: %+v", day20)
+		}
+		for _, day := range daily.Days {
+			for _, b := range day.CurrencyTotals {
+				if b.NetSalesMinor != b.SalesTotalMinor-b.RefundTotalMinor {
+					t.Fatalf("day %s bucket %s net: %+v", day.Date, b.Currency, b)
+				}
+			}
+		}
+		egp20 := day20.CurrencyTotals[0]
+		if egp20.Currency != "EGP" || egp20.SalesTotalMinor != 400000 || egp20.RefundTotalMinor != 300000 || egp20.NetSalesMinor != 100000 {
+			t.Fatalf("day20 egp: %+v", egp20)
+		}
+	})
+
+	// Verifies product/root/subcategory/cashier/channel
+	// breakdowns merge refunds into the same attribution the sales used, with
+	// net derivable and counts un-conflated.
+	t.Run("breakdown", func(t *testing.T) {
+		// Product: fixture product reverses 2 units / 200000 (A1+A2), plus the
+		// D1 return of the same product snapshot.
+		prod := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "product")
+		if len(prod.Rows) == 0 {
+			t.Fatal("product rows must exist")
+		}
+		// PAP-002 rides sales A and C in-window (Sale D is on 09-19);
+		// returns A1, A2, D1 all fall on 09-20.
+		found := false
+		for _, row := range prod.Rows {
+			if row.SKU == nil || *row.SKU != "PAP-002" {
+				continue
+			}
+			found = true
+			if row.Units != 4 || row.UnitsReturned != 3 {
+				t.Fatalf("product units: %+v", row)
+			}
+			var gross, refund int64
+			for _, b := range row.LineSales {
+				if b.Currency != "EGP" {
+					continue
+				}
+				gross = b.LineSalesMinor
+				refund = b.LineRefundMinor
+				if b.LineReturnedCostMinor != 1200 {
+					t.Fatalf("product returned cost: %+v", b)
+				}
+			}
+			if gross != 400000 || refund != 300000 || gross-refund != 100000 {
+				t.Fatalf("product gross/refund: %+v", row.LineSales)
+			}
+		}
+		if !found {
+			t.Fatal("fixture product row missing")
+		}
+
+		// Root categories mirror the same fanout the sales used.
+		roots := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "root_category")
+		if len(roots.Rows) == 0 {
+			t.Fatal("root rows must exist")
+		}
+		for _, row := range roots.Rows {
+			if row.ClassificationKind == nil || *row.ClassificationKind != "root" {
+				t.Fatalf("root kind: %+v", row)
+			}
+			for _, b := range row.LineSales {
+				if b.LineRefundMinor < 0 || b.LineReturnedCostMinor < 0 {
+					t.Fatalf("negative reversal: %+v", b)
+				}
+			}
+		}
+		subs := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "subcategory")
+		if len(subs.Rows) == 0 {
+			t.Fatal("subcategory rows must exist (facet semantics preserved)")
+		}
+
+		// Cashier: refunds attribute to the original sale cashier.
+		cashiers := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "cashier")
+		if len(cashiers.Rows) == 0 {
+			t.Fatal("cashier rows must exist")
+		}
+		for _, row := range cashiers.Rows {
+			if row.Transactions == 0 && row.ReturnTransactions == 0 {
+				t.Fatalf("empty cashier row: %+v", row)
+			}
+			for _, b := range row.CurrencyTotals {
+				if b.NetSalesMinor != b.SalesTotalMinor-b.RefundTotalMinor {
+					t.Fatalf("cashier net: %+v", b)
+				}
+			}
+		}
+
+		// Channel: single STORE channel carries both sides.
+		channels := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "channel")
+		if len(channels.Rows) != 1 || channels.Rows[0].Channel == nil || *channels.Rows[0].Channel != "STORE" {
+			t.Fatalf("channel rows: %+v", channels.Rows)
+		}
+		if channels.Rows[0].ReturnTransactions != 4 {
+			t.Fatalf("channel return transactions: %+v", channels.Rows[0])
+		}
+	})
 }
 
 // TestReportNegativeNet proves a refund-only period reports signed net
@@ -270,130 +392,6 @@ func TestReportNegativeNet(t *testing.T) {
 	bucket := decoded["currency_totals"].([]any)[0].(map[string]any)
 	if bucket["net_sales_minor"].(float64) != -200000 {
 		t.Fatalf("net sign lost in JSON: %v", bucket["net_sales_minor"])
-	}
-}
-
-// TestReportDailyNet verifies per-day gross/refund/net with sale and
-// return dates kept distinct (Sale D on 09-19, its return on 09-20).
-func TestReportDailyNet(t *testing.T) {
-	env := openSaleEnv(t)
-	returnScenario(t, env)
-
-	daily := reportDaily(t, env, "custom", "2026-09-19", "2026-09-20", "")
-	if len(daily.Days) != 2 {
-		t.Fatalf("two days: %+v", daily.Days)
-	}
-	day19, day20 := daily.Days[0], daily.Days[1]
-	if day19.Date != "2026-09-19" || day20.Date != "2026-09-20" {
-		t.Fatalf("ascending dates: %+v", daily.Days)
-	}
-	// 09-19: only Sale D gross, no refunds.
-	if day19.Transactions != 1 || day19.ReturnTransactions != 0 {
-		t.Fatalf("day19 counts: %+v", day19)
-	}
-	// 09-20: 3 sales + 4 returns (A1, A2, B1, D1).
-	if day20.Transactions != 3 || day20.ReturnTransactions != 4 {
-		t.Fatalf("day20 counts: %+v", day20)
-	}
-	for _, day := range daily.Days {
-		for _, b := range day.CurrencyTotals {
-			if b.NetSalesMinor != b.SalesTotalMinor-b.RefundTotalMinor {
-				t.Fatalf("day %s bucket %s net: %+v", day.Date, b.Currency, b)
-			}
-		}
-	}
-	egp20 := day20.CurrencyTotals[0]
-	if egp20.Currency != "EGP" || egp20.SalesTotalMinor != 400000 || egp20.RefundTotalMinor != 300000 || egp20.NetSalesMinor != 100000 {
-		t.Fatalf("day20 egp: %+v", egp20)
-	}
-}
-
-// TestReportBreakdownNet verifies product/root/subcategory/cashier/channel
-// breakdowns merge refunds into the same attribution the sales used, with
-// net derivable and counts un-conflated.
-func TestReportBreakdownNet(t *testing.T) {
-	env := openSaleEnv(t)
-	returnScenario(t, env)
-
-	// Product: fixture product reverses 2 units / 200000 (A1+A2), plus the
-	// D1 return of the same product snapshot.
-	prod := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "product")
-	if len(prod.Rows) == 0 {
-		t.Fatal("product rows must exist")
-	}
-	// PAP-002 rides sales A and C in-window (Sale D is on 09-19);
-	// returns A1, A2, D1 all fall on 09-20.
-	found := false
-	for _, row := range prod.Rows {
-		if row.SKU == nil || *row.SKU != "PAP-002" {
-			continue
-		}
-		found = true
-		if row.Units != 4 || row.UnitsReturned != 3 {
-			t.Fatalf("product units: %+v", row)
-		}
-		var gross, refund int64
-		for _, b := range row.LineSales {
-			if b.Currency != "EGP" {
-				continue
-			}
-			gross = b.LineSalesMinor
-			refund = b.LineRefundMinor
-			if b.LineReturnedCostMinor != 1200 {
-				t.Fatalf("product returned cost: %+v", b)
-			}
-		}
-		if gross != 400000 || refund != 300000 || gross-refund != 100000 {
-			t.Fatalf("product gross/refund: %+v", row.LineSales)
-		}
-	}
-	if !found {
-		t.Fatal("fixture product row missing")
-	}
-
-	// Root categories mirror the same fanout the sales used.
-	roots := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "root_category")
-	if len(roots.Rows) == 0 {
-		t.Fatal("root rows must exist")
-	}
-	for _, row := range roots.Rows {
-		if row.ClassificationKind == nil || *row.ClassificationKind != "root" {
-			t.Fatalf("root kind: %+v", row)
-		}
-		for _, b := range row.LineSales {
-			if b.LineRefundMinor < 0 || b.LineReturnedCostMinor < 0 {
-				t.Fatalf("negative reversal: %+v", b)
-			}
-		}
-	}
-	subs := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "subcategory")
-	if len(subs.Rows) == 0 {
-		t.Fatal("subcategory rows must exist (facet semantics preserved)")
-	}
-
-	// Cashier: refunds attribute to the original sale cashier.
-	cashiers := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "cashier")
-	if len(cashiers.Rows) == 0 {
-		t.Fatal("cashier rows must exist")
-	}
-	for _, row := range cashiers.Rows {
-		if row.Transactions == 0 && row.ReturnTransactions == 0 {
-			t.Fatalf("empty cashier row: %+v", row)
-		}
-		for _, b := range row.CurrencyTotals {
-			if b.NetSalesMinor != b.SalesTotalMinor-b.RefundTotalMinor {
-				t.Fatalf("cashier net: %+v", b)
-			}
-		}
-	}
-
-	// Channel: single STORE channel carries both sides.
-	channels := reportBreakdown(t, env, "custom", "2026-09-20", "2026-09-20", "", "channel")
-	if len(channels.Rows) != 1 || channels.Rows[0].Channel == nil || *channels.Rows[0].Channel != "STORE" {
-		t.Fatalf("channel rows: %+v", channels.Rows)
-	}
-	if channels.Rows[0].ReturnTransactions != 4 {
-		t.Fatalf("channel return transactions: %+v", channels.Rows[0])
 	}
 }
 

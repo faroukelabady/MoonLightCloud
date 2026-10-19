@@ -225,65 +225,6 @@ func TestH4PerLineOverflow(t *testing.T) {
 	}
 }
 
-// TestM1CategoryRenamePreserved proves snapshot identity: same category ID
-// with different historical names yields separate rows with their own
-// totals; buckets merge only within exact identity.
-func TestM1CategoryRenamePreserved(t *testing.T) {
-	for _, tc := range []struct {
-		dimension string
-		group     string
-		oldName   string
-		newName   string
-	}{
-		{report.DimensionRootCategory, "roots", "Old Root", "New Root"},
-		{report.DimensionSubcategory, "subcategories", "Old Sub", "New Sub"},
-	} {
-		t.Run(tc.dimension, func(t *testing.T) {
-			env := openSaleEnv(t)
-			mkSale := func(saleID, name string) {
-				projectSale(t, env, saleID, "2026-09-20T10:00:00Z", func(m map[string]any) {
-					line := m["lines"].([]any)[0].(map[string]any)
-					// Exactly one root is required by the contract; the
-					// non-target group keeps a constant entry.
-					groups := map[string]any{
-						"roots": []any{map[string]any{
-							"category_id": "00000000-0000-0000-0000-000000000102",
-							"name_ar":     "ثابت", "name_en": "Constant",
-						}},
-						"subcategories": []any{},
-					}
-					groups[tc.group] = []any{map[string]any{
-						"category_id": "00000000-0000-0000-0000-000000000101",
-						"name_ar":     "x-" + name, "name_en": name,
-					}}
-					line["classifications"] = groups
-				})
-			}
-			mkSale("11111111-1111-4111-8111-111111111111", tc.oldName)
-			mkSale("22222222-2222-4222-8222-222222222222", tc.newName)
-			svc := repService(env)
-			req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
-			res, err := svc.Breakdown(context.Background(), req, tc.dimension)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(res.Rows) != 2 {
-				t.Fatalf("rename must yield two rows: %+v", res.Rows)
-			}
-			names := map[string]int64{}
-			for _, r := range res.Rows {
-				names[*r.NameEN] = r.Units
-				if len(r.LineSales) != 1 || r.LineSales[0].Currency != "EGP" {
-					t.Fatalf("buckets merge within identity only: %+v", r)
-				}
-			}
-			if names[tc.oldName] != 2 || names[tc.newName] != 2 {
-				t.Fatalf("per-snapshot totals: %v", names)
-			}
-		})
-	}
-}
-
 // TestL1NestedCurrencyOrder proves alphabetical nested bucket order with
 // both currencies present, deterministically.
 func TestL1NestedCurrencyOrder(t *testing.T) {
@@ -393,9 +334,11 @@ func TestM2NoFalseZeroCost(t *testing.T) {
 	}
 }
 
-// TestL2EqualUnitRenameOrdering proves equal-unit renamed category rows
-// keep one exact top-level order across repeated executions.
-func TestL2EqualUnitRenameOrdering(t *testing.T) {
+// TestCategoryRenameSnapshots proves snapshot identity for a renamed
+// category (same ID, two historical names -> two rows with their own
+// totals; buckets merge only within exact identity) and that the
+// equal-unit rows keep one exact order across repeated executions.
+func TestCategoryRenameSnapshots(t *testing.T) {
 	for _, tc := range []struct {
 		dimension string
 		group     string
@@ -429,12 +372,14 @@ func TestL2EqualUnitRenameOrdering(t *testing.T) {
 			mkSale("22222222-2222-4222-8222-222222222222", tc.oldName)
 			svc := repService(env)
 			var first []string
+			var last report.Breakdown
 			for i := 0; i < 5; i++ {
 				req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
 				res, err := svc.Breakdown(context.Background(), req, tc.dimension)
 				if err != nil {
 					t.Fatal(err)
 				}
+				last = res
 				var order []string
 				for _, r := range res.Rows {
 					id := ""
@@ -458,6 +403,16 @@ func TestL2EqualUnitRenameOrdering(t *testing.T) {
 			// Complete tie-break: names decide (New < Old alphabetically).
 			if len(first) != 2 || !strings.HasSuffix(first[0], tc.newName) {
 				t.Fatalf("expected name tie-break order, got %v", first)
+			}
+			names := map[string]int64{}
+			for _, r := range last.Rows {
+				names[*r.NameEN] = r.Units
+				if len(r.LineSales) != 1 || r.LineSales[0].Currency != "EGP" {
+					t.Fatalf("buckets merge within identity only: %+v", r)
+				}
+			}
+			if names[tc.oldName] != 2 || names[tc.newName] != 2 {
+				t.Fatalf("per-snapshot totals: %v", names)
 			}
 		})
 	}

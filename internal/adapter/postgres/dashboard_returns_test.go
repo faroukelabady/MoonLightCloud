@@ -114,47 +114,88 @@ func dashReturnPayload(t *testing.T, salePayload, rrID, number, occurred string,
 	return string(out)
 }
 
-// TestDashboardNetOverview proves net KPI math: normalized gross minus
-// normalized refunds with per-event historical FX, counts split.
-func TestDashboardNetOverview(t *testing.T) {
+// TestDashboardReturnScenario checks overview net KPIs, sync-health
+// return scope and activity kinds against one shared sale + return.
+func TestDashboardReturnScenario(t *testing.T) {
 	env := openDashEnv(t)
 	salePayload := fixture(t, "sale_egp.json")
 	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", "2026-09-20T10:00:00Z", salePayload)
 	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T12:00:00Z",
 		dashReturnPayload(t, salePayload, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "RET-1", "2026-09-20T12:00:00Z", 1))
 
-	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
-	over, err := env.dash.Overview(context.Background(), req)
-	if err != nil {
-		t.Fatalf("overview: %v", err)
-	}
-	// Fixture sale: total 200000; return: 100000 (unit of qty-2 line).
-	if over.Normalized.NormalizedTotalMinor != "200000" {
-		t.Fatalf("gross normalized: %+v", over.Normalized)
-	}
-	if over.Normalized.NormalizedRefundMinor != "100000" {
-		t.Fatalf("refund normalized: %+v", over.Normalized)
-	}
-	if over.Normalized.NormalizedNetMinor != "100000" {
-		t.Fatalf("net normalized: %+v", over.Normalized)
-	}
-	if over.Normalized.Transactions != 1 || over.Normalized.ReturnTransactions != 1 {
-		t.Fatalf("transaction split: %+v", over.Normalized)
-	}
-	if over.Normalized.Units != 2 || over.Normalized.UnitsReturned != 1 {
-		t.Fatalf("unit split: %+v", over.Normalized)
-	}
-	// Summary buckets carry the same net natively.
-	if len(over.Summary.CurrencyTotals) != 1 {
-		t.Fatalf("buckets: %+v", over.Summary.CurrencyTotals)
-	}
-	bucket := over.Summary.CurrencyTotals[0]
-	if bucket.SalesTotalMinor != "200000" || bucket.RefundTotalMinor != "100000" || bucket.NetSalesMinor != "100000" {
-		t.Fatalf("summary bucket: %+v", bucket)
-	}
-	if over.Summary.TransactionCount != 1 || over.Summary.ReturnTransactionCount != 1 {
-		t.Fatalf("summary counts: %+v", over.Summary)
-	}
+	// Proves net KPI math: normalized gross minus
+	// normalized refunds with per-event historical FX, counts split.
+	t.Run("overview", func(t *testing.T) {
+		req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
+		over, err := env.dash.Overview(context.Background(), req)
+		if err != nil {
+			t.Fatalf("overview: %v", err)
+		}
+		// Fixture sale: total 200000; return: 100000 (unit of qty-2 line).
+		if over.Normalized.NormalizedTotalMinor != "200000" {
+			t.Fatalf("gross normalized: %+v", over.Normalized)
+		}
+		if over.Normalized.NormalizedRefundMinor != "100000" {
+			t.Fatalf("refund normalized: %+v", over.Normalized)
+		}
+		if over.Normalized.NormalizedNetMinor != "100000" {
+			t.Fatalf("net normalized: %+v", over.Normalized)
+		}
+		if over.Normalized.Transactions != 1 || over.Normalized.ReturnTransactions != 1 {
+			t.Fatalf("transaction split: %+v", over.Normalized)
+		}
+		if over.Normalized.Units != 2 || over.Normalized.UnitsReturned != 1 {
+			t.Fatalf("unit split: %+v", over.Normalized)
+		}
+		// Summary buckets carry the same net natively.
+		if len(over.Summary.CurrencyTotals) != 1 {
+			t.Fatalf("buckets: %+v", over.Summary.CurrencyTotals)
+		}
+		bucket := over.Summary.CurrencyTotals[0]
+		if bucket.SalesTotalMinor != "200000" || bucket.RefundTotalMinor != "100000" || bucket.NetSalesMinor != "100000" {
+			t.Fatalf("summary bucket: %+v", bucket)
+		}
+		if over.Summary.TransactionCount != 1 || over.Summary.ReturnTransactionCount != 1 {
+			t.Fatalf("summary counts: %+v", over.Summary)
+		}
+	})
+
+	// Proves sale and return completeness
+	// stay separate metrics with the 4A note gone from the data model.
+	t.Run("sync_health", func(t *testing.T) {
+		health, err := env.dash.SyncHealth(context.Background())
+		if err != nil {
+			t.Fatalf("sync health: %v", err)
+		}
+		if health.ProcessedCount != 1 || health.ReturnProcessedCount != 1 {
+			t.Fatalf("processed split: %+v", health)
+		}
+		if !health.Freshness.CloudProjectionComplete || !health.Freshness.ReturnProjectionComplete {
+			t.Fatalf("completeness split: %+v", health.Freshness)
+		}
+		if health.Freshness.LatestReturnEventReceivedAt == nil {
+			t.Fatal("return freshness timestamps must exist")
+		}
+		var _ = dashboard.SyncHealthItem{}
+	})
+
+	// Proves return events surface with
+	// truthful kinds from durable data (no invented activity).
+	t.Run("activity_kinds", func(t *testing.T) {
+		items, err := env.dash.RecentActivity(context.Background(), report.Request{}, 20)
+		if err != nil {
+			t.Fatalf("activity: %v", err)
+		}
+		kinds := map[string]bool{}
+		for _, it := range items {
+			kinds[it.Kind] = true
+		}
+		for _, want := range []string{"accepted", "projected", "return_accepted", "return_projected"} {
+			if !kinds[want] {
+				t.Fatalf("activity kinds %v missing %q", kinds, want)
+			}
+		}
+	})
 }
 
 // TestDashboardUSDRefundNormalization proves per-event historical FX for
@@ -236,55 +277,6 @@ func usdReturnAt(t *testing.T, rate string, micro int64, rrID, number, saleID, s
 		t.Fatal(err)
 	}
 	return string(out)
-}
-
-// TestDashboardSyncHealthReturnScope proves sale and return completeness
-// stay separate metrics with the 4A note gone from the data model.
-func TestDashboardSyncHealthReturnScope(t *testing.T) {
-	env := openDashEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", "2026-09-20T10:00:00Z", salePayload)
-	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T12:00:00Z",
-		dashReturnPayload(t, salePayload, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "RET-1", "2026-09-20T12:00:00Z", 1))
-
-	health, err := env.dash.SyncHealth(context.Background())
-	if err != nil {
-		t.Fatalf("sync health: %v", err)
-	}
-	if health.ProcessedCount != 1 || health.ReturnProcessedCount != 1 {
-		t.Fatalf("processed split: %+v", health)
-	}
-	if !health.Freshness.CloudProjectionComplete || !health.Freshness.ReturnProjectionComplete {
-		t.Fatalf("completeness split: %+v", health.Freshness)
-	}
-	if health.Freshness.LatestReturnEventReceivedAt == nil {
-		t.Fatal("return freshness timestamps must exist")
-	}
-	var _ = dashboard.SyncHealthItem{}
-}
-
-// TestDashboardActivityReturnKinds proves return events surface with
-// truthful kinds from durable data (no invented activity).
-func TestDashboardActivityReturnKinds(t *testing.T) {
-	env := openDashEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa", "2026-09-20T10:00:00Z", salePayload)
-	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb", "2026-09-20T12:00:00Z",
-		dashReturnPayload(t, salePayload, "cccccccc-cccc-7ccc-8ccc-cccccccccccc", "RET-1", "2026-09-20T12:00:00Z", 1))
-
-	items, err := env.dash.RecentActivity(context.Background(), report.Request{}, 20)
-	if err != nil {
-		t.Fatalf("activity: %v", err)
-	}
-	kinds := map[string]bool{}
-	for _, it := range items {
-		kinds[it.Kind] = true
-	}
-	for _, want := range []string{"accepted", "projected", "return_accepted", "return_projected"} {
-		if !kinds[want] {
-			t.Fatalf("activity kinds %v missing %q", kinds, want)
-		}
-	}
 }
 
 // TestDashboardAllNetRanking proves All-mode products/categories rank by

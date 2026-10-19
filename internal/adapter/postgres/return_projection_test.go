@@ -255,89 +255,6 @@ func TestReturnBlockedUnknownLine(t *testing.T) {
 	}
 }
 
-// TestReturnRivalBusinessID proves two events sharing return_refund_id
-// arbitrate to one winner: loser blocked, one header, no double projection.
-func TestReturnRivalBusinessID(t *testing.T) {
-	env := returnEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-
-	base := alignedReturnPayload(t, salePayload,
-		"33333333-3333-7333-8333-333333333333", "RET-20260921-33333333", 1)
-	e1, e2 := "44444444-4444-7444-8444-444444444444", "55555555-5555-7555-8555-555555555555"
-	ingestReturnRaw(t, env, e1, base)
-	var m map[string]any
-	if err := json.Unmarshal([]byte(base), &m); err != nil {
-		t.Fatal(err)
-	}
-	m["return_number"] = "RET-RIVAL"
-	rival, _ := json.Marshal(m)
-	ingestReturnRaw(t, env, e2, string(rival))
-	drainReturns(t, env)
-
-	processed, blocked := 0, 0
-	for _, e := range []string{e1, e2} {
-		status, code := returnStatus(t, env, e)
-		switch status {
-		case "processed":
-			processed++
-		case "blocked":
-			blocked++
-			if code != ErrReturnIDConflict {
-				t.Fatalf("loser code: %q", code)
-			}
-		default:
-			t.Fatalf("event %s: %q/%q", e, status, code)
-		}
-	}
-	if processed != 1 || blocked != 1 {
-		t.Fatalf("want 1 processed + 1 conflict, got %d/%d", processed, blocked)
-	}
-	if n := saleCount(t, env.pool, "return_refund_projection"); n != 1 {
-		t.Fatalf("one header, got %d", n)
-	}
-	if n := saleCount(t, env.pool, "return_refund_ownership"); n != 1 {
-		t.Fatalf("one ownership row, got %d", n)
-	}
-}
-
-// TestReturnCumulativeOverReturn proves the second full return of an
-// already-returned line is blocked with zero new rows.
-func TestReturnCumulativeOverReturn(t *testing.T) {
-	env := returnEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-
-	// Fixture line sells qty 2: two qty-1 returns exhaust it exactly.
-	for i, e := range []string{"44444444-4444-7444-8444-444444444444", "55555555-5555-7555-8555-555555555555"} {
-		payload := alignedReturnPayload(t, salePayload,
-			fmt.Sprintf("3333333%d-3333-7333-8333-33333333333%d", i, i), fmt.Sprintf("RET-%d", i), 1)
-		ingestReturnRaw(t, env, e, payload)
-	}
-	drainReturns(t, env)
-	for _, e := range []string{"44444444-4444-7444-8444-444444444444", "55555555-5555-7555-8555-555555555555"} {
-		if status, _ := returnStatus(t, env, e); status != "processed" {
-			t.Fatalf("return %s: %q", e, status)
-		}
-	}
-	// Third return of the same line exceeds sold quantity.
-	over := alignedReturnPayload(t, salePayload,
-		"66666666-6666-7666-8666-666666666666", "RET-OVER", 1)
-	overEvent := "77777777-7777-7777-8777-777777777777"
-	ingestReturnRaw(t, env, overEvent, over)
-	drainReturns(t, env)
-	if status, code := returnStatus(t, env, overEvent); status != "blocked" || code != ErrCumulativeOverRet {
-		t.Fatalf("over-return: %q/%q", status, code)
-	}
-	if n := saleCount(t, env.pool, "return_refund_projection"); n != 2 {
-		t.Fatalf("two headers, got %d", n)
-	}
-}
-
 // TestReturnConcurrentSameEvent proves concurrent identical projection
 // converges: one header, processed, no false conflict.
 func TestReturnConcurrentSameEvent(t *testing.T) {
@@ -578,8 +495,10 @@ func TestReturnExtendedCostNotMultiplied(t *testing.T) {
 	retEvent := "44444444-4444-7444-8444-444444444444"
 	ingestReturnRaw(t, env, retEvent, string(raw))
 	drainReturns(t, env)
-	if status, _ := returnStatus(t, env, retEvent); status != "processed" {
-		t.Fatalf("cost return: %q", status)
+	// Qty 2 refunds exactly the 200000 sale total: the inclusive ceiling
+	// passes (ceiling+1 is TestReturnOneMinorOverCeilingBlocks).
+	if status, code := returnStatus(t, env, retEvent); status != "processed" || code != "" {
+		t.Fatalf("cost return at the exact ceiling: %q/%q", status, code)
 	}
 	var cost int64
 	if err := env.pool.QueryRow(context.Background(), `

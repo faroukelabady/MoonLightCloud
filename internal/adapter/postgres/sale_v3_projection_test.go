@@ -59,52 +59,6 @@ func v3Fixture(t *testing.T, saleID, variantSKU string) string {
 	return string(encoded)
 }
 
-func TestSaleV3ProjectsVariantSnapshots(t *testing.T) {
-	env := openSaleEnv(t)
-	eventID := "33333333-3333-7333-8333-333333333301"
-	res := env.ingestV3(t, eventID, v3Fixture(t, "", "NFT-BLU-TRD"))
-	if res.Events[0].Status != "accepted" {
-		t.Fatalf("want accepted, got %+v", res)
-	}
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-
-	var variantSKU, attrs string
-	var egp, usd *int64
-	if err := env.pool.QueryRow(context.Background(),
-		`SELECT variant_sku, variant_attributes::text, variant_price_egp_minor, variant_price_usd_minor
-		 FROM sale_lines_projection`).Scan(&variantSKU, &attrs, &egp, &usd); err != nil {
-		t.Fatal(err)
-	}
-	if variantSKU != "NFT-BLU-TRD" {
-		t.Fatalf("variant sku snapshot: %q", variantSKU)
-	}
-	if egp == nil || *egp != 65000 || usd != nil {
-		t.Fatalf("price override snapshot: %v %v", egp, usd)
-	}
-	var parsed []map[string]any
-	if err := json.Unmarshal([]byte(attrs), &parsed); err != nil {
-		t.Fatalf("attributes json: %v (%s)", err, attrs)
-	}
-	if len(parsed) != 1 || parsed[0]["definition_code"] != "color" ||
-		parsed[0]["name_ar"] != "أزرق" || parsed[0]["definition_name_en"] != "Color" {
-		t.Fatalf("attributes verbatim: %s", attrs)
-	}
-	// Tag snapshots are mandatory for the canonical Sale contract.
-	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 2 {
-		t.Fatalf("tag snapshots: %d", n)
-	}
-
-	// Same-event replay is idempotent: row counts never grow.
-	env.drain(t)
-	if n := saleCount(t, env.pool, "sale_lines_projection"); n != 1 {
-		t.Fatalf("replay duplicated lines: %d", n)
-	}
-	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 2 {
-		t.Fatalf("replay duplicated tags: %d", n)
-	}
-}
-
 // TestSaleV3LabelRenameImmutability is the history law (00036): the
 // stored snapshot and its reads come ONLY from the event. Renaming the
 // catalog attribute labels and the variant SKU afterwards can never
@@ -328,6 +282,33 @@ func TestSaleV3ProjectsTypeSnapshot(t *testing.T) {
 	}
 	if typeID != "10000000-0000-4000-8000-000000000001" || typeCode != "papyrus" || nameAR != "برديات" || nameEN != "Papyrus" {
 		t.Fatalf("type snapshot: %q %q %q %q", typeID, typeCode, nameAR, nameEN)
+	}
+
+	// The Variant snapshot is frozen from the event alongside the Type.
+	var variantSKU, attrs string
+	var egp, usd *int64
+	if err := env.pool.QueryRow(ctx,
+		`SELECT variant_sku, variant_attributes::text, variant_price_egp_minor, variant_price_usd_minor
+		 FROM sale_lines_projection`).Scan(&variantSKU, &attrs, &egp, &usd); err != nil {
+		t.Fatal(err)
+	}
+	if variantSKU != "NFT-BLU-TRD" {
+		t.Fatalf("variant sku snapshot: %q", variantSKU)
+	}
+	if egp == nil || *egp != 65000 || usd != nil {
+		t.Fatalf("price override snapshot: %v %v", egp, usd)
+	}
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(attrs), &parsed); err != nil {
+		t.Fatalf("attributes json: %v (%s)", err, attrs)
+	}
+	if len(parsed) != 1 || parsed[0]["definition_code"] != "color" ||
+		parsed[0]["name_ar"] != "أزرق" || parsed[0]["definition_name_en"] != "Color" {
+		t.Fatalf("attributes verbatim: %s", attrs)
+	}
+	// Tag snapshots are mandatory for the canonical Sale contract.
+	if n := saleCount(t, env.pool, "sale_item_tag_snapshots"); n != 2 {
+		t.Fatalf("tag snapshots: %d", n)
 	}
 
 	// SalesByProductType serves the frozen bucket.

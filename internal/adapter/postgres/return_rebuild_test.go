@@ -96,6 +96,18 @@ func TestReturnRebuildStable(t *testing.T) {
 		`SELECT count(*) FROM sync_event_processing WHERE processor='return_refund_projection.v1' AND status='processed'`).Scan(&processed); err != nil || processed != 2 {
 		t.Fatalf("want 2 processed, got %d (%v)", processed, err)
 	}
+	// The two qty-1 returns exhaust the qty-2 line: a third is blocked.
+	over := alignedReturnPayload(t, salePayload,
+		"66666666-6666-7666-8666-666666666666", "RET-OVER", 1)
+	overEvent := "77777777-7777-7777-8777-777777777777"
+	ingestReturnRaw(t, env, overEvent, over)
+	drainReturns(t, env)
+	if status, code := returnStatus(t, env, overEvent); status != "blocked" || code != ErrCumulativeOverRet {
+		t.Fatalf("over-return: %q/%q", status, code)
+	}
+	if n := saleCount(t, env.pool, "return_refund_projection"); n != 2 {
+		t.Fatalf("two headers, got %d", n)
+	}
 }
 
 // TestReturnRivalRebuildStable proves a rebuild with reversed discovery
@@ -119,6 +131,30 @@ func TestReturnRivalRebuildStable(t *testing.T) {
 	rival, _ := json.Marshal(m)
 	ingestReturnRaw(t, env, e2, string(rival))
 	drainReturns(t, env)
+	processed, blocked := 0, 0
+	for _, e := range []string{e1, e2} {
+		status, code := returnStatus(t, env, e)
+		switch status {
+		case "processed":
+			processed++
+		case "blocked":
+			blocked++
+			if code != ErrReturnIDConflict {
+				t.Fatalf("loser code: %q", code)
+			}
+		default:
+			t.Fatalf("event %s: %q/%q", e, status, code)
+		}
+	}
+	if processed != 1 || blocked != 1 {
+		t.Fatalf("want 1 processed + 1 conflict, got %d/%d", processed, blocked)
+	}
+	if n := saleCount(t, env.pool, "return_refund_projection"); n != 1 {
+		t.Fatalf("one header, got %d", n)
+	}
+	if n := saleCount(t, env.pool, "return_refund_ownership"); n != 1 {
+		t.Fatalf("one ownership row, got %d", n)
+	}
 	before := dumpReturns(t, env)
 
 	// Reset and rebuild with the loser discovered first.
@@ -301,26 +337,6 @@ func TestReturnFxMismatchBlocked(t *testing.T) {
 	}
 	if n := saleCount(t, env.pool, "return_refund_projection"); n != 0 {
 		t.Fatalf("zero headers, got %d", n)
-	}
-}
-
-// TestReturnExactCeilingPasses proves a refund exactly equal to the sale
-// total projects (boundary inclusive).
-func TestReturnExactCeilingPasses(t *testing.T) {
-	env := returnEnv(t)
-	salePayload := fixture(t, "sale_egp.json")
-	env.ingest(t, "22222222-2222-7222-8222-222222222222", salePayload)
-	env.drain(t)
-	waitFor(t, 10*time.Second, func() bool { return saleCount(t, env.pool, "sales_projection") == 1 }, "sale projection")
-
-	// Fixture sale total is 200000; qty-2 full return refunds exactly that.
-	retPayload := alignedReturnPayload(t, salePayload,
-		"33333333-3333-7333-8333-333333333333", "RET-CEIL", 2)
-	retEvent := "44444444-4444-7444-8444-444444444444"
-	ingestReturnRaw(t, env, retEvent, retPayload)
-	drainReturns(t, env)
-	if status, code := returnStatus(t, env, retEvent); status != "processed" || code != "" {
-		t.Fatalf("exact ceiling must process: %q/%q", status, code)
 	}
 }
 

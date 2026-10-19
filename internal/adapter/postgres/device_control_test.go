@@ -563,19 +563,6 @@ func TestPresenceFirstNonPollContact(t *testing.T) {
 	}
 }
 
-// F10: first poll populates both columns.
-func TestPresenceFirstPoll(t *testing.T) {
-	store, _, dev, _ := ctlFixture(t)
-	ctx := context.Background()
-	if err := store.TouchSeen(ctx, dev, time.Now().UTC(), true); err != nil {
-		t.Fatal(err)
-	}
-	p, ok, _ := store.GetPresence(ctx, dev)
-	if !ok || p.LastSeenAt == nil || p.LastPollAt == nil {
-		t.Fatalf("both populated: %+v", p)
-	}
-}
-
 // F10: accepted/running/terminal contact never moves last_poll_at.
 func TestPresenceNonPollPreservesLastPoll(t *testing.T) {
 	store, ctl, dev, _ := ctlFixture(t)
@@ -628,6 +615,9 @@ func TestPresenceOlderPollNoRegression(t *testing.T) {
 	fresh := time.Now().UTC()
 	if err := store.TouchSeen(ctx, dev, fresh, true); err != nil {
 		t.Fatal(err)
+	}
+	if p, ok, _ := store.GetPresence(ctx, dev); !ok || p.LastSeenAt == nil || p.LastPollAt == nil {
+		t.Fatalf("first poll populates both: %+v", p)
 	}
 	stale := fresh.Add(-time.Hour)
 	if err := store.TouchSeen(ctx, dev, stale, true); err != nil {
