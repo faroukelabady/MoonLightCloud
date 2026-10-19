@@ -38,7 +38,7 @@ func r3Converge(t *testing.T, f *scopeFixture) {
 		}
 		remaining := 0
 		for _, p := range []struct{ processor, typ string }{{catalog.ProcessorCategoryProjectionV1, catalog.EventCategorySnapshotV2}, {catalog.ProcessorTagProjectionV1, catalog.EventTagSnapshotV1}, {catalog.ProcessorProductProjectionV1, catalog.EventProductSnapshotV2}} {
-			events, err := d.PendingCatalogEvents(ctx, p.processor, p.typ, 100, time.Now())
+			events, err := NewCatalogProjection(d.pool, d.timeout).PendingCatalogEvents(ctx, p.processor, p.typ, 100, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}

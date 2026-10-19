@@ -33,7 +33,7 @@ func openDashEnv(t *testing.T) *dashEnv {
 	rep := report.NewService(NewReporting(store.pool, store.timeout), clock.System{}, loc)
 	return &dashEnv{
 		saleEnv: base,
-		dash:    dashboard.NewService(rep, NewReporting(store.pool, store.timeout), store, clock.System{}),
+		dash:    dashboard.NewService(rep, NewReporting(store.pool, store.timeout), NewProjectionState(store.pool, store.timeout), clock.System{}),
 		rep:     rep,
 		loc:     loc,
 	}

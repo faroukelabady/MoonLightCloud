@@ -17,7 +17,7 @@ import (
 // projected state. Provider publication must use this (or a single
 // authoritative product) rather than any global enumeration, so one
 // Store's write can never sweep another Store's products.
-func (d Devices) CatalogOnlineConfiguredProductsForStore(ctx context.Context, storeID string, limit int) ([]string, error) {
+func (d CatalogProjection) CatalogOnlineConfiguredProductsForStore(ctx context.Context, storeID string, limit int) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
@@ -45,7 +45,7 @@ func catalogNotFound(what string) error {
 }
 
 // CatalogProduct assembles the full projected product aggregate.
-func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product, error) {
+func (d CatalogProjection) CatalogProduct(ctx context.Context, id string) (catalog.Product, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -108,7 +108,7 @@ func (d Devices) CatalogProduct(ctx context.Context, id string) (catalog.Product
 }
 
 // CatalogActiveProducts lists active product headers.
-func (d Devices) CatalogActiveProducts(ctx context.Context, limit int) ([]catalog.ProductHeader, error) {
+func (d CatalogProjection) CatalogActiveProducts(ctx context.Context, limit int) ([]catalog.ProductHeader, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CatalogActiveProducts(ctx, int32(limit))
@@ -127,7 +127,7 @@ func (d Devices) CatalogActiveProducts(ctx context.Context, limit int) ([]catalo
 }
 
 // CatalogCategory assembles the projected category with its parent set.
-func (d Devices) CatalogCategory(ctx context.Context, id string) (catalog.Category, error) {
+func (d CatalogProjection) CatalogCategory(ctx context.Context, id string) (catalog.Category, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -161,7 +161,7 @@ func (d Devices) CatalogCategory(ctx context.Context, id string) (catalog.Catego
 }
 
 // CatalogCategoryEdges lists every projected DAG edge.
-func (d Devices) CatalogCategoryEdges(ctx context.Context) ([]catalog.Edge, error) {
+func (d CatalogProjection) CatalogCategoryEdges(ctx context.Context) ([]catalog.Edge, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).AllCatalogCategoryEdges(ctx)
@@ -176,7 +176,7 @@ func (d Devices) CatalogCategoryEdges(ctx context.Context) ([]catalog.Edge, erro
 }
 
 // CatalogTag returns the projected tag.
-func (d Devices) CatalogTag(ctx context.Context, id string) (catalog.Tag, error) {
+func (d CatalogProjection) CatalogTag(ctx context.Context, id string) (catalog.Tag, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -203,7 +203,7 @@ func (d Devices) CatalogTag(ctx context.Context, id string) (catalog.Tag, error)
 
 // CatalogProductSalesPolicy returns the projected channel/allocation
 // configuration for one product.
-func (d Devices) CatalogProductSalesPolicy(ctx context.Context, id string) (catalog.ProductSalesPolicy, error) {
+func (d CatalogProjection) CatalogProductSalesPolicy(ctx context.Context, id string) (catalog.ProductSalesPolicy, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -232,7 +232,7 @@ func (d Devices) CatalogProductSalesPolicy(ctx context.Context, id string) (cata
 // from current product, policy, and inventory rows in one read
 // transaction, so the three inputs are mutually consistent. The read
 // performs no writes.
-func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (catalog.ProductAvailability, error) {
+func (d CatalogProjection) CatalogProductAvailability(ctx context.Context, id string) (catalog.ProductAvailability, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -286,7 +286,7 @@ func (d Devices) CatalogProductAvailability(ctx context.Context, id string) (cat
 // CatalogProductOnlinePolicy reads the canonical effective-online policy
 // for one Product (Phase 13). Read-only: no provider calls, no writes,
 // no barrier interaction — durable Cloud state only.
-func (d Devices) CatalogProductOnlinePolicy(ctx context.Context, id string) (catalog.ProductOnlinePolicy, error) {
+func (d CatalogProjection) CatalogProductOnlinePolicy(ctx context.Context, id string) (catalog.ProductOnlinePolicy, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -317,7 +317,7 @@ func (d Devices) CatalogProductOnlinePolicy(ctx context.Context, id string) (cat
 
 // CatalogProductConfigurations reads one Product's projected ONLINE
 // configurations (Phase 15). Read-only durable Cloud state.
-func (d Devices) CatalogProductConfigurations(ctx context.Context, id string) ([]catalog.ProductConfiguration, error) {
+func (d CatalogProjection) CatalogProductConfigurations(ctx context.Context, id string) ([]catalog.ProductConfiguration, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(id)
@@ -357,7 +357,7 @@ func (d Devices) CatalogProductConfigurations(ctx context.Context, id string) ([
 // CatalogProductVariants returns the projected variants of one product
 // with attributes and last-known stock. Tombstoned variants are excluded
 // (historical rows stay queryable through admin/health surfaces).
-func (d Devices) CatalogProductVariants(ctx context.Context, productID string) ([]catalog.Variant, error) {
+func (d CatalogProjection) CatalogProductVariants(ctx context.Context, productID string) ([]catalog.Variant, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	puid, err := parseUUID(productID)
@@ -423,7 +423,7 @@ func (d Devices) CatalogProductVariants(ctx context.Context, productID string) (
 
 // CatalogProductVariantInventory returns the projected last-known
 // variant inventory with its policy/catalog mirrors.
-func (d Devices) CatalogProductVariantInventory(ctx context.Context, id string) (catalog.VariantInventory, error) {
+func (d CatalogProjection) CatalogProductVariantInventory(ctx context.Context, id string) (catalog.VariantInventory, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	vuid, err := parseUUID(id)
@@ -457,7 +457,7 @@ func (d Devices) CatalogProductVariantInventory(ctx context.Context, id string) 
 // inventory rows in one read transaction (no writes). The variant-level
 // policy mirror (sell_online, online_allocation_limit) carried by the
 // inventory stream tightens the product-level policy when present.
-func (d Devices) CatalogProductVariantAvailability(ctx context.Context, id string) (catalog.VariantAvailability, error) {
+func (d CatalogProjection) CatalogProductVariantAvailability(ctx context.Context, id string) (catalog.VariantAvailability, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	vuid, err := parseUUID(id)

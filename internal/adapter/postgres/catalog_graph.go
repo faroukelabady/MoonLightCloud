@@ -290,7 +290,7 @@ func hasCatalogParents(ctx context.Context, q *sqlcgen.Queries, parentIDs []stri
 // resetCatalogProductsForGraph re-arms waiting/graph-blocked product events
 // referencing the given categories. Best-effort by design: errors are
 // logged and absorbed because product backoff+rescan converges regardless.
-func (d Devices) resetCatalogProductsForGraph(ctx context.Context, categoryIDs []string) {
+func (d CatalogProjection) resetCatalogProductsForGraph(ctx context.Context, categoryIDs []string) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -313,7 +313,7 @@ func (d Devices) resetCatalogProductsForGraph(ctx context.Context, categoryIDs [
 	}
 }
 
-func (d Devices) logResetFailure(categoryIDs []string, err error) {
+func (d CatalogProjection) logResetFailure(categoryIDs []string, err error) {
 	// Devices has no logger; the projector logs outcomes per event, and
 	// convergence does not depend on this reset (see above).
 	_ = categoryIDs
@@ -339,7 +339,7 @@ const (
 // against the current graph (R03). Active flags are deliberately not
 // required (mirrors Retail retained-assignment semantics). Invalidity
 // under an unsettled graph waits; invalidity under a settled graph blocks.
-func (d Devices) checkProductStructure(ctx context.Context, q *sqlcgen.Queries, valid catalog.ProductSnapshot) (structureVerdict, error) {
+func (d CatalogProjection) checkProductStructure(ctx context.Context, q *sqlcgen.Queries, valid catalog.ProductSnapshot) (structureVerdict, error) {
 	// Phase 17-R2 §77: product → type dependency ordering. If the product
 	// references a type not yet projected, wait (the type event may still
 	// arrive). Never create fake types, never drop the relation.
@@ -377,7 +377,7 @@ func (d Devices) checkProductStructure(ctx context.Context, q *sqlcgen.Queries, 
 
 // settleProductStructure applies the settled rule: terminal block only
 // when no accepted category event can still advance the involved graph.
-func (d Devices) settleProductStructure(ctx context.Context, q *sqlcgen.Queries, valid catalog.ProductSnapshot, _ string) (structureVerdict, error) {
+func (d CatalogProjection) settleProductStructure(ctx context.Context, q *sqlcgen.Queries, valid catalog.ProductSnapshot, _ string) (structureVerdict, error) {
 	settled, err := graphSettledForProduct(ctx, q, valid.TopCategoryID, valid.SubcategoryIDs)
 	if err != nil {
 		return structureWait, err
@@ -390,7 +390,7 @@ func (d Devices) settleProductStructure(ctx context.Context, q *sqlcgen.Queries,
 
 // assertProductStructure maps the structural verdict to a projection
 // outcome for the equal-revision-identical path (no writes needed).
-func (d Devices) assertProductStructure(ctx context.Context, q *sqlcgen.Queries, tx pgx.Tx, attempt catalogAttempt, valid catalog.ProductSnapshot, count int32, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) assertProductStructure(ctx context.Context, q *sqlcgen.Queries, tx pgx.Tx, attempt catalogAttempt, valid catalog.ProductSnapshot, count int32, now time.Time) (catalog.ProjectResult, error) {
 	// Dependencies must still exist (they cannot be deleted, but defense
 	// in depth never assumes it).
 	if _, err := q.CatalogCategoryByID(ctx, mustParseUUID(valid.TopCategoryID)); err != nil {

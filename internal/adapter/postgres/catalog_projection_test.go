@@ -101,8 +101,8 @@ func ingestCatalog(t *testing.T, env *saleEnv, eventID, eventType, occurred, pay
 	}
 }
 
-func catalogStore(env *saleEnv) Devices {
-	return NewDevices(env.pool, 5*time.Second)
+func catalogStore(env *saleEnv) CatalogProjection {
+	return NewCatalogProjection(env.pool, 5*time.Second)
 }
 
 func projectCatalogOnce(t *testing.T, env *saleEnv, eventID string) catalog.ProjectResult {
@@ -740,7 +740,7 @@ func TestCatalogRebuildStable(t *testing.T) {
 // instances = restart proof) with a bounded wait.
 func drainCatalog(t *testing.T, env *saleEnv) {
 	t.Helper()
-	store := NewDevices(env.pool, 5*time.Second)
+	store := NewCatalogProjection(env.pool, 5*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	projectors := []*catalog.Projector{

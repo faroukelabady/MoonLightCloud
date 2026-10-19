@@ -17,7 +17,7 @@ import (
 // ProductType throughput does not prove this mixed bootstrap converges.
 func TestCatalogMixedBootstrapConvergesWithoutDeadlineReset(t *testing.T) {
 	f := openScopeFixture(t)
-	d := NewDevices(f.pool, 5*time.Second)
+	d := NewCatalogProjection(f.pool, 5*time.Second)
 	ids := catalogIDs(t, 65000, "root", "child", "leaf", "type", "type2", "tag1", "tag2", "tag3")
 	ctx := context.Background()
 	n := 0
@@ -136,7 +136,7 @@ func TestCatalogMissingDependencyRemainsBoundedUnderWakeFlood(t *testing.T) {
 	event := variantEventID(67020)
 	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T10:00:00Z",
 		variantInventoryPayload(missing, product, "ML-WAIT-V", 4, 8, true, nil))
-	store := &countingSkewStore{Devices: catalogStore(env)}
+	store := &countingSkewStore{CatalogProjection: catalogStore(env)}
 	p := catalog.NewProductVariantInventoryProjector(store, clock.System{}, nilLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

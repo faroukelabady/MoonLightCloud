@@ -45,10 +45,10 @@ func TestManualRetryDiscoverability(t *testing.T) {
 	}
 
 	// Manual retry both.
-	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, blockedID); err != nil {
+	if err := NewProjectionState(store.pool, store.timeout).ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, blockedID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, retryID); err != nil {
+	if err := NewProjectionState(store.pool, store.timeout).ResetProcessing(ctx, sale.ProcessorSaleProjectionV3, retryID); err != nil {
 		t.Fatal(err)
 	}
 	var status string

@@ -17,19 +17,19 @@ func (c *projectorSkewClock) Now() time.Time {
 }
 
 type countingSkewStore struct {
-	Devices
+	CatalogProjection
 	scans    atomic.Int64
 	projects atomic.Int64
 }
 
 func (s *countingSkewStore) PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int, asOf time.Time) ([]string, error) {
 	s.scans.Add(1)
-	return s.Devices.PendingCatalogEvents(ctx, processor, eventType, limit, asOf)
+	return s.CatalogProjection.PendingCatalogEvents(ctx, processor, eventType, limit, asOf)
 }
 
 func (s *countingSkewStore) ProjectProductVariantInventory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	s.projects.Add(1)
-	return s.Devices.ProjectProductVariantInventory(ctx, event, now)
+	return s.CatalogProjection.ProjectProductVariantInventory(ctx, event, now)
 }
 
 // Use actual database discovery/claiming, including the new local retry
@@ -54,7 +54,7 @@ func TestCatalogProjectorClockSkewYieldsAndRecovers(t *testing.T) {
 				}
 				c := &projectorSkewClock{}
 				c.offset.Store(int64(offset))
-				store := &countingSkewStore{Devices: catalogStore(env)}
+				store := &countingSkewStore{CatalogProjection: catalogStore(env)}
 				event, ok, err := store.LoadCatalogEvent(context.Background(), eventID)
 				if err != nil || !ok {
 					t.Fatalf("load: found=%v err=%v", ok, err)
@@ -135,7 +135,7 @@ func TestCatalogProjectorHealthyInventoryBehindRetriesAcrossClocks(t *testing.T)
 			}
 			ingestCatalog(t, env, variantEventID(61300), catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T10:01:00Z",
 				variantInventoryPayload(healthy, productID, "ML-HEALTHY", 9, 8, true, nil))
-			store := &countingSkewStore{Devices: catalogStore(env)}
+			store := &countingSkewStore{CatalogProjection: catalogStore(env)}
 			c := &projectorSkewClock{}
 			c.offset.Store(int64(offset))
 			p := catalog.NewProductVariantInventoryProjector(store, c, nilLogger())

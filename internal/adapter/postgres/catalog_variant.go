@@ -94,7 +94,7 @@ func currentProductVariantInventorySnapshot(ctx context.Context, q *sqlcgen.Quer
 // constraints never fire for NULL ownership (NULL is never equal to
 // NULL), so duplicate combination data is tolerated at the projection
 // layer and surfaced as VARIANT_DUPLICATE_COMBINATION health instead.
-func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProductVariant(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)
@@ -303,7 +303,7 @@ func (d Devices) ProjectProductVariant(ctx context.Context, event catalog.EventR
 // does; failure leaves the previous revision visible. Inactive/tombstoned
 // variants and sell_online=false still project rows: lifecycle and policy
 // affect availability, never inventory truth.
-func (d Devices) ProjectProductVariantInventory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProductVariantInventory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)

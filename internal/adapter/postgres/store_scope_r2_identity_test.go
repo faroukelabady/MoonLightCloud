@@ -124,7 +124,7 @@ func TestR2_ConcurrentDefaultEdits(t *testing.T) {
 			// connections over the same default identity. The bounded
 			// driver re-attempts ONLY permitted transient aborts
 			// (40001/40P01) exactly like production durable retry.
-			done <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
+			done <- runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
 		}(e)
 	}
 	wg.Wait()
@@ -197,7 +197,7 @@ func TestR2_AbortRetryPreservesDurablePayloads(t *testing.T) {
 		wg.Add(1)
 		go func(event string) {
 			defer wg.Done()
-			done <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
+			done <- runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), event, catalog.EventTagSnapshotV1, catalogRetryBudget)
 		}(e)
 	}
 	wg.Wait()

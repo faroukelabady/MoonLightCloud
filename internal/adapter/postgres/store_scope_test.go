@@ -159,7 +159,7 @@ func sqlStateOf(err error) string {
 // SQLSTATE context; it is never suppressed or retried.
 func (f *scopeFixture) projectCatalog(t *testing.T, eventID, eventType string) catalog.ProjectResult {
 	t.Helper()
-	result := catalogWorkerAttempt(NewDevices(f.pool, 5*time.Second), eventID, eventType)
+	result := catalogWorkerAttempt(NewCatalogProjection(f.pool, 5*time.Second), eventID, eventType)
 	if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
 		reportCatalogWorkerError(t, result.Err)
 	}
@@ -176,7 +176,7 @@ func (f *scopeFixture) projectCatalog(t *testing.T, eventID, eventType string) c
 // touches no shared state beyond the event row itself.
 func projectCatalogTerminal(t *testing.T, f *scopeFixture, eventID, eventType string) catalog.ProjectResult {
 	t.Helper()
-	result := runCatalogWorker(NewDevices(f.pool, 5*time.Second), eventID, eventType, catalogRetryBudget)
+	result := runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), eventID, eventType, catalogRetryBudget)
 	reportCatalogWorkerError(t, result.Err)
 	return result.Result
 }

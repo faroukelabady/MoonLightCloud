@@ -43,6 +43,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 	}
 	defer pool.Close()
 	d := postgres.NewDevices(pool, 5*time.Second)
+	catalogStore := postgres.NewCatalogProjection(pool, 5*time.Second)
 	hasher, err := auth.NewHasher(bytes.Repeat([]byte{'r'}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -164,26 +165,26 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		priority := map[string]int{catalog.EventProductTypeSnapshotV1: -1, catalog.EventProductVariantSnapshotV1: 3, catalog.EventCategorySnapshotV2: 0, catalog.EventProductSnapshotV2: 1, catalog.EventProductSalesPolicySnapshotV1: 2, catalog.EventInventoryProductVariantSnapshotV1: 3, catalog.EventProductConfigurationSnapshotV1: 4}
 		sort.SliceStable(export.Events, func(i, j int) bool { return priority[export.Events[i].Type] < priority[export.Events[j].Type] })
 		for _, item := range export.Events {
-			record, found, e := d.LoadCatalogEvent(ctx, item.ID)
+			record, found, e := catalogStore.LoadCatalogEvent(ctx, item.ID)
 			if e != nil || !found {
 				t.Fatal(e)
 			}
 			var result catalog.ProjectResult
 			switch item.Type {
 			case catalog.EventCategorySnapshotV2:
-				result, e = d.ProjectCategory(ctx, record, time.Now())
+				result, e = catalogStore.ProjectCategory(ctx, record, time.Now())
 			case catalog.EventProductTypeSnapshotV1:
-				result, e = d.ProjectProductType(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProductType(ctx, record, time.Now())
 			case catalog.EventProductVariantSnapshotV1:
-				result, e = d.ProjectProductVariant(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProductVariant(ctx, record, time.Now())
 			case catalog.EventProductSnapshotV2:
-				result, e = d.ProjectProduct(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProduct(ctx, record, time.Now())
 			case catalog.EventProductSalesPolicySnapshotV1:
-				result, e = d.ProjectProductSalesPolicy(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProductSalesPolicy(ctx, record, time.Now())
 			case catalog.EventInventoryProductVariantSnapshotV1:
-				result, e = d.ProjectProductVariantInventory(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProductVariantInventory(ctx, record, time.Now())
 			case catalog.EventProductConfigurationSnapshotV1:
-				result, e = d.ProjectProductConfigurations(ctx, record, time.Now())
+				result, e = catalogStore.ProjectProductConfigurations(ctx, record, time.Now())
 			default:
 				t.Fatal("unexpected exported event")
 			}
@@ -200,7 +201,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 	if err = registry.Register(p.Key(), p); err != nil {
 		t.Fatal(err)
 	}
-	service := commerce.NewCommerceService(registry, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), nil)
+	service := commerce.NewCommerceService(registry, d, commerce.NewCatalogCommerceSource(catalog.NewService(catalogStore)), nil)
 	// Run the production durable reevaluation worker. The observing wrapper
 	// forwards every database operation and signals only after fenced commit.
 	runQueue := func() {
@@ -229,7 +230,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 	if e != nil || result.ExternalProductID == "" || f.Creates() != 1 {
 		t.Fatal("actual pair did not converge", e)
 	}
-	choices, e := d.CatalogProductConfigurations(ctx, productID)
+	choices, e := catalogStore.CatalogProductConfigurations(ctx, productID)
 	if e != nil || len(choices) != 1 {
 		t.Fatal("actual Retail configuration not projected")
 	}
@@ -267,12 +268,13 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 	}
 	defer pool.Close()
 	d = postgres.NewDevices(pool, 5*time.Second)
+	catalogStore = postgres.NewCatalogProjection(pool, 5*time.Second)
 	p = f.Provider(t, d)
 	registry = commerce.NewRegistry()
 	if err = registry.Register(p.Key(), p); err != nil {
 		t.Fatal(err)
 	}
-	service = commerce.NewCommerceService(registry, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), nil)
+	service = commerce.NewCommerceService(registry, d, commerce.NewCatalogCommerceSource(catalog.NewService(catalogStore)), nil)
 	runQueue()
 	reconcile(freshOrder(orders.StatusProcessing))
 	after, e := postgres.NewCommerceOrders(pool, 5*time.Second).GetOrderDetail(ctx, string(p.Key()), "150031")

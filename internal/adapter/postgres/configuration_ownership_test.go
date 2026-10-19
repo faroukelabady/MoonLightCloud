@@ -87,14 +87,14 @@ func TestConfigurationStoreOwnershipBoundary(t *testing.T) {
 
 	// A's original ownership and values unchanged.
 	devices := NewDevices(f.pool, 5*time.Second)
-	rows, err := devices.CatalogProductConfigurations(context.Background(), productA)
+	rows, err := NewCatalogProjection(devices.pool, devices.timeout).CatalogProductConfigurations(context.Background(), productA)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 1 || rows[0].StyleCode != "classic" || rows[0].PriceDeltaEGPCents != 30000 {
 		t.Fatalf("Store A configuration mutated by foreign ingress: %+v", rows)
 	}
-	bRows, err := devices.CatalogProductConfigurations(context.Background(), productB)
+	bRows, err := NewCatalogProjection(devices.pool, devices.timeout).CatalogProductConfigurations(context.Background(), productB)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -108,7 +108,7 @@ func buildPolicyFixture(t *testing.T) *policyFixture {
 }
 
 // policyOrFail reads the canonical policy with full diagnostics.
-func policyOrFail(t *testing.T, devices Devices, productID string) catalog.ProductOnlinePolicy {
+func policyOrFail(t *testing.T, devices CatalogProjection, productID string) catalog.ProductOnlinePolicy {
 	t.Helper()
 	policy, err := devices.CatalogProductOnlinePolicy(context.Background(), productID)
 	if err != nil {
@@ -127,7 +127,7 @@ func policyOrFail(t *testing.T, devices Devices, productID string) catalog.Produ
 
 func (pf *policyFixture) eligible(t *testing.T, productID string) catalog.ProductOnlinePolicy {
 	t.Helper()
-	policy, err := NewDevices(pf.pool, 5*time.Second).CatalogProductOnlinePolicy(context.Background(), productID)
+	policy, err := NewCatalogProjection(pf.pool, 5*time.Second).CatalogProductOnlinePolicy(context.Background(), productID)
 	if err != nil {
 		var ids string
 		rows, _ := pf.pool.Query(context.Background(), "SELECT product_id FROM catalog_product_online_state")
@@ -285,7 +285,7 @@ func TestCategoryOnlineFanOutExactness(t *testing.T) {
 		t.Fatalf("shared-DAG/replay fan-out must dedupe to one row per Product: %v", rows)
 	}
 	// Final durable state is the newest policy (enabled).
-	state := policyOrFail(t, devices, rows[0])
+	state := policyOrFail(t, NewCatalogProjection(devices.pool, devices.timeout), rows[0])
 	if !state.Allowed {
 		t.Fatalf("rapid toggle must converge to latest committed policy: %+v", state)
 	}
@@ -317,7 +317,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 
 	devices := NewDevices(f.pool, 5*time.Second)
 	drainReevaluations(t, devices)
-	state := policyOrFail(t, devices, productID)
+	state := policyOrFail(t, NewCatalogProjection(devices.pool, devices.timeout), productID)
 	if !state.Allowed {
 		t.Fatalf("precondition: %+v", state)
 	}
@@ -329,7 +329,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 	// or the Product.
 	project(catalog.EventCategorySnapshotV2,
 		categoryV2Payload(sub, "active", map[string]string{"en": "Sub"}, []string{rootOn, rootOff}, 2, true))
-	state = policyOrFail(t, devices, productID)
+	state = policyOrFail(t, NewCatalogProjection(devices.pool, devices.timeout), productID)
 	if state.Allowed {
 		t.Fatalf("parent-edge change must suppress through the disabled ancestor: %+v", state)
 	}
@@ -340,7 +340,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 	// §44: removing the disabled ancestor restores eligibility.
 	project(catalog.EventCategorySnapshotV2,
 		categoryV2Payload(sub, "active", map[string]string{"en": "Sub"}, []string{rootOn}, 3, true))
-	state = policyOrFail(t, devices, productID)
+	state = policyOrFail(t, NewCatalogProjection(devices.pool, devices.timeout), productID)
 	if !state.Allowed {
 		t.Fatalf("removing disabled ancestor must restore eligibility: %+v", state)
 	}

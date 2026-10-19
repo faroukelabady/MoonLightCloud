@@ -205,7 +205,7 @@ func TestR3_ParentAdditionProtectsProductTop(t *testing.T) {
 
 func r3Project(t *testing.T, f *scopeFixture, id, typ string) catalog.ProjectResult {
 	t.Helper()
-	result := catalogWorkerAttempt(NewDevices(f.pool, 5*time.Second), id, typ)
+	result := catalogWorkerAttempt(NewCatalogProjection(f.pool, 5*time.Second), id, typ)
 	if result.Err != nil && !catalogAttemptRetryable(result.Result, result.Err) {
 		reportCatalogWorkerError(t, result.Err)
 	}
@@ -265,7 +265,7 @@ func TestR3_ParentAdditionRacingProduct(t *testing.T) {
 				wg.Add(1)
 				go func(id, typ string) {
 					defer wg.Done()
-					result := runCatalogWorker(NewDevices(f.pool, 5*time.Second), id, typ, catalogRetryBudget)
+					result := runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), id, typ, catalogRetryBudget)
 					reportCatalogWorkerError(t, result.Err)
 				}(entry.id, entry.typ)
 			}
@@ -310,7 +310,7 @@ func TestR3_DefaultGraphRepairArbitration(t *testing.T) {
 				requireOutcome(t, res, catalog.OutcomeBlocked, ErrCatalogInvalidRelation)
 				requireOutcome(t, r3Project(t, f, r2EventID(782), catalog.EventCategorySnapshotV2), catalog.OutcomeProcessed, "")
 				// A foreign graph advancement cannot re-arm the blocked local event.
-				if err := NewDevices(f.pool, 5*time.Second).RearmBlockedProducts(ctx); err != nil {
+				if err := NewCatalogProjection(f.pool, 5*time.Second).RearmBlockedProducts(ctx); err != nil {
 					t.Fatal(err)
 				}
 				var status string

@@ -21,7 +21,7 @@ import (
 // when effective option state actually changed — a durable commerce
 // re-evaluation intent in the SAME transaction (crash-safe; no provider
 // I/O inside the transaction).
-func (d Devices) ProjectProductConfigurations(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProductConfigurations(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)

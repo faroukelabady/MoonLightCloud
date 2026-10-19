@@ -78,7 +78,7 @@ func TestCatalogWorkerGenuineLoaderFailureOneAttempt(t *testing.T) {
 	}
 	done := make(chan catalogWorkerResult, 1)
 	go func() {
-		done <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), r2EventID(12345), catalog.EventTagSnapshotV1, 30)
+		done <- runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), r2EventID(12345), catalog.EventTagSnapshotV1, 30)
 	}()
 	result := <-done
 	if result.Err == nil || result.Attempts != 1 || !strings.Contains(result.Err.Error(), "42703") {
@@ -95,7 +95,7 @@ func TestCatalogWorkerRepeatedSerializationBudget(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `CREATE SEQUENCE r1_attempts; CREATE FUNCTION r1_abort() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM nextval('r1_attempts'); RAISE EXCEPTION 'test serialization abort' USING ERRCODE='40001'; END $$; CREATE TRIGGER r1_abort BEFORE INSERT ON catalog_tags FOR EACH ROW EXECUTE FUNCTION r1_abort()`); err != nil {
 		t.Fatal(err)
 	}
-	result := runCatalogWorker(NewDevices(f.pool, 5*time.Second), id, catalog.EventTagSnapshotV1, catalogRetryBudget)
+	result := runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), id, catalog.EventTagSnapshotV1, catalogRetryBudget)
 	var count int64
 	if err := f.pool.QueryRow(ctx, "SELECT last_value FROM r1_attempts").Scan(&count); err != nil {
 		t.Fatal(err)

@@ -103,7 +103,7 @@ func TestSaleEndToEndUSD(t *testing.T) {
 		t.Fatalf("processing status: %q (%v)", status, err)
 	}
 	// Operator stats must survive NULL error columns (regression).
-	stats, err := NewDevices(env.pool, 5*time.Second).ProcessingStats(context.Background(), "sale_projection.v3")
+	stats, err := NewProjectionState(env.pool, 5*time.Second).ProcessingStats(context.Background(), "sale_projection.v3")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}

@@ -33,7 +33,7 @@ func TestR3UnusedConfigurationIDTwoStoreRace(t *testing.T) {
 	d := NewDevices(f.pool, 5*time.Second)
 	events := make([]catalog.EventRecord, 2)
 	for i, c := range candidates {
-		r, found, e := d.LoadCatalogEvent(ctx, c.event)
+		r, found, e := NewCatalogProjection(d.pool, d.timeout).LoadCatalogEvent(ctx, c.event)
 		if e != nil || !found {
 			t.Fatal(e)
 		}
@@ -46,7 +46,11 @@ func TestR3UnusedConfigurationIDTwoStoreRace(t *testing.T) {
 	start := make(chan struct{})
 	out := make(chan attempt, 2)
 	for _, event := range events {
-		go func() { <-start; r, e := d.ProjectProductConfigurations(ctx, event, time.Now()); out <- attempt{r, e} }()
+		go func() {
+			<-start
+			r, e := NewCatalogProjection(d.pool, d.timeout).ProjectProductConfigurations(ctx, event, time.Now())
+			out <- attempt{r, e}
+		}()
 	}
 	close(start)
 	for i := 0; i < 2; i++ {

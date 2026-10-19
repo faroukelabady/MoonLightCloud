@@ -72,7 +72,7 @@ func currentProductSnapshot(ctx context.Context, q *sqlcgen.Queries, puid pgtype
 // dependency waits, and structural checks. Either a complete product
 // projection commits or nothing does; failure leaves the previous
 // revision visible.
-func (d Devices) ProjectProduct(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProduct(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)
@@ -491,7 +491,7 @@ func currentProductSalesPolicySnapshot(ctx context.Context, q *sqlcgen.Queries, 
 // revision ordering and a product dependency wait. Either the policy row
 // commits or nothing does; failure leaves the previous revision visible.
 // Inactive products still project policy rows: lifecycle stays separate.
-func (d Devices) ProjectProductSalesPolicy(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProductSalesPolicy(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)

@@ -141,22 +141,23 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	returnStore := postgres.NewReturnProjection(pool, cfg.DBQueryTimeout)
 	a.ReturnStore = returnStore
 	a.ReturnProjector = returnrefund.NewProjector(returnStore, clock.System{}, log)
-	a.CatalogStore = store
-	a.CategoryProjector = catalog.NewCategoryProjector(store, clock.System{}, log)
-	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
-	a.ProductProjector = catalog.NewProductProjector(store, clock.System{}, log)
-	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(store, clock.System{}, log)
-	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(store, clock.System{}, log)
-	a.ProductVariantProjector = catalog.NewProductVariantProjector(store, clock.System{}, log)
-	a.ProductTypeProjector = catalog.NewProductTypeProjector(store, clock.System{}, log)
-	a.VariantInventoryProjector = catalog.NewProductVariantInventoryProjector(store, clock.System{}, log)
+	catalogStore := postgres.NewCatalogProjection(pool, cfg.DBQueryTimeout)
+	a.CatalogStore = catalogStore
+	a.CategoryProjector = catalog.NewCategoryProjector(catalogStore, clock.System{}, log)
+	a.TagProjector = catalog.NewTagProjector(catalogStore, clock.System{}, log)
+	a.ProductProjector = catalog.NewProductProjector(catalogStore, clock.System{}, log)
+	a.PolicyProjector = catalog.NewProductSalesPolicyProjector(catalogStore, clock.System{}, log)
+	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(catalogStore, clock.System{}, log)
+	a.ProductVariantProjector = catalog.NewProductVariantProjector(catalogStore, clock.System{}, log)
+	a.ProductTypeProjector = catalog.NewProductTypeProjector(catalogStore, clock.System{}, log)
+	a.VariantInventoryProjector = catalog.NewProductVariantInventoryProjector(catalogStore, clock.System{}, log)
 	// Catalog streams depend on each other (Type/Category → Product →
 	// Variant → inventory). A projector that lands work wakes the others
 	// so dependency waits retry promptly instead of at the safety scan.
 	for _, p := range a.catalogProjectors() {
 		p.WakeOnProgress(a.notifyCatalogProjectors)
 	}
-	a.Catalog = catalog.NewService(store)
+	a.Catalog = catalog.NewService(catalogStore)
 	reportingStore := postgres.NewReporting(pool, cfg.DBQueryTimeout)
 	a.Reports = report.NewService(reportingStore, clock.System{}, cfg.StoreLocation)
 	a.Health = adapterhttp.Health{
@@ -221,7 +222,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		// the exact same CommerceService the manual CLI uses. The store
 		// doubles as the durable queue; no provider I/O runs in any
 		// projection transaction.
-		a.CommerceService = NewCommerceService(store, a.CommerceRegistry, log)
+		a.CommerceService = NewCommerceService(store, catalogStore, a.CommerceRegistry, log)
 		a.ReevaluationWorker = commerce.NewReevaluationWorker(store, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),

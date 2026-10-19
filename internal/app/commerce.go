@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	shopifyadapter "github.com/faroukelabady/MoonLightCloud/internal/commerce/shopify"
@@ -44,7 +43,7 @@ func NewCommerceRegistry(cfg config.Config, coordinator commerce.ProductSyncCoor
 
 // NewCommerceService wires orchestration over live catalog reads and the
 // durable mapping repository.
-func NewCommerceService(store postgres.Devices, registry *commerce.Registry, log *slog.Logger) *commerce.CommerceService {
-	return commerce.NewCommerceService(registry, store,
-		commerce.NewCatalogCommerceSource(catalog.NewService(store)), log)
+func NewCommerceService(mappings commerce.ProductMappingRepository, catalogRepo catalog.Repository, registry *commerce.Registry, log *slog.Logger) *commerce.CommerceService {
+	return commerce.NewCommerceService(registry, mappings,
+		commerce.NewCatalogCommerceSource(catalog.NewService(catalogRepo)), log)
 }

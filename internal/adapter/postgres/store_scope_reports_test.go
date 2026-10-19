@@ -228,12 +228,12 @@ func TestScope_ConcurrentSameSKU(t *testing.T) {
 			for attempt := 0; attempt < 25; attempt++ {
 				expireBackoff(t, f, event)
 				store := NewDevices(f.pool, 5*time.Second)
-				rec, ok, err := store.LoadCatalogEvent(context.Background(), event)
+				rec, ok, err := NewCatalogProjection(store.pool, store.timeout).LoadCatalogEvent(context.Background(), event)
 				if err != nil || !ok {
 					t.Errorf("load %s: %v", event, err)
 					return
 				}
-				res, err := store.ProjectProduct(context.Background(), rec, time.Now())
+				res, err := NewCatalogProjection(store.pool, store.timeout).ProjectProduct(context.Background(), rec, time.Now())
 				if err == nil && (res.Outcome == catalog.OutcomeProcessed || res.Outcome == catalog.OutcomeAlready || res.Outcome == catalog.OutcomeBlocked) {
 					results[i] = res
 					return
@@ -409,11 +409,11 @@ func TestScope_RetryRestartStability(t *testing.T) {
 	// the durable processing row (keeps STORE_SCOPE_CONFLICT) plus an
 	// unchanged projection and a still-terminal verdict.
 	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadCatalogEvent(context.Background(), "e0000330-0000-4000-8000-000000000002")
+	rec, ok, err := NewCatalogProjection(store.pool, store.timeout).LoadCatalogEvent(context.Background(), "e0000330-0000-4000-8000-000000000002")
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
-	second, err := store.ProjectProduct(context.Background(), rec, time.Now())
+	second, err := NewCatalogProjection(store.pool, store.timeout).ProjectProduct(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

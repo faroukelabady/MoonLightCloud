@@ -17,7 +17,7 @@ import (
 // dependency): the only waits are store scoping and revision order.
 // Either the type row plus its dimension/capability sets commit, or
 // nothing does; failure leaves the previous revision visible.
-func (d Devices) ProjectProductType(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectProductType(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)

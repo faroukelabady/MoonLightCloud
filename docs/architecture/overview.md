@@ -42,6 +42,9 @@ Store registration/bindings, `CatalogAdmin` durable intent/targets, and
 `CommerceOrders` webhook fencing and order projection/history. `SaleProjection`
 and `ReturnProjection` own their financial projection transactions and permanent
 ownership arbitration; `ProjectionState` owns shared diagnostics/manual retry SQL.
+`CatalogProjection` owns current catalog reads and structural projections,
+including their transaction-local commerce queue writes. Commerce orchestration
+receives catalog reads and provider mappings as separate collaborators.
 The dashboard depends only on the diagnostic reader, not projection mutation.
 Each type satisfies its domain store contracts directly. The remaining
 `Devices` families are still being extracted; these types do not embed that

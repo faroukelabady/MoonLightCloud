@@ -56,7 +56,7 @@ func currentTagSnapshot(ctx context.Context, q *sqlcgen.Queries, tuid pgtype.UUI
 // ProjectCategory projects one category snapshot with revision ordering,
 // parent dependency waits, and DAG defense. Either a complete category
 // projection commits or nothing does.
-func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectCategory(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)
@@ -439,7 +439,7 @@ func (d Devices) ProjectCategory(ctx context.Context, event catalog.EventRecord,
 
 // ProjectTag projects one tag snapshot with revision ordering. Tags carry
 // no dependencies.
-func (d Devices) ProjectTag(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
+func (d CatalogProjection) ProjectTag(ctx context.Context, event catalog.EventRecord, now time.Time) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	attempt, blocked := startCatalogAttempt(event, now)

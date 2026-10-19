@@ -124,7 +124,7 @@ func TestR1ToggleDuringProvider(t *testing.T) {
 					t.Fatal(err)
 				}
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-				svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), logger)
+				svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(NewCatalogProjection(d.pool, d.timeout))), logger)
 				run := func() (context.CancelFunc, chan struct{}) {
 					c, cancel := context.WithCancel(ctx)
 					stopped := make(chan struct{})
@@ -275,21 +275,21 @@ func TestR1ClaimFencing(t *testing.T) {
 }
 
 type r1CatalogScan struct {
-	Devices
+	CatalogProjection
 	empty chan struct{}
 	once  sync.Once
 }
 
 func (s *r1CatalogScan) PendingCatalogEvents(ctx context.Context, processor, typ string, limit int, asOf time.Time) ([]string, error) {
-	rows, err := s.Devices.PendingCatalogEvents(ctx, processor, typ, limit, asOf)
+	rows, err := s.CatalogProjection.PendingCatalogEvents(ctx, processor, typ, limit, asOf)
 	if err == nil && len(rows) == 0 {
 		s.once.Do(func() { close(s.empty) })
 	}
 	return rows, err
 }
-func r1RunCategory(t *testing.T, d Devices) {
+func r1RunCategory(t *testing.T, d CatalogProjection) {
 	t.Helper()
-	s := &r1CatalogScan{Devices: d, empty: make(chan struct{})}
+	s := &r1CatalogScan{CatalogProjection: d, empty: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stopped := make(chan struct{})
@@ -312,7 +312,7 @@ func TestR1CategoryProductionDiscovery(t *testing.T) {
 				t.Helper()
 				body := categoryV2Payload(catIDA, "active", map[string]string{"en": "A", "ar": "أ"}, nil, rev, enabled)
 				f.ingest(t, f.devA, f.credA, id, typ, body)
-				r1RunCategory(t, d)
+				r1RunCategory(t, NewCatalogProjection(d.pool, d.timeout))
 			}
 			switch scenario {
 			case "older-then-newer":
@@ -330,7 +330,7 @@ func TestR1CategoryProductionDiscovery(t *testing.T) {
 			case "bootstrap":
 				f.ingest(t, f.devA, f.credA, old, catalog.EventCategorySnapshotV2, categoryPayload(catIDX, "active", map[string]string{"en": "X"}, nil, 1))
 				f.ingest(t, f.devA, f.credA, current, catalog.EventCategorySnapshotV2, categoryV2Payload(catIDA, "active", map[string]string{"en": "A", "ar": "أ"}, nil, 2, false))
-				r1RunCategory(t, d)
+				r1RunCategory(t, NewCatalogProjection(d.pool, d.timeout))
 			}
 			var rev int64
 			var enabled bool
@@ -457,7 +457,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 			}
 			q := &r1Queue{Devices: d, done: make(chan struct{}, 8)}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), logger)
+			svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(NewCatalogProjection(d.pool, d.timeout))), logger)
 			run := func() {
 				c, cancel := context.WithCancel(ctx)
 				stopped := make(chan struct{})
@@ -521,7 +521,7 @@ func TestR1NewPolicyBetweenProviders(t *testing.T) {
 	}
 	q := &r1Queue{Devices: d, done: make(chan struct{}, 8)}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), logger)
+	svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(NewCatalogProjection(d.pool, d.timeout))), logger)
 	run := func() (context.CancelFunc, chan struct{}) {
 		c, cancel := context.WithCancel(ctx)
 		stop := make(chan struct{})
@@ -621,12 +621,12 @@ func TestR1CategoryProductionFanout(t *testing.T) {
 	drainReevaluations(t, d)
 	id := "98983333-0000-4000-8000-000000000001"
 	pf.ingest(t, pf.devA, pf.credA, id, catalog.EventCategorySnapshotV2, categoryV2Payload(catIDA, "active", map[string]string{"en": "A"}, nil, 2, false))
-	r1RunCategory(t, d)
+	r1RunCategory(t, NewCatalogProjection(d.pool, d.timeout))
 	rows := reevaluationRows(t, d)
 	if len(rows) != 4 {
 		t.Fatalf("production v2 fanout %v", rows)
 	}
-	if policyOrFail(t, d, prodP1).Allowed || !policyOrFail(t, d, prodP3).Allowed {
+	if policyOrFail(t, NewCatalogProjection(d.pool, d.timeout), prodP1).Allowed || !policyOrFail(t, NewCatalogProjection(d.pool, d.timeout), prodP3).Allowed {
 		t.Fatal("automatic policy/Store isolation wrong")
 	}
 	var gen int64
@@ -635,7 +635,7 @@ func TestR1CategoryProductionFanout(t *testing.T) {
 	}
 	dup := "98983333-0000-4000-8000-000000000002"
 	pf.ingest(t, pf.devA, pf.credA, dup, catalog.EventCategorySnapshotV2, categoryV2Payload(catIDA, "active", map[string]string{"en": "A"}, nil, 2, false))
-	r1RunCategory(t, d)
+	r1RunCategory(t, NewCatalogProjection(d.pool, d.timeout))
 	var after int64
 	if err := pf.pool.QueryRow(ctx, "SELECT requested_generation FROM commerce_product_reevaluations WHERE product_id=$1", prodP1).Scan(&after); err != nil || after != gen {
 		t.Fatal("duplicate replay fanned out again", gen, after, err)

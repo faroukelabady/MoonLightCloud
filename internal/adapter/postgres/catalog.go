@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Catalog projector Store implementation on Devices (shared pool +
+// Catalog projector Store implementation on CatalogProjection (shared pool +
 // timeouts). Revision ordering, dependency waits, and DAG defense follow
 // ADR-0028; the claim/lock/mark machinery is the frozen generic one.
 
@@ -32,7 +32,7 @@ const (
 // PendingCatalogEvents returns due candidate catalog event IDs for one
 // processor (durable lazy discovery: accepted events with no processing
 // row are discoverable, so pre-projector history backfills with no resend).
-func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int, asOf time.Time) ([]string, error) {
+func (d CatalogProjection) PendingCatalogEvents(ctx context.Context, processor, eventType string, limit int, asOf time.Time) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).PendingCatalogEvents(ctx, sqlcgen.PendingCatalogEventsParams{
@@ -51,7 +51,7 @@ func (d Devices) PendingCatalogEvents(ctx context.Context, processor, eventType 
 
 // NextCatalogRetry reports the earliest future durable retry time for one
 // processor; found=false when no retry is scheduled.
-func (d Devices) NextCatalogRetry(ctx context.Context, processor, eventType string, asOf time.Time) (time.Time, bool, error) {
+func (d CatalogProjection) NextCatalogRetry(ctx context.Context, processor, eventType string, asOf time.Time) (time.Time, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	next, err := sqlcgen.New(d.pool).NextCatalogRetryAt(ctx, sqlcgen.NextCatalogRetryAtParams{
@@ -68,7 +68,7 @@ func (d Devices) NextCatalogRetry(ctx context.Context, processor, eventType stri
 }
 
 // LoadCatalogEvent loads the immutable inbox row for catalog projection.
-func (d Devices) LoadCatalogEvent(ctx context.Context, eventID string) (catalog.EventRecord, bool, error) {
+func (d CatalogProjection) LoadCatalogEvent(ctx context.Context, eventID string) (catalog.EventRecord, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(eventID)
@@ -195,7 +195,7 @@ func lockCatalogEntities(ctx context.Context, q *sqlcgen.Queries, keys ...[2]str
 // isolation is the backstop behind advisory entity locks: any interleaving
 // the locks do not serialize fails with SQLSTATE 40001 instead of
 // committing a wrong revision, and 40001 maps to transient retry.
-func (d Devices) beginCatalogTx(ctx context.Context) (pgx.Tx, error) {
+func (d CatalogProjection) beginCatalogTx(ctx context.Context) (pgx.Tx, error) {
 	tx, err := d.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return nil, transient(redact(err))
@@ -350,7 +350,7 @@ func nilIf(cond bool, t time.Time) *time.Time {
 
 // markCatalogBlocked records a deterministic blocked outcome in one short
 // transaction. Zero projection writes precede it.
-func (d Devices) markCatalogBlocked(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (catalog.ProjectResult, error) {
+func (d CatalogProjection) markCatalogBlocked(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string) (catalog.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -400,7 +400,7 @@ func catalogRetryDelay(attempt int, code string, causes ...error) time.Duration 
 // persistCatalogRetry writes retry state in a SEPARATE durable transaction
 // after the projection transaction rolled back, mirroring the sale/return
 // discipline: the schedule commits even though the projection did not.
-func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string, causes ...error) (catalog.ProjectResult, error) {
+func (d CatalogProjection) persistCatalogRetry(ctx context.Context, processor string, euid pgtype.UUID, now time.Time, code, msg string, causes ...error) (catalog.ProjectResult, error) {
 	// The returned error keeps its frozen exact shape (the F12 retry
 	// classifier contracts on it); the branch detail is persisted in
 	// sync_event_processing.last_error_message for diagnostics.
@@ -449,7 +449,7 @@ func (d Devices) persistCatalogRetry(ctx context.Context, processor string, euid
 // the normal entity locks and revision gate, so serialization, staleness,
 // and atomicity guarantees are unchanged. Never touches retry rows,
 // other processors, or other error codes.
-func (d Devices) RearmBlockedProducts(ctx context.Context) error {
+func (d CatalogProjection) RearmBlockedProducts(ctx context.Context) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if err := sqlcgen.New(d.pool).RearmBlockedCatalogProducts(ctx); err != nil {

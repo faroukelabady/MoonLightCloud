@@ -99,7 +99,7 @@ func TestCommerceOrderProjectionMatrix(t *testing.T) {
 	// Mapping change: resolve the line, rev 4.
 	productID := "11111111-1111-4111-8111-111111111111"
 	seedStoreProduct(t, env, productID)
-	if _, err := catalogStore(env).CreateProductMapping(context.Background(), "website", productID, "500"); err != nil {
+	if _, err := NewDevices(env.pool, 5*time.Second).CreateProductMapping(context.Background(), "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}
 	revision, changed = reconcileSnapshot(t, env, snapshot)
@@ -197,7 +197,7 @@ func TestCommerceOrderRenamePreservesHistory(t *testing.T) {
 	ingestCatalog(t, env, "d0007000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-REN", "Old Name", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007000-0000-4000-8000-000000000000")
-	if _, err := catalogStore(env).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
+	if _, err := NewDevices(env.pool, 5*time.Second).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := orderTestSnapshot("website", "203", orders.StatusPending, "pending", 10000)
@@ -234,7 +234,7 @@ func TestCommerceOrderSurvivesCatalogRebuild(t *testing.T) {
 	ingestCatalog(t, env, "d0007100-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-RB", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007100-0000-4000-8000-000000000000")
-	if _, err := catalogStore(env).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
+	if _, err := NewDevices(env.pool, 5*time.Second).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := orderTestSnapshot("website", "210", orders.StatusProcessing, "processing", 15000)

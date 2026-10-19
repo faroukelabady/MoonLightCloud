@@ -18,17 +18,17 @@ import (
 
 func testRunner(t *testing.T, env *saleEnv, source businessreports.ReportSource) *businessreports.Runner {
 	t.Helper()
-	store := catalogStore(env)
+	store := NewBusinessReports(env.pool, 5*time.Second)
 	seedReportTemplateMapping(t, env)
 	return makeRunner(t, env, store, source)
 }
 
 func testRunnerNoSeed(t *testing.T, env *saleEnv, source businessreports.ReportSource) *businessreports.Runner {
 	t.Helper()
-	return makeRunner(t, env, catalogStore(env), source)
+	return makeRunner(t, env, NewBusinessReports(env.pool, 5*time.Second), source)
 }
 
-func makeRunner(t *testing.T, env *saleEnv, store Devices, source businessreports.ReportSource) *businessreports.Runner {
+func makeRunner(t *testing.T, env *saleEnv, store BusinessReports, source businessreports.ReportSource) *businessreports.Runner {
 	t.Helper()
 	return businessreports.NewRunner(NewBusinessReports(store.pool, store.timeout), NewBusinessReports(store.pool, store.timeout), source,
 		notifications.NewService(NewNotifications(store.pool, store.timeout), NewNotifications(store.pool, store.timeout), nilLogger()),

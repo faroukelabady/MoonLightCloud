@@ -21,7 +21,7 @@ func reportCatalogWorkerError(t *testing.T, err error) {
 		t.Cleanup(func() { t.Errorf("catalog worker failure: %v", err) })
 	}
 }
-func catalogWorkerAttempt(d Devices, id, typ string) catalogWorkerResult {
+func catalogWorkerAttempt(d CatalogProjection, id, typ string) catalogWorkerResult {
 	ctx := context.Background()
 	rec, ok, err := d.LoadCatalogEvent(ctx, id)
 	if err != nil || !ok {
@@ -86,7 +86,7 @@ func runCatalogAttempts(id, typ string, budget int, attempt func() catalogWorker
 	last.Err = fmt.Errorf("event %s projector %s exhausted %d attempts: last outcome=%+v failure=%v", id, typ, budget, last.Result, last.Err)
 	return last
 }
-func runCatalogWorker(d Devices, id, typ string, budget int) catalogWorkerResult {
+func runCatalogWorker(d CatalogProjection, id, typ string, budget int) catalogWorkerResult {
 	return runCatalogAttempts(id, typ, budget, func() catalogWorkerResult {
 		_, err := d.pool.Exec(context.Background(), `UPDATE sync_event_processing SET next_attempt_at=NULL WHERE event_id=$1 AND status='retry'`, id)
 		if err != nil {

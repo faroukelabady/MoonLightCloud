@@ -433,7 +433,7 @@ func TestCatalogResetFailureEventuallyRearmsProduct(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh := NewDevices(env.pool, 5*time.Second)
-	if err := fresh.RearmBlockedProducts(context.Background()); err != nil {
+	if err := NewCatalogProjection(fresh.pool, fresh.timeout).RearmBlockedProducts(context.Background()); err != nil {
 		t.Fatalf("fallback re-arm: %v", err)
 	}
 	if status, _ := catalogStatus(t, env, catalog.ProcessorProductProjectionV1, rev2); status != "pending" {
@@ -495,7 +495,7 @@ func TestCatalogTrueInvalidNeverRearms(t *testing.T) {
 	// advancement).
 	fresh := NewDevices(env.pool, 5*time.Second)
 	for i := 0; i < 3; i++ {
-		if err := fresh.RearmBlockedProducts(context.Background()); err != nil {
+		if err := NewCatalogProjection(fresh.pool, fresh.timeout).RearmBlockedProducts(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -551,7 +551,7 @@ func TestCatalogSupersededNeverRearmed(t *testing.T) {
 	}
 	// Re-arm must not touch the superseded blocked rev1.
 	fresh := NewDevices(env.pool, 5*time.Second)
-	if err := fresh.RearmBlockedProducts(context.Background()); err != nil {
+	if err := NewCatalogProjection(fresh.pool, fresh.timeout).RearmBlockedProducts(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if status, code := catalogStatus(t, env, catalog.ProcessorProductProjectionV1, rev1); status != "blocked" || code != ErrCatalogInvalidRelation {

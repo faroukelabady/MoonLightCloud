@@ -80,7 +80,7 @@ func TestSharedProductTypeOwnedRawAndScopedConcurrentRevisions(t *testing.T) {
 				<-start
 				// Reuse the production-attempt test seam: only the explicit
 				// transient contract can retry, bounded by catalogRetryBudget.
-				results <- runCatalogWorker(NewDevices(f.pool, 5*time.Second), eventID, catalog.EventProductTypeSnapshotV1, catalogRetryBudget)
+				results <- runCatalogWorker(NewCatalogProjection(f.pool, 5*time.Second), eventID, catalog.EventProductTypeSnapshotV1, catalogRetryBudget)
 			}(id)
 		}
 		close(start)

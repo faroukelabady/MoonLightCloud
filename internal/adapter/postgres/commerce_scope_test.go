@@ -165,14 +165,14 @@ func TestMapping_PublicationEnumeration(t *testing.T) {
 	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, 510, 2), catalog.EventProductSalesPolicySnapshotV1), catalog.OutcomeProcessed, "")
 	store := NewDevices(f.pool, 5*time.Second)
 	ctx := context.Background()
-	onlyA, err := store.CatalogOnlineConfiguredProductsForStore(ctx, scopeStoreA, 100)
+	onlyA, err := NewCatalogProjection(store.pool, store.timeout).CatalogOnlineConfiguredProductsForStore(ctx, scopeStoreA, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(onlyA) != 1 || onlyA[0] != prodA {
 		t.Fatalf("store A enumeration: %v", onlyA)
 	}
-	onlyB, err := store.CatalogOnlineConfiguredProductsForStore(ctx, scopeStoreB, 100)
+	onlyB, err := NewCatalogProjection(store.pool, store.timeout).CatalogOnlineConfiguredProductsForStore(ctx, scopeStoreB, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
