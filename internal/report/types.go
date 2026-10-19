@@ -450,31 +450,11 @@ type (
 // postgres adapter with static parameterized sqlc queries. One explicit
 // operation per report need — never QueryReport(dimension string).
 type Repository interface {
-	SalesSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]SummaryRow, error)
-	SalesPayments(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]PaymentRow, error)
-	SalesDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
-	SalesByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)
-	SalesByVariant(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]VariantRow, error)
-	SalesByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ProductTypeRow, error)
-	SalesByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
-	SalesBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CategoryRow, error)
-	SalesByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]TagRow, error)
-	SalesByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]CashierRow, error)
-	SalesByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ChannelRow, error)
+	Reader
 	SalesProjectionFreshness(ctx context.Context) (FreshnessRow, error)
-	RefundsSummary(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundSummaryRow, error)
-	RefundsDaily(ctx context.Context, startUTC, endUTC time.Time, currency, timezone string) ([]RefundDailyRow, error)
-	RefundsByProduct(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductRow, error)
-	RefundsByProductType(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundProductTypeRow, error)
-	RefundsByRootCategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
-	RefundsBySubcategory(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCategoryRow, error)
-	RefundsByTag(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundTagRow, error)
-	RefundsByCashier(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundCashierRow, error)
-	RefundsByChannel(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]RefundChannelRow, error)
 	ReturnProjectionFreshness(ctx context.Context) (ReturnFreshnessRow, error)
-	// Phase 9B store-scoped read isolation. Same frozen row shapes
-	// restricted to one proven Store. Internal until 9D: no service,
-	// HTTP, or dashboard change; unfiltered methods keep global behavior.
+	// Adapter/tooling compatibility surface. Services select Reader once;
+	// these static Store queries keep their existing validation and SQL.
 	SalesSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]SummaryRow, error)
 	SalesDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency, timezone string) ([]DailyRowRaw, error)
 	SalesByProductForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ProductRow, error)

@@ -11,6 +11,7 @@ import (
 
 // Breakdown assembles one fixed dimension via its static query.
 func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (Breakdown, error) {
+	reader := ReaderFor(s.repo, req.Store)
 	fresh, err := s.freshness(ctx)
 	if err != nil {
 		return Breakdown{}, err
@@ -23,11 +24,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 	}
 	switch dimension {
 	case DimensionProduct:
-		rows, err := s.scopedSalesByProduct(ctx, req)
+		rows, err := reader.SalesByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.scopedRefundsByProduct(ctx, req)
+		refundRows, err := reader.RefundsByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -82,11 +83,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = applyLimit(sortProductRows(byKey, order, req.Currency), req.Limit)
 	case DimensionProductType:
-		rows, err := s.scopedSalesByProductType(ctx, req)
+		rows, err := reader.SalesByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.scopedRefundsByProductType(ctx, req)
+		refundRows, err := reader.RefundsByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -147,11 +148,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		var rows []CategoryRow
 		var refundRows []RefundCategoryRow
 		if root := dimension == DimensionRootCategory; true {
-			rows, err = s.scopedSalesByCategory(ctx, req, root)
+			rows, err = salesByCategory(ctx, reader, req, root)
 			if err != nil {
 				return Breakdown{}, err
 			}
-			refundRows, err = s.scopedRefundsByCategory(ctx, req, root)
+			refundRows, err = refundsByCategory(ctx, reader, req, root)
 		}
 		if err != nil {
 			return Breakdown{}, err
@@ -207,11 +208,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = applyLimit(sortCategoryRows(byKey, order, req.Currency), req.Limit)
 	case DimensionTag:
-		rows, err := s.scopedSalesByTag(ctx, req)
+		rows, err := reader.SalesByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.scopedRefundsByTag(ctx, req)
+		refundRows, err := reader.RefundsByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -268,11 +269,11 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = applyLimit(sortCategoryRows(byKey, order, req.Currency), req.Limit)
 	case DimensionCashier:
-		rows, err := s.scopedSalesByCashier(ctx, req)
+		rows, err := reader.SalesByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
-		refundRows, err := s.scopedRefundsByCashier(ctx, req)
+		refundRows, err := reader.RefundsByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
@@ -334,13 +335,13 @@ func (s Service) Breakdown(ctx context.Context, req Request, dimension string) (
 		}
 		out.Rows = applyLimit(sortCashierRows(byKey, order), req.Limit)
 	case DimensionChannel:
-		rows, err := s.scopedSalesByChannel(ctx, req)
+		rows, err := reader.SalesByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}
 		byKey := map[string]*BreakdownRow{}
 		order := []string{}
-		refundRows, err := s.scopedRefundsByChannel(ctx, req)
+		refundRows, err := reader.RefundsByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 		if err != nil {
 			return Breakdown{}, err
 		}

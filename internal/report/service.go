@@ -153,76 +153,11 @@ func ParseDimension(d string) (string, error) {
 	}
 }
 
-// scopedFetch routes one repository read through the selected Store
-// scope. Specific scopes call the Store-scoped repository surface with
-// the validated Store UUID; global requests keep the frozen methods.
-func (s Service) scopedSalesSummary(ctx context.Context, req Request) ([]SummaryRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesPayments(ctx context.Context, req Request) ([]PaymentRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesPaymentsForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesPayments(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsSummary(ctx context.Context, req Request) ([]RefundSummaryRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsSummaryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesDaily(ctx context.Context, req Request, mode, timezone string) ([]DailyRowRaw, error) {
-	if req.Scoped() {
-		return s.repo.SalesDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
-	}
-	return s.repo.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
-}
-
-func (s Service) scopedRefundsDaily(ctx context.Context, req Request, mode, timezone string) ([]RefundDailyRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsDailyForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
-	}
-	return s.repo.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, mode, timezone)
-}
-
-func (s Service) scopedSalesByProduct(ctx context.Context, req Request) ([]ProductRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByProductForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByVariant(ctx context.Context, req Request) ([]VariantRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByVariantForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByVariant(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByProductType(ctx context.Context, req Request) ([]ProductTypeRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByProductTypeForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsByProductType(ctx context.Context, req Request) ([]RefundProductTypeRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsByProductTypeForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
 // SalesByProductType returns the Phase 17-R2 type breakdown: sale lines
 // grouped by their frozen per-line type snapshot (never current catalog).
 func (s Service) SalesByProductType(ctx context.Context, req Request) ([]ProductTypeRow, error) {
-	rows, err := s.scopedSalesByProductType(ctx, req)
+	reader := ReaderFor(s.repo, req.Store)
+	rows, err := reader.SalesByProductType(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +170,8 @@ func (s Service) SalesByProductType(ctx context.Context, req Request) ([]Product
 // projection). Lines without a variant identity group under a NULL
 // variant ID. Existing product/category/tag breakdowns are unchanged.
 func (s Service) SalesByVariant(ctx context.Context, req Request) ([]VariantRow, error) {
-	rows, err := s.scopedSalesByVariant(ctx, req)
+	reader := ReaderFor(s.repo, req.Store)
+	rows, err := reader.SalesByVariant(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -250,81 +186,6 @@ func applyVariantLimit(rows []VariantRow, limit int) []VariantRow {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].LineSales > rows[j].LineSales })
 	return rows[:limit]
-}
-
-func (s Service) scopedRefundsByProduct(ctx context.Context, req Request) ([]RefundProductRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsByProductForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsByProduct(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByCategory(ctx context.Context, req Request, root bool) ([]CategoryRow, error) {
-	if req.Scoped() {
-		if root {
-			return s.repo.SalesByRootCategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-		}
-		return s.repo.SalesBySubcategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	if root {
-		return s.repo.SalesByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsByCategory(ctx context.Context, req Request, root bool) ([]RefundCategoryRow, error) {
-	if req.Scoped() {
-		if root {
-			return s.repo.RefundsByRootCategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-		}
-		return s.repo.RefundsBySubcategoryForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	if root {
-		return s.repo.RefundsByRootCategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsBySubcategory(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByTag(ctx context.Context, req Request) ([]TagRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByTagForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsByTag(ctx context.Context, req Request) ([]RefundTagRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsByTagForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsByTag(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByCashier(ctx context.Context, req Request) ([]CashierRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByCashierForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsByCashier(ctx context.Context, req Request) ([]RefundCashierRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsByCashierForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsByCashier(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedSalesByChannel(ctx context.Context, req Request) ([]ChannelRow, error) {
-	if req.Scoped() {
-		return s.repo.SalesByChannelForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.SalesByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-}
-
-func (s Service) scopedRefundsByChannel(ctx context.Context, req Request) ([]RefundChannelRow, error) {
-	if req.Scoped() {
-		return s.repo.RefundsByChannelForStore(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.Currency)
-	}
-	return s.repo.RefundsByChannel(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 }
 
 // subChecked/subtracts with overflow failure (net may be negative, but
@@ -368,15 +229,16 @@ func metaOf(p Period, loc *time.Location) PeriodMeta {
 // negative). TransactionCount/UnitsSold stay sale-only; return activity
 // rides in ReturnTransactionCount/UnitsReturned.
 func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
-	rows, err := s.scopedSalesSummary(ctx, req)
+	reader := ReaderFor(s.repo, req.Store)
+	rows, err := reader.SalesSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return Summary{}, err
 	}
-	pays, err := s.scopedSalesPayments(ctx, req)
+	pays, err := reader.SalesPayments(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return Summary{}, err
 	}
-	refunds, err := s.scopedRefundsSummary(ctx, req)
+	refunds, err := reader.RefundsSummary(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -440,11 +302,12 @@ func (s Service) Summary(ctx context.Context, req Request) (Summary, error) {
 // days create their own rows (a day with refunds but no sales is real
 // activity); net may be negative and is never clamped.
 func (s Service) Daily(ctx context.Context, req Request) (Daily, error) {
-	rows, err := s.scopedSalesDaily(ctx, req, req.Currency, req.Period.Timezone)
+	reader := ReaderFor(s.repo, req.Store)
+	rows, err := reader.SalesDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
 	if err != nil {
 		return Daily{}, err
 	}
-	refundRows, err := s.scopedRefundsDaily(ctx, req, req.Currency, req.Period.Timezone)
+	refundRows, err := reader.RefundsDaily(ctx, req.Period.StartUTC, req.Period.EndUTC, req.Currency, req.Period.Timezone)
 	if err != nil {
 		return Daily{}, err
 	}
