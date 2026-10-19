@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // Wire shape is shared by byte budgeting and the HTTP encoder.
@@ -95,12 +93,16 @@ func (s *Service) noopProjected(ctx context.Context, view CommandView) bool {
 			if !ok {
 				return false
 			}
+			wanted, valid := decodeVariantExpectation(entry)
+			if !valid {
+				return false
+			}
 			found := false
 			for _, row := range rows {
 				if matched[row.VariantID] {
 					continue
 				}
-				if sameVariantIdentity(row, entry) && variantStateMatches(row, entry) {
+				if wanted.sameIdentity(row) && wanted.matches(row) {
 					matched[row.VariantID] = true
 					found = true
 					break
@@ -125,128 +127,18 @@ func (s *Service) noopProjected(ctx context.Context, view CommandView) bool {
 // sameVariantIdentity reports whether a bulk variants entry targets a
 // projected variant by explicit ID or by normalized combination key.
 func sameVariantIdentity(row AdminProductVariant, entry map[string]any) bool {
-	if id := payloadText(entry, "id"); id != "" {
-		parsed := id
-		if canonical, err := uuid.Parse(id); err == nil {
-			parsed = canonical.String()
-		}
-		return parsed == row.VariantID
-	}
-	if key := payloadText(entry, "combination_key"); key != "" {
-		return key == row.CombinationKey
-	}
-	return false
+	return (variantExpectation{identityID: payloadText(entry, "id"), identityKey: payloadText(entry, "combination_key")}).sameIdentity(row)
 }
 
-// variantStateMatches verifies every requested variant field against the
-// projection (fields absent from the payload are unconstrained). Money
-// compares as exact decimal strings, never floats.
+// Decode known wire fields once; absent fields remain unconstrained.
 func variantStateMatches(row AdminProductVariant, entry map[string]any) bool {
-	if raw, present := entry["sku"]; present {
-		value, ok := raw.(string)
-		if !ok || strings.TrimSpace(value) != row.SKU {
-			return false
-		}
-	}
-	if raw, present := entry["combination_key"]; present {
-		value, ok := raw.(string)
-		if !ok || strings.TrimSpace(value) != row.CombinationKey {
-			return false
-		}
-	}
-	if raw, present := entry["is_active"]; present {
-		value, ok := raw.(bool)
-		if !ok || value != row.IsActive {
-			return false
-		}
-	}
-	if raw, present := entry["deleted"]; present {
-		value, ok := raw.(bool)
-		if !ok || value != row.Deleted {
-			return false
-		}
-	}
-	if raw, present := entry["position"]; present {
-		value, ok := raw.(float64)
-		if !ok || value != float64(row.Position) {
-			return false
-		}
-	}
-	if raw, present := entry["price_egp_cents"]; present {
-		if raw == nil || !minorTextEqual(row.PriceEGPMinor, raw) {
-			return false
-		}
-	}
-	if raw, present := entry["price_usd_cents"]; present {
-		if raw == nil {
-			if row.PriceUSDMinor != nil {
-				return false
-			}
-		} else if row.PriceUSDMinor == nil || !minorTextEqual(*row.PriceUSDMinor, raw) {
-			return false
-		}
-	}
-	return attributesOptionalMatch(row.Attributes, entry)
+	wanted, valid := decodeVariantExpectation(entry)
+	return valid && wanted.matches(row)
 }
 
-// attributesOptionalMatch verifies the requested attribute list when
-// present (absent = unconstrained).
-func attributesOptionalMatch(projected []AdminProductVariantAttribute, entry map[string]any) bool {
-	raw, present := entry["attributes"]
-	if !present {
-		return true
-	}
-	desired, ok := raw.([]any)
-	if !ok {
-		return false
-	}
-	return attributesMatch(projected, desired)
-}
-
-// attributesMatch verifies a full requested attribute list against the
-// projection: same definition codes with identical value codes, labels
-// and positions.
 func attributesMatch(projected []AdminProductVariantAttribute, desired []any) bool {
-	if len(desired) != len(projected) {
-		return false
-	}
-	byCode := make(map[string]AdminProductVariantAttribute, len(projected))
-	for _, attr := range projected {
-		byCode[attr.DefinitionCode] = attr
-	}
-	for _, item := range desired {
-		entry, ok := item.(map[string]any)
-		if !ok {
-			return false
-		}
-		row, ok := byCode[payloadText(entry, "definition_code")]
-		if !ok {
-			return false
-		}
-		if payloadText(entry, "value_code") != row.ValueCode ||
-			!optionalTextEqual(&row.NameAR, entry["name_ar"]) ||
-			!optionalTextEqual(&row.NameEN, entry["name_en"]) ||
-			!optionalTextEqual(&row.DefinitionNameAR, entry["definition_name_ar"]) ||
-			!optionalTextEqual(&row.DefinitionNameEN, entry["definition_name_en"]) {
-			return false
-		}
-		if raw, present := entry["position"]; present {
-			value, ok := raw.(float64)
-			if !ok || value != float64(row.Position) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func optionalTextEqual(stored *string, requested any) bool {
-	value, _ := requested.(string)
-	value = strings.TrimSpace(value)
-	if stored == nil {
-		return value == ""
-	}
-	return *stored == value
+	wanted, valid := decodeAttributeExpectations(desired)
+	return valid && attributeExpectationsMatch(projected, wanted)
 }
 
 func payloadText(payload map[string]any, key string) string {
@@ -254,25 +146,8 @@ func payloadText(payload map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
-// Compare exact decimal strings after the same whitespace/leading-zero
-// normalization as Retail's integer parser; never use floating-point money.
+// Compare exact decimal strings after the same normalization as Retail.
 func minorTextEqual(stored string, requested any) bool {
-	value, ok := requested.(string)
-	if !ok {
-		return false
-	}
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-	for _, digit := range value {
-		if digit < '0' || digit > '9' {
-			return false
-		}
-	}
-	value = strings.TrimLeft(value, "0")
-	if value == "" {
-		value = "0"
-	}
-	return stored == value
+	value, valid := minorExpectation(requested)
+	return valid && stored == value
 }
