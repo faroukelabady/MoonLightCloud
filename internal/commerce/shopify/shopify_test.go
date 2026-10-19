@@ -33,22 +33,9 @@ func TestStartupPerformsNoShopifyRequests(t *testing.T) {
 	if provider.Key() != commerce.ProviderKey("shopify-main") {
 		t.Fatalf("key = %q", provider.Key())
 	}
-}
-
-// Phase 11 §18: enabled + unreachable host must still construct.
-func TestStartupSucceedsWhenShopifyUnreachable(t *testing.T) {
-	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	deadURL := dead.URL
-	dead.Close()
-	cfg := testConfig()
-	cfg.ShopDomain = "unreachable.myshopify.com"
-	provider, err := NewShopifyProvider(cfg, nil)
-	if err != nil {
-		t.Fatalf("construction must not contact shopify: %v", err)
-	}
-	_ = deadURL
-	if provider == nil {
-		t.Fatal("nil provider")
+	// Production constructs with a nil client (internal/app/commerce.go).
+	if p, err := NewShopifyProvider(testConfig(), nil); err != nil || p == nil {
+		t.Fatalf("nil-client construction: %v", err)
 	}
 }
 

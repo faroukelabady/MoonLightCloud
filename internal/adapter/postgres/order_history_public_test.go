@@ -152,6 +152,8 @@ func TestPublicReconcilePreservesSelectionHistory(t *testing.T) {
 	provider.snapshot.ProviderStatus = "processing"
 	provider.snapshot.Canonical = orders.StatusProcessing
 	provider.snapshot.TotalMinor = 130500
+	provider.snapshot.Lines[0].TotalMinor = 130500
+	provider.snapshot.Lines[0].SubtotalMinor = 130500
 	if _, err := service.ReconcileOrder(ctx, "website", "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +168,11 @@ func TestPublicReconcilePreservesSelectionHistory(t *testing.T) {
 	}
 	if styleAR != "Original" || styleEN != "Original" || deltaMinor != 30000 {
 		t.Fatalf("purchase-time selection rewritten by public reconciliation: %s/%s/%d", styleAR, styleEN, deltaMinor)
+	}
+	var lineTotal int64
+	if err := pool.QueryRow(ctx, `SELECT total_minor FROM commerce_online_order_lines
+		WHERE provider_key='website' AND external_order_id='1001' AND external_line_id=1`).Scan(&lineTotal); err != nil || lineTotal != 130500 {
+		t.Fatalf("line money must still evolve: %d (%v)", lineTotal, err)
 	}
 	var total int64
 	var status string

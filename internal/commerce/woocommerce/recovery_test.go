@@ -292,11 +292,15 @@ func TestWooDuplicateSKUAfterPost(t *testing.T) {
 		harness := newWooHarness(t, testConsumerKey, testConsumerSec)
 		harness.preload(600, skuOwner("dup-1"))
 		harness.fail(http.MethodPost, "/wp-json/wc/v3/products", http.StatusBadRequest, duplicate)
+		missFirstSKULookup(harness)
 		mappings := &stubMappingRepo{}
 		service, _ := recoveryService(harness, testProduct("dup-1"), 7, true, mappings)
 		result, err := service.SyncProduct(context.Background(), "website", "dup-1")
 		if err != nil {
 			t.Fatalf("recover: %v", err)
+		}
+		if countPosts(harness) != 1 {
+			t.Fatal("the create must be attempted before recovery")
 		}
 		if result.ExternalProductID != "600" {
 			t.Fatalf("recovered: %q", result.ExternalProductID)
@@ -309,6 +313,7 @@ func TestWooDuplicateSKUAfterPost(t *testing.T) {
 		harness := newWooHarness(t, testConsumerKey, testConsumerSec)
 		harness.preload(600, skuOwner("someone-else"))
 		harness.fail(http.MethodPost, "/wp-json/wc/v3/products", http.StatusBadRequest, duplicate)
+		missFirstSKULookup(harness)
 		mappings := &stubMappingRepo{}
 		service, _ := recoveryService(harness, testProduct("dup-1"), 7, true, mappings)
 		if _, err := service.SyncProduct(context.Background(), "website", "dup-1"); err == nil {
@@ -316,6 +321,22 @@ func TestWooDuplicateSKUAfterPost(t *testing.T) {
 		} else {
 			requireProviderConflict(t, err, "foreign duplicate")
 		}
+		if countPosts(harness) != 1 {
+			t.Fatal("the create must be attempted before the conflict")
+		}
+	})
+}
+
+// missFirstSKULookup makes the preflight SKU lookup miss, so the create is
+// attempted and the duplicate-SKU recovery after the POST is exercised.
+func missFirstSKULookup(harness *wooHarness) {
+	first := true
+	harness.setIntercept(func(r wooRecordedRequest) (int, any, bool) {
+		if first && r.Method == http.MethodGet && r.Query.Get("sku") == "PAP-001" {
+			first = false
+			return http.StatusOK, []any{}, true
+		}
+		return 0, nil, false
 	})
 }
 

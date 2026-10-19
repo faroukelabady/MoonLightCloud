@@ -70,51 +70,6 @@ func findSpringTransition(t *testing.T, loc *time.Location) time.Time {
 	return time.Time{}
 }
 
-func TestReportMultiSubcategoryFacet(t *testing.T) {
-	env := openSaleEnv(t)
-	// EGP fixture line has no subcategories; attach two.
-	projectSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z",
-		func(m map[string]any) {
-			line := m["lines"].([]any)[0].(map[string]any)
-			line["classifications"].(map[string]any)["subcategories"] = []any{
-				map[string]any{
-					"category_id": "00000000-0000-0000-0000-000000000301",
-					"name_ar":     "قطط", "name_en": "Cats",
-				},
-				map[string]any{
-					"category_id": "00000000-0000-0000-0000-000000000302",
-					"name_ar":     "كلاب", "name_en": "Dogs",
-				},
-			}
-		})
-	svc := repService(env)
-	req, _ := svc.ParseRequest("custom", "2026-09-20", "2026-09-20", "")
-	roots, err := svc.Breakdown(context.Background(), req, report.DimensionRootCategory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(roots.Rows) != 1 || roots.Rows[0].Units != 2 {
-		t.Fatalf("root counted once: %+v", roots.Rows)
-	}
-	subs, err := svc.Breakdown(context.Background(), req, report.DimensionSubcategory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(subs.Rows) != 2 {
-		t.Fatalf("two subcategory rows: %+v", subs.Rows)
-	}
-	var facetUnits int64
-	for _, r := range subs.Rows {
-		if r.Units != 2 {
-			t.Fatalf("each subcategory carries the full line: %+v", r)
-		}
-		facetUnits += r.Units
-	}
-	if facetUnits != 4 {
-		t.Fatalf("facet sum exceeds line total by design: %d", facetUnits)
-	}
-}
-
 func TestReportChannelCashier(t *testing.T) {
 	env := openSaleEnv(t)
 	projectSale(t, env, "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", nil)

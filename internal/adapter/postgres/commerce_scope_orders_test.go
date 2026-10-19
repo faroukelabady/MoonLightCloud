@@ -339,6 +339,16 @@ func TestOrder_ReplayIdempotent(t *testing.T) {
 		`SELECT count(*) FROM commerce_online_order_status_history WHERE provider_key='website' AND external_order_id='821'`).Scan(&history); err != nil || history != 1 {
 		t.Fatalf("one history row: %d (%v)", history, err)
 	}
+	// A Store B order replays without moving to another Store.
+	storeB := scopeSnapshot("website", "824", "W-824", []orders.OrderLine{orderLine("701", 1, 10000)})
+	b1 := mustReconcile(t, f, storeB)
+	b2 := mustReconcile(t, f, storeB)
+	if b1.Revision != b2.Revision || b2.Changed {
+		t.Fatalf("store B replay no-op: %+v %+v", b1, b2)
+	}
+	if got := orderStore(t, f, "website", "824"); got == nil || *got != scopeStoreB {
+		t.Fatalf("store stable: %v", got)
+	}
 }
 
 // TestOrder_ExactMoney proves >2^53 minor-unit totals reconcile exactly.
@@ -404,21 +414,6 @@ func TestOrder_ConcurrentReconcile(t *testing.T) {
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM commerce_online_order_status_history WHERE provider_key='website' AND external_order_id='823'`).Scan(&history); err != nil || history != 1 {
 		t.Fatalf("one history row: %d (%v)", history, err)
-	}
-}
-
-// TestOrder_RestartStability proves a fresh handle re-reconciling the
-// same snapshot converges identically (no duplicate rows/history).
-func TestOrder_RestartStability(t *testing.T) {
-	f, _, _ := scopeOrderFixture(t)
-	snapshot := scopeSnapshot("website", "824", "W-824", []orders.OrderLine{orderLine("701", 1, 10000)})
-	first := mustReconcile(t, f, snapshot)
-	second := mustReconcile(t, f, snapshot)
-	if first.Revision != second.Revision || second.Changed {
-		t.Fatalf("restart-stable: %+v %+v", first, second)
-	}
-	if got := orderStore(t, f, "website", "824"); got == nil || *got != scopeStoreB {
-		t.Fatalf("store stable: %v", got)
 	}
 }
 

@@ -1,8 +1,9 @@
 package shopify
 
 import (
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"testing"
+
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 )
 
 // External-package integration tests use the same strict stateful TLS fixture

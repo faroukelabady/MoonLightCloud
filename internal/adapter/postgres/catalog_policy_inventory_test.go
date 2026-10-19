@@ -449,45 +449,6 @@ func TestInventoryProjectionRollback(t *testing.T) {
 	}
 }
 
-// TestInventoryInactiveProductProjects proves lifecycle never gates
-// inventory truth: an inactive product still projects its stock.
-func TestInventoryInactiveProductProjects(t *testing.T) {
-	env := openSaleEnv(t)
-	root, sub, tag := catalogProductFixture(t, env, 156, "inv7")
-	productID := "e0005006-0000-4000-8000-000000000006"
-	hidden := productPayload(productID, "PAP-HID", "مخفي", root, []string{sub}, []string{tag}, 1)
-	var hiddenMap map[string]any
-	if err := json.Unmarshal([]byte(hidden), &hiddenMap); err != nil {
-		t.Fatal(err)
-	}
-	hiddenMap["is_active"] = false
-	hiddenRaw, _ := json.Marshal(hiddenMap)
-	ingestCatalog(t, env, "d0006070-0000-4000-8000-000000000070", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z", string(hiddenRaw))
-	projectCatalogOnce(t, env, "d0006070-0000-4000-8000-000000000070")
-	ingestCatalog(t, env, "d0006072-0000-4000-8000-000000000072", catalog.EventProductSalesPolicySnapshotV1, "2026-09-20T12:00:30Z",
-		policyPayload(productID, 1, true, true, nil))
-	projectCatalogOnce(t, env, "d0006072-0000-4000-8000-000000000072")
-	event := "d0006071-0000-4000-8000-000000000071"
-	seedInventoryVariant(t, env, productID)
-	ingestCatalog(t, env, event, catalog.EventInventoryProductVariantSnapshotV1, "2026-09-20T12:01:00Z",
-		inventoryPayload(productID, 1, 9))
-	if res := projectCatalogOnce(t, env, event); res.Outcome != catalog.OutcomeProcessed {
-		t.Fatalf("inactive inventory: %+v", res)
-	}
-	svc := catalog.NewService(catalogStore(env))
-	availability, err := svc.GetProductAvailability(context.Background(), productID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Inventory truth present, but availability is zero: inactive.
-	if availability.StockQuantity == nil || *availability.StockQuantity != 9 {
-		t.Fatalf("stock visible: %+v", availability)
-	}
-	if availability.OnlineAvailable != 0 || !availability.Ready {
-		t.Fatalf("inactive zeroes availability: %+v", availability)
-	}
-}
-
 // TestInventoryAvailabilityMatrix drives availability through the real
 // read service across lifecycle, policy, stock, and cap combinations.
 func TestInventoryAvailabilityMatrix(t *testing.T) {
@@ -567,6 +528,10 @@ func TestInventoryAvailabilityMatrix(t *testing.T) {
 				t.Fatalf("got (%d,%v): %+v", availability.OnlineAvailable, availability.Ready, availability)
 			}
 		})
+	}
+	// Inactive keeps its inventory truth even though nothing is sellable.
+	if a, err := svc.GetProductAvailability(ctx, inactive); err != nil || a.StockQuantity == nil || *a.StockQuantity != 10 {
+		t.Fatalf("inactive keeps inventory truth: %+v %v", a, err)
 	}
 
 	// Missing inventory: policy present, no inventory row → 0 + not ready.

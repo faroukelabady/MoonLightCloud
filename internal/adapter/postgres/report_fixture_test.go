@@ -207,6 +207,9 @@ func TestIntegratedAdversarialFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(subs.Rows) != 3 {
+		t.Fatalf("subcategory rows: %+v", subs.Rows)
+	}
 	sv := map[string][2]int64{}
 	for _, r := range subs.Rows {
 		sv[*r.NameEN] = [2]int64{r.Units, r.LineSales[0].LineSalesMinor}

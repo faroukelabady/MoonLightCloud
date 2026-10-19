@@ -284,30 +284,6 @@ func TestR05ActivityTopNPrefix(t *testing.T) {
 	}
 }
 
-func TestH04DailyMissingFxFails(t *testing.T) {
-	env := openDashEnv(t)
-	projectDashSale(t, env, "55555555-5555-4555-8555-555555555555", "2026-09-20T10:00:00Z", withSaleID(t, fixture(t, "sale_egp.json"), "11111111-1111-4111-8111-111111111111"))
-	ctx := context.Background()
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id) VALUES ('77777777-7777-4777-8777-777777777777', $1, 'sale.finalized.v3', '2026-09-20T10:00:00Z', now(), '{}', '\x00', (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := env.pool.Exec(ctx, `INSERT INTO sales_projection (sale_id, source_event_id, source_device_id, sale_number, channel, occurred_at, paid_at, shop_name_ar, shop_name_en, shop_address_ar, shop_address_en, shop_phone, shop_receipt_footer_ar, shop_receipt_footer_en, currency, subtotal_minor, discount_minor, tax_minor, total_minor, received_at, store_id) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01', '77777777-7777-4777-8777-777777777777', $1, 'MLR-X', 'STORE', '2026-09-20T10:00:00Z', '2026-09-20T10:00:00Z', 'a','b','c','d','e','f','g', 'USD', 1000, 0, 0, 1000, now(), (SELECT store_id FROM device_store_bindings WHERE device_id = $1)) ON CONFLICT DO NOTHING`, env.devID); err != nil {
-		t.Fatal(err)
-	}
-	req := dashReq(t, env, "custom", "2026-09-20", "2026-09-20")
-	if _, err := env.dash.Daily(ctx, req, "all"); err == nil {
-		t.Fatal("daily All with missing FX must fail loudly")
-	}
-	// Native USD mode does not convert: must still work.
-	usd, err := env.dash.Daily(ctx, req, "USD")
-	if err != nil {
-		t.Fatalf("native USD must work: %v", err)
-	}
-	if len(usd.Days) == 0 {
-		t.Fatal("native USD days missing")
-	}
-}
-
 func TestM01BranchNativeInvariant(t *testing.T) {
 	env := openDashEnv(t)
 	projectDashSale(t, env, "55555555-5555-4555-8555-555555555555", "2026-09-20T10:00:00Z", withSale(t, fixture(t, "sale_egp.json"), "11111111-1111-4111-8111-111111111111", "2026-09-20T10:00:00Z", "2026-09-20T10:05:00Z"))
@@ -376,7 +352,11 @@ func TestH04MissingFxAllNormalizedEndpoints(t *testing.T) {
 		t.Fatal("categories All must fail on missing FX")
 	}
 	// Native modes keep working (no conversion required).
-	if _, err := env.dash.Daily(ctx, req, "USD"); err != nil {
+	usd, err := env.dash.Daily(ctx, req, "USD")
+	if err != nil {
 		t.Fatalf("native USD daily must work: %v", err)
+	}
+	if len(usd.Days) == 0 {
+		t.Fatal("native USD days missing")
 	}
 }
