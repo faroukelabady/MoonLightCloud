@@ -225,7 +225,7 @@ func TestR3DelayedAuthorizationEvidenceRequiresConfirmedSettlement(t *testing.T)
 	fresh.Product.Names = []commerce.LocalizedName{{Locale: "en", Name: "NEW-TITLE"}}
 	source.set(fresh)
 	before := len(f.h.recorded())
-	independent := postgres.NewDevices(f.newPool(t), 5*time.Second)
+	independent := postgres.NewCommercePersistence(f.newPool(t), 5*time.Second)
 	next, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), independent)
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestR3DelayedAuthorizationEvidenceRequiresConfirmedSettlement(t *testing.T)
 		t.Fatal("delayed effect cleared the barrier")
 	}
 	f.restoreHarness()
-	restarted := postgres.NewDevices(f.newPool(t), 5*time.Second)
+	restarted := postgres.NewCommercePersistence(f.newPool(t), 5*time.Second)
 	third, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), restarted)
 	if err != nil {
 		t.Fatal(err)

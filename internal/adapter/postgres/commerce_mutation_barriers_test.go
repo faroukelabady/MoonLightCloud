@@ -12,7 +12,7 @@ import (
 func TestCommerceMutationBarrierDurabilityAndFencing(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := NewDevices(env.pool, 5*time.Second)
+	store := NewCommercePersistence(env.pool, 5*time.Second)
 	product := commerceProductID(0x117f)
 	var oldCtx context.Context
 	var oldToken string
@@ -92,7 +92,7 @@ func TestCommerceMutationBarrierDurabilityAndFencing(t *testing.T) {
 func TestCommerceMutationBarrierMissingCompletionBlocks(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := NewDevices(env.pool, 5*time.Second)
+	store := NewCommercePersistence(env.pool, 5*time.Second)
 	product := commerceProductID(0x1181)
 	err := store.WithProductSync(ctx, "shopify-main", product, func(held context.Context) error {
 		_, err := commerce.BeginProductMutation(held, strings.Repeat("c", 64))
@@ -111,7 +111,7 @@ func TestCommerceMutationResolverWaitsForLiveSequence(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	store := NewDevices(env.pool, 5*time.Second)
+	store := NewCommercePersistence(env.pool, 5*time.Second)
 	product := commerceProductID(0x1182)
 	entered, release := make(chan string, 1), make(chan struct{})
 	done := make(chan error, 1)

@@ -21,7 +21,7 @@ func TestPhase17R1VariantMappingTransitionCAS(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `UPDATE catalog_products SET store_id=$1 WHERE product_id=$2`, scope, product); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", product, variant, "500", "500"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", product, variant, "500", "500"); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -30,7 +30,7 @@ func TestPhase17R1VariantMappingTransitionCAS(t *testing.T) {
 		wg.Add(1)
 		go func(child string) {
 			defer wg.Done()
-			_, err := NewDevices(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", "500", child)
+			_, err := NewCommercePersistence(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", "500", child)
 			results <- err
 		}(child)
 	}
@@ -50,14 +50,14 @@ func TestPhase17R1VariantMappingTransitionCAS(t *testing.T) {
 	if wins != 1 || conflicts != 1 {
 		t.Fatalf("wins %d conflicts %d", wins, conflicts)
 	}
-	row, err := NewDevices(store.pool, store.timeout).GetProductVariantMapping(ctx, "website", variant)
+	row, err := NewCommercePersistence(store.pool, store.timeout).GetProductVariantMapping(ctx, "website", variant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = NewDevices(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", "500", row.ExternalVariantID); err != nil {
+	if _, err = NewCommercePersistence(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", "500", row.ExternalVariantID); err != nil {
 		t.Fatalf("same transition replay: %v", err)
 	}
-	if _, err = NewDevices(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", row.ExternalVariantID, "99"); !commerce.IsMappingConflict(err) {
+	if _, err = NewCommercePersistence(store.pool, store.timeout).UpdateProductVariantMappingExternal(ctx, "website", product, variant, "500", row.ExternalVariantID, "99"); !commerce.IsMappingConflict(err) {
 		t.Fatalf("arbitrary child remap accepted: %v", err)
 	}
 }

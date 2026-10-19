@@ -48,10 +48,10 @@ func TestCommerceMappingRepository(t *testing.T) {
 	seedStoreProduct(t, env, productA, productB)
 
 	// A mapping needs a projected product: it inherits that product's Store.
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", commerceProductID(0xF0), "ext-0"); !isCommerceNotFound(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", commerceProductID(0xF0), "ext-0"); !isCommerceNotFound(err) {
 		t.Fatalf("unprojected product: %v", err)
 	}
-	created, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-1")
+	created, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-1")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestCommerceMappingRepository(t *testing.T) {
 	}
 
 	// Same pair is idempotent, no duplicate.
-	again, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-1")
+	again, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-1")
 	if err != nil {
 		t.Fatalf("idempotent: %v", err)
 	}
@@ -75,17 +75,17 @@ func TestCommerceMappingRepository(t *testing.T) {
 	}
 
 	// Same provider+product, different external: conflict.
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-2"); !commerce.IsMappingConflict(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productA, "ext-2"); !commerce.IsMappingConflict(err) {
 		t.Fatalf("product conflict: %v", err)
 	}
 
 	// Same provider+external, different product: conflict.
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productB, "ext-1"); !commerce.IsMappingConflict(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productB, "ext-1"); !commerce.IsMappingConflict(err) {
 		t.Fatalf("external conflict: %v", err)
 	}
 
 	// Same product under a second provider: valid and independent.
-	other, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "website", productA, "ext-1")
+	other, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "website", productA, "ext-1")
 	if err != nil {
 		t.Fatalf("multi-provider: %v", err)
 	}
@@ -94,15 +94,15 @@ func TestCommerceMappingRepository(t *testing.T) {
 	}
 
 	// Lookups by product and by external ID.
-	found, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productA)
+	found, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productA)
 	if err != nil || found.ExternalProductID != "ext-1" {
 		t.Fatalf("lookup by product: %+v %v", found, err)
 	}
-	byExternal, err := NewDevices(store.pool, store.timeout).FindByExternalProductID(ctx, "primary", "ext-1")
+	byExternal, err := NewCommercePersistence(store.pool, store.timeout).FindByExternalProductID(ctx, "primary", "ext-1")
 	if err != nil || byExternal.ProductID != productA {
 		t.Fatalf("lookup by external: %+v %v", byExternal, err)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productB); !isCommerceNotFound(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productB); !isCommerceNotFound(err) {
 		t.Fatalf("missing lookup: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestCommerceMappingRepository(t *testing.T) {
 		{"bad product", "primary", "nope", "ext-9"},
 		{"empty external", "primary", productA, ""},
 	} {
-		if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, tc.key, tc.product, tc.external); err == nil {
+		if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, tc.key, tc.product, tc.external); err == nil {
 			t.Fatalf("%s must fail", tc.name)
 		}
 	}
@@ -136,7 +136,7 @@ func TestCommerceMappingConcurrentSame(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		go func() {
 			<-start
-			_, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, "ext-same")
+			_, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, "ext-same")
 			results <- err
 		}()
 	}
@@ -146,7 +146,7 @@ func TestCommerceMappingConcurrentSame(t *testing.T) {
 			t.Fatalf("concurrent same: %v", err)
 		}
 	}
-	stored, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
+	stored, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
 	if err != nil || stored.ExternalProductID != "ext-same" {
 		t.Fatalf("one mapping: %+v %v", stored, err)
 	}
@@ -171,7 +171,7 @@ func TestCommerceMappingConcurrentConflict(t *testing.T) {
 	for _, external := range []string{"ext-x", "ext-y"} {
 		go func(external string) {
 			<-start
-			_, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, external)
+			_, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, external)
 			results <- outcome{external, err}
 		}(external)
 	}
@@ -191,7 +191,7 @@ func TestCommerceMappingConcurrentConflict(t *testing.T) {
 	if winner == "" || conflicts != 1 {
 		t.Fatalf("one winner one conflict: %q %d", winner, conflicts)
 	}
-	stored, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
+	stored, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
 	if err != nil || stored.ExternalProductID != winner {
 		t.Fatalf("winner durable: %+v %v", stored, err)
 	}
@@ -242,7 +242,7 @@ func TestCommerceSyncEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := commerce.NewCatalogCommerceSource(catalog.NewService(store))
-	service := commerce.NewCommerceService(registry, NewDevices(store.pool, store.timeout), source, nilLogger())
+	service := commerce.NewCommerceService(registry, NewCommercePersistence(store.pool, store.timeout), source, nilLogger())
 
 	result, err := service.SyncProduct(ctx, "primary", productID)
 	if err != nil {
@@ -305,7 +305,7 @@ func TestCommerceSyncEndToEnd(t *testing.T) {
 	if provider.Creations() != 1 {
 		t.Fatalf("one remote product: %d", provider.Creations())
 	}
-	stored, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
+	stored, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
 	if err != nil || stored.ExternalProductID != result.ExternalProductID {
 		t.Fatalf("mapping: %+v %v", stored, err)
 	}
@@ -341,7 +341,7 @@ func TestCommerceAvailabilityFidelity(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := commerce.NewCatalogCommerceSource(catalog.NewService(store))
-	service := commerce.NewCommerceService(registry, NewDevices(store.pool, store.timeout), source, nilLogger())
+	service := commerce.NewCommerceService(registry, NewCommercePersistence(store.pool, store.timeout), source, nilLogger())
 	if _, err := service.SyncProduct(ctx, "primary", productID); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestCommerceMoneyExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := commerce.NewCatalogCommerceSource(catalog.NewService(store))
-	service := commerce.NewCommerceService(registry, NewDevices(store.pool, store.timeout), source, nilLogger())
+	service := commerce.NewCommerceService(registry, NewCommercePersistence(store.pool, store.timeout), source, nilLogger())
 	if _, err := service.SyncProduct(ctx, "primary", productID); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestCommerceTranslationFidelity(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := commerce.NewCatalogCommerceSource(catalog.NewService(store))
-	service := commerce.NewCommerceService(registry, NewDevices(store.pool, store.timeout), source, nilLogger())
+	service := commerce.NewCommerceService(registry, NewCommercePersistence(store.pool, store.timeout), source, nilLogger())
 	if _, err := service.SyncProduct(ctx, "primary", productID); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := commerce.NewCatalogCommerceSource(catalog.NewService(store))
-	service := commerce.NewCommerceService(registry, NewDevices(store.pool, store.timeout), source, nilLogger())
+	service := commerce.NewCommerceService(registry, NewCommercePersistence(store.pool, store.timeout), source, nilLogger())
 	first, err := service.SyncProduct(ctx, "primary", productID)
 	if err != nil {
 		t.Fatalf("sync: %v", err)
@@ -493,7 +493,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	}
 
 	// Mapping table untouched by the rebuild.
-	stored, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
+	stored, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID)
 	if err != nil || stored.ExternalProductID != first.ExternalProductID {
 		t.Fatalf("mapping survives reset: %+v %v", stored, err)
 	}
@@ -503,7 +503,7 @@ func TestCommerceMappingSurvivesCatalogRebuild(t *testing.T) {
 	if _, err := service.SyncProduct(ctx, "primary", productID); err == nil {
 		t.Fatal("product not ready during rebuild gap")
 	}
-	if _, err := NewDevices(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).GetProductMapping(ctx, "primary", productID); err != nil {
 		t.Fatalf("mapping retained during gap: %v", err)
 	}
 
@@ -595,7 +595,7 @@ func TestCommerceMappingConcurrentGate(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, "ext-gate")
+			_, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "primary", productID, "ext-gate")
 			errs <- err
 		}()
 	}

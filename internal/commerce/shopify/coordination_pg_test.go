@@ -53,7 +53,7 @@ func TestR1CrossInstanceSequence(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer b.Close()
-			coordA, coordB := postgres.NewDevices(a, 5*time.Second), postgres.NewDevices(b, 5*time.Second)
+			coordA, coordB := postgres.NewCommercePersistence(a, 5*time.Second), postgres.NewCommercePersistence(b, 5*time.Second)
 			h := newHarness(t)
 			pa, err := NewShopifyProvider(testConfig(), harnessClient(t, h), coordA)
 			if err != nil {
@@ -206,7 +206,7 @@ func TestR1CoordinationCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	coord := postgres.NewDevices(pool, time.Second)
+	coord := postgres.NewCommercePersistence(pool, time.Second)
 	entered, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
@@ -255,7 +255,7 @@ func TestR1LostCoordinationSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	coord := postgres.NewDevices(a, 5*time.Second)
+	coord := postgres.NewCommercePersistence(a, 5*time.Second)
 	h := newHarness(t)
 	p, err := NewShopifyProvider(testConfig(), harnessClient(t, h), coord)
 	if err != nil {
@@ -279,7 +279,7 @@ func TestR1LostCoordinationSession(t *testing.T) {
 	if got := len(h.recorded()); got != 0 {
 		t.Fatal("provider network occurred after lost session", got)
 	}
-	if err := postgres.NewDevices(b, 5*time.Second).WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error { return nil }); err != nil {
+	if err := postgres.NewCommercePersistence(b, 5*time.Second).WithProductSync(ctx, "shopify-main", "019c0000-0000-7000-8000-000000000011", func(context.Context) error { return nil }); err != nil {
 		t.Fatal("lost lock did not release", err)
 	}
 }

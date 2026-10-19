@@ -19,19 +19,19 @@ import (
 // Barriers observe the real workers at repository/provider boundaries. Timeout
 // guards report deadlocks; they do not determine interleaving or lease expiry.
 type r1Queue struct {
-	Devices
+	CommercePersistence
 	done chan struct{}
 }
 
 func (q *r1Queue) RetryProductReevaluation(ctx context.Context, c commerce.ProductReevaluation, next time.Time, code string) (bool, error) {
-	ok, err := q.Devices.RetryProductReevaluation(ctx, c, next, code)
+	ok, err := q.CommercePersistence.RetryProductReevaluation(ctx, c, next, code)
 	if c.ProductID == prodP1 {
 		q.done <- struct{}{}
 	}
 	return ok, err
 }
 func (q *r1Queue) CompleteProductReevaluation(ctx context.Context, c commerce.ProductReevaluation) (bool, error) {
-	ok, err := q.Devices.CompleteProductReevaluation(ctx, c)
+	ok, err := q.CommercePersistence.CompleteProductReevaluation(ctx, c)
 	if c.ProductID == prodP1 {
 		q.done <- struct{}{}
 	}
@@ -104,7 +104,7 @@ func TestR1ToggleDuringProvider(t *testing.T) {
 			t.Run(fmt.Sprintf("initial-%t-rapid-%t", initial, rapid), func(t *testing.T) {
 				pf := buildPolicyFixture(t)
 				ctx := context.Background()
-				d := NewDevices(pf.pool, 5*time.Second)
+				d := NewCommercePersistence(pf.pool, 5*time.Second)
 				r1ReadyProduct(t, pf)
 				drainReevaluations(t, d)
 				if !initial {
@@ -117,7 +117,7 @@ func TestR1ToggleDuringProvider(t *testing.T) {
 				if err := d.EnqueueProductReevaluation(ctx, prodP1, nil, "test"); err != nil {
 					t.Fatal(err)
 				}
-				q := &r1Queue{Devices: d, done: make(chan struct{}, 8)}
+				q := &r1Queue{CommercePersistence: d, done: make(chan struct{}, 8)}
 				p := &r1Provider{entered: make(chan commerce.ProductUpsertRequest, 8), release: make(chan struct{})}
 				reg := commerce.NewRegistry()
 				if err := reg.Register(p.Key(), p); err != nil {
@@ -183,7 +183,7 @@ func TestR1ToggleDuringProvider(t *testing.T) {
 func TestR1ClaimFencing(t *testing.T) {
 	pf := buildPolicyFixture(t)
 	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
+	d := NewCommercePersistence(pf.pool, 5*time.Second)
 	drainReevaluations(t, d)
 	enqueue := func() {
 		t.Helper()
@@ -306,7 +306,7 @@ func TestR1CategoryProductionDiscovery(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			f := openScopeFixture(t)
 			ctx := context.Background()
-			d := NewDevices(f.pool, 5*time.Second)
+			d := NewCommercePersistence(f.pool, 5*time.Second)
 			old, current := "98987777-0000-4000-8000-000000000001", "98987777-0000-4000-8000-000000000002"
 			send := func(id, typ string, rev int64, enabled bool) {
 				t.Helper()
@@ -358,7 +358,7 @@ func TestR1CategoryProductionDiscovery(t *testing.T) {
 func TestR1HealthSummaryDetailParity(t *testing.T) {
 	pf := buildPolicyFixture(t)
 	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
+	d := NewCommercePersistence(pf.pool, 5*time.Second)
 	r1ReadyProduct(t, pf)
 	// Missing inventory, Product-policy suppression and ready zero stock are
 	// distinct durable states. A second Store uses the same SKU independently.
@@ -438,7 +438,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 		t.Run(string(failed), func(t *testing.T) {
 			pf := buildPolicyFixture(t)
 			ctx := context.Background()
-			d := NewDevices(pf.pool, 5*time.Second)
+			d := NewCommercePersistence(pf.pool, 5*time.Second)
 			r1ReadyProduct(t, pf)
 			drainReevaluations(t, d)
 			providers := []*commerce.FakeProvider{commerce.NewFakeProvider("woo-local"), commerce.NewFakeProvider("shopify-local")}
@@ -455,7 +455,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 					p.FailUpsertOnce(prodP1, &commerce.ProviderError{Kind: commerce.ErrorTemporary, Message: "fixture"})
 				}
 			}
-			q := &r1Queue{Devices: d, done: make(chan struct{}, 8)}
+			q := &r1Queue{CommercePersistence: d, done: make(chan struct{}, 8)}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(NewCatalogProjection(d.pool, d.timeout))), logger)
 			run := func() {
@@ -500,7 +500,7 @@ func TestR1ProviderFailureIndependence(t *testing.T) {
 func TestR1NewPolicyBetweenProviders(t *testing.T) {
 	pf := buildPolicyFixture(t)
 	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
+	d := NewCommercePersistence(pf.pool, 5*time.Second)
 	r1ReadyProduct(t, pf)
 	drainReevaluations(t, d)
 	first := &r1Provider{key: "a-woo", entered: make(chan commerce.ProductUpsertRequest, 8), release: make(chan struct{})}
@@ -519,7 +519,7 @@ func TestR1NewPolicyBetweenProviders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	q := &r1Queue{Devices: d, done: make(chan struct{}, 8)}
+	q := &r1Queue{CommercePersistence: d, done: make(chan struct{}, 8)}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := commerce.NewCommerceService(reg, d, commerce.NewCatalogCommerceSource(catalog.NewService(NewCatalogProjection(d.pool, d.timeout))), logger)
 	run := func() (context.CancelFunc, chan struct{}) {
@@ -566,7 +566,7 @@ func TestR1NewPolicyBetweenProviders(t *testing.T) {
 func TestR1HealthReadOnlySuppression(t *testing.T) {
 	pf := buildPolicyFixture(t)
 	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
+	d := NewCommercePersistence(pf.pool, 5*time.Second)
 	r1ReadyProduct(t, pf)
 	pf.toggle(t, catIDA, false, 2)
 	if _, err := d.CreateProductMapping(ctx, "review", prodP3, "mapped-other"); err != nil {
@@ -588,7 +588,7 @@ func TestR1HealthReadOnlySuppression(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ro.Close()
-	readonly := NewDevices(ro, 5*time.Second)
+	readonly := NewCommercePersistence(ro, 5*time.Second)
 	for i := 0; i < 3; i++ {
 		summary, err := NewReporting(readonly.pool, readonly.timeout).CatalogHealthSummaryRows(ctx, scopeStoreA, "review")
 		if err != nil {
@@ -617,7 +617,7 @@ func TestR1HealthReadOnlySuppression(t *testing.T) {
 func TestR1CategoryProductionFanout(t *testing.T) {
 	pf := buildPolicyFixture(t)
 	ctx := context.Background()
-	d := NewDevices(pf.pool, 5*time.Second)
+	d := NewCommercePersistence(pf.pool, 5*time.Second)
 	drainReevaluations(t, d)
 	id := "98983333-0000-4000-8000-000000000001"
 	pf.ingest(t, pf.devA, pf.credA, id, catalog.EventCategorySnapshotV2, categoryV2Payload(catIDA, "active", map[string]string{"en": "A"}, nil, 2, false))

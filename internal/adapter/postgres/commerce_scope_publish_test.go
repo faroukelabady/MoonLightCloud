@@ -262,7 +262,7 @@ func TestPublish_CrossStoreTakeoverBlocked(t *testing.T) {
 	source := &stubDesiredSource{states: map[string]commerce.DesiredProduct{
 		prodB: desiredFor(prodB, "PUB-001", scopeStoreB, true, 20),
 	}}
-	service := publishService(t, provider, source, NewDevices(f.pool, 5*time.Second))
+	service := publishService(t, provider, source, NewCommercePersistence(f.pool, 5*time.Second))
 	_, err := service.SyncProduct(context.Background(), "website", prodB)
 	if err == nil {
 		t.Fatal("B takeover of A external resource must fail closed")
@@ -270,7 +270,7 @@ func TestPublish_CrossStoreTakeoverBlocked(t *testing.T) {
 	if !strings.Contains(err.Error(), "another product") && !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("stable conflict: %v", err)
 	}
-	mapping, merr := NewDevices(f.pool, 5*time.Second).GetProductMapping(context.Background(), "website", prodA)
+	mapping, merr := NewCommercePersistence(f.pool, 5*time.Second).GetProductMapping(context.Background(), "website", prodA)
 	if merr != nil || mapping.ExternalProductID != "750" {
 		t.Fatalf("A mapping intact: %+v (%v)", mapping, merr)
 	}
@@ -301,7 +301,7 @@ func TestPublish_SameInstanceFailsClosed(t *testing.T) {
 		prodA: desiredFor(prodA, "PUB-002", scopeStoreA, true, 5),
 		prodB: desiredFor(prodB, "PUB-002", scopeStoreB, true, 20),
 	}}
-	service := publishService(t, provider, source, NewDevices(f.pool, 5*time.Second))
+	service := publishService(t, provider, source, NewCommercePersistence(f.pool, 5*time.Second))
 	ctx := context.Background()
 	resA, err := service.SyncProduct(ctx, "website", prodA)
 	if err != nil {
@@ -314,7 +314,7 @@ func TestPublish_SameInstanceFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("second same-SKU publication on one instance must fail closed")
 	}
-	mappingA, merr := NewDevices(f.pool, 5*time.Second).GetProductMapping(ctx, "website", prodA)
+	mappingA, merr := NewCommercePersistence(f.pool, 5*time.Second).GetProductMapping(ctx, "website", prodA)
 	if merr != nil || mappingA.ExternalProductID != resA.ExternalProductID {
 		t.Fatalf("A mapping intact: %+v (%v)", mappingA, merr)
 	}
@@ -339,7 +339,7 @@ func TestPublish_IndependentInstancesCoexist(t *testing.T) {
 		prodA: desiredFor(prodA, "PUB-002B", scopeStoreA, true, 5),
 		prodB: desiredFor(prodB, "PUB-002B", scopeStoreB, true, 20),
 	}}
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommercePersistence(f.pool, 5*time.Second)
 	service := commerce.NewCommerceService(registry, devices, source, slog.Default())
 	ctx := context.Background()
 	resA, err := service.SyncProduct(ctx, "website", prodA)
@@ -372,7 +372,7 @@ func TestPublish_AmbiguousPostRecovery(t *testing.T) {
 	source := &stubDesiredSource{states: map[string]commerce.DesiredProduct{
 		prodA: desiredFor(prodA, "AMB-001", scopeStoreA, true, 5),
 	}}
-	service := publishService(t, provider, source, NewDevices(f.pool, 5*time.Second))
+	service := publishService(t, provider, source, NewCommercePersistence(f.pool, 5*time.Second))
 	ctx := context.Background()
 	if _, err := service.SyncProduct(ctx, "website", prodA); err == nil {
 		t.Fatal("first attempt must observe the dropped response")
@@ -394,7 +394,7 @@ func TestPublish_AmbiguousPostRecovery(t *testing.T) {
 	if remote != 1 {
 		t.Fatalf("one remote product: %d", remote)
 	}
-	mapping, err := NewDevices(f.pool, 5*time.Second).GetProductMapping(ctx, "website", prodA)
+	mapping, err := NewCommercePersistence(f.pool, 5*time.Second).GetProductMapping(ctx, "website", prodA)
 	if err != nil || mapping.ExternalProductID != res.ExternalProductID {
 		t.Fatalf("mapping recovered: %+v (%v)", mapping, err)
 	}
@@ -415,7 +415,7 @@ func TestPublish_SafeZeroStoreScoped(t *testing.T) {
 	source := &stubDesiredSource{states: map[string]commerce.DesiredProduct{
 		prodA: desiredFor(prodA, "PUB-003", scopeStoreA, false, 0),
 	}}
-	service := publishService(t, provider, source, NewDevices(f.pool, 5*time.Second))
+	service := publishService(t, provider, source, NewCommercePersistence(f.pool, 5*time.Second))
 	res, err := service.SyncProduct(context.Background(), "website", prodA)
 	if err != nil {
 		t.Fatalf("safe-zero sync: %v", err)

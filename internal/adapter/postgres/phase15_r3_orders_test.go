@@ -22,10 +22,10 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 		t.Fatal(e)
 	}
 	store := catalogStore(env)
-	if _, e = NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "website", p, "500"); e != nil {
+	if _, e = NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "website", p, "500"); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = NewDevices(store.pool, store.timeout).UpsertProductConfigurationMapping(ctx, "website", p, c, "500", "501"); e != nil {
+	if _, e = NewCommercePersistence(store.pool, store.timeout).UpsertProductConfigurationMapping(ctx, "website", p, c, "500", "501"); e != nil {
 		t.Fatal(e)
 	}
 	snapshot := orderTestSnapshot("website", "15001", orders.StatusPending, "pending", 130000)
@@ -106,7 +106,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	}
 	t.Log("F13 regression: late mapping preserves both unresolved history and incomplete header")
 
-	if _, e = NewDevices(store.pool, store.timeout).UpsertProductConfigurationMapping(ctx, "website", p, "00000000-0000-0000-0000-000000000000", "500", "502"); e != nil {
+	if _, e = NewCommercePersistence(store.pool, store.timeout).UpsertProductConfigurationMapping(ctx, "website", p, "00000000-0000-0000-0000-000000000000", "500", "502"); e != nil {
 		t.Fatal(e)
 	}
 	nf := orderTestSnapshot("website", "15003", orders.StatusPending, "pending", 100000)
@@ -163,7 +163,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	if label != "Original" || delta != 30000 {
 		t.Fatal("mapping loss changed history")
 	}
-	if _, e = NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "website", p, "500"); e != nil {
+	if _, e = NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "website", p, "500"); e != nil {
 		t.Fatal(e)
 	}
 	// Disabled and missing-current-currency metadata never revise a captured

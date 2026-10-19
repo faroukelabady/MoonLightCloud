@@ -51,7 +51,7 @@ func mappingStore(t *testing.T, f *scopeFixture, provider, product string) *stri
 
 func createMapping(t *testing.T, f *scopeFixture, provider, product, external string) commerce.ProductMapping {
 	t.Helper()
-	mapping, err := NewDevices(f.pool, 5*time.Second).CreateProductMapping(
+	mapping, err := NewCommercePersistence(f.pool, 5*time.Second).CreateProductMapping(
 		context.Background(), commerce.ProviderKey(provider), product, external)
 	if err != nil {
 		t.Fatalf("create mapping: %v", err)
@@ -84,7 +84,7 @@ func TestMapping_CrossStoreConflict(t *testing.T) {
 	f := openScopeFixture(t)
 	prodA, prodB := scopeProducts(t, f, 440, "mc", "MAP-002")
 	createMapping(t, f, "website", prodA, "910")
-	store := NewDevices(f.pool, 5*time.Second)
+	store := NewCommercePersistence(f.pool, 5*time.Second)
 	ctx := context.Background()
 	if _, err := store.CreateProductMapping(ctx, "website", prodA, "911"); err == nil {
 		t.Fatal("remap same product must conflict")
@@ -117,7 +117,7 @@ func TestMapping_ConcurrentAdoption(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			store := NewDevices(f.pool, 5*time.Second)
+			store := NewCommercePersistence(f.pool, 5*time.Second)
 			_, errs[i] = store.CreateProductMapping(context.Background(), "website", prodA, "920")
 		}(i)
 	}
@@ -163,7 +163,7 @@ func TestMapping_PublicationEnumeration(t *testing.T) {
 		catalog.EventProductSalesPolicySnapshotV1, policyPayload(prodB, 1, true, true, policyInt(10)))
 	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, 510, 1), catalog.EventProductSalesPolicySnapshotV1), catalog.OutcomeProcessed, "")
 	requireOutcome(t, f.projectCatalog(t, uuidEvent(t, 510, 2), catalog.EventProductSalesPolicySnapshotV1), catalog.OutcomeProcessed, "")
-	store := NewDevices(f.pool, 5*time.Second)
+	store := NewCommercePersistence(f.pool, 5*time.Second)
 	ctx := context.Background()
 	onlyA, err := NewCatalogProjection(store.pool, store.timeout).CatalogOnlineConfiguredProductsForStore(ctx, scopeStoreA, 100)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestMapping_ExternalClaimRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int, prod string) {
 			defer wg.Done()
-			store := NewDevices(f.pool, 5*time.Second)
+			store := NewCommercePersistence(f.pool, 5*time.Second)
 			mapping, err := store.CreateProductMapping(context.Background(), "website", prod, "940")
 			outs[i].mapping, outs[i].err = mapping, err
 		}(i, prod)

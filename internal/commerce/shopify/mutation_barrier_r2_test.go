@@ -34,7 +34,7 @@ type r2Fixture struct {
 	ctx      context.Context
 	database string
 	pool     *pgxpool.Pool
-	store    postgres.Devices
+	store    postgres.CommercePersistence
 	h        *shopifyHarness
 	provider *ShopifyProvider
 	product  string
@@ -63,7 +63,7 @@ func newR2Fixture(t *testing.T) *r2Fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	store := postgres.NewDevices(pool, 5*time.Second)
+	store := postgres.NewCommercePersistence(pool, 5*time.Second)
 	h := newHarness(t)
 	provider, err := NewShopifyProvider(testConfig(), harnessClient(t, h), store)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestR2DelayedRemoteEffectRequiresConfirmedSettlement(t *testing.T) {
 	source.set(fresh)
 	newerDone := make(chan error, 1)
 	go func() {
-		independent := postgres.NewDevices(f.newPool(t), 5*time.Second)
+		independent := postgres.NewCommercePersistence(f.newPool(t), 5*time.Second)
 		next, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), independent)
 		if err != nil {
 			newerDone <- err
@@ -308,7 +308,7 @@ func TestR2DelayedRemoteEffectRequiresConfirmedSettlement(t *testing.T) {
 	// Coordinator recreation: the barrier persists and still blocks.
 	f.restoreHarness()
 	before := len(f.h.recorded())
-	restarted := postgres.NewDevices(f.newPool(t), 5*time.Second)
+	restarted := postgres.NewCommercePersistence(f.newPool(t), 5*time.Second)
 	third, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), restarted)
 	if err != nil {
 		t.Fatal(err)

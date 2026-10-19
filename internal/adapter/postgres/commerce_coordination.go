@@ -17,7 +17,7 @@ import (
 // The dedicated
 // connection owns it until the complete callback ends or the connection closes.
 // Hash collisions only over-serialize unrelated products; they cannot weaken it.
-func (d Devices) WithProductSync(ctx context.Context, provider commerce.ProviderKey, product string, work func(context.Context) error) error {
+func (d CommercePersistence) WithProductSync(ctx context.Context, provider commerce.ProviderKey, product string, work func(context.Context) error) error {
 	if commerce.ProductSyncHeld(ctx, provider, product) {
 		return work(ctx)
 	}

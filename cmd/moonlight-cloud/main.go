@@ -433,7 +433,7 @@ func runCommerceSyncOrder(ctx context.Context, orderService *orders.OrderService
 // commerceEnv holds one CLI invocation's database pool and wired
 // commerce services. The pool stays open until close runs.
 type commerceEnv struct {
-	store          postgres.Devices
+	store          postgres.CommercePersistence
 	pool           interface{ Close() }
 	productService *commerce.CommerceService
 	registry       *commerce.Registry
@@ -458,7 +458,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 	if err != nil {
 		return nil, err
 	}
-	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	store := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	registry, err := app.NewCommerceRegistry(cfg, store)
 	if err != nil {
 		pool.Close()

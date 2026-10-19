@@ -33,7 +33,7 @@ func newReceiptStack(t *testing.T) (*bundleFixture, string, func(**pgxpool.Pool)
 	t.Helper()
 	f := newBundleFixture(t)
 	provider := func(pool **pgxpool.Pool) *ShopifyProvider {
-		p, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(*pool, 5*time.Second))
+		p, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(*pool, 5*time.Second))
 		if err != nil {
 			t.Fatal(err)
 		}

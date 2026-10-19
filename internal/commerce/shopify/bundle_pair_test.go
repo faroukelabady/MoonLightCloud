@@ -42,13 +42,13 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	d := postgres.NewDevices(pool, 5*time.Second)
+	d := postgres.NewCommercePersistence(pool, 5*time.Second)
 	catalogStore := postgres.NewCatalogProjection(pool, 5*time.Second)
 	hasher, err := auth.NewHasher(bytes.Repeat([]byte{'r'}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	authentication := auth.NewService(d, hasher, "", 1, clock.System{}, ids.System{})
+	authentication := auth.NewService(postgres.NewDevices(pool, 5*time.Second), hasher, "", 1, clock.System{}, ids.System{})
 	device, err := authentication.Create(ctx, "candidate-retail")
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	d = postgres.NewDevices(pool, 5*time.Second)
+	d = postgres.NewCommercePersistence(pool, 5*time.Second)
 	catalogStore = postgres.NewCatalogProjection(pool, 5*time.Second)
 	p = f.Provider(t, d)
 	registry = commerce.NewRegistry()

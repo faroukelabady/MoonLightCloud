@@ -175,8 +175,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
 	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
+	commerceStore := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)
-	a.CommerceRegistry, err = NewCommerceRegistry(cfg, store)
+	a.CommerceRegistry, err = NewCommerceRegistry(cfg, commerceStore)
 	if err != nil {
 		pool.Close()
 		return nil, err
@@ -222,8 +223,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		// the exact same CommerceService the manual CLI uses. The store
 		// doubles as the durable queue; no provider I/O runs in any
 		// projection transaction.
-		a.CommerceService = NewCommerceService(store, catalogStore, a.CommerceRegistry, log)
-		a.ReevaluationWorker = commerce.NewReevaluationWorker(store, a.CommerceService, a.CommerceRegistry, time.Now, log)
+		a.CommerceService = NewCommerceService(commerceStore, catalogStore, a.CommerceRegistry, log)
+		a.ReevaluationWorker = commerce.NewReevaluationWorker(commerceStore, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
 		"orders", ordersEnabled)

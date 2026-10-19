@@ -46,7 +46,7 @@ func TestMutationBarrierResponseEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer pool.Close()
-			store := postgres.NewDevices(pool, 5*time.Second)
+			store := postgres.NewCommercePersistence(pool, 5*time.Second)
 			h := newHarness(t)
 			p, err := NewShopifyProvider(testConfig(), harnessClient(t, h), store)
 			if err != nil {
@@ -117,7 +117,7 @@ func TestMutationBarrierPersistenceFaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer pool.Close()
-			store := postgres.NewDevices(pool, 5*time.Second)
+			store := postgres.NewCommercePersistence(pool, 5*time.Second)
 			h := newHarness(t)
 			p, _ := NewShopifyProvider(testConfig(), harnessClient(t, h), store)
 			triggerEvent := "INSERT"

@@ -16,7 +16,7 @@ import (
 )
 
 type productMutationBarrier struct {
-	store    Devices
+	store    CommercePersistence
 	provider commerce.ProviderKey
 	product  pgtype.UUID
 	mu       sync.Mutex
@@ -91,7 +91,7 @@ func (b *productMutationBarrier) retain() {
 	// Failure here is safe: an in_flight row blocks just as an uncertain row does.
 	_, _ = sqlcgen.New(b.store.pool).MarkCommerceMutationUncertain(ctx, sqlcgen.MarkCommerceMutationUncertainParams{OperationID: b.token, ProviderKey: string(b.provider), ProductID: b.product})
 }
-func (d Devices) GetProductMutationBarrier(ctx context.Context, provider commerce.ProviderKey, product string) (commerce.MutationBarrierStatus, error) {
+func (d CommercePersistence) GetProductMutationBarrier(ctx context.Context, provider commerce.ProviderKey, product string) (commerce.MutationBarrierStatus, error) {
 	if _, err := commerce.ValidateProviderKey(string(provider)); err != nil {
 		return commerce.MutationBarrierStatus{}, commerce.ValidationError("invalid provider key")
 	}
@@ -114,7 +114,7 @@ func (d Devices) GetProductMutationBarrier(ctx context.Context, provider commerc
 // Resolve requires explicit operator confirmation of remote settlement, never
 // a local timeout, fresh GET or observed expiry. It uses the same sequence lock
 // and expected operation identity; a late resolver cannot release newer work.
-func (d Devices) ResolveProductMutationBarrier(ctx context.Context, provider commerce.ProviderKey, product, operation, resolution string, confirmed bool) error {
+func (d CommercePersistence) ResolveProductMutationBarrier(ctx context.Context, provider commerce.ProviderKey, product, operation, resolution string, confirmed bool) error {
 	if !confirmed || (resolution != "remote_completed" && resolution != "remote_not_applied") {
 		return commerce.ValidationError("explicit remote settlement confirmation required")
 	}

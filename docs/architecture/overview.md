@@ -46,9 +46,10 @@ ownership arbitration; `ProjectionState` owns shared diagnostics/manual retry SQ
 including their transaction-local commerce queue writes. Commerce orchestration
 receives catalog reads and provider mappings as separate collaborators.
 The dashboard depends only on the diagnostic reader, not projection mutation.
-Each type satisfies its domain store contracts directly. The remaining
-`Devices` families are still being extracted; these types do not embed that
-universal repository. Cross-table atomic operations remain in one transaction.
+`CommercePersistence` owns provider mappings, reevaluation and durable product
+mutation coordination. `Devices` now owns only device identity and credential
+authentication persistence. Each type satisfies its domain contracts directly;
+none embeds a universal repository. Cross-table atomic operations remain in one transaction.
 
 Reporting and dashboard services select a scope-bound Reader once per
 operation, after HTTP permissions and Store membership checks. Global reads

@@ -262,7 +262,7 @@ func TestCategoryOnlineFanOutExactness(t *testing.T) {
 			productPayload(id, fmt.Sprintf("PAP-%d", i), "P", top, nil, nil, 1))
 	}
 	// Drain the product-classification enqueue noise before measuring.
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommercePersistence(f.pool, 5*time.Second)
 	drainReevaluations(t, devices)
 
 	// Disabling root affects exactly the 3 subtree Products.
@@ -315,7 +315,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 	project(catalog.EventProductSnapshotV2,
 		productPayload(productID, "PAP-MOVE", "Move", rootOn, []string{sub}, nil, 1))
 
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommercePersistence(f.pool, 5*time.Second)
 	drainReevaluations(t, devices)
 	state := policyOrFail(t, NewCatalogProjection(devices.pool, devices.timeout), productID)
 	if !state.Allowed {
@@ -347,7 +347,7 @@ func TestCategoryOnlineParentEdgeChangeFiresFanOut(t *testing.T) {
 }
 
 // reevaluationRows lists pending Product re-evaluation requests.
-func reevaluationRows(t *testing.T, d Devices) []string {
+func reevaluationRows(t *testing.T, d CommercePersistence) []string {
 	t.Helper()
 	rows, err := d.pool.Query(context.Background(), "SELECT product_id::text FROM commerce_product_reevaluations ORDER BY product_id")
 	if err != nil {
@@ -369,7 +369,7 @@ func reevaluationRows(t *testing.T, d Devices) []string {
 }
 
 // drainReevaluations clears queued work (test setup only).
-func drainReevaluations(t *testing.T, d Devices) {
+func drainReevaluations(t *testing.T, d CommercePersistence) {
 	t.Helper()
 	ctx := context.Background()
 	rows, err := d.ClaimProductReevaluations(ctx, 100, time.Now().Add(time.Hour))
@@ -461,7 +461,7 @@ func TestReevaluationQueueRecoversAbandonedWork(t *testing.T) {
 		id := fmt.Sprintf("44444444-0000-4000-8000-%012d", i)
 		project(catalog.EventProductSnapshotV2, productPayload(id, fmt.Sprintf("PAP-R%d", i), "P", root, nil, nil, 1))
 	}
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommercePersistence(f.pool, 5*time.Second)
 	drainReevaluations(t, devices)
 	project(catalog.EventCategorySnapshotV2, categoryV2Payload(root, "active", map[string]string{"en": "R"}, nil, 2, false))
 

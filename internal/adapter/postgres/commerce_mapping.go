@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Commerce mapping repository on Devices (shared pool + timeouts).
+// Commerce mapping repository on CommercePersistence (shared pool + timeouts).
 // Mappings are durable integration state, never derived projections:
 // no rebuild path touches this table.
 
@@ -25,7 +25,7 @@ func commerceMappingFromRow(providerKey string, productID pgtype.UUID, external 
 }
 
 // GetCommerceProductMapping returns one provider product mapping.
-func (d Devices) GetProductMapping(ctx context.Context, providerKey commerce.ProviderKey, productID string) (commerce.ProductMapping, error) {
+func (d CommercePersistence) GetProductMapping(ctx context.Context, providerKey commerce.ProviderKey, productID string) (commerce.ProductMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -49,7 +49,7 @@ func (d Devices) GetProductMapping(ctx context.Context, providerKey commerce.Pro
 
 // FindCommerceProductMappingByExternal returns the mapping holding one
 // external product identity.
-func (d Devices) FindByExternalProductID(ctx context.Context, providerKey commerce.ProviderKey, externalID string) (commerce.ProductMapping, error) {
+func (d CommercePersistence) FindByExternalProductID(ctx context.Context, providerKey commerce.ProviderKey, externalID string) (commerce.ProductMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -76,7 +76,7 @@ func (d Devices) FindByExternalProductID(ctx context.Context, providerKey commer
 // constraints are the backstop under concurrency: the insert wins or the
 // read-back classifies, so concurrent same-pair attempts resolve
 // idempotently and conflicting attempts never silently overwrite.
-func (d Devices) CreateProductMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, externalID string) (commerce.ProductMapping, error) {
+func (d CommercePersistence) CreateProductMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, externalID string) (commerce.ProductMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -140,12 +140,12 @@ func (d Devices) CreateProductMapping(ctx context.Context, providerKey commerce.
 	return commerce.ProductMapping{}, apperr.Wrap(apperr.Internal, "commerce mapping", redact(err))
 }
 
-var _ commerce.ProductMappingRepository = Devices{}
+var _ commerce.ProductMappingRepository = CommercePersistence{}
 
 // ListProductMappingsForStore enumerates one Store's mappings for one
 // provider. No global list exists, so there is no legacy behavior to
 // preserve: administration uses provider-keyed point reads.
-func (d Devices) ListProductMappingsForStore(ctx context.Context, providerKey commerce.ProviderKey, storeID string) ([]commerce.ProductMapping, error) {
+func (d CommercePersistence) ListProductMappingsForStore(ctx context.Context, providerKey commerce.ProviderKey, storeID string) ([]commerce.ProductMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -172,7 +172,7 @@ func (d Devices) ListProductMappingsForStore(ctx context.Context, providerKey co
 // ownership-keyed by (provider, product, configuration). Never matched
 // by labels or SKU. Rows survive disable/re-enable (§63).
 
-func (d Devices) GetProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID string) (commerce.ProductConfigurationMapping, error) {
+func (d CommercePersistence) GetProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID string) (commerce.ProductConfigurationMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	puid, err := parseUUID(productID)
@@ -195,7 +195,7 @@ func (d Devices) GetProductConfigurationMapping(ctx context.Context, providerKey
 	return configurationMappingFromRow(row), nil
 }
 
-func (d Devices) FindConfigurationByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+func (d CommercePersistence) FindConfigurationByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).FindCommerceProductConfigurationMappingByExternal(ctx, sqlcgen.FindCommerceProductConfigurationMappingByExternalParams{
@@ -210,7 +210,7 @@ func (d Devices) FindConfigurationByExternal(ctx context.Context, providerKey co
 	return configurationMappingFromRow(row), nil
 }
 
-func (d Devices) UpsertProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
+func (d CommercePersistence) UpsertProductConfigurationMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, configurationID, externalProductID, externalConfigurationID string) (commerce.ProductConfigurationMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	puid, err := parseUUID(productID)
@@ -257,7 +257,7 @@ func configurationMappingFromRow(row sqlcgen.CommerceProductConfigurationMapping
 // UpdateProductMappingExternal is the Phase 15-R1 F07 (§116) documented
 // simple→framed sellable-identity transition: compare-and-set, never a
 // blind overwrite.
-func (d Devices) UpdateProductMappingExternal(ctx context.Context, providerKey commerce.ProviderKey, productID, expectedExternalID, newExternalID string) (commerce.ProductMapping, error) {
+func (d CommercePersistence) UpdateProductMappingExternal(ctx context.Context, providerKey commerce.ProviderKey, productID, expectedExternalID, newExternalID string) (commerce.ProductMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if expectedExternalID == newExternalID {
@@ -297,7 +297,7 @@ func variantMappingFromRow(row sqlcgen.CommerceProductVariantMapping) commerce.P
 }
 
 // GetProductVariantMapping returns one provider variant mapping.
-func (d Devices) GetProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, variantID string) (commerce.ProductVariantMapping, error) {
+func (d CommercePersistence) GetProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, variantID string) (commerce.ProductVariantMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -321,7 +321,7 @@ func (d Devices) GetProductVariantMapping(ctx context.Context, providerKey comme
 
 // ListProductVariantMappings returns every mapped variant of one product
 // for one provider instance (adapter reconciliation input).
-func (d Devices) ListProductVariantMappings(ctx context.Context, providerKey commerce.ProviderKey, productID string) ([]commerce.ProductVariantMapping, error) {
+func (d CommercePersistence) ListProductVariantMappings(ctx context.Context, providerKey commerce.ProviderKey, productID string) ([]commerce.ProductVariantMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -347,7 +347,7 @@ func (d Devices) ListProductVariantMappings(ctx context.Context, providerKey com
 // FindProductVariantMappingByExternal returns the mapping holding one
 // provider variation identity (order-line variant resolution and
 // mapping-loss recovery evidence).
-func (d Devices) FindProductVariantMappingByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+func (d CommercePersistence) FindProductVariantMappingByExternal(ctx context.Context, providerKey commerce.ProviderKey, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -376,7 +376,7 @@ func (d Devices) FindProductVariantMappingByExternal(ctx context.Context, provid
 // variant, or the same external pair for a different variant, is a typed
 // conflict. Uniqueness constraints are the backstop under concurrency:
 // the insert wins or the read-back classifies.
-func (d Devices) CreateProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, variantID, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
+func (d CommercePersistence) CreateProductVariantMapping(ctx context.Context, providerKey commerce.ProviderKey, productID, variantID, externalProductID, externalVariantID string) (commerce.ProductVariantMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -462,7 +462,7 @@ func (d Devices) CreateProductVariantMapping(ctx context.Context, providerKey co
 
 // UpdateProductVariantMappingExternal permits only the proven parent-to-child
 // transition. Store ownership and the previous tuple are fenced in SQL.
-func (d Devices) UpdateProductVariantMappingExternal(ctx context.Context, key commerce.ProviderKey, productID, variantID, parent, previous, next string) (commerce.ProductVariantMapping, error) {
+func (d CommercePersistence) UpdateProductVariantMappingExternal(ctx context.Context, key commerce.ProviderKey, productID, variantID, parent, previous, next string) (commerce.ProductVariantMapping, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(key)); err != nil {

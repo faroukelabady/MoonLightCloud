@@ -34,7 +34,7 @@ func TestR3LostReceiptAndChangedIntent(t *testing.T) {
 			defer func() { pool.Close() }()
 			f := newBundleFixture(t)
 			provider := func() *ShopifyProvider {
-				p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+				p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -99,7 +99,7 @@ func TestR3IncompletePaginationRefusesPriceWrites(t *testing.T) {
 			}
 			defer pool.Close()
 			f := newBundleFixture(t)
-			p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+			p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -164,7 +164,7 @@ func TestR3ProviderServiceErrorPrivacy(t *testing.T) {
 					t.Fatal(e)
 				}
 				defer pool.Close()
-				d := postgres.NewDevices(pool, 5*time.Second)
+				d := postgres.NewCommercePersistence(pool, 5*time.Second)
 				f := newBundleFixture(t)
 				p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), d)
 				if e != nil {
@@ -226,7 +226,7 @@ func TestR3MappingFailureAdoptsReceipt(t *testing.T) {
 	seedR3Product(t, pool, req.ProductID)
 	req.Product.Configurations = []commerce.CommerceConfiguration{frameConfig("019c0000-0000-7000-8000-000000000082", "classic", "black", "Classic", "Black", 1000, nil, true)}
 	makeService := func() *commerce.CommerceService {
-		d := postgres.NewDevices(pool, 5*time.Second)
+		d := postgres.NewCommercePersistence(pool, 5*time.Second)
 		p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), d)
 		if e != nil {
 			t.Fatal(e)
@@ -299,7 +299,7 @@ func TestR3ReceiptProcessHelper(t *testing.T) {
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: trust, MinVersion: tls.VersionTLS12}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: r3ProcessTransport{os.Getenv("R3_RECEIPT_URL"), transport}, Timeout: 10 * time.Second}
-	d := postgres.NewDevices(pool, 5*time.Second)
+	d := postgres.NewCommercePersistence(pool, 5*time.Second)
 	p, e := NewShopifyProvider(testConfig(), client, d)
 	if e != nil {
 		t.Fatal(e)

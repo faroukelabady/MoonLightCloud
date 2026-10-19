@@ -18,7 +18,7 @@ import (
 // SKIP-LOCKED claim with lease). Store ownership rides the Product row;
 // nothing here contacts providers.
 
-func (d Devices) ClaimProductReevaluations(ctx context.Context, limit int, leaseUntil time.Time) ([]commerce.ProductReevaluation, error) {
+func (d CommercePersistence) ClaimProductReevaluations(ctx context.Context, limit int, leaseUntil time.Time) ([]commerce.ProductReevaluation, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	token, err := parseUUID(ids.System{}.New())
@@ -47,7 +47,7 @@ func (d Devices) ClaimProductReevaluations(ctx context.Context, limit int, lease
 
 // Completion and retry return false for stale or expired claims. The opaque
 // token also distinguishes a deleted/reinserted Product queue row.
-func (d Devices) CompleteProductReevaluation(ctx context.Context, claim commerce.ProductReevaluation) (bool, error) {
+func (d CommercePersistence) CompleteProductReevaluation(ctx context.Context, claim commerce.ProductReevaluation) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(claim.ProductID)
@@ -67,7 +67,7 @@ func (d Devices) CompleteProductReevaluation(ctx context.Context, claim commerce
 	return acknowledged.Bool, nil
 }
 
-func (d Devices) RetryProductReevaluation(ctx context.Context, claim commerce.ProductReevaluation, next time.Time, code string) (bool, error) {
+func (d CommercePersistence) RetryProductReevaluation(ctx context.Context, claim commerce.ProductReevaluation, next time.Time, code string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(claim.ProductID)
@@ -91,7 +91,7 @@ func (d Devices) RetryProductReevaluation(ctx context.Context, claim commerce.Pr
 // EnqueueProductReevaluation records one Product re-evaluation request
 // (coalescing: repeats collapse into the single Product row). Used by
 // the product projector when classification changes and by operators.
-func (d Devices) EnqueueProductReevaluation(ctx context.Context, productID string, storeID *string, reason string) error {
+func (d CommercePersistence) EnqueueProductReevaluation(ctx context.Context, productID string, storeID *string, reason string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(productID)
@@ -126,7 +126,7 @@ func (d Devices) EnqueueProductReevaluation(ctx context.Context, productID strin
 // EnqueueCategoryAffectedReevaluations enqueues every Product whose
 // classification reaches the Category or any DAG descendant of it
 // (set-based, Store-proven only). Returns the number of rows scheduled.
-func (d Devices) EnqueueCategoryAffectedReevaluations(ctx context.Context, categoryID string, storeID *string, reason string) (int64, error) {
+func (d CommercePersistence) EnqueueCategoryAffectedReevaluations(ctx context.Context, categoryID string, storeID *string, reason string) (int64, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	cuid, err := parseUUID(categoryID)
@@ -144,4 +144,4 @@ func (d Devices) EnqueueCategoryAffectedReevaluations(ctx context.Context, categ
 	return sqlcgen.New(d.pool).EnqueueCategoryAffectedReevaluations(ctx, params)
 }
 
-var _ commerce.ProductReevaluationStore = (*Devices)(nil)
+var _ commerce.ProductReevaluationStore = (*CommercePersistence)(nil)

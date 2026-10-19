@@ -34,7 +34,7 @@ func TestR1InFlightCancellation(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer b.Close()
-	coordA, coordB := postgres.NewDevices(a, 5*time.Second), postgres.NewDevices(b, 5*time.Second)
+	coordA, coordB := postgres.NewCommercePersistence(a, 5*time.Second), postgres.NewCommercePersistence(b, 5*time.Second)
 	h := newHarness(t)
 	pa, _ := NewShopifyProvider(testConfig(), harnessClient(t, h), coordA)
 	pb, _ := NewShopifyProvider(testConfig(), harnessClient(t, h), coordB)
@@ -105,7 +105,7 @@ func TestR1InFlightCancellation(t *testing.T) {
 	}
 	// A new coordinator represents process restart. Neither elapsed time nor
 	// matching remote state releases the old barrier.
-	restarted := postgres.NewDevices(b, 5*time.Second)
+	restarted := postgres.NewCommercePersistence(b, 5*time.Second)
 	if err := restarted.WithProductSync(ctx, "shopify-main", blocked.ProductID, func(context.Context) error { t.Fatal("restart callback ran"); return nil }); err == nil {
 		t.Fatal("restart erased uncertainty")
 	}

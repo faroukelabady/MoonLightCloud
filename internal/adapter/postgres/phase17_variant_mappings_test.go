@@ -22,7 +22,7 @@ func TestCommerceProductVariantMappingLifecycle(t *testing.T) {
 	_, prodID := seedCatalogProduct(t, env, 600, "ML-P-6")
 	vid := catalogIDs(t, 620, "v")["v"]
 
-	created, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77")
+	created, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,38 +30,38 @@ func TestCommerceProductVariantMappingLifecycle(t *testing.T) {
 		t.Fatalf("created: %+v", created)
 	}
 	// Same pair is idempotent.
-	again, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77")
+	again, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77")
 	if err != nil || again.ExternalVariantID != "77" {
 		t.Fatalf("idempotent replay: %+v %v", again, err)
 	}
 	// Same variant, different external variation: conflict (never remap).
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "78"); !commerce.IsMappingConflict(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "78"); !commerce.IsMappingConflict(err) {
 		t.Fatalf("remap must conflict: %v", err)
 	}
 	// Same external pair, different variant: conflict (never merge).
 	other := catalogIDs(t, 621, "v")["v"]
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, other, "500", "77"); !commerce.IsMappingConflict(err) {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, other, "500", "77"); !commerce.IsMappingConflict(err) {
 		t.Fatalf("external reuse must conflict: %v", err)
 	}
 	// Independent per provider instance (Woo + Shopify same product).
-	shopify, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "shopify-main", prodID, vid, "9000000001", "9100000001")
+	shopify, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "shopify-main", prodID, vid, "9000000001", "9100000001")
 	if err != nil || shopify.ExternalVariantID != "9100000001" {
 		t.Fatalf("independent provider mapping: %+v %v", shopify, err)
 	}
 	// Read surfaces.
-	got, err := NewDevices(store.pool, store.timeout).GetProductVariantMapping(ctx, "website", vid)
+	got, err := NewCommercePersistence(store.pool, store.timeout).GetProductVariantMapping(ctx, "website", vid)
 	if err != nil || got.ExternalVariantID != "77" {
 		t.Fatalf("get: %+v %v", got, err)
 	}
-	list, err := NewDevices(store.pool, store.timeout).ListProductVariantMappings(ctx, "website", prodID)
+	list, err := NewCommercePersistence(store.pool, store.timeout).ListProductVariantMappings(ctx, "website", prodID)
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %+v %v", list, err)
 	}
-	found, err := NewDevices(store.pool, store.timeout).FindProductVariantMappingByExternal(ctx, "website", "500", "77")
+	found, err := NewCommercePersistence(store.pool, store.timeout).FindProductVariantMappingByExternal(ctx, "website", "500", "77")
 	if err != nil || found.VariantID != vid {
 		t.Fatalf("find by external: %+v %v", found, err)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).FindProductVariantMappingByExternal(ctx, "website", "500", "nope"); err == nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).FindProductVariantMappingByExternal(ctx, "website", "500", "nope"); err == nil {
 		t.Fatal("unknown external variation must not resolve")
 	}
 }
@@ -82,10 +82,10 @@ func TestOrderLineVariantSnapshot(t *testing.T) {
 	if res := projectCatalogOnce(t, env, rev1); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("variant: %+v", res)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "website", prodID, "500"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "website", prodID, "500"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,10 +152,10 @@ func TestOrderLineVariantFrameLayerFallback(t *testing.T) {
 	if res := projectCatalogOnce(t, env, rev1); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("variant: %+v", res)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductMapping(ctx, "website", prodID, "500"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductMapping(ctx, "website", prodID, "500"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid, "500", "77"); err != nil {
 		t.Fatal(err)
 	}
 	// Frame-layer variation 88 has no variant mapping.
@@ -184,7 +184,7 @@ func TestOrderLineVariantFrameLayerFallback(t *testing.T) {
 	if res := projectCatalogOnce(t, env, rev2); res.Outcome != catalog.OutcomeProcessed {
 		t.Fatalf("variant2: %+v", res)
 	}
-	if _, err := NewDevices(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid2, "500", "78"); err != nil {
+	if _, err := NewCommercePersistence(store.pool, store.timeout).CreateProductVariantMapping(ctx, "website", prodID, vid2, "500", "78"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot = orderTestSnapshot("website", "302", orders.StatusPending, "pending", 10000)

@@ -444,7 +444,7 @@ func TestR3PublicBundleDurableLifecycle(t *testing.T) {
 	defer func() { pool.Close() }()
 	f := newBundleFixture(t)
 	provider := func() *ShopifyProvider {
-		p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+		p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -557,7 +557,7 @@ func TestR3MaximumChoicesAndOwnedIdentity(t *testing.T) {
 	}
 	defer pool.Close()
 	f := newBundleFixture(t)
-	p, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+	p, err := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func TestR3MaximumChoicesAndOwnedIdentity(t *testing.T) {
 	old := component["product"]
 	component["product"] = map[string]any{"id": "gid://shopify/Product/999999"}
 	var checkErr error
-	err = postgres.NewDevices(pool, 5*time.Second).WithProductSync(ctx, p.Key(), req.ProductID, func(held context.Context) error {
+	err = postgres.NewCommercePersistence(pool, 5*time.Second).WithProductSync(ctx, p.Key(), req.ProductID, func(held context.Context) error {
 		_, checkErr = p.establishBundleVariantIdentity(held, bundleID, req, chooseConfigurations(req.Product, "EGP"))
 		return checkErr
 	})
@@ -650,7 +650,7 @@ func TestR3TwoWorkersAdoptPendingReceipt(t *testing.T) {
 	results := make(chan error, 2)
 	start := make(chan struct{})
 	for _, pool := range []*pgxpool.Pool{a, b} {
-		p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+		p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -666,7 +666,7 @@ func TestR3TwoWorkersAdoptPendingReceipt(t *testing.T) {
 	if f.creates != 1 {
 		t.Fatalf("competing workers submitted %d creates", f.creates)
 	}
-	p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewDevices(a, 5*time.Second))
+	p, e := NewShopifyProvider(testConfig(), harnessClient(t, f.h), postgres.NewCommercePersistence(a, 5*time.Second))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -689,7 +689,7 @@ func TestR3CurrencyEligibilityAndOverflow(t *testing.T) {
 	f.h.shopCurrency = "USD"
 	cfg := testConfig()
 	cfg.Currency = "USD"
-	p, err := NewShopifyProvider(cfg, harnessClient(t, f.h), postgres.NewDevices(pool, 5*time.Second))
+	p, err := NewShopifyProvider(cfg, harnessClient(t, f.h), postgres.NewCommercePersistence(pool, 5*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
