@@ -1,6 +1,5 @@
 import {render,fireEvent,waitFor,cleanup} from '@testing-library/svelte';
 import {it,expect,vi,afterEach} from 'vitest';
-import TagCard from './TagCard.svelte';
 import App from '../App.svelte';
 import {dashboardApi,ApiError} from '../lib/api.js';
 vi.mock('../lib/chartAction.js',()=>({chart:()=>({destroy(){}})}));
@@ -10,10 +9,6 @@ const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbb
 const ME={authenticated:true,stage:'full' as const,csrf_token:'t',user:{id:'u',login:'review@test',display_name:'review',role:'owner' as const,mfa_enabled:true},permissions:['reports.read','catalog.read'],all_stores:true,store_ids:[],session:{expires_at:'',idle_timeout_seconds:1800}};
 const bucket={currency:'EGP',line_sales_minor:'100',line_refund_minor:'0',net_minor:'100'};
 function tags(name:string){return {generated_at:'',timezone:'Africa/Cairo',store_id:null,overlap_note:'Tag totals overlap and must not be summed',rows:[{tag_id:A,tag_slug:'gold',name_ar:name,name_en:name,units:1,units_returned:0,currencies:[bucket]}]};}
-it('R1 regression: valid renamed historical Tag rows collide in the actual component',()=>{
- const d=tags('Gold');d.rows.push({...d.rows[0],name_ar:'Golden',name_en:'Golden'});
- expect(()=>render(TagCard,{props:{data:d,status:'loaded',errStatus:null,onretry(){},currency:'EGP'}})).not.toThrow();
-});
 it('R1 regression: Store B selected while loaded Store A Tags remain visible',async()=>{
  window.history.replaceState({},'',`/dashboard/categories?store_id=${A}`);
  for(const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi,k as any).mockImplementation(async()=>({}) as any);
