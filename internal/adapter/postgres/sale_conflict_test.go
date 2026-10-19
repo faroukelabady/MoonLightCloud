@@ -48,7 +48,7 @@ func newSaleEnvOnPool(t *testing.T, pool *pgxpool.Pool, devID, credID string) *s
 	return &saleEnv{
 		pool:    pool,
 		syncSvc: isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()),
-		proj: sale.NewProjector(store, clock.System{},
+		proj: sale.NewProjector(NewSaleProjection(store.pool, store.timeout), clock.System{},
 			slog.New(slog.NewTextHandler(io.Discard, nil))),
 		devID: devID, credID: credID, storeID: storeID,
 	}
@@ -133,11 +133,11 @@ func TestConcurrentDistinctEventsSameSaleID(t *testing.T) {
 
 		storeA := NewDevices(poolA, 10*time.Second)
 		storeB := NewDevices(poolB, 10*time.Second)
-		recA, ok, err := storeA.LoadSaleEvent(context.Background(), e1)
+		recA, ok, err := NewSaleProjection(storeA.pool, storeA.timeout).LoadSaleEvent(context.Background(), e1)
 		if err != nil || !ok {
 			t.Fatal("load e1")
 		}
-		recB, ok, err := storeB.LoadSaleEvent(context.Background(), e2)
+		recB, ok, err := NewSaleProjection(storeB.pool, storeB.timeout).LoadSaleEvent(context.Background(), e2)
 		if err != nil || !ok {
 			t.Fatal("load e2")
 		}
@@ -153,12 +153,12 @@ func TestConcurrentDistinctEventsSameSaleID(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
+			outs[0].res, outs[0].err = NewSaleProjection(storeA.pool, storeA.timeout).ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
+			outs[1].res, outs[1].err = NewSaleProjection(storeB.pool, storeB.timeout).ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 		}()
 		close(start)
 		done := make(chan struct{})
@@ -172,7 +172,7 @@ func TestConcurrentDistinctEventsSameSaleID(t *testing.T) {
 		// Settle any transient serialization loser sequentially (bounded).
 		stores := []interface {
 			ProjectSaleV3(context.Context, sale.EventRecord, time.Time) (sale.ProjectResult, error)
-		}{storeA, storeB}
+		}{NewSaleProjection(storeA.pool, storeA.timeout), NewSaleProjection(storeB.pool, storeB.timeout)}
 		recs := []sale.EventRecord{recA, recB}
 		for i, o := range outs {
 			if o.err != nil || o.res.Outcome == sale.OutcomeRetryable || o.res.Outcome == sale.OutcomeNotDue {

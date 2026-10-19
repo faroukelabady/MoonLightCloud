@@ -262,12 +262,12 @@ func TestReportRebuildInvariance(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	ids, err := store.PendingSaleV3Events(ctx, 25)
+	ids, err := NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("rediscovery: %v %v", ids, err)
 	}
-	rec, _, _ := store.LoadSaleEvent(ctx, ids[0])
-	if _, err := store.ProjectSaleV3(ctx, rec, time.Now()); err != nil {
+	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, ids[0])
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, rec, time.Now()); err != nil {
 		t.Fatalf("re-project: %v", err)
 	}
 	after := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")

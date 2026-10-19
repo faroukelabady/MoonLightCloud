@@ -129,7 +129,7 @@ func openSaleEnv(t *testing.T) *saleEnv {
 	return &saleEnv{
 		pool:    pool,
 		syncSvc: isync.NewService(NewSyncInbox(pool, 5*time.Second), clock.System{}, testEventRegistry()),
-		proj: sale.NewProjector(store, clock.System{},
+		proj: sale.NewProjector(NewSaleProjection(store.pool, store.timeout), clock.System{},
 			nilLogger()),
 		devID: p.Device.ID, credID: p.Credential.ID, storeID: storeID,
 	}

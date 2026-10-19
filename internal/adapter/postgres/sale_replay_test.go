@@ -41,11 +41,11 @@ func TestConcurrentSameEventReplay(t *testing.T) {
 		ingestRaw(t, env, e1, "2026-09-20T10:00:00Z", payload)
 		storeA := NewDevices(poolA, 10*time.Second)
 		storeB := NewDevices(poolB, 10*time.Second)
-		recA, ok, err := storeA.LoadSaleEvent(context.Background(), e1)
+		recA, ok, err := NewSaleProjection(storeA.pool, storeA.timeout).LoadSaleEvent(context.Background(), e1)
 		if err != nil || !ok {
 			t.Fatalf("round %d: load", r)
 		}
-		recB, ok, err := storeB.LoadSaleEvent(context.Background(), e1)
+		recB, ok, err := NewSaleProjection(storeB.pool, storeB.timeout).LoadSaleEvent(context.Background(), e1)
 		if err != nil || !ok {
 			t.Fatalf("round %d: load", r)
 		}
@@ -60,12 +60,12 @@ func TestConcurrentSameEventReplay(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
+			outs[0].res, outs[0].err = NewSaleProjection(storeA.pool, storeA.timeout).ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
+			outs[1].res, outs[1].err = NewSaleProjection(storeB.pool, storeB.timeout).ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 		}()
 		close(start)
 		done := make(chan struct{})
@@ -153,7 +153,7 @@ func TestImpossibleWinningEventReuse(t *testing.T) {
 	store := NewDevices(pool, 10*time.Second)
 	_ = dev
 	_ = s1
-	winner, err := store.arbitrate(ctx, s2, e, dev, time.Now().UTC())
+	winner, err := NewSaleProjection(store.pool, store.timeout).arbitrate(ctx, s2, e, dev, time.Now().UTC())
 	if err == nil {
 		t.Fatalf("impossible reuse must fail, got winner %s", winner)
 	}

@@ -184,11 +184,11 @@ func projectCatalogTerminal(t *testing.T, f *scopeFixture, eventID, eventType st
 func (f *scopeFixture) projectSale(t *testing.T, eventID string) sale.ProjectResult {
 	t.Helper()
 	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load sale %s: %v %v", eventID, ok, err)
 	}
-	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
+	res, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project sale: %v", err)
 	}
@@ -198,11 +198,11 @@ func (f *scopeFixture) projectSale(t *testing.T, eventID string) sale.ProjectRes
 func (f *scopeFixture) projectSaleV3(t *testing.T, eventID string) sale.ProjectResult {
 	t.Helper()
 	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load sale %s: %v %v", eventID, ok, err)
 	}
-	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
+	res, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project sale v3: %v", err)
 	}
@@ -212,11 +212,11 @@ func (f *scopeFixture) projectSaleV3(t *testing.T, eventID string) sale.ProjectR
 func (f *scopeFixture) projectReturn(t *testing.T, eventID string) returnrefund.ProjectResult {
 	t.Helper()
 	store := NewDevices(f.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), eventID)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load return %s: %v %v", eventID, ok, err)
 	}
-	res, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	res, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project return: %v", err)
 	}

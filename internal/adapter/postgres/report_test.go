@@ -68,11 +68,11 @@ func projectSale(t *testing.T, env *saleEnv, saleID, occurred string, mutate fun
 		t.Fatalf("ingest: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load event: %v %v", ok, err)
 	}
-	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
+	res, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -108,8 +108,8 @@ func TestReportSummaryExact(t *testing.T) {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), usdEvent)
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 
@@ -238,8 +238,8 @@ func TestReportConflictLoserExcluded(t *testing.T) {
 	mk(e2)
 	store := NewDevices(env.pool, 5*time.Second)
 	for _, id := range []string{e1, e2} {
-		rec, _, _ := store.LoadSaleEvent(context.Background(), id)
-		if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+		rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), id)
+		if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 			t.Fatalf("project %s: %v", id, err)
 		}
 	}

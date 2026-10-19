@@ -34,7 +34,7 @@ func TestManualRetryDiscoverability(t *testing.T) {
 	}
 
 	// Blocked is not discoverable (no hot-loop); future retry is not due.
-	due, err := store.PendingSaleV3Events(ctx, 25)
+	due, err := NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestManualRetryDiscoverability(t *testing.T) {
 			t.Fatalf("%s: want pending/NULL, got %q/%v", id, status, next)
 		}
 	}
-	due, err = store.PendingSaleV3Events(ctx, 25)
+	due, err = NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 	env.ingest(t, missingID, payload)
 	store := NewDevices(env.pool, 5*time.Second)
 	ctx := context.Background()
-	due, err := store.PendingSaleV3Events(ctx, 25)
+	due, err := NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 		`INSERT INTO sync_event_processing (event_id, processor, status) VALUES ($1,'sale_projection.v3','pending')`, missingID); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingSaleV3Events(ctx, 25)
+	due, err = NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestDiscoveryStateSemantics(t *testing.T) {
 		`UPDATE sync_event_processing SET status='processed' WHERE event_id=$1`, missingID); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingSaleV3Events(ctx, 25)
+	due, err = NewSaleProjection(store.pool, store.timeout).PendingSaleV3Events(ctx, 25)
 	if err != nil {
 		t.Fatal(err)
 	}

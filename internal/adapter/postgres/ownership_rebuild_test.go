@@ -34,11 +34,11 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	t.Helper()
 	storeA := NewDevices(poolA, 10*time.Second)
 	storeB := NewDevices(poolB, 10*time.Second)
-	recA, ok, err := storeA.LoadSaleEvent(context.Background(), e1)
+	recA, ok, err := NewSaleProjection(storeA.pool, storeA.timeout).LoadSaleEvent(context.Background(), e1)
 	if err != nil || !ok {
 		t.Fatal("load e1")
 	}
-	recB, ok, err := storeB.LoadSaleEvent(context.Background(), e2)
+	recB, ok, err := NewSaleProjection(storeB.pool, storeB.timeout).LoadSaleEvent(context.Background(), e2)
 	if err != nil || !ok {
 		t.Fatal("load e2")
 	}
@@ -53,12 +53,12 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[0].res, outs[0].err = storeA.ProjectSaleV3(context.Background(), recA, time.Now().UTC())
+		outs[0].res, outs[0].err = NewSaleProjection(storeA.pool, storeA.timeout).ProjectSaleV3(context.Background(), recA, time.Now().UTC())
 	}()
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[1].res, outs[1].err = storeB.ProjectSaleV3(context.Background(), recB, time.Now().UTC())
+		outs[1].res, outs[1].err = NewSaleProjection(storeB.pool, storeB.timeout).ProjectSaleV3(context.Background(), recB, time.Now().UTC())
 	}()
 	close(start)
 	done := make(chan struct{})
@@ -73,7 +73,7 @@ func raceProject(t *testing.T, poolA, poolB *pgxpool.Pool, e1, e2 string) string
 	for i, o := range outs {
 		if o.err != nil || (o.res.Outcome != sale.OutcomeProcessed && o.res.Outcome != sale.OutcomeBlocked) {
 			for k := 0; k < 10; k++ {
-				res, err := stores[i].ProjectSaleV3(context.Background(), recs[i], time.Now().UTC())
+				res, err := NewSaleProjection(stores[i].pool, stores[i].timeout).ProjectSaleV3(context.Background(), recs[i], time.Now().UTC())
 				outs[i] = outcome{res, err}
 				if err == nil && (res.Outcome == sale.OutcomeProcessed || res.Outcome == sale.OutcomeBlocked) {
 					break
@@ -137,11 +137,11 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDevices(pool, 10*time.Second)
-	rec1, ok, err := store.LoadSaleEvent(ctx, e1)
+	rec1, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, e1)
 	if err != nil || !ok {
 		t.Fatal("load e1")
 	}
-	if _, err := store.ProjectSaleV3(ctx, rec1, time.Now().UTC()); err == nil {
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, rec1, time.Now().UTC()); err == nil {
 		t.Fatal("E1 projection must fail under sabotage")
 	}
 	var owner string
@@ -156,11 +156,11 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 	}
 
 	// E2 arrives while E1 is unprojected: conflicts, zero children.
-	rec2, ok, err := store.LoadSaleEvent(ctx, e2)
+	rec2, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, e2)
 	if err != nil || !ok {
 		t.Fatal("load e2")
 	}
-	res2, err := store.ProjectSaleV3(ctx, rec2, time.Now().UTC())
+	res2, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, rec2, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("E2 must resolve deterministically: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestFirstOwnerFailureRivalConflicts(t *testing.T) {
 		`UPDATE sync_event_processing SET next_attempt_at = now() - interval '1 second' WHERE event_id=$1`, e1); err != nil {
 		t.Fatal(err)
 	}
-	res1, err := store.ProjectSaleV3(ctx, rec1, time.Now().UTC())
+	res1, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, rec1, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("E1 retry: %v", err)
 	}
@@ -294,11 +294,11 @@ func TestConflictingRebuildPreservesWinner(t *testing.T) {
 		// Rebuild with REVERSED order and TWO projector instances.
 		storeA := NewDevices(poolA, 10*time.Second)
 		storeB := NewDevices(poolB, 10*time.Second)
-		recB, ok, err := storeB.LoadSaleEvent(context.Background(), e2)
+		recB, ok, err := NewSaleProjection(storeB.pool, storeB.timeout).LoadSaleEvent(context.Background(), e2)
 		if err != nil || !ok {
 			t.Fatal("load e2")
 		}
-		recA, ok, err := storeA.LoadSaleEvent(context.Background(), e1)
+		recA, ok, err := NewSaleProjection(storeA.pool, storeA.timeout).LoadSaleEvent(context.Background(), e1)
 		if err != nil || !ok {
 			t.Fatal("load e1")
 		}
@@ -314,7 +314,7 @@ func TestConflictingRebuildPreservesWinner(t *testing.T) {
 				<-start
 				// Settle transient retries sequentially inside worker.
 				for k := 0; k < 10; k++ {
-					res, err := s.ProjectSaleV3(context.Background(), rec, time.Now().UTC())
+					res, err := NewSaleProjection(s.pool, s.timeout).ProjectSaleV3(context.Background(), rec, time.Now().UTC())
 					if err == nil && (res.Outcome == sale.OutcomeProcessed || res.Outcome == sale.OutcomeBlocked) {
 						return
 					}

@@ -161,11 +161,11 @@ func TestTransportDuplicateOneSale(t *testing.T) {
 	for _, table := range []string{"sales_projection", "sale_lines_projection", "sale_payments_projection", "sale_line_classifications_projection"} {
 		before[table] = saleCount(t, env.pool, table)
 	}
-	rec, ok, err := NewDevices(env.pool, 5*time.Second).LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(env.pool, 5*time.Second).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	if _, err := NewDevices(env.pool, 5*time.Second).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	if _, err := NewSaleProjection(env.pool, 5*time.Second).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	for table, n := range before {

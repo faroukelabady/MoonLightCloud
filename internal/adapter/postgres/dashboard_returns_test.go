@@ -27,11 +27,11 @@ func projectDashReturn(t *testing.T, env *dashEnv, eventID, occurred, payload st
 		t.Fatalf("want accepted, got %+v", res)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), eventID)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load return: %v %v", ok, err)
 	}
-	pres, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	pres, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project return: %v", err)
 	}
@@ -54,11 +54,11 @@ func projectDashReturnOutcome(t *testing.T, env *dashEnv, eventID, occurred, pay
 		t.Fatalf("want accepted, got %+v", res)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), eventID)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load return: %v %v", ok, err)
 	}
-	pres, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	pres, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project return: %v", err)
 	}

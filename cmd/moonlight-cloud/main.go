@@ -305,7 +305,7 @@ func projectionCmd(args []string) error {
 		return err
 	}
 	defer pool.Close()
-	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	store := postgres.NewProjectionState(pool, cfg.DBQueryTimeout)
 	switch args[0] {
 	case "status":
 		for _, processor := range allProjectionProcessors() {

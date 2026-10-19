@@ -8,6 +8,7 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
+	"github.com/faroukelabady/MoonLightCloud/internal/projection"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
@@ -32,19 +33,24 @@ func subCheckedI64(a, b int64) (int64, error) {
 	return a - b, nil
 }
 
+// ProcessingReader exposes diagnostics without granting projection mutation.
+type ProcessingReader interface {
+	ProcessingStats(context.Context, string) (projection.Stats, error)
+}
+
 // Service composes frozen ReportingService data with dashboard-only
 // presentation values (FX normalization). No business rule is
 // reimplemented: native totals flow through untouched.
 type Service struct {
-	reports   report.Service
-	repo      Repository
-	saleStore sale.Store
-	clock     clock.Clock
+	reports    report.Service
+	repo       Repository
+	processing ProcessingReader
+	clock      clock.Clock
 }
 
 // NewService wires the dashboard service.
-func NewService(reports report.Service, repo Repository, saleStore sale.Store, c clock.Clock) Service {
-	return Service{reports: reports, repo: repo, saleStore: saleStore, clock: c}
+func NewService(reports report.Service, repo Repository, processing ProcessingReader, c clock.Clock) Service {
+	return Service{reports: reports, repo: repo, processing: processing, clock: c}
 }
 
 // scopedDashboard routes one dashboard repository read through the
@@ -624,11 +630,11 @@ func (s Service) SyncHealth(ctx context.Context) (SyncHealthItem, error) {
 	if err != nil {
 		return SyncHealthItem{}, err
 	}
-	stats, err := s.saleStore.ProcessingStats(ctx, sale.ProcessorSaleProjectionV3)
+	stats, err := s.processing.ProcessingStats(ctx, sale.ProcessorSaleProjectionV3)
 	if err != nil {
 		return SyncHealthItem{}, err
 	}
-	retStats, err := s.saleStore.ProcessingStats(ctx, returnrefund.ProcessorReturnProjectionV1)
+	retStats, err := s.processing.ProcessingStats(ctx, returnrefund.ProcessorReturnProjectionV1)
 	if err != nil {
 		return SyncHealthItem{}, err
 	}

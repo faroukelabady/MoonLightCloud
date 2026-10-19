@@ -63,11 +63,11 @@ func TestSaleV3ProductTypeCodeIngressBounds(t *testing.T) {
 					t.Fatalf("supported Type code rejected: %+v %v", result, err)
 				}
 				store := NewDevices(env.pool, 5*time.Second)
-				record, found, err := store.LoadSaleEvent(ctx, eventID)
+				record, found, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, eventID)
 				if err != nil || !found {
 					t.Fatalf("load valid event: %v %v", found, err)
 				}
-				projected, err := store.ProjectSaleV3(ctx, record, time.Now())
+				projected, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, record, time.Now())
 				if err != nil || projected.Outcome != sale.OutcomeProcessed {
 					t.Fatalf("supported Type code cannot project: %+v %v", projected, err)
 				}
@@ -100,12 +100,12 @@ func TestSaleV3PreviouslyAcceptedOversizedTypeCodeBlocks(t *testing.T) {
 					t.Fatal(err)
 				}
 				store := NewDevices(env.pool, 5*time.Second)
-				record, found, err := store.LoadSaleEvent(ctx, eventID)
+				record, found, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, eventID)
 				if err != nil || !found {
 					t.Fatalf("load persisted event: %v %v", found, err)
 				}
 				for attempt := 0; attempt < 2; attempt++ {
-					result, err := store.ProjectSaleV3(ctx, record, time.Now())
+					result, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, record, time.Now())
 					if err != nil || result.Outcome != sale.OutcomeBlocked || result.ErrorCode != ErrValidation {
 						t.Fatalf("malformed history must block, not retry: %+v %v", result, err)
 					}

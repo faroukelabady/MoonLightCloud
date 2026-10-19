@@ -37,6 +37,12 @@ application-owned pool and query timeout. `SyncInbox` owns ingestion,
 `SyncRecovery` the recovery ledger, `Reporting` financial/dashboard reads,
 `Notifications` mappings/outbox/delivery state, `DeviceControl` presence and
 remote-sync commands, and `BusinessReports` schedules/runs/delivery snapshots.
+`Operations` owns incident/recovery policies and state, `StoreRegistry` proven
+Store registration/bindings, `CatalogAdmin` durable intent/targets, and
+`CommerceOrders` webhook fencing and order projection/history. `SaleProjection`
+and `ReturnProjection` own their financial projection transactions and permanent
+ownership arbitration; `ProjectionState` owns shared diagnostics/manual retry SQL.
+The dashboard depends only on the diagnostic reader, not projection mutation.
 Each type satisfies its domain store contracts directly. The remaining
 `Devices` families are still being extracted; these types do not embed that
 universal repository. Cross-table atomic operations remain in one transaction.

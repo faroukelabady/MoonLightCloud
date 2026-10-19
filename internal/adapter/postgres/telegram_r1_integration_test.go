@@ -296,11 +296,11 @@ func TestTelegramR1SaleSeededExactMoney(t *testing.T) {
 				t.Fatal("USD ingest", err)
 			}
 			store := catalogStore(env)
-			record, ok, err := store.LoadSaleEvent(ctx, event)
+			record, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, event)
 			if err != nil || !ok {
 				t.Fatal(err)
 			}
-			if projected, err := store.ProjectSaleV3(ctx, record, time.Now()); err != nil || projected.Outcome != 1 {
+			if projected, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, record, time.Now()); err != nil || projected.Outcome != 1 {
 				t.Fatal("USD projection", err)
 			}
 			seedTelegramTemplateMapping(t, env)

@@ -125,11 +125,11 @@ func TestReturnRivalRebuildStable(t *testing.T) {
 	resetReturnDerived(t, env)
 	store := NewDevices(env.pool, 5*time.Second)
 	for _, id := range []string{e2, e1} {
-		rec, ok, err := store.LoadReturnEvent(context.Background(), id)
+		rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), id)
 		if err != nil || !ok {
 			t.Fatal("load")
 		}
-		if _, err := store.ProjectReturn(context.Background(), rec, time.Now()); err != nil {
+		if _, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now()); err != nil {
 			t.Fatalf("rebuild project %s: %v", id, err)
 		}
 	}
@@ -533,11 +533,11 @@ func TestReturnBackfillLiveRace(t *testing.T) {
 	// Backfill starts: project the first backlog row directly while the
 	// second row is still undiscovered.
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), backlog[0].event)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), backlog[0].event)
 	if err != nil || !ok {
 		t.Fatal("backlog event must load")
 	}
-	if _, err := store.ProjectReturn(context.Background(), rec, time.Now()); err != nil {
+	if _, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("backfill project: %v", err)
 	}
 

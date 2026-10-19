@@ -45,11 +45,11 @@ func projectSaleWithTags(t *testing.T, env *saleEnv, saleID, occurred string, ta
 		t.Fatalf("ingest: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load event: %v %v", ok, err)
 	}
-	res, err := store.ProjectSaleV3(context.Background(), rec, time.Now())
+	res, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}

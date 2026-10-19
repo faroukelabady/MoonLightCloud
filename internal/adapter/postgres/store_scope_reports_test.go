@@ -288,12 +288,12 @@ func TestScope_ConcurrentCrossStoreReturn(t *testing.T) {
 			for attempt := 0; attempt < 25; attempt++ {
 				expireBackoff(t, f, event)
 				store := NewDevices(f.pool, 5*time.Second)
-				rec, _, err := store.LoadReturnEvent(context.Background(), event)
+				rec, _, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), event)
 				if err != nil {
 					t.Errorf("load: %v", err)
 					return
 				}
-				res, err := store.ProjectReturn(context.Background(), rec, time.Now())
+				res, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 				if err == nil && res.Outcome != returnrefund.OutcomeNotDue && res.Outcome != returnrefund.OutcomeRetryable {
 					outs[i].res = res
 					return
@@ -448,11 +448,11 @@ func TestScope_LifecycleInvariance(t *testing.T) {
 	syncSvc := isyncNewService(t, NewSyncInbox(pool, 5*time.Second))
 	payload := scopedSalePayload(t, "aaaaaaaa-0000-4000-8000-0000000000c1")
 	ingestScoped(t, syncSvc, p.Device.ID, p.Credential.ID, "e0000340-0000-4000-8000-000000000001", "sale.finalized.v3", payload)
-	rec, ok, err := devices.LoadSaleEvent(ctx, "e0000340-0000-4000-8000-000000000001")
+	rec, ok, err := NewSaleProjection(devices.pool, devices.timeout).LoadSaleEvent(ctx, "e0000340-0000-4000-8000-000000000001")
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
-	if res, err := devices.ProjectSaleV3(ctx, rec, time.Now()); err != nil || res.Outcome != sale.OutcomeProcessed {
+	if res, err := NewSaleProjection(devices.pool, devices.timeout).ProjectSaleV3(ctx, rec, time.Now()); err != nil || res.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("sale: %+v %v", res, err)
 	}
 	var before *string

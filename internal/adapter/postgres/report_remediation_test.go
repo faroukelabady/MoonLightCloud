@@ -214,8 +214,8 @@ func TestH4PerLineOverflow(t *testing.T) {
 		t.Fatalf("ingest: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, _, _ := store.LoadSaleEvent(context.Background(), eventID)
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project: %v", err)
 	}
 	svc := repService(env)

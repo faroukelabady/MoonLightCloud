@@ -65,11 +65,11 @@ func TestCatalogMilestoneActualRetailOutboxPair(t *testing.T) {
 		if event.Type != sale.EventSaleFinalizedV3 {
 			continue
 		}
-		record, ok, err := store.LoadSaleEvent(ctx, event.ID)
+		record, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(ctx, event.ID)
 		if err != nil || !ok {
 			t.Fatalf("load sale: %v %v", ok, err)
 		}
-		out, err := store.ProjectSaleV3(ctx, record, time.Now())
+		out, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(ctx, record, time.Now())
 		if err != nil || out.Outcome != sale.OutcomeProcessed {
 			t.Fatalf("project sale: %+v %v", out, err)
 		}
@@ -78,11 +78,11 @@ func TestCatalogMilestoneActualRetailOutboxPair(t *testing.T) {
 		if event.Type != "sale.return_refund.finalized.v1" {
 			continue
 		}
-		record, ok, err := store.LoadReturnEvent(ctx, event.ID)
+		record, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(ctx, event.ID)
 		if err != nil || !ok {
 			t.Fatalf("load return: %v %v", ok, err)
 		}
-		out, err := store.ProjectReturn(ctx, record, time.Now())
+		out, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(ctx, record, time.Now())
 		if err != nil || out.Outcome != returnrefund.OutcomeProcessed {
 			t.Fatalf("project return: %+v %v", out, err)
 		}

@@ -20,7 +20,7 @@ func TestProjectorRestartRecovery(t *testing.T) {
 		t.Fatalf("ingest must not project synchronously, got %d", n)
 	}
 	// "Restart": a fresh projector instance over the same database.
-	fresh := sale.NewProjector(NewDevices(env.pool, 5*time.Second), testSystemClock(), nilLogger())
+	fresh := sale.NewProjector(NewSaleProjection(env.pool, 5*time.Second), testSystemClock(), nilLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan struct{})
@@ -50,11 +50,11 @@ func TestProjectionRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err == nil {
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err == nil {
 		t.Fatal("injected failure must surface")
 	}
 	// Zero partial projection rows; source event intact.
@@ -95,7 +95,7 @@ func TestProjectionRollback(t *testing.T) {
 		`UPDATE sync_event_processing SET next_attempt_at = now() - interval '1 second' WHERE event_id=$1`, eventID); err != nil {
 		t.Fatal(err)
 	}
-	fresh := sale.NewProjector(NewDevices(env.pool, 5*time.Second), testSystemClock(), nilLogger())
+	fresh := sale.NewProjector(NewSaleProjection(env.pool, 5*time.Second), testSystemClock(), nilLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan struct{})

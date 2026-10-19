@@ -498,8 +498,8 @@ func TestReportParityWithCanonicalService(t *testing.T) {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), usdEvent)
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 	var saleA map[string]any

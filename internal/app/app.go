@@ -135,10 +135,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		clock.System{}, ids.System{},
 	)
 	a.Sync = sync.NewService(postgres.NewSyncInbox(pool, cfg.DBQueryTimeout), clock.System{}, syncEventRegistry())
-	a.SaleStore = store
-	a.Projector = sale.NewProjector(store, clock.System{}, log)
-	a.ReturnStore = store
-	a.ReturnProjector = returnrefund.NewProjector(store, clock.System{}, log)
+	saleStore := postgres.NewSaleProjection(pool, cfg.DBQueryTimeout)
+	a.SaleStore = saleStore
+	a.Projector = sale.NewProjector(saleStore, clock.System{}, log)
+	returnStore := postgres.NewReturnProjection(pool, cfg.DBQueryTimeout)
+	a.ReturnStore = returnStore
+	a.ReturnProjector = returnrefund.NewProjector(returnStore, clock.System{}, log)
 	a.CatalogStore = store
 	a.CategoryProjector = catalog.NewCategoryProjector(store, clock.System{}, log)
 	a.TagProjector = catalog.NewTagProjector(store, clock.System{}, log)
@@ -162,7 +164,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ReadyCheck: a.checkReady,
 	}
 	a.Version = adapterhttp.Version{App: AppName, Version: Version, Commit: Commit, BuildTime: BuildTime}
-	a.Dashboard = dashboard.NewService(a.Reports, reportingStore, store, clock.System{})
+	a.Dashboard = dashboard.NewService(a.Reports, reportingStore, postgres.NewProjectionState(pool, cfg.DBQueryTimeout), clock.System{})
 	humanAuthSvc, err := NewHumanAuthService(cfg, pool, log)
 	if err != nil {
 		pool.Close()

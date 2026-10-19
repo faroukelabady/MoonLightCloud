@@ -156,7 +156,7 @@ func TestRecoveryStatusWaitsForAcceptedSaleProjectionHTTPPostgres(t *testing.T) 
 	if _, err := pool.Exec(ctx, `UPDATE sync_event_processing SET status='pending',last_error_code=NULL WHERE event_id=$1 AND processor='sale_projection.v3'`, eventID); err != nil {
 		t.Fatal(err)
 	}
-	projector := sale.NewProjector(devices, clock.System{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	projector := sale.NewProjector(postgres.NewSaleProjection(pool, 5*time.Second), clock.System{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	projector.Notify()
 	projectCtx, cancel := context.WithCancel(ctx)
 	finished := make(chan struct{})

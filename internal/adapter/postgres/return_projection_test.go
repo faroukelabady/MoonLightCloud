@@ -87,7 +87,7 @@ func ingestReturnRaw(t *testing.T, env *saleEnv, eventID, payload string) {
 // restart proof) with a bounded wait.
 func drainReturns(t *testing.T, env *saleEnv) {
 	t.Helper()
-	fresh := returnrefund.NewProjector(NewDevices(env.pool, 5*time.Second), testSystemClock(), nilLogger())
+	fresh := returnrefund.NewProjector(NewReturnProjection(env.pool, 5*time.Second), testSystemClock(), nilLogger())
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	done := make(chan struct{})
@@ -190,11 +190,11 @@ func TestReturnWaitsForSaleThenProjects(t *testing.T) {
 	ingestReturnRaw(t, env, retEvent, retPayload)
 
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), retEvent)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), retEvent)
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	res, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	res, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 	if err == nil {
 		t.Fatalf("missing sale must surface, got %+v", res)
 	}
@@ -389,11 +389,11 @@ func TestReturnConcurrentSameEvent(t *testing.T) {
 	ingestReturnRaw(t, env, retEvent, retPayload)
 
 	storeA, storeB := NewDevices(env.pool, 10*time.Second), NewDevices(env.pool, 10*time.Second)
-	recA, ok, err := storeA.LoadReturnEvent(context.Background(), retEvent)
+	recA, ok, err := NewReturnProjection(storeA.pool, storeA.timeout).LoadReturnEvent(context.Background(), retEvent)
 	if err != nil || !ok {
 		t.Fatal("load")
 	}
-	recB, ok, err := storeB.LoadReturnEvent(context.Background(), retEvent)
+	recB, ok, err := NewReturnProjection(storeB.pool, storeB.timeout).LoadReturnEvent(context.Background(), retEvent)
 	if err != nil || !ok {
 		t.Fatal("load")
 	}
@@ -408,12 +408,12 @@ func TestReturnConcurrentSameEvent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[0].res, outs[0].err = storeA.ProjectReturn(context.Background(), recA, time.Now().UTC())
+		outs[0].res, outs[0].err = NewReturnProjection(storeA.pool, storeA.timeout).ProjectReturn(context.Background(), recA, time.Now().UTC())
 	}()
 	go func() {
 		defer wg.Done()
 		<-start
-		outs[1].res, outs[1].err = storeB.ProjectReturn(context.Background(), recB, time.Now().UTC())
+		outs[1].res, outs[1].err = NewReturnProjection(storeB.pool, storeB.timeout).ProjectReturn(context.Background(), recB, time.Now().UTC())
 	}()
 	close(start)
 	finished := make(chan struct{})
@@ -457,19 +457,19 @@ func TestReturnDiscoveryDueSemantics(t *testing.T) {
 	ctx := context.Background()
 
 	// Missing row: discoverable.
-	due, err := store.PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
+	due, err := NewReturnProjection(store.pool, store.timeout).PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
 	if err != nil || !containsID(due, e1) {
 		t.Fatalf("missing row discoverable: %v %v", due, err)
 	}
 	// Project to processed: never discoverable again.
-	rec, ok, err := store.LoadReturnEvent(ctx, e1)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(ctx, e1)
 	if err != nil || !ok {
 		t.Fatal("load")
 	}
-	if _, err := store.ProjectReturn(ctx, rec, time.Now()); err != nil {
+	if _, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(ctx, rec, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
+	due, err = NewReturnProjection(store.pool, store.timeout).PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestReturnDiscoveryDueSemantics(t *testing.T) {
 		 VALUES ($1,'return_refund_projection.v1','retry',1,now() + interval '1 hour')`, e2); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
+	due, err = NewReturnProjection(store.pool, store.timeout).PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestReturnDiscoveryDueSemantics(t *testing.T) {
 		 WHERE event_id=$1 AND processor='return_refund_projection.v1'`, e2); err != nil {
 		t.Fatal(err)
 	}
-	due, err = store.PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
+	due, err = NewReturnProjection(store.pool, store.timeout).PendingReturnEvents(ctx, returnrefund.ProcessorReturnProjectionV1, 25)
 	if err != nil || !containsID(due, e2) {
 		t.Fatalf("due retry discoverable: %v %v", due, err)
 	}
@@ -754,11 +754,11 @@ func TestReturnProjectionFailureRetriesCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), retEvent)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), retEvent)
 	if err != nil || !ok {
 		t.Fatal("event must load")
 	}
-	if _, err := store.ProjectReturn(context.Background(), rec, time.Now()); err == nil {
+	if _, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now()); err == nil {
 		t.Fatal("injected failure must surface")
 	}
 	for _, table := range []string{"return_refund_projection", "return_refund_lines_projection", "return_refund_payments_projection"} {

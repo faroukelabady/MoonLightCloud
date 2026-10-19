@@ -15,7 +15,7 @@ import (
 
 // PendingSaleV3Events returns due sale.finalized.v3 candidate event IDs
 // under the v3 processor. v1/v2 rows are never returned here.
-func (d Devices) PendingSaleV3Events(ctx context.Context, limit int) ([]string, error) {
+func (d SaleProjection) PendingSaleV3Events(ctx context.Context, limit int) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).PendingSaleV3Events(ctx, sqlcgen.PendingSaleV3EventsParams{
@@ -39,7 +39,7 @@ func (d Devices) PendingSaleV3Events(ctx context.Context, limit int) ([]string, 
 // tag-capture mark. Same-event replay uses ON CONFLICT DO NOTHING
 // throughout and stays idempotent. v1/v2 events keep flowing through
 // their own projectors untouched.
-func (d Devices) ProjectSaleV3(ctx context.Context, event sale.EventRecord, now time.Time) (sale.ProjectResult, error) {
+func (d SaleProjection) ProjectSaleV3(ctx context.Context, event sale.EventRecord, now time.Time) (sale.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	euid, err := parseUUID(event.EventID)

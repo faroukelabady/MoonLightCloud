@@ -168,11 +168,11 @@ func phase17TypeSale(t *testing.T, env *saleEnv, fixtureName, saleID, occurred, 
 		t.Fatalf("v3 ingestion: %+v %v", res, err)
 	}
 	d := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := d.LoadSaleEvent(context.Background(), eid)
+	rec, ok, err := NewSaleProjection(d.pool, d.timeout).LoadSaleEvent(context.Background(), eid)
 	if err != nil || !ok {
 		t.Fatalf("load v3: %v %v", ok, err)
 	}
-	projected, err := d.ProjectSaleV3(context.Background(), rec, time.Now())
+	projected, err := NewSaleProjection(d.pool, d.timeout).ProjectSaleV3(context.Background(), rec, time.Now())
 	if err != nil || projected.Outcome != sale.OutcomeProcessed {
 		t.Fatalf("v3 projection: %+v %v", projected, err)
 	}

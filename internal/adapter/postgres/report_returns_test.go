@@ -73,11 +73,11 @@ func projectReturnSync(t *testing.T, env *saleEnv, saleID, saleNumber, currency 
 		t.Fatalf("want accepted, got %+v", res)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadReturnEvent(context.Background(), eventID)
+	rec, ok, err := NewReturnProjection(store.pool, store.timeout).LoadReturnEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load return: %v %v", ok, err)
 	}
-	pres, err := store.ProjectReturn(context.Background(), rec, time.Now())
+	pres, err := NewReturnProjection(store.pool, store.timeout).ProjectReturn(context.Background(), rec, time.Now())
 	if err != nil {
 		t.Fatalf("project return: %v", err)
 	}
@@ -116,8 +116,8 @@ func returnScenario(t *testing.T, env *saleEnv) {
 		t.Fatalf("ingest usd: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, _, _ := store.LoadSaleEvent(context.Background(), usdEvent)
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	rec, _, _ := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), usdEvent)
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project usd: %v", err)
 	}
 	projectReturnSync(t, env,
@@ -514,11 +514,11 @@ func TestReportUSDNetRanking(t *testing.T) {
 			t.Fatalf("ingest usd: %v", err)
 		}
 		store := NewDevices(env.pool, 5*time.Second)
-		rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+		rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 		if err != nil || !ok {
 			t.Fatalf("load usd: %v %v", ok, err)
 		}
-		if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+		if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 			t.Fatalf("project usd: %v", err)
 		}
 	}

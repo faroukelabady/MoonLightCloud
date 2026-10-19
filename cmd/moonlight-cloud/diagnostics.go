@@ -116,7 +116,7 @@ func diagnosticsCmd(args []string) error {
 		}
 	}
 
-	store := postgres.NewDevices(pool, cfg.DBQueryTimeout)
+	store := postgres.NewProjectionState(pool, cfg.DBQueryTimeout)
 	for _, processor := range allProjectionProcessors() {
 		stats, err := store.ProcessingStats(ctx, processor)
 		if err != nil {

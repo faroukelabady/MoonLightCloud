@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Return projector Store implementation on Devices (shared pool + timeouts).
+// Return projector persistence (shared application pool + timeouts).
 
 // Deterministic return-projection failure codes (persisted, operational).
 const (
@@ -29,7 +29,7 @@ const (
 // PendingReturnEvents returns due candidate return event IDs (durable
 // discovery, including retroactive Phase 4A backfill: accepted events with
 // no processing row are discoverable).
-func (d Devices) PendingReturnEvents(ctx context.Context, processor string, limit int) ([]string, error) {
+func (d ReturnProjection) PendingReturnEvents(ctx context.Context, processor string, limit int) ([]string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).PendingReturnEvents(ctx, sqlcgen.PendingReturnEventsParams{
@@ -46,7 +46,7 @@ func (d Devices) PendingReturnEvents(ctx context.Context, processor string, limi
 }
 
 // LoadReturnEvent loads the immutable inbox row for return projection.
-func (d Devices) LoadReturnEvent(ctx context.Context, eventID string) (returnrefund.EventRecord, bool, error) {
+func (d ReturnProjection) LoadReturnEvent(ctx context.Context, eventID string) (returnrefund.EventRecord, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	uid, err := parseUUID(eventID)
@@ -96,7 +96,7 @@ func (d Devices) LoadReturnEvent(ctx context.Context, eventID string) (returnref
 // winning event may populate return projection tables. Rebuilds clear
 // projections but never ownership, so the historical winner always
 // reproduces.
-func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventRecord, now time.Time) (returnrefund.ProjectResult, error) {
+func (d ReturnProjection) ProjectReturn(ctx context.Context, event returnrefund.EventRecord, now time.Time) (returnrefund.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	euid, err := parseUUID(event.EventID)
@@ -352,7 +352,7 @@ func (d Devices) ProjectReturn(ctx context.Context, event returnrefund.EventReco
 //     invariant: deterministic integrity error (never transient).
 //   - no row + no business row + no winner row → arbitration undecided
 //     (concurrent rollback): transient, re-arbitrate later.
-func (d Devices) arbitrateReturn(ctx context.Context, rid, euid, duid pgtype.UUID, now time.Time) (string, error) {
+func (d ReturnProjection) arbitrateReturn(ctx context.Context, rid, euid, duid pgtype.UUID, now time.Time) (string, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -411,7 +411,7 @@ func (d Devices) arbitrateReturn(ctx context.Context, rid, euid, duid pgtype.UUI
 // markReturnBlocked records a deterministic blocked outcome (validation,
 // conflict, or integrity) in one short transaction. Zero projection writes
 // precede it.
-func (d Devices) markReturnBlocked(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (returnrefund.ProjectResult, error) {
+func (d ReturnProjection) markReturnBlocked(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (returnrefund.ProjectResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	tx, err := d.pool.Begin(ctx)
@@ -462,7 +462,7 @@ func (d Devices) markReturnBlocked(ctx context.Context, euid pgtype.UUID, now ti
 // survive restarts. Deterministic outcomes never reach here (they commit
 // blocked). The returned error stays non-nil so callers observe the failed
 // attempt; the retry state is already committed when it does.
-func (d Devices) persistReturnRetry(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (returnrefund.ProjectResult, error) {
+func (d ReturnProjection) persistReturnRetry(ctx context.Context, euid pgtype.UUID, now time.Time, code, msg string) (returnrefund.ProjectResult, error) {
 	fail := func() (returnrefund.ProjectResult, error) {
 		return returnrefund.ProjectResult{Outcome: returnrefund.OutcomeRetryable, ErrorCode: code},
 			transient(errors.New("return projection transient failure"))

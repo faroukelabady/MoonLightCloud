@@ -57,11 +57,11 @@ func projectDashSale(t *testing.T, env *dashEnv, eventID, occurred, payload stri
 		t.Fatalf("ingest: %v", err)
 	}
 	store := NewDevices(env.pool, 5*time.Second)
-	rec, ok, err := store.LoadSaleEvent(context.Background(), eventID)
+	rec, ok, err := NewSaleProjection(store.pool, store.timeout).LoadSaleEvent(context.Background(), eventID)
 	if err != nil || !ok {
 		t.Fatalf("load: %v %v", ok, err)
 	}
-	if _, err := store.ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
+	if _, err := NewSaleProjection(store.pool, store.timeout).ProjectSaleV3(context.Background(), rec, time.Now()); err != nil {
 		t.Fatalf("project: %v", err)
 	}
 }
