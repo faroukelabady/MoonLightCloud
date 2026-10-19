@@ -227,24 +227,10 @@ type SummaryDTO struct {
 // repository plus dashboard-only read operations (all static,
 // parameterized, read-only aggregates).
 type Repository interface {
+	Reader
 	report.Repository
-	DashboardNormalizedSummary(ctx context.Context, startUTC, endUTC time.Time) (NormalizedSummaryRow, error)
-	DashboardNormalizedDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]NormalizedDailyRow, error)
-	DashboardLatestFx(ctx context.Context, startUTC, endUTC time.Time) (LatestFxRow, error)
-	DashboardBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]BranchRowRaw, error)
-	DashboardProductsNormalized(ctx context.Context, startUTC, endUTC time.Time) ([]NormalizedProductRowRaw, error)
-	DashboardCategoriesNormalized(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedCategoryRowRaw, error)
-	DashboardRecentActivity(ctx context.Context, limit int) ([]ActivityItem, error)
-	DashboardLatestSales(ctx context.Context, limit int) ([]LatestSale, error)
-	DashboardNormalizedRefundsSummary(ctx context.Context, startUTC, endUTC time.Time) (NormalizedRefundSummaryRow, error)
-	DashboardNormalizedRefundsDaily(ctx context.Context, startUTC, endUTC time.Time, timezone string) ([]NormalizedRefundDailyRow, error)
-	DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
-	DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
-	DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
-	// Phase 9D Store-scoped dashboard reads. Same frozen row shapes with
-	// an ownership predicate on the authoritative root (or ingress event
-	// for the activity feed). Internal until dashboard HTTP wires them;
-	// global reads keep ALL+legacy behavior.
+	// Static Store-specific adapter/tooling compatibility reads.
+	// Services select Reader once; global reads keep ALL+legacy behavior.
 	DashboardNormalizedSummaryForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (NormalizedSummaryRow, error)
 	DashboardNormalizedDailyForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, timezone string) ([]NormalizedDailyRow, error)
 	DashboardLatestFxForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) (LatestFxRow, error)

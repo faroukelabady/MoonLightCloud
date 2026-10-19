@@ -47,6 +47,14 @@ Each type satisfies its domain store contracts directly. The remaining
 `Devices` families are still being extracted; these types do not embed that
 universal repository. Cross-table atomic operations remain in one transaction.
 
+Reporting and dashboard services select a scope-bound Reader once per
+operation, after HTTP permissions and Store membership checks. Global reads
+aggregate across Stores; they do not depend on legacy/unowned rows existing.
+A selected Store never falls back to global. The existing global/ForStore SQL
+methods remain explicit adapter/tooling compatibility surfaces; readers do not
+construct dynamic accounting queries. Global processing freshness and already
+scope-aware operational analytics remain separate.
+
 ## Ingestion, projection and recovery
 
 `internal/sync` validates envelopes and exact canonical JSON, commits immutable
