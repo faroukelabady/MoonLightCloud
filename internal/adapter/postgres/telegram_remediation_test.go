@@ -24,8 +24,10 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
+// r1Envelopes are representative malformed Telegram responses;
+// TestR1IncompleteEnvelope pins the classification of every malformed shape.
 func r1Envelopes() []string {
-	return []string{`{}`, `{"ok":null}`, `{"ok":false}`, `{"result":{"message_id":42,"chat":{"id":111}}}`, `{"ok":"true"}`, `{"ok":false,"error_code":0,"description":"error"}`, `{"ok":false,"error_code":200,"description":"error"}`, `{"ok":false,"error_code":403}`, `{"ok":false,"error_code":null,"description":"error"}`, `{"ok":false,"error_code":"403","description":"error"}`, `{"ok":true}`, `{"ok":true,"result":{"message_id":42}}`, `{"ok":true,"result":{"chat":{"id":111}}}`, `{"ok":true,"result":{"message_id":42,"chat":{"id":null}}}`, `{"ok":true,"result":{"message_id":42,"chat":{"id":111}}} garbage`, `{"ok":true,"result":{"message_id":42,"chat":{"id":111}}} {}`, `{"ok":true,`, strings.Repeat("x", (1<<20)+1), `{"ok":true,"ok":false,"error_code":429,"description":"retry"}`, `{"ok":true,"error_code":null,"result":{"message_id":42,"chat":{"id":111}}}`}
+	return []string{`{}`, `{"ok":null}`, `{"ok":false}`, `{"result":{"message_id":42,"chat":{"id":111}}}`}
 }
 
 const r1Success = `{"ok":true,"result":{"message_id":42,"chat":{"id":111}},"future_field":{}}`
@@ -190,7 +192,7 @@ func TestTelegramR1ProcessRestart(t *testing.T) {
 	}
 	env := openSaleEnv(t)
 	seedTelegramTemplateMapping(t, env)
-	responses := r1Envelopes()[:4]
+	responses := r1Envelopes()
 	ids := []string{}
 	for i := range responses {
 		ids = append(ids, r1Enqueue(t, env, fmt.Sprintf("runtime-%d", i), "@operations", fmt.Sprintf("runtime-body-%d", i)))

@@ -246,8 +246,7 @@ authoritative and reprocessing reproduces identical rows (tested by
    gross/returned/net cost totals must be semantically identical before
    and after. Never delete accepted source events. No automated rebuild
    CLI in this phase; the documented procedure plus the rebuild tests
-   (`TestReturnRebuildStable`, `TestReturnRivalRebuildStable`,
-   `TestReturnOutOfOrderRebuildStable`) suffice.
+   (`TestReturnRebuildStable`, `TestReturnRivalRebuildStable`) suffice.
 
 ## Catalog processors
 
