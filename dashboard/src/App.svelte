@@ -24,7 +24,8 @@
 	import UpdatesPage from './components/UpdatesPage.svelte';
 	import UsersPage from './components/UsersPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
-	import { dashboardApi, ApiError, isStoreID } from './lib/api.js';
+	import { createRequestScope } from './lib/requestScope';
+	import { dashboardApi, ApiError, isStoreID, setCSRFToken } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
@@ -32,6 +33,7 @@
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
 	let authed: boolean | null = $state(null);
+	let loggingOut = $state(false);
 	// Current human (ADR-0053): stage, permissions and Store access from
 	// /auth/me, held in memory only. UX gating; the server re-checks all.
 	let me: Me | null = $state(null);
@@ -46,20 +48,8 @@
 
 	let storesState: 'idle' | 'loading' | 'loaded' | 'error' = $state('idle');
 
-	// scopeEpoch fences stale async responses: every freshSignal (any new
-	// load or scope transition) advances it, and callers drop results whose
-	// captured epoch is no longer current. Abort alone cannot stop a
-	// response that already resolved before the abort.
-	let aborters: AbortController[] = [];
-	let scopeEpoch = 0;
-	function freshSignal(): AbortSignal {
-		for (const c of aborters) c.abort();
-		aborters = [];
-		scopeEpoch += 1;
-		const c = new AbortController();
-		aborters.push(c);
-		return c.signal;
-	}
+	const requests = createRequestScope<'widgets' | 'orders' | 'more' | 'detail'>();
+	const sessionRequests = createRequestScope<'session'>();
 
 	function readRoute() {
 		const path = window.location.pathname.replace(/^\/dashboard\/?/, '') || 'overview';
@@ -145,26 +135,36 @@
 	}
 
 	async function checkSession() {
+		if (loggingOut) return false;
+		const owner = sessionRequests.begin('session');
 		try {
-			const current = await dashboardApi.me();
+			const current = await dashboardApi.me(owner.signal);
+			if (!owner.current()) return false;
 			me = current;
 			operatorName = current.user.display_name;
 			pendingStage = current.stage === 'full' ? null : current.stage;
 			authed = current.stage === 'full';
+			return authed;
 		} catch {
+			if (!owner.current()) return false;
 			me = null;
 			pendingStage = null;
 			authed = false;
+			return false;
 		}
 	}
 
 	async function onAuthenticated() {
-		await checkSession();
-		if (authed) await initAuthenticated();
+		if (await checkSession()) await initAuthenticated();
 	}
 
 	function requireAuth(err: unknown): boolean {
 		if (err instanceof ApiError && err.status === 401) {
+			requests.invalidate();
+			sessionRequests.invalidate();
+			storesEpoch += 1;
+			resetScopeState();
+			setCSRFToken('');
 			authed = false;
 			me = null;
 			pendingStage = null;
@@ -198,10 +198,14 @@
 	// apply the URL scope, clear any prior scope-dependent state, load the
 	// registry, then load business reads.
 	async function initAuthenticated() {
+		if (loggingOut) return;
+		const current = sessionRequests.capture('session');
+		requests.invalidate();
 		readRoute();
 		resetScopeState();
 		storesEpoch += 1; // invalidate any prior in-flight registry load
 		await loadStores();
+		if (!current() || !authed) return;
 		// A Store-restricted human has no "all Stores" view: default to its
 		// first Store (the server refuses aggregate reads anyway).
 		if (me && !me.all_stores && (!store || !me.store_ids.includes(store))) {
@@ -268,22 +272,22 @@
 	let latestErr: number | null = $state(null);
 
 	async function reloadOrders() {
-		if (!authed) return;
-		const signal = freshSignal();
-		const epoch = scopeEpoch;
+		if (!authed || loggingOut) return;
+		requests.cancel('more');
+		const { signal, current } = requests.begin('orders');
 		ordersState = 'loading';
 		ordersMore = 'idle';
 		ordersMoreErr = null;
 		try {
 			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, signal);
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			orderList = v.orders;
 			orderCursor = v.next_cursor;
 			orderCounts = v.status_counts;
 			orderInbox = v.webhook_inbox;
 			ordersState = v.orders.length === 0 ? 'empty' : 'loaded';
 		} catch (err) {
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			if (requireAuth(err)) return;
 			ordersState = 'error';
@@ -297,16 +301,15 @@
 	}
 
 	async function loadMoreOrders() {
-		if (!authed || !orderCursor || ordersMore === 'loading') return;
-		const signal = freshSignal();
-		const epoch = scopeEpoch;
+		if (!authed || loggingOut || !orderCursor || ordersMore === 'loading') return;
+		const { signal, current } = requests.begin('more');
 		ordersMore = 'loading';
 		ordersMoreErr = null;
 		try {
 			const v = await dashboardApi.orders(orderFilterStatus, orderFilterProvider, orderCursor, store, signal);
 			// A scope change while the continuation was in flight must not
 			// append the previous Store's rows to the new Store's list.
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			const seen = new Set(orderList.map(orderKey));
 			for (const row of v.orders) {
 				if (!seen.has(orderKey(row))) {
@@ -317,7 +320,7 @@
 			orderCursor = v.next_cursor;
 			ordersMore = 'idle';
 		} catch (err) {
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			if (err instanceof DOMException && err.name === 'AbortError') {
 				ordersMore = 'idle';
 				return;
@@ -333,22 +336,23 @@
 	}
 
 	async function selectOrder(order: OrderSummary | null) {
+		if (loggingOut) return;
+		requests.cancel('detail');
 		orderSelected = null;
 		if (!order) {
 			orderDetailState = 'idle';
 			return;
 		}
 		orderDetailState = 'loading';
-		const signal = freshSignal();
-		const epoch = scopeEpoch;
+		const { signal, current } = requests.begin('detail');
 		try {
 			const detail = await dashboardApi.orderDetail(order.provider_key, order.external_order_id, store, signal);
 			// Drop a detail response that belongs to a superseded scope.
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			orderSelected = detail;
 			orderDetailState = 'loaded';
 		} catch (err) {
-			if (epoch !== scopeEpoch) return;
+			if (!current()) return;
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			if (requireAuth(err)) return;
 			orderDetailState = 'error';
@@ -365,24 +369,31 @@
 	}
 
 	async function reloadAll() {
-		if (!authed) return;
+		if (!authed || loggingOut) return;
 		fatal = null;
-		const signal = freshSignal();
-		const epoch = scopeEpoch;
+		requests.invalidate();
+		const { signal, current } = requests.begin('widgets');
+		const ordersOwner = requests.begin('orders');
+		orderSelected = null;
+		orderDetailState = 'idle';
+		orderDetailErr = null;
+		ordersMore = 'idle';
+		ordersMoreErr = null;
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
 			ordersState = tagState = onlineState = healthState = 'loading';
 		const done = async <T>(
 			p: Promise<T>,
 			apply: (v: T) => void,
 			setState: (s: WidgetState) => void,
-			setErr: (n: number | null) => void
+			setErr: (n: number | null) => void,
+			currentOwner: () => boolean = current
 		) => {
 			try {
 				const v = await p;
-				if (epoch !== scopeEpoch) return;
+				if (!currentOwner()) return;
 				apply(v);
 			} catch (err) {
-				if (epoch !== scopeEpoch) return;
+				if (!currentOwner()) return;
 				if (err instanceof DOMException && err.name === 'AbortError') return;
 				if (requireAuth(err)) return;
 				setState('error');
@@ -464,7 +475,7 @@
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
 			}, (s) => (latestState = s), (n) => (latestErr = n)),
-			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, signal), (v) => {
+			done(dashboardApi.orders(orderFilterStatus, orderFilterProvider, null, store, ordersOwner.signal), (v) => {
 				orderList = v.orders;
 				orderCursor = v.next_cursor;
 				ordersMore = 'idle';
@@ -472,7 +483,7 @@
 				orderCounts = v.status_counts;
 				orderInbox = v.webhook_inbox;
 				ordersState = emptyOf(v.orders);
-			}, (s) => (ordersState = s), (n) => (ordersErr = n)),
+			}, (s) => (ordersState = s), (n) => (ordersErr = n), ordersOwner.current),
 			done(dashboardApi.tags(params, currency === 'all' ? '' : currency, store, 10, signal), (v) => {
 				tagList = v;
 				tagState = v.rows.length === 0 ? 'empty' : 'loaded';
@@ -512,18 +523,29 @@
 	}
 
 	async function logout() {
-		await dashboardApi.logout();
-		authed = false;
-		me = null;
-		pendingStage = null;
-		operatorName = '';
-		// Do not leak one session's Store registry or scoped rows into the
-		// next login; re-authentication re-reads the URL and reloads. The
-		// epoch bump also drops a registry response still in flight.
+		if (loggingOut) return;
+		loggingOut = true;
+		requests.invalidate();
+		sessionRequests.invalidate();
 		storesEpoch += 1;
-		stores = [];
-		storesState = 'idle';
-		resetScopeState();
+		try {
+			await dashboardApi.logout();
+		} finally {
+			requests.invalidate();
+			sessionRequests.invalidate();
+			authed = false;
+			me = null;
+			pendingStage = null;
+			operatorName = '';
+			// Do not leak one session's Store registry or scoped rows into the
+			// next login; re-authentication re-reads the URL and reloads. The
+			// epoch bump also drops a registry response still in flight.
+			storesEpoch += 1;
+			stores = [];
+			storesState = 'idle';
+			resetScopeState();
+			loggingOut = false;
+		}
 	}
 
 	// KPI cards follow the same active-currency scoping as the reporting
@@ -574,10 +596,14 @@
 		const onHistory = () => applyRouteTransition();
 		window.addEventListener('popstate', onHistory);
 		void (async () => {
-			await checkSession();
-			if (authed) await initAuthenticated();
+			if (await checkSession()) await initAuthenticated();
 		})();
-		return () => window.removeEventListener('popstate', onHistory);
+		return () => {
+			window.removeEventListener('popstate', onHistory);
+			requests.dispose();
+			sessionRequests.dispose();
+			storesEpoch += 1;
+		};
 	});
 </script>
 
@@ -607,7 +633,7 @@
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
 						English
 					</span>
-					<button type="button" class="logout" onclick={logout}>خروج / Logout</button>
+					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>خروج / Logout</button>
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}

@@ -122,3 +122,83 @@ it('late A, rapid A→B→A, combined period/currency and history scopes remain 
  for(const i of [2,3]){h.retailCalls[i].pending.resolve(h.retail('9900'));h.onlineCalls[i].pending.resolve(h.online('SUPERSEDED'))}await Promise.resolve();expect(r.container.textContent).not.toContain('SUPERSEDED');
  window.history.pushState({},'',`/dashboard/sales?store_id=${B}&period=yesterday&currency=USD`);window.dispatchEvent(new PopStateEvent('popstate'));await waitFor(()=>expect(h.onlineCalls.length).toBe(6));expect(r.container.textContent).not.toContain('A_NEW');expect(h.onlineCalls[5].scope).toBe(B);expect(h.onlineCalls[5].currency).toBe('USD');expect(vi.mocked(dashboardApi.orderSummary).mock.calls[5][0].period).toBe('yesterday');h.retailCalls[5].pending.resolve(h.retail('6600'));h.onlineCalls[5].pending.resolve(h.online('B_HISTORY'));await waitFor(()=>expect(r.container.textContent).toContain('B_HISTORY'));
 });
+
+// Deferred order reads ignore cancellation to test ownership, not fetch timing.
+function orderRow(id:string){return {provider_key:'website',external_order_id:id,order_number:`ORDER_${id}`,provider_status:'processing',canonical_status:'processing',currency:'EGP',total_minor:'100',created_at:'2026-10-03T10:00:00Z',modified_at:'2026-10-03T10:00:00Z',customer_name:'Fixture',mapping_complete:true,unmapped_line_count:0,provider_deleted:false,revision:1};}
+function orderPage(ids:string[],cursor:string|null){return {orders:ids.map(orderRow),next_cursor:cursor,status_counts:[],webhook_inbox:{pending:0,retry:0,blocked:0,oldest_pending_at:null}};}
+function orderDetail(id:string){return {summary:orderRow(id),discount_minor:'0',shipping_minor:'0',cart_tax_minor:'0',total_tax_minor:'0',prices_include_tax:false,paid_at:null,completed_at:null,payment_method:'cash',payment_method_title:'Cash',customer_first_name:`DETAIL_${id}`,customer_last_name:'',customer_email:'',customer_phone:'',lines:[],addresses:[],status_history:[]};}
+for(const first of ['more','detail'] as const)it(`independent order reads finish together (${first} starts first)`,async()=>{
+ setupScopes();window.history.replaceState({},'',`/dashboard/orders?store_id=${A}`);
+ const more=deferred<any>(),detail=deferred<any>();
+ vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,c)=>c?more.promise:orderPage(['a'],'cursor-a') as any);
+ vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
+ const view=async()=>fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
+ const load=async()=>fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));
+ if(first==='more'){await load();await view()}else{await view();await load()}
+ more.resolve(orderPage(['a','b'],'cursor-b'));detail.resolve(orderDetail('a'));
+ await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
+ await waitFor(()=>expect(r.queryByText('DETAIL_a')).not.toBeNull());
+ expect((r.getByRole('button',{name:/تحميل المزيد \/ Load more/}) as HTMLButtonElement).disabled).toBe(false);
+ expect(r.getAllByText('ORDER_b')).toHaveLength(1);
+});
+it('replacing an order list rejects old continuation but preserves a pending detail',async()=>{
+ setupScopes();window.history.replaceState({},'',`/dashboard/orders?store_id=${A}`);
+ const more=deferred<any>(),detail=deferred<any>();let lists=0;
+ vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,c)=>c?more.promise:orderPage([++lists===1?'a':'filtered'],lists===1?'cursor-a':null) as any);
+ vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
+ await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));
+ await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
+ await fireEvent.change(r.getByLabelText(/الحالة \/ Status/),{target:{value:'completed'}});
+ await waitFor(()=>expect(r.queryByText('ORDER_filtered')).not.toBeNull());
+ more.resolve(orderPage(['old-continuation'],null));detail.resolve(orderDetail('a'));
+ await waitFor(()=>expect(r.queryByText('DETAIL_a')).not.toBeNull());
+ expect(r.queryByText('ORDER_old-continuation')).toBeNull();
+});
+
+it('order filters do not discard pending analytics siblings',async()=>{
+ const h=setupScopes();window.history.replaceState({},'',`/dashboard/?store_id=${A}`);
+ vi.mocked(dashboardApi.orders).mockResolvedValue(orderPage(['a'],null) as any);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
+ await fireEvent.change(r.getByLabelText(/الحالة \/ Status/),{target:{value:'completed'}});
+ h.retailCalls[0].pending.resolve(h.retail('4242'));
+ await waitFor(()=>expect(r.container.textContent).toContain('42.42'));
+ expect(h.retailCalls).toHaveLength(1);
+});
+it('late detail A cannot replace newer detail B',async()=>{
+ setupScopes();window.history.replaceState({},'',`/dashboard/orders?store_id=${A}`);
+ const first=deferred<any>(),second=deferred<any>();
+ vi.mocked(dashboardApi.orders).mockResolvedValue(orderPage(['a','b'],null) as any);
+ vi.mocked(dashboardApi.orderDetail).mockImplementation(async(_provider,id)=>id==='a'?first.promise:second.promise);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
+ const views=r.getAllByRole('button',{name:/عرض \/ View/});await fireEvent.click(views[0]);await fireEvent.click(views[1]);
+ second.resolve(orderDetail('b'));await waitFor(()=>expect(r.queryByText('DETAIL_b')).not.toBeNull());
+ first.resolve(orderDetail('a'));await Promise.resolve();await Promise.resolve();
+ expect(r.queryByText('DETAIL_a')).toBeNull();expect(r.queryByText('DETAIL_b')).not.toBeNull();
+});
+it('a Store transition fences every old order sibling including late authorization errors',async()=>{
+ setupScopes();window.history.replaceState({},'',`/dashboard/orders?store_id=${A}`);
+ const more=deferred<any>(),detail=deferred<any>();
+ vi.mocked(dashboardApi.orders).mockImplementation(async(_status,_provider,cursor,store)=>cursor?more.promise:orderPage([store===A?'a':'b'],store===A?'cursor-a':null) as any);
+ vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
+ await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
+ await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
+ more.reject(new ApiError(401,'UNAUTHORIZED','old session'));detail.resolve(orderDetail('a'));
+ await Promise.resolve();await Promise.resolve();
+ expect(r.queryByText('DETAIL_a')).toBeNull();expect(r.queryByText('ORDER_b')).not.toBeNull();
+});
+it('does not start new Store reads while logout is pending',async()=>{
+ setupScopes();window.history.replaceState({},'',`/dashboard/orders?store_id=${A}`);
+ const logout=deferred<any>(),late=deferred<any>();void late.promise.catch(()=>{});
+ vi.mocked(dashboardApi.logout).mockReturnValue(logout.promise);
+ vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,_c,store)=>store===A?orderPage(['a'],null):late.promise as any);
+ const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
+ await fireEvent.click(r.getByRole('button',{name:/خروج \/ Logout/}));
+ await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});
+ expect(vi.mocked(dashboardApi.orders).mock.calls.map(c=>c[3])).toEqual([A]);
+ logout.resolve(undefined);
+ await waitFor(()=>expect(r.queryByTestId('store-selector')).toBeNull());
+ late.reject(new ApiError(401,'UNAUTHORIZED','obsolete request'));
+});

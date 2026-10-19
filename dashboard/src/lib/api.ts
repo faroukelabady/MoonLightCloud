@@ -64,7 +64,7 @@ export function isStoreID(value: string): boolean {
 export const dashboardApi = {
 	me: async (s?: AbortSignal): Promise<Me> => {
 		const me = await get<Me>('/api/v1/dashboard/auth/me', s);
-		setCSRFToken(me.csrf_token);
+		if (!s?.aborted) setCSRFToken(me.csrf_token);
 		return me;
 	},
 	logout: async (): Promise<void> => {

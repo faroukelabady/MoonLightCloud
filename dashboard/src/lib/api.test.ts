@@ -1,11 +1,28 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { dashboardApi, ApiError } from './api.js';
+import { dashboardApi, ApiError, mutationHeaders, setCSRFToken } from './api.js';
 
 function jsonResponse(status: number, body: unknown): Response {
 	return new Response(JSON.stringify(body), { status });
 }
 
 describe('dashboardApi', () => {
+  it('does not restore a cancelled session CSRF token after body parsing finishes', async () => {
+    let finish!: (value: unknown) => void;
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => { started = resolve; });
+    const body = new Promise<unknown>((resolve) => { finish = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200, ok: true, json: () => { started(); return body; } })));
+    const controller = new AbortController();
+    const pending = dashboardApi.me(controller.signal);
+    await reading;
+    controller.abort();
+    setCSRFToken('current-session');
+    finish({ csrf_token: 'obsolete-session' });
+    await pending;
+    expect(mutationHeaders()['X-CSRF-Token']).toBe('current-session');
+    setCSRFToken('');
+  });
+
 	beforeEach(() => {
 		vi.stubGlobal(
 			'fetch',
