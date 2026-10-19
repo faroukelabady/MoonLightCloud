@@ -53,17 +53,13 @@ func orderProcessorEnv(env *saleEnv, provider *stubCommerceOrderProvider) *order
 	return orders.NewProcessor(store, service, orders.SystemClock{}, "test-worker", nilLogger())
 }
 
-func runProcessorBriefly(t *testing.T, processor *orders.Processor) {
+// drainOrderProcessor runs the processor's startup scan pass: with no
+// wakeups and a 15s interval that pass is all Run performs in a test.
+func drainOrderProcessor(t *testing.T, processor *orders.Processor) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	done := make(chan struct{})
-	go func() { defer close(done); processor.Run(ctx) }()
-	// Startup drain runs immediately; give retries/backoff-free passes
-	// time to settle, then stop.
-	time.Sleep(1500 * time.Millisecond)
-	cancel()
-	<-done
+	processor.DrainForTest(ctx)
 }
 
 // insertTestWebhook persists one delivery directly for processor tests.
@@ -128,12 +124,12 @@ func TestOrderProcessorOutOfOrder(t *testing.T) {
 	processor := orderProcessorEnv(env, provider)
 	// B arrives first and projects the new state.
 	insertTestWebhook(t, env, "website", "delivery-B", "order.updated", "301", []byte(`{"id":301,"v":"B"}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	// A arrives later carrying an older body, but reconciliation reads
 	// current provider state (B), so the projection stays at B.
 	provider.snapshots["301"] = newSnapshot
 	insertTestWebhook(t, env, "website", "delivery-A", "order.updated", "301", []byte(`{"id":301,"v":"A"}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "301")
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +155,7 @@ func TestOrderProcessorTemporaryRetry(t *testing.T) {
 	}
 	processor := orderProcessorEnv(env, provider)
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "302", []byte(`{"id":302}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	status, attempts, code := webhookStatus(t, env, "website", "delivery-1")
 	if status != "retry" || attempts < 1 || code != "ORDER_PROVIDER_RETRY" {
 		t.Fatalf("retry: %s %d %q", status, attempts, code)
@@ -169,7 +165,7 @@ func TestOrderProcessorTemporaryRetry(t *testing.T) {
 	provider.errs = map[string]error{}
 	provider.snapshots = map[string]orders.OrderSnapshot{"302": snapshot}
 	forceWebhookDue(t, env, "website", "delivery-1")
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	if status, _, _ := webhookStatus(t, env, "website", "delivery-1"); status != "processed" {
 		t.Fatalf("recovered: %s", status)
 	}
@@ -198,7 +194,7 @@ func TestOrderProcessorBlockedPermanent(t *testing.T) {
 	}
 	processor := orderProcessorEnv(env, provider)
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "303", []byte(`{"id":303}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	status, _, code := webhookStatus(t, env, "website", "delivery-1")
 	if status != "blocked" || code == "" {
 		t.Fatalf("blocked with code: %s %q", status, code)
@@ -214,12 +210,12 @@ func TestOrderProcessorDeleteFlow(t *testing.T) {
 	provider := &stubCommerceOrderProvider{key: "website", snapshots: map[string]orders.OrderSnapshot{"304": snapshot}}
 	processor := orderProcessorEnv(env, provider)
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "304", []byte(`{"id":304}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	// Provider confirms absence for the delete attempt: genuine deletion.
 	provider.snapshots = map[string]orders.OrderSnapshot{}
 	provider.errs = map[string]error{"304": &orders.BlockedError{Code: orders.CodeOrderNotFound, Message: "gone"}}
 	insertTestWebhook(t, env, "website", "delivery-2", "order.deleted", "304", []byte(`{"id":304}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "304")
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +240,7 @@ func TestOrderProcessorDeleteBeforeCreate(t *testing.T) {
 	ctx := context.Background()
 	processor := orderProcessorEnv(env, &stubCommerceOrderProvider{key: "website"})
 	insertTestWebhook(t, env, "website", "delivery-1", "order.deleted", "305", []byte(`{"id":305}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	stored, rev, found, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "305")
 	if err != nil || !found {
 		t.Fatalf("tombstone: %v %v", found, err)
@@ -267,14 +263,14 @@ func TestOrderProcessorCrashReplay(t *testing.T) {
 		key: "website", snapshots: map[string]orders.OrderSnapshot{"306": snapshot},
 	})
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "306", []byte(`{"id":306}`))
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	// Crash simulation: projection committed, finish lost. Rewind the
 	// event to pending as if the status update never committed.
 	if _, err := env.pool.Exec(ctx,
 		`UPDATE commerce_online_order_webhook_events SET status='pending', lease_owner=NULL, lease_until=NULL WHERE provider_key='website' AND delivery_id='delivery-1'`); err != nil {
 		t.Fatal(err)
 	}
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "306")
 	if err != nil || rev != 1 || stored.TotalMinor != 4000 {
 		t.Fatalf("idempotent replay: %+v %d %v", stored, rev, err)
@@ -310,7 +306,7 @@ func TestOrderProcessorLeaseRecovery(t *testing.T) {
 		`UPDATE commerce_online_order_webhook_events SET lease_until = now() - interval '1 minute' WHERE provider_key='website' AND delivery_id='delivery-1'`); err != nil {
 		t.Fatal(err)
 	}
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	if status, _, _ := webhookStatus(t, env, "website", "delivery-1"); status != "processed" {
 		t.Fatalf("lease recovery: %s", status)
 	}
@@ -342,7 +338,7 @@ func TestOrderProcessorConcurrentWorkers(t *testing.T) {
 			<-start
 			workerCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			defer cancel()
-			newWorker(owner).Run(workerCtx)
+			newWorker(owner).DrainForTest(workerCtx)
 		}(owner)
 	}
 	close(start)
@@ -371,7 +367,7 @@ func TestOrderProcessorRateLimitedRetry(t *testing.T) {
 	processor := orderProcessorEnv(env, provider)
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "309", []byte(`{"id":309}`))
 	before := time.Now().UTC()
-	runProcessorBriefly(t, processor)
+	drainOrderProcessor(t, processor)
 	status, _, code := webhookStatus(t, env, "website", "delivery-1")
 	if status != "retry" || code != "ORDER_PROVIDER_RETRY" {
 		t.Fatalf("retry: %s %q", status, code)

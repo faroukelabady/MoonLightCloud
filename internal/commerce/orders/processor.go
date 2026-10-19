@@ -124,6 +124,12 @@ func (p *Processor) Run(ctx context.Context) {
 	}
 }
 
+// DrainForTest runs one bounded scan pass. Test hook only:
+// production uses Run with wakeups and intervals.
+func (p *Processor) DrainForTest(ctx context.Context) {
+	p.drain(ctx)
+}
+
 func (p *Processor) drain(ctx context.Context) {
 	for i := 0; i < ProcessorBatchSize; i++ {
 		if ctx.Err() != nil {
