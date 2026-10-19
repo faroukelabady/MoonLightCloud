@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { productClassificationCommand, productOnlinePolicyCommand, categoryOnlinePolicyCommand } from '../lib/catalogCommands.js';
 	import { dashboardApi, ApiError } from '../lib/api.js';
 	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration } from '../lib/api.js';
 
@@ -147,13 +148,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product.online-policy.update.v1',
-				entity_id: p.product_id,
-				expected_revision: p.sales_policy_revision,
-				payload: { product_id: p.product_id, sell_online: next, expected_sales_policy_revision: p.sales_policy_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productOnlinePolicyCommand(store, p, next));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -174,13 +169,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.product.classification.update.v1',
-				entity_id: p.product_id,
-				expected_revision: p.catalog_revision,
-				payload: { product_id: p.product_id, top_category_id: top, subcategory_ids: subs, tag_ids: tagIds, expected_catalog_revision: p.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(productClassificationCommand(store, p, { top_category_id: top, subcategory_ids: subs, tag_ids: tagIds }));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();
@@ -227,13 +216,7 @@
 		const actionEpoch = epoch;
 		saving = true;
 		try {
-			const cmd = await dashboardApi.adminCreateCommand({
-				store_id: store,
-				type: 'catalog.category.online-policy.update.v1',
-				entity_id: c.category_id,
-				expected_revision: c.catalog_revision,
-				payload: { category_id: c.category_id, online_enabled: next, expected_catalog_revision: c.catalog_revision }
-			});
+			const cmd = await dashboardApi.adminCreateCommand(categoryOnlinePolicyCommand(store, c, next));
 			if (actionEpoch !== epoch) return;
 			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
 			void loadCommands();

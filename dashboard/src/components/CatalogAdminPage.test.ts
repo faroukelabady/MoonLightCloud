@@ -87,3 +87,38 @@ it('shows shared frame choices read-only (edited in Retail)', async()=>{
  expect(list.textContent).toContain('كلاسيكي / أسود');expect(list.textContent).toContain('+30000 EGP · +600 USD');
  expect(screen.queryByText(/Queue options change/)).toBeNull();expect(api.adminCreateCommand).not.toHaveBeenCalled();
 });
+
+it('submits classification replacement arrays and the catalog revision unchanged', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue({...productDetail('ready'),catalog_revision:17,sales_policy_revision:29});
+ api.adminConfigurations.mockResolvedValue({configurations:[]});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ api.adminCategories.mockResolvedValue({categories:[...fixtures('ready').categories,{category_id:'sub-z',name_ar:'Sub Z',parent_ids:['c-ready']},{category_id:'sub-a',name_ar:'Sub A',parent_ids:['c-ready']}]});
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await screen.findByRole('button',{name:/Queue classification change/});
+ await fireEvent.click(screen.getByLabelText('Sub Z'));await fireEvent.click(screen.getByLabelText('Sub A'));await fireEvent.click(screen.getByLabelText('Tag ready'));
+ await fireEvent.click(screen.getByRole('button',{name:/Queue classification change/}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.classification.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',top_category_id:'c-ready',subcategory_ids:['sub-z','sub-a'],tag_ids:['t-ready'],expected_catalog_revision:17}}));
+});
+
+it('submits product online intent with the separate sales policy revision', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue({...productDetail('ready'),catalog_revision:17,sales_policy_revision:29,sell_online:true});
+ api.adminConfigurations.mockResolvedValue({configurations:[]});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await fireEvent.click(await screen.findByRole('button',{name:/Disable online/}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.online-policy.update.v1',entity_id:'p-ready',expected_revision:29,payload:{product_id:'p-ready',sell_online:false,expected_sales_policy_revision:29}}));
+});
+
+it('keeps category disable confirmation before catalog-revision command submission', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:[],next_cursor:''});
+ api.adminCategories.mockResolvedValue({categories:[{category_id:'category-1',name_ar:'Category One',name_en:'',parent_ids:[],online_enabled:true,catalog_revision:31}]});
+ api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+ try {
+  render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'الفئات / Categories'}));
+  await fireEvent.click(await screen.findByRole('button',{name:'Category One'}));
+  await fireEvent.click(screen.getByRole('button',{name:/Disable online/}));expect(api.adminCreateCommand).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);await fireEvent.click(screen.getByRole('button',{name:/Disable online/}));
+  await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.category.online-policy.update.v1',entity_id:'category-1',expected_revision:31,payload:{category_id:'category-1',online_enabled:false,expected_catalog_revision:31}}));
+ } finally { confirm.mockRestore(); }
+});
