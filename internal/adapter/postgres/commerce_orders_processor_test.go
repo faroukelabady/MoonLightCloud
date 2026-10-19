@@ -48,7 +48,7 @@ func orderProcessorEnv(env *saleEnv, provider *stubCommerceOrderProvider) *order
 	if err := registry.Register(provider.key, provider); err != nil {
 		panic(err)
 	}
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	service := orders.NewOrderService(registry, store, nilLogger())
 	return orders.NewProcessor(store, service, orders.SystemClock{}, "test-worker", nilLogger())
 }
@@ -70,7 +70,7 @@ func runProcessorBriefly(t *testing.T, processor *orders.Processor) {
 func insertTestWebhook(t *testing.T, env *saleEnv, provider, delivery, topic, external string, body []byte) {
 	t.Helper()
 	sum := sha256.Sum256(body)
-	outcome, err := catalogStore(env).InsertOrderWebhookEvent(context.Background(),
+	outcome, err := commerceOrderStore(env).InsertOrderWebhookEvent(context.Background(),
 		commerce.ProviderKey(provider), delivery, orders.WebhookTopic(topic), external, sum[:], nil)
 	if err != nil || outcome != orders.WebhookInserted {
 		t.Fatalf("insert webhook: %v %v", outcome, err)
@@ -94,7 +94,7 @@ func webhookStatus(t *testing.T, env *saleEnv, provider, delivery string) (strin
 func TestOrderWebhookDedupe(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	body := []byte(`{"id":300,"status":"pending"}`)
 	sum := sha256.Sum256(body)
 	outcome, err := store.InsertOrderWebhookEvent(ctx, "website", "delivery-1", orders.TopicOrderCreated, "300", sum[:], nil)
@@ -134,7 +134,7 @@ func TestOrderProcessorOutOfOrder(t *testing.T) {
 	provider.snapshots["301"] = newSnapshot
 	insertTestWebhook(t, env, "website", "delivery-A", "order.updated", "301", []byte(`{"id":301,"v":"A"}`))
 	runProcessorBriefly(t, processor)
-	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "301")
+	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "301")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestOrderProcessorTemporaryRetry(t *testing.T) {
 	if status, _, _ := webhookStatus(t, env, "website", "delivery-1"); status != "processed" {
 		t.Fatalf("recovered: %s", status)
 	}
-	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(context.Background(), "website", "302")
+	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(context.Background(), "website", "302")
 	if err != nil || rev != 1 || stored.TotalMinor != 5000 {
 		t.Fatalf("projected: %+v %d %v", stored, rev, err)
 	}
@@ -220,7 +220,7 @@ func TestOrderProcessorDeleteFlow(t *testing.T) {
 	provider.errs = map[string]error{"304": &orders.BlockedError{Code: orders.CodeOrderNotFound, Message: "gone"}}
 	insertTestWebhook(t, env, "website", "delivery-2", "order.deleted", "304", []byte(`{"id":304}`))
 	runProcessorBriefly(t, processor)
-	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "304")
+	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "304")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestOrderProcessorDeleteBeforeCreate(t *testing.T) {
 	processor := orderProcessorEnv(env, &stubCommerceOrderProvider{key: "website"})
 	insertTestWebhook(t, env, "website", "delivery-1", "order.deleted", "305", []byte(`{"id":305}`))
 	runProcessorBriefly(t, processor)
-	stored, rev, found, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "305")
+	stored, rev, found, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "305")
 	if err != nil || !found {
 		t.Fatalf("tombstone: %v %v", found, err)
 	}
@@ -275,7 +275,7 @@ func TestOrderProcessorCrashReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	runProcessorBriefly(t, processor)
-	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "306")
+	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "306")
 	if err != nil || rev != 1 || stored.TotalMinor != 4000 {
 		t.Fatalf("idempotent replay: %+v %d %v", stored, rev, err)
 	}
@@ -300,7 +300,7 @@ func TestOrderProcessorLeaseRecovery(t *testing.T) {
 	insertTestWebhook(t, env, "website", "delivery-1", "order.created", "307", []byte(`{"id":307}`))
 	// Worker A claims then disappears: simulate by setting a short past
 	// lease directly after a manual claim window.
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	_, claimed, err := store.ClaimOrderWebhookEvent(context.Background(), "worker-A", time.Hour, time.Now().UTC())
 	if err != nil || !claimed {
 		t.Fatalf("claim: %v %v", claimed, err)
@@ -327,7 +327,7 @@ func TestOrderProcessorConcurrentWorkers(t *testing.T) {
 	if err := registry.Register("website", provider); err != nil {
 		t.Fatal(err)
 	}
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	newWorker := func(owner string) *orders.Processor {
 		return orders.NewProcessor(store,
 			orders.NewOrderService(registry, store, nilLogger()),
@@ -393,7 +393,7 @@ func TestOrderProcessorRateLimitedRetry(t *testing.T) {
 func TestWebhookDeliveryIdentityConflict(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	body := []byte(`{"id":960}`)
 	sum := sha256.Sum256(body)
 	outcome, err := store.InsertOrderWebhookEvent(ctx, "website", "delivery-9",

@@ -19,7 +19,7 @@ import (
 )
 
 // Commerce order webhook inbox, current-order projection, and read
-// models on Devices (shared pool + timeouts). Webhook rows and order
+// models on CommerceOrders (shared pool + timeouts). Webhook rows and order
 // rows are durable integration state: no catalog/policy/inventory
 // rebuild path touches these tables.
 
@@ -27,7 +27,7 @@ import (
 // duplicate. An identical redelivery (same hash, topic, and order
 // identity) is idempotent; any contradiction — different hash, topic,
 // or external order ID — is a conflict that never overwrites.
-func (d Devices) InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (orders.WebhookInsertOutcome, error) {
+func (d CommerceOrders) InsertOrderWebhookEvent(ctx context.Context, providerKey commerce.ProviderKey, deliveryID string, topic orders.WebhookTopic, externalOrderID string, payloadHash []byte, webhookID *string) (orders.WebhookInsertOutcome, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(string(providerKey)); err != nil {
@@ -69,7 +69,7 @@ func (d Devices) InsertOrderWebhookEvent(ctx context.Context, providerKey commer
 // ClaimOrderWebhookEvent leases one due event to this worker. Row-level
 // SKIP LOCKED keeps multi-instance workers apart; the bounded lease
 // (not a permanent status) makes crashed claims eligible again.
-func (d Devices) ClaimOrderWebhookEvent(ctx context.Context, owner string, lease time.Duration, now time.Time) (orders.ClaimedWebhookEvent, bool, error) {
+func (d CommerceOrders) ClaimOrderWebhookEvent(ctx context.Context, owner string, lease time.Duration, now time.Time) (orders.ClaimedWebhookEvent, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	leaseUntil := pgtype.Timestamptz{Time: now.Add(lease), Valid: true}
@@ -99,7 +99,7 @@ func (d Devices) ClaimOrderWebhookEvent(ctx context.Context, owner string, lease
 // BeginOrderReconcile atomically creates or increments the per-order
 // reconciliation fence and returns the caller's generation token. Must
 // run before provider HTTP; never inside the projection transaction.
-func (d Devices) BeginOrderReconcile(ctx context.Context, providerKey, externalOrderID string) (orders.ReconcileGeneration, error) {
+func (d CommerceOrders) BeginOrderReconcile(ctx context.Context, providerKey, externalOrderID string) (orders.ReconcileGeneration, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	generation, err := sqlcgen.New(d.pool).BeginOrderReconcile(ctx, sqlcgen.BeginOrderReconcileParams{
@@ -115,7 +115,7 @@ func (d Devices) BeginOrderReconcile(ctx context.Context, providerKey, externalO
 // releases the lease. A superseded claim affects zero rows and reports
 // stale: the current owner controls the event. Only machine-readable
 // codes persist: no prose, PII, or bodies.
-func (d Devices) FinishOrderWebhookEvent(ctx context.Context, claim orders.ClaimedWebhookEvent, status string, nextAttemptAt *time.Time, processed bool, errorCode string) (orders.FinishResult, error) {
+func (d CommerceOrders) FinishOrderWebhookEvent(ctx context.Context, claim orders.ClaimedWebhookEvent, status string, nextAttemptAt *time.Time, processed bool, errorCode string) (orders.FinishResult, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	var next pgtype.Timestamptz
@@ -143,7 +143,7 @@ func (d Devices) FinishOrderWebhookEvent(ctx context.Context, claim orders.Claim
 
 // OrderWebhookStats returns pending/retry/blocked counts plus the oldest
 // pending age for operational visibility.
-func (d Devices) OrderWebhookStats(ctx context.Context) (pending, retry, blocked int64, oldestPending *time.Time, err error) {
+func (d CommerceOrders) OrderWebhookStats(ctx context.Context) (pending, retry, blocked int64, oldestPending *time.Time, err error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	row, err := sqlcgen.New(d.pool).CommerceWebhookStats(ctx)
@@ -165,7 +165,7 @@ func (d Devices) OrderWebhookStats(ctx context.Context) (pending, retry, blocked
 // revision). A fault anywhere leaves the previous full revision
 // visible. A missing fence row fails closed: every production path
 // begins a generation before projecting.
-func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte, generation orders.ReconcileGeneration) (orders.ReconcileOutcome, error) {
+func (d CommerceOrders) ReconcileProjectedOrder(ctx context.Context, snapshot orders.OrderSnapshot, fingerprint [32]byte, generation orders.ReconcileGeneration) (orders.ReconcileOutcome, error) {
 	none := orders.ReconcileOutcome{}
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
@@ -273,7 +273,7 @@ func (d Devices) ReconcileProjectedOrder(ctx context.Context, snapshot orders.Or
 // LoadProjectedOrder reconstructs the current normalized snapshot for
 // fingerprint continuity (tombstones, deletion checks). Missing orders
 // report found=false.
-func (d Devices) LoadProjectedOrder(ctx context.Context, providerKey, externalOrderID string) (orders.OrderSnapshot, int64, bool, error) {
+func (d CommerceOrders) LoadProjectedOrder(ctx context.Context, providerKey, externalOrderID string) (orders.OrderSnapshot, int64, bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	q := sqlcgen.New(d.pool)
@@ -697,19 +697,9 @@ func writeProjectedOrder(ctx context.Context, q *sqlcgen.Queries, snapshot order
 	return nil
 }
 
-var (
-	_ orders.OrderReader = Devices{}
-	_ orders.OrderStore  = Devices{}
-)
-
 // Phase 9C Store-scoped order reads. Root ownership controls the entire
 // graph: list, detail, and counts predicate on the order root, so lines,
 // addresses, history, and customer PII can never cross a Store boundary.
 // Legacy NULL rows never match a Store scope. Global reads above keep
 // documented ALL+legacy behavior for administration. No HTTP change: the
 // Store filter stays internal until 9D.
-
-var (
-	_ orders.OrderReader = Devices{}
-	_ orders.OrderStore  = Devices{}
-)

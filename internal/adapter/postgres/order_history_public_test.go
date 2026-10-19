@@ -120,7 +120,7 @@ func TestPublicReconcilePreservesSelectionHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	devices := NewDevices(pool, 5*time.Second)
+	devices := NewCommerceOrders(pool, 5*time.Second)
 	registry := commerce.NewRegistry()
 	provider := &stubOrderProvider{}
 	if err := registry.Register("website", provider); err != nil {
@@ -215,7 +215,7 @@ func TestPublicReconcileTruthfulCompleteness(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	devices := NewDevices(pool, 5*time.Second)
+	devices := NewCommerceOrders(pool, 5*time.Second)
 	registry := commerce.NewRegistry()
 	provider := &stubOrderProvider{}
 	if err := registry.Register("website", provider); err != nil {

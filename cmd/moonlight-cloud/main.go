@@ -470,7 +470,7 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 		store:          store,
 		productService: app.NewCommerceService(store, registry, logger),
 		registry:       registry,
-		orderService:   orders.NewOrderService(registry, store, logger),
+		orderService:   orders.NewOrderService(registry, postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout), logger),
 	}, nil
 }
 

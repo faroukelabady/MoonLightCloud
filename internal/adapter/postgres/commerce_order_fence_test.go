@@ -50,7 +50,7 @@ func fenceService(env *saleEnv, provider *barrierOrderProvider) *orders.OrderSer
 	if err := registry.Register(provider.key, provider); err != nil {
 		panic(err)
 	}
-	return orders.NewOrderService(registry, catalogStore(env), nilLogger())
+	return orders.NewOrderService(registry, commerceOrderStore(env), nilLogger())
 }
 
 // TestReconcileDelayedGetBarrier is the F-01 gate: A begins first and
@@ -59,7 +59,7 @@ func fenceService(env *saleEnv, provider *barrierOrderProvider) *orders.OrderSer
 func TestReconcileDelayedGetBarrier(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	stateA := orderTestSnapshot("website", "910", orders.StatusPending, "pending", 10000)
 	stateB := orderTestSnapshot("website", "910", orders.StatusProcessing, "processing", 12000)
 	stateB.Lines = append(stateB.Lines, orders.OrderLine{
@@ -129,7 +129,7 @@ func TestReconcileDelayedGetBarrier(t *testing.T) {
 func TestReconcileCommitOrderInversion(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	stateA := orderTestSnapshot("website", "911", orders.StatusPending, "pending", 10000)
 	stateB := orderTestSnapshot("website", "911", orders.StatusProcessing, "processing", 12000)
 	genA, err := store.BeginOrderReconcile(ctx, "website", "911")
@@ -175,7 +175,7 @@ func TestReconcileCommitOrderInversion(t *testing.T) {
 func TestReconcileSameStateConcurrent(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	snapshot := orderTestSnapshot("website", "912", orders.StatusProcessing, "processing", 12000)
 	genA, err := store.BeginOrderReconcile(ctx, "website", "912")
 	if err != nil {
@@ -213,7 +213,7 @@ func TestReconcileSameStateConcurrent(t *testing.T) {
 func TestReconcileThreeGenerations(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	stateC := orderTestSnapshot("website", "913", orders.StatusCompleted, "completed", 15000)
 	stateA := orderTestSnapshot("website", "913", orders.StatusPending, "pending", 10000)
 	stateB := orderTestSnapshot("website", "913", orders.StatusProcessing, "processing", 12000)
@@ -259,7 +259,7 @@ func TestReconcileThreeGenerations(t *testing.T) {
 func TestManualSyncVsWebhook(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	stateA := orderTestSnapshot("website", "914", orders.StatusPending, "pending", 10000)
 	stateB := orderTestSnapshot("website", "914", orders.StatusProcessing, "processing", 12000)
 	provider := &barrierOrderProvider{
@@ -317,7 +317,7 @@ func TestManualSyncVsWebhook(t *testing.T) {
 func TestFailedNewerSupersedesOlder(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	committed := orderTestSnapshot("website", "915", orders.StatusProcessing, "processing", 12000)
 	gen0, err := store.BeginOrderReconcile(ctx, "website", "915")
 	if err != nil {
@@ -364,7 +364,7 @@ func TestFailedNewerSupersedesOlder(t *testing.T) {
 func TestBeginOrderReconcileConcurrent(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	const racers = 16
 	results := make(chan orders.ReconcileGeneration, racers)
 	var wg sync.WaitGroup

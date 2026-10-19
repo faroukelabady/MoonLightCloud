@@ -44,7 +44,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	if label != "Original" || delta != 30000 {
 		t.Fatalf("initial %s %d", label, delta)
 	}
-	detail, e := store.GetOrderDetail(ctx, "website", "15001")
+	detail, e := NewCommerceOrders(store.pool, store.timeout).GetOrderDetail(ctx, "website", "15001")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -125,7 +125,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	// persisted selection defects. Mapping loss never rewrites history.
 	assertHeader := func(id string, want bool) {
 		t.Helper()
-		detail, e := store.GetOrderDetail(ctx, "website", id)
+		detail, e := NewCommerceOrders(store.pool, store.timeout).GetOrderDetail(ctx, "website", id)
 		if e != nil || detail.Summary.MappingComplete != want {
 			t.Fatalf("header/detail %s: %v %+v", id, e, detail.Summary)
 		}
@@ -185,11 +185,11 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	}
 	broken := orderTestSnapshot("website", "15004", orders.StatusPending, "pending", 100000)
 	broken.Lines[0].VariationID = 599
-	gen, e := store.BeginOrderReconcile(ctx, "website", "15004")
+	gen, e := NewCommerceOrders(store.pool, store.timeout).BeginOrderReconcile(ctx, "website", "15004")
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = store.ReconcileProjectedOrder(ctx, broken, orders.Fingerprint(broken), gen); e == nil {
+	if _, e = NewCommerceOrders(store.pool, store.timeout).ReconcileProjectedOrder(ctx, broken, orders.Fingerprint(broken), gen); e == nil {
 		t.Fatal("fault did not fire")
 	}
 	assertHeader("15004", true)
@@ -202,7 +202,7 @@ func TestR3ConfigurationOrderHistory(t *testing.T) {
 	}
 	defer reopened.Close()
 	reopenedStore := NewDevices(reopened, 5*time.Second)
-	persisted, e := reopenedStore.GetOrderDetail(ctx, "website", "15004")
+	persisted, e := NewCommerceOrders(reopenedStore.pool, reopenedStore.timeout).GetOrderDetail(ctx, "website", "15004")
 	if e != nil || !persisted.Summary.MappingComplete || len(persisted.Lines) != 1 {
 		t.Fatal("restart changed reconciled verdict", e)
 	}

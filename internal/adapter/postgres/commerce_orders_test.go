@@ -14,6 +14,11 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/commerce/orders"
 )
 
+// commerceOrderStore selects order persistence without catalog mutation methods.
+func commerceOrderStore(env *saleEnv) CommerceOrders {
+	return NewCommerceOrders(env.pool, 5*time.Second)
+}
+
 // orderTestSnapshot builds a normalized snapshot for projection tests.
 func orderTestSnapshot(provider, external string, status orders.CanonicalStatus, providerStatus string, total int64) orders.OrderSnapshot {
 	created := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
@@ -36,7 +41,7 @@ func orderTestSnapshot(provider, external string, status orders.CanonicalStatus,
 func reconcileSnapshot(t *testing.T, env *saleEnv, snapshot orders.OrderSnapshot) (int64, bool) {
 	t.Helper()
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	generation, err := store.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -101,7 +106,7 @@ func TestCommerceOrderProjectionMatrix(t *testing.T) {
 	if revision != 4 || !changed {
 		t.Fatalf("mapping change: %d %v", revision, changed)
 	}
-	stored, _, found, err := catalogStore(env).LoadProjectedOrder(context.Background(), "website", "200")
+	stored, _, found, err := commerceOrderStore(env).LoadProjectedOrder(context.Background(), "website", "200")
 	if err != nil || !found {
 		t.Fatal("stored")
 	}
@@ -136,7 +141,7 @@ func TestCommerceOrderAtomicity(t *testing.T) {
 	snapshot.TotalMinor = 12000
 	snapshot.ModifiedAt = snapshot.ModifiedAt.Add(time.Hour)
 	snapshot.Lines[0].Quantity = 0
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	generation, err := store.BeginOrderReconcile(context.Background(), snapshot.ProviderKey, snapshot.ExternalOrderID)
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +150,7 @@ func TestCommerceOrderAtomicity(t *testing.T) {
 	if err == nil {
 		t.Fatal("constraint failure must surface")
 	}
-	stored, revision, found, rerr := catalogStore(env).LoadProjectedOrder(context.Background(), "website", "201")
+	stored, revision, found, rerr := commerceOrderStore(env).LoadProjectedOrder(context.Background(), "website", "201")
 	if rerr != nil || !found {
 		t.Fatal("previous revision intact")
 	}
@@ -166,7 +171,7 @@ func TestCommerceOrderUnmappedLine(t *testing.T) {
 	if revision != 1 || !changed {
 		t.Fatalf("initial: %d %v", revision, changed)
 	}
-	stored, _, _, err := catalogStore(env).LoadProjectedOrder(context.Background(), "website", "202")
+	stored, _, _, err := commerceOrderStore(env).LoadProjectedOrder(context.Background(), "website", "202")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,13 +191,13 @@ func TestCommerceOrderUnmappedLine(t *testing.T) {
 func TestCommerceOrderRenamePreservesHistory(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	root, sub, tag := catalogProductFixture(t, env, 300, "ordren")
 	productID := "e0003000-0000-4000-8000-000000000000"
 	ingestCatalog(t, env, "d0007000-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-REN", "Old Name", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007000-0000-4000-8000-000000000000")
-	if _, err := store.CreateProductMapping(ctx, "website", productID, "500"); err != nil {
+	if _, err := catalogStore(env).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := orderTestSnapshot("website", "203", orders.StatusPending, "pending", 10000)
@@ -223,13 +228,13 @@ func TestCommerceOrderRenamePreservesHistory(t *testing.T) {
 func TestCommerceOrderSurvivesCatalogRebuild(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	root, sub, tag := catalogProductFixture(t, env, 310, "orbr")
 	productID := "e0003100-0000-4000-8000-000000000000"
 	ingestCatalog(t, env, "d0007100-0000-4000-8000-000000000000", catalog.EventProductSnapshotV2, "2026-09-20T12:00:00Z",
 		productPayload(productID, "PAP-RB", "x", root, []string{sub}, []string{tag}, 1))
 	projectCatalogOnce(t, env, "d0007100-0000-4000-8000-000000000000")
-	if _, err := store.CreateProductMapping(ctx, "website", productID, "500"); err != nil {
+	if _, err := catalogStore(env).CreateProductMapping(ctx, "website", productID, "500"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := orderTestSnapshot("website", "210", orders.StatusProcessing, "processing", 15000)
@@ -288,7 +293,7 @@ func TestCommerceOrderSurvivesCatalogRebuild(t *testing.T) {
 func TestCommerceOrderReads(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	first := orderTestSnapshot("website", "220", orders.StatusPending, "pending", 9007199254740993)
 	second := orderTestSnapshot("website", "221", orders.StatusCompleted, "completed", 1300)
 	second.CreatedAt = second.CreatedAt.Add(-time.Hour)
@@ -382,7 +387,7 @@ func TestCommerceWebhookInboxMinimization(t *testing.T) {
 	ctx := context.Background()
 	body := []byte(`{"id":400,"billing":{"first_name":"Layla","email":"layla-pii@example.com","phone":"+201111111111","address_1":"5 PII Street"},"customer_note":"PII note here"}`)
 	sum := sha256.Sum256(body)
-	outcome, err := catalogStore(env).InsertOrderWebhookEvent(ctx, "website", "delivery-pii", orders.TopicOrderCreated, "400", sum[:], nil)
+	outcome, err := commerceOrderStore(env).InsertOrderWebhookEvent(ctx, "website", "delivery-pii", orders.TopicOrderCreated, "400", sum[:], nil)
 	if err != nil || outcome != orders.WebhookInserted {
 		t.Fatalf("insert: %v %v", outcome, err)
 	}
@@ -404,7 +409,7 @@ func TestCommerceWebhookInboxMinimization(t *testing.T) {
 func TestCommerceOrderDeleteThenRevive(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	snapshot := orderTestSnapshot("website", "230", orders.StatusProcessing, "processing", 15000)
 	if revision, changed := reconcileSnapshot(t, env, snapshot); revision != 1 || !changed {
 		t.Fatalf("initial: %d %v", revision, changed)
@@ -471,7 +476,7 @@ func TestCommerceOrderLeavesSalesMetricsUnchanged(t *testing.T) {
 	}
 	baseCount, baseRevenue, baseRefunds := snapshot()
 
-	store := catalogStore(env.saleEnv)
+	store := commerceOrderStore(env.saleEnv)
 	project := func(status orders.CanonicalStatus, providerStatus string, total int64) {
 		t.Helper()
 		order := orderTestSnapshot("website", "970", status, providerStatus, total)
@@ -520,7 +525,7 @@ func TestCommerceInboxOldestPending(t *testing.T) {
 	seed("old-r", "order.updated", "702", "retry", "2026-09-27T09:00:00Z")
 	seed("old-ok", "order.updated", "703", "processed", "2026-09-27T08:00:00Z")
 	seed("old-block", "order.created", "704", "blocked", "2026-09-27T07:00:00Z")
-	stats, err := catalogStore(env).OrderInboxStats(ctx)
+	stats, err := commerceOrderStore(env).OrderInboxStats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +537,7 @@ func TestCommerceInboxOldestPending(t *testing.T) {
 	}
 	// Empty inbox: zero counts and null oldest.
 	fresh := openSaleEnv(t)
-	empty, err := catalogStore(fresh).OrderInboxStats(ctx)
+	empty, err := commerceOrderStore(fresh).OrderInboxStats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +564,7 @@ func seedPagedOrders(t *testing.T, env *saleEnv, provider string, base time.Time
 			t.Fatalf("seed %s changed", external)
 		}
 		if i%3 == 2 {
-			store := catalogStore(env)
+			store := commerceOrderStore(env)
 			generation, err := store.BeginOrderReconcile(context.Background(), provider, external)
 			if err != nil {
 				t.Fatal(err)
@@ -582,7 +587,7 @@ func seedPagedOrders(t *testing.T, env *saleEnv, provider string, base time.Time
 func collectPageIDs(t *testing.T, env *saleEnv, provider, status string, limit int) []string {
 	t.Helper()
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	var ids []string
 	seen := map[string]bool{}
 	var cursor *orders.OrderCursor
@@ -671,7 +676,7 @@ func TestCommerceOrderPageFilters(t *testing.T) {
 	if len(processing) != 8 {
 		t.Fatalf("status filter: %d rows", len(processing))
 	}
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	page, err := store.ListOrderPage(context.Background(), "website", "processing", 5, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -688,7 +693,7 @@ func TestCommerceOrderPageFilters(t *testing.T) {
 func TestCommerceOrderPageConcurrentInsert(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	base := time.Date(2026, 9, 27, 15, 0, 0, 0, time.UTC)
 	seedPagedOrders(t, env, "website", base, 8)
 	first, err := store.ListOrderPage(ctx, "website", "", 5, nil)

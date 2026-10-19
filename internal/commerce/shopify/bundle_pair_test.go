@@ -242,16 +242,16 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 		return orders.OrderSnapshot{ProviderKey: string(p.Key()), ExternalOrderID: "150031", ProviderStatus: string(status), Canonical: status, Currency: "EGP", TotalMinor: 130000, CreatedAt: now, ModifiedAt: now, Lines: []orders.OrderLine{{ExternalLineID: 1, ExternalProductID: result.ExternalProductID, ProviderConfigurationID: mapping.ExternalConfigurationID, Name: "Papyrus", Quantity: 1, TotalMinor: 130000}}}
 	}
 	reconcile := func(snapshot orders.OrderSnapshot) {
-		generation, e := d.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
+		generation, e := postgres.NewCommerceOrders(pool, 5*time.Second).BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = d.ReconcileProjectedOrder(ctx, snapshot, orders.Fingerprint(snapshot), generation); e != nil {
+		if _, e = postgres.NewCommerceOrders(pool, 5*time.Second).ReconcileProjectedOrder(ctx, snapshot, orders.Fingerprint(snapshot), generation); e != nil {
 			t.Fatal(e)
 		}
 	}
 	reconcile(freshOrder(orders.StatusPending))
-	before, e := d.GetOrderDetail(ctx, string(p.Key()), "150031")
+	before, e := postgres.NewCommerceOrders(pool, 5*time.Second).GetOrderDetail(ctx, string(p.Key()), "150031")
 	if e != nil || before.Lines[0].FrameStyleNameEN == nil || *before.Lines[0].FrameStyleNameEN != "Original" {
 		t.Fatal("initial historical selection not captured")
 	}
@@ -275,26 +275,26 @@ func TestR3ActualRetailCloudProviderPair(t *testing.T) {
 	service = commerce.NewCommerceService(registry, d, commerce.NewCatalogCommerceSource(catalog.NewService(d)), nil)
 	runQueue()
 	reconcile(freshOrder(orders.StatusProcessing))
-	after, e := d.GetOrderDetail(ctx, string(p.Key()), "150031")
+	after, e := postgres.NewCommerceOrders(pool, 5*time.Second).GetOrderDetail(ctx, string(p.Key()), "150031")
 	if e != nil {
 		t.Fatal(e)
 	}
 	if after.Lines[0].FrameStyleNameEN == nil || *after.Lines[0].FrameStyleNameEN != "Original" || after.Lines[0].ConfigurationPriceDeltaMinor == nil || *after.Lines[0].ConfigurationPriceDeltaMinor != "30000" {
 		t.Fatal("fresh status refresh substituted current rename/reprice/disable")
 	}
-	scoped, e := d.GetOrderDetailForStore(ctx, storeID, string(p.Key()), "150031")
+	scoped, e := postgres.NewCommerceOrders(pool, 5*time.Second).GetOrderDetailForStore(ctx, storeID, string(p.Key()), "150031")
 	if e != nil || scoped.Summary.MappingComplete != after.Summary.MappingComplete || scoped.Lines[0].ConfigurationPriceDeltaMinor == nil || *scoped.Lines[0].ConfigurationPriceDeltaMinor != "30000" {
 		t.Fatal("Store/global historical verdict differs", e)
 	}
-	globalCounts, e := d.CountOrdersByStatus(ctx, string(p.Key()))
+	globalCounts, e := postgres.NewCommerceOrders(pool, 5*time.Second).CountOrdersByStatus(ctx, string(p.Key()))
 	if e != nil {
 		t.Fatal(e)
 	}
-	scopedCounts, e := d.CountOrdersByStatusForStore(ctx, storeID, string(p.Key()))
+	scopedCounts, e := postgres.NewCommerceOrders(pool, 5*time.Second).CountOrdersByStatusForStore(ctx, storeID, string(p.Key()))
 	if e != nil || len(globalCounts) != len(scopedCounts) {
 		t.Fatal("Store/global count mismatch", e)
 	}
-	other, e := d.ListOrderSummariesForStore(ctx, "019c0000-0000-7000-8000-000000000092", string(p.Key()), "", 10, nil)
+	other, e := postgres.NewCommerceOrders(pool, 5*time.Second).ListOrderSummariesForStore(ctx, "019c0000-0000-7000-8000-000000000092", string(p.Key()), "", 10, nil)
 	if e != nil || len(other) != 0 {
 		t.Fatal("unknown Store widened scope", e)
 	}

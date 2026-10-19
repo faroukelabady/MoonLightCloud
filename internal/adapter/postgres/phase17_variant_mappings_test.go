@@ -97,7 +97,7 @@ func TestOrderLineVariantSnapshot(t *testing.T) {
 	if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
 		t.Fatal("initial projection must change")
 	}
-	stored, _, found, err := store.LoadProjectedOrder(ctx, "website", "300")
+	stored, _, found, err := NewCommerceOrders(store.pool, store.timeout).LoadProjectedOrder(ctx, "website", "300")
 	if err != nil || !found {
 		t.Fatal("stored")
 	}
@@ -126,7 +126,7 @@ func TestOrderLineVariantSnapshot(t *testing.T) {
 	if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
 		t.Fatal("line change must project")
 	}
-	stored, _, found, err = store.LoadProjectedOrder(ctx, "website", "300")
+	stored, _, found, err = NewCommerceOrders(store.pool, store.timeout).LoadProjectedOrder(ctx, "website", "300")
 	if err != nil || !found {
 		t.Fatal("stored")
 	}
@@ -167,7 +167,7 @@ func TestOrderLineVariantFrameLayerFallback(t *testing.T) {
 	if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
 		t.Fatal("initial projection must change")
 	}
-	stored, _, found, err := store.LoadProjectedOrder(ctx, "website", "301")
+	stored, _, found, err := NewCommerceOrders(store.pool, store.timeout).LoadProjectedOrder(ctx, "website", "301")
 	if err != nil || !found {
 		t.Fatal("stored")
 	}
@@ -195,7 +195,7 @@ func TestOrderLineVariantFrameLayerFallback(t *testing.T) {
 	if _, changed := reconcileSnapshot(t, env, snapshot); !changed {
 		t.Fatal("initial projection must change")
 	}
-	stored, _, found, err = store.LoadProjectedOrder(ctx, "website", "302")
+	stored, _, found, err = NewCommerceOrders(store.pool, store.timeout).LoadProjectedOrder(ctx, "website", "302")
 	if err != nil || !found {
 		t.Fatal("stored")
 	}

@@ -12,7 +12,7 @@ import (
 // claimForTest leases one event and returns its fencing token.
 func claimForTest(t *testing.T, env *saleEnv, owner string) orders.ClaimedWebhookEvent {
 	t.Helper()
-	claim, ok, err := catalogStore(env).ClaimOrderWebhookEvent(
+	claim, ok, err := commerceOrderStore(env).ClaimOrderWebhookEvent(
 		context.Background(), owner, 5*time.Minute, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
@@ -22,7 +22,7 @@ func claimForTest(t *testing.T, env *saleEnv, owner string) orders.ClaimedWebhoo
 
 func finishForTest(t *testing.T, env *saleEnv, claim orders.ClaimedWebhookEvent, status string) (orders.FinishResult, string, int) {
 	t.Helper()
-	result, err := catalogStore(env).FinishOrderWebhookEvent(
+	result, err := commerceOrderStore(env).FinishOrderWebhookEvent(
 		context.Background(), claim, status, nil, status == "processed", "")
 	if err != nil {
 		t.Fatalf("finish: %v", err)
@@ -98,7 +98,7 @@ func TestLeaseBlockedProtected(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimB := claimForTest(t, env, "worker-B")
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	result, err := store.FinishOrderWebhookEvent(ctx, claimB, "blocked", nil, false, "ORDER_INVALID")
 	if err != nil || result != orders.FinishApplied {
 		t.Fatalf("B blocked: %v %v", result, err)
@@ -116,7 +116,7 @@ func TestLeaseCurrentOwnerRetry(t *testing.T) {
 	ctx := context.Background()
 	insertLeaseWebhook(t, env, "delivery-3")
 	claim := claimForTest(t, env, "worker-A")
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	next := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
 	result, err := store.FinishOrderWebhookEvent(ctx, claim, "retry", &next, false, "ORDER_PROVIDER_RETRY")
 	if err != nil || result != orders.FinishApplied {
@@ -160,7 +160,7 @@ func TestLeaseSameProcessReclaim(t *testing.T) {
 func TestStaleWorkerCombined(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	stateA := orderTestSnapshot("website", "940", orders.StatusPending, "pending", 10000)
 	stateB := orderTestSnapshot("website", "940", orders.StatusProcessing, "processing", 12000)
 	provider := &barrierOrderProvider{

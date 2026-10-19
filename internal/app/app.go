@@ -171,7 +171,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.HumanAuth = humanAuthSvc
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
-	dashOrders := adapterhttp.NewDashboardOrderHandlers(store, log)
+	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
+	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)
 	a.CommerceRegistry, err = NewCommerceRegistry(cfg, store)
 	if err != nil {
 		pool.Close()
@@ -182,14 +183,14 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	ordersEnabled := (cfg.WooCommerce.Enabled && cfg.WooCommerce.OrdersEnabled) ||
 		(cfg.Shopify.Enabled && cfg.Shopify.OrdersEnabled)
 	if a.CommerceRegistry.Count() > 0 {
-		a.OrderService = orders.NewOrderService(a.CommerceRegistry, store, log)
+		a.OrderService = orders.NewOrderService(a.CommerceRegistry, commerceOrders, log)
 	}
 	if ordersEnabled {
-		a.OrderProcessor = orders.NewProcessor(store, a.OrderService, orders.SystemClock{}, commerceOwner(), log)
+		a.OrderProcessor = orders.NewProcessor(commerceOrders, a.OrderService, orders.SystemClock{}, commerceOwner(), log)
 		if cfg.WooCommerce.Enabled && cfg.WooCommerce.OrdersEnabled {
 			secret := cfg.WooCommerce.WebhookSecret
 			key := cfg.WooCommerce.ProviderKey
-			commerceWebhooks = adapterhttp.NewCommerceWebhookHandlers(store,
+			commerceWebhooks = adapterhttp.NewCommerceWebhookHandlers(commerceOrders,
 				func(providerKey string) (string, bool) {
 					if providerKey == key {
 						return secret, true
@@ -201,7 +202,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			secret := cfg.Shopify.ClientSecret
 			domain := cfg.Shopify.NormalizedShopDomain()
 			key := cfg.Shopify.ProviderKey
-			shopifyWebhooks = adapterhttp.NewShopifyWebhookHandlers(store,
+			shopifyWebhooks = adapterhttp.NewShopifyWebhookHandlers(commerceOrders,
 				func(providerKey string) (adapterhttp.ShopifyWebhookConfig, bool) {
 					if providerKey == key {
 						return adapterhttp.ShopifyWebhookConfig{ClientSecret: secret, ShopDomain: domain}, true

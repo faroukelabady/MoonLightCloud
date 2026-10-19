@@ -17,7 +17,7 @@ import (
 
 // keyset pagination (created_at DESC, provider_key, external_order_id).
 // Empty provider/status means no filter; limit is bounded.
-func (d Devices) ListOrderSummaries(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]orders.OrderSummary, error) {
+func (d CommerceOrders) ListOrderSummaries(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]orders.OrderSummary, error) {
 	if limit <= 0 || limit > 100 {
 		return nil, apperr.New(apperr.InvalidInput, "limit must be 1..100")
 	}
@@ -54,7 +54,7 @@ func orderSummaryRow(row sqlcgen.ListCommerceOrdersRow) orders.OrderSummary {
 // It fetches one lookahead row to decide continuation without a full
 // count; Next is nil on the final page and otherwise points after the
 // last returned row (never the lookahead row).
-func (d Devices) ListOrderPage(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) (orders.OrderPage, error) {
+func (d CommerceOrders) ListOrderPage(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) (orders.OrderPage, error) {
 	if limit <= 0 || limit > 100 {
 		return orders.OrderPage{}, apperr.New(apperr.InvalidInput, "limit must be 1..100")
 	}
@@ -85,7 +85,7 @@ func (d Devices) ListOrderPage(ctx context.Context, provider, status string, lim
 
 // listOrderRows runs the shared keyset list query for both list entry
 // points so ordering can never diverge between them.
-func (d Devices) listOrderRows(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]sqlcgen.ListCommerceOrdersRow, error) {
+func (d CommerceOrders) listOrderRows(ctx context.Context, provider, status string, limit int, cursor *orders.OrderCursor) ([]sqlcgen.ListCommerceOrdersRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	var cursorAt pgtype.Timestamptz
@@ -105,7 +105,7 @@ func (d Devices) listOrderRows(ctx context.Context, provider, status string, lim
 }
 
 // GetOrderDetail assembles the full operator-visible order.
-func (d Devices) GetOrderDetail(ctx context.Context, providerKey, externalOrderID string) (orders.OrderDetail, error) {
+func (d CommerceOrders) GetOrderDetail(ctx context.Context, providerKey, externalOrderID string) (orders.OrderDetail, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(providerKey); err != nil {
@@ -196,7 +196,7 @@ func (d Devices) GetOrderDetail(ctx context.Context, providerKey, externalOrderI
 }
 
 // CountOrdersByStatus returns order counts per canonical status.
-func (d Devices) CountOrdersByStatus(ctx context.Context, provider string) ([]orders.OrderStatusCount, error) {
+func (d CommerceOrders) CountOrdersByStatus(ctx context.Context, provider string) ([]orders.OrderStatusCount, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	rows, err := sqlcgen.New(d.pool).CountCommerceOrdersByStatus(ctx, provider)
@@ -211,7 +211,7 @@ func (d Devices) CountOrdersByStatus(ctx context.Context, provider string) ([]or
 }
 
 // OrderInboxStats adapts the webhook queue stats to the orders read model.
-func (d Devices) OrderInboxStats(ctx context.Context) (orders.WebhookQueueStats, error) {
+func (d CommerceOrders) OrderInboxStats(ctx context.Context) (orders.WebhookQueueStats, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	pending, retry, blocked, oldest, err := d.OrderWebhookStats(ctx)
@@ -235,7 +235,7 @@ func scopedStoreUUID(storeID string) (pgtype.UUID, error) {
 }
 
 // ListOrderSummariesForStore returns one Store-scoped dashboard page.
-func (d Devices) ListOrderSummariesForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) ([]orders.OrderSummary, error) {
+func (d CommerceOrders) ListOrderSummariesForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) ([]orders.OrderSummary, error) {
 	if limit <= 0 || limit > 100 {
 		return nil, apperr.New(apperr.InvalidInput, "limit must be 1..100")
 	}
@@ -252,7 +252,7 @@ func (d Devices) ListOrderSummariesForStore(ctx context.Context, storeID, provid
 
 // ListOrderPageForStore returns one Store-scoped page plus its
 // continuation cursor, mirroring ListOrderPage semantics.
-func (d Devices) ListOrderPageForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) (orders.OrderPage, error) {
+func (d CommerceOrders) ListOrderPageForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) (orders.OrderPage, error) {
 	if limit <= 0 || limit > 100 {
 		return orders.OrderPage{}, apperr.New(apperr.InvalidInput, "limit must be 1..100")
 	}
@@ -291,7 +291,7 @@ func scopedOrderSummaryRow(row sqlcgen.ListCommerceOrdersForStoreRow) orders.Ord
 	}
 }
 
-func (d Devices) listOrderRowsForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) ([]sqlcgen.ListCommerceOrdersForStoreRow, error) {
+func (d CommerceOrders) listOrderRowsForStore(ctx context.Context, storeID, provider, status string, limit int, cursor *orders.OrderCursor) ([]sqlcgen.ListCommerceOrdersForStoreRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)
@@ -318,7 +318,7 @@ func (d Devices) listOrderRowsForStore(ctx context.Context, storeID, provider, s
 // Wrong-Store and missing rows are indistinguishable
 // (repository-standard not-found): Store A can never observe Store B
 // order, customer, address, line, or history data through this surface.
-func (d Devices) GetOrderDetailForStore(ctx context.Context, storeID, providerKey, externalOrderID string) (orders.OrderDetail, error) {
+func (d CommerceOrders) GetOrderDetailForStore(ctx context.Context, storeID, providerKey, externalOrderID string) (orders.OrderDetail, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	if _, err := commerce.ValidateProviderKey(providerKey); err != nil {
@@ -414,7 +414,7 @@ func (d Devices) GetOrderDetailForStore(ctx context.Context, storeID, providerKe
 }
 
 // CountOrdersByStatusForStore returns Store-scoped counts per canonical status.
-func (d Devices) CountOrdersByStatusForStore(ctx context.Context, storeID, provider string) ([]orders.OrderStatusCount, error) {
+func (d CommerceOrders) CountOrdersByStatusForStore(ctx context.Context, storeID, provider string) ([]orders.OrderStatusCount, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := scopedStoreUUID(storeID)

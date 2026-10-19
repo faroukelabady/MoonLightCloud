@@ -40,7 +40,7 @@ func deleteTestService(env *saleEnv, provider *scriptedOrderProvider) *orders.Or
 	if err := registry.Register("website", provider); err != nil {
 		panic(err)
 	}
-	return orders.NewOrderService(registry, catalogStore(env), nilLogger())
+	return orders.NewOrderService(registry, commerceOrderStore(env), nilLogger())
 }
 
 func notFoundOrder() error {
@@ -67,7 +67,7 @@ func TestDeleteDelayedAfterLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete reconciles: %v", err)
 	}
-	stored, rev, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "950")
+	stored, rev, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "950")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDeleteDelayedAfterLive(t *testing.T) {
 func TestDelete404Race(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	live := orderTestSnapshot("website", "951", orders.StatusProcessing, "processing", 12000)
 	release := make(chan struct{})
 	returned := make(chan struct{})
@@ -143,7 +143,7 @@ func TestDelete404Race(t *testing.T) {
 func TestDeleteProviderOutcomes(t *testing.T) {
 	env := openSaleEnv(t)
 	ctx := context.Background()
-	store := catalogStore(env)
+	store := commerceOrderStore(env)
 	live := orderTestSnapshot("website", "952", orders.StatusProcessing, "processing", 12000)
 	if _, err := store.BeginOrderReconcile(ctx, "website", "952"); err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestManualDeleteOrdering(t *testing.T) {
 	if !deleted.ProviderDeleted || deleted.Revision != 2 {
 		t.Fatalf("absent tombstones: %+v", deleted)
 	}
-	stored, _, _, err := catalogStore(env).LoadProjectedOrder(ctx, "website", "953")
+	stored, _, _, err := commerceOrderStore(env).LoadProjectedOrder(ctx, "website", "953")
 	if err != nil || !stored.ProviderDeleted || stored.TotalMinor != 12000 {
 		t.Fatalf("tombstone retains data: %+v %v", stored, err)
 	}

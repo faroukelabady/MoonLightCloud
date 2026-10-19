@@ -71,7 +71,7 @@ func TestR1ShopifyRealPostgresPipeline(t *testing.T) {
 	if err := reg.Register(p.Key(), p); err != nil {
 		t.Fatal(err)
 	}
-	store := NewDevices(f.pool, 5*time.Second)
+	store := NewCommerceOrders(f.pool, 5*time.Second)
 	svc := orders.NewOrderService(reg, store, nilLogger())
 	ctx := context.Background()
 	if _, err := svc.ReconcileOrder(ctx, "shopify-main", "800"); err != nil {
@@ -199,7 +199,7 @@ func TestR1ShopifyPagedProjectionAtomicity(t *testing.T) {
 	if err := registry.Register(provider.Key(), provider); err != nil {
 		t.Fatal(err)
 	}
-	store := NewDevices(f.pool, 5*time.Second)
+	store := NewCommerceOrders(f.pool, 5*time.Second)
 	service := orders.NewOrderService(registry, store, nilLogger())
 	if _, err := service.ReconcileOrder(ctx, "shopify-main", "800"); err != nil {
 		t.Fatal(err)

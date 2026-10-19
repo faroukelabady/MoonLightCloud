@@ -51,7 +51,7 @@ func scopeSnapshot(provider, external, number string, lines []orders.OrderLine) 
 func reconcileScoped(t *testing.T, f *scopeFixture, snapshot orders.OrderSnapshot) (orders.ReconcileOutcome, error) {
 	t.Helper()
 	ctx := context.Background()
-	store := NewDevices(f.pool, 5*time.Second)
+	store := NewCommerceOrders(f.pool, 5*time.Second)
 	generation, err := store.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -247,7 +247,7 @@ func TestOrder_ReadIsolation(t *testing.T) {
 	mkOrder("810", "Alice", "alice@example.com", []orders.OrderLine{orderLine("700", 1, 10000)})
 	mkOrder("811", "Bob", "bob@example.com", []orders.OrderLine{orderLine("701", 1, 10000)})
 	mkOrder("812", "Legacy", "legacy@example.com", []orders.OrderLine{orderLine("unmapped-x", 1, 10000)})
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommerceOrders(f.pool, 5*time.Second)
 	ctx := context.Background()
 	summaries, err := devices.ListOrderSummariesForStore(ctx, scopeStoreA, "", "", 100, nil)
 	if err != nil || len(summaries) != 1 || summaries[0].ExternalOrderID != "810" {
@@ -295,7 +295,7 @@ func TestOrder_ReadIsolation(t *testing.T) {
 func TestOrder_DeletionPreserves(t *testing.T) {
 	f, _, _ := scopeOrderFixture(t)
 	mustReconcile(t, f, scopeSnapshot("website", "820", "W-820", []orders.OrderLine{orderLine("700", 1, 10000)}))
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommerceOrders(f.pool, 5*time.Second)
 	ctx := context.Background()
 	loaded, _, found, err := devices.LoadProjectedOrder(ctx, "website", "820")
 	if err != nil || !found {
@@ -373,7 +373,7 @@ func TestOrder_ConcurrentReconcile(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			store := NewDevices(f.pool, 5*time.Second)
+			store := NewCommerceOrders(f.pool, 5*time.Second)
 			ctx := context.Background()
 			snapshot := scopeSnapshot("website", "823", "W-823", []orders.OrderLine{orderLine("700", 1, 10000)})
 			generation, err := store.BeginOrderReconcile(ctx, snapshot.ProviderKey, snapshot.ExternalOrderID)
@@ -444,7 +444,7 @@ func TestOrder_ExistingPreservedOnUnmapped(t *testing.T) {
 // a truthfully unscoped tombstone (no invented ownership).
 func TestOrder_GhostTombstoneNull(t *testing.T) {
 	f := openScopeFixture(t)
-	devices := NewDevices(f.pool, 5*time.Second)
+	devices := NewCommerceOrders(f.pool, 5*time.Second)
 	ctx := context.Background()
 	loaded := scopeSnapshot("website", "831", "W-831", []orders.OrderLine{orderLine("ghost-ext", 1, 100)})
 	loaded.ProviderDeleted = true
