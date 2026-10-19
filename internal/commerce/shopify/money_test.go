@@ -14,7 +14,6 @@ func TestFormatMinorUnitsExact(t *testing.T) {
 		{1, "0.01"},
 		{65000, "650.00"},
 		{65025, "650.25"},
-		{1, "0.01"},
 		// beyond JavaScript safe integer range, exact
 		{9007199254740993, "90071992547409.93"},
 		{9223372036854775807, "92233720368547758.07"},

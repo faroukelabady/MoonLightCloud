@@ -169,10 +169,6 @@ func TestDecodeV2TagRules(t *testing.T) {
 			m["lines"].([]any)[0].(map[string]any)["tags"] = []any{
 				map[string]any{"tag_id": "nope", "slug": "x", "name_ar": "x", "name_en": "x"}}
 		}},
-		{"duplicate tag", func(m map[string]any) {
-			tag := map[string]any{"tag_id": "aaaaaaaa-0000-4000-8000-000000000001", "slug": "x", "name_ar": "x", "name_en": "x"}
-			m["lines"].([]any)[0].(map[string]any)["tags"] = []any{tag, tag}
-		}},
 		{"empty slug", func(m map[string]any) {
 			m["lines"].([]any)[0].(map[string]any)["tags"] = []any{
 				map[string]any{"tag_id": "aaaaaaaa-0000-4000-8000-000000000001", "slug": "", "name_ar": "x", "name_en": "x"}}

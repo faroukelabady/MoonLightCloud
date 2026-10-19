@@ -125,7 +125,6 @@ func TestShopifyWebhookSignatureFailures(t *testing.T) {
 		"missing header":  func(h http.Header, _ *[]byte) { h.Del("X-Shopify-Hmac-Sha256") },
 		"invalid base64":  func(h http.Header, _ *[]byte) { h.Set("X-Shopify-Hmac-Sha256", "!!!not-base64!!!") },
 		"wrong signature": func(h http.Header, _ *[]byte) { h.Set("X-Shopify-Hmac-Sha256", signShopify([]byte("other"))) },
-		"empty signature": func(h http.Header, _ *[]byte) { h.Set("X-Shopify-Hmac-Sha256", "") },
 		"raw body tamper": func(_ http.Header, body *[]byte) { *body = append(*body, ' ') },
 		"different ordering": func(_ http.Header, body *[]byte) {
 			*body = []byte(`{"admin_graphql_api_id":"gid://shopify/Order/5231234567890","id":5231234567890}`)

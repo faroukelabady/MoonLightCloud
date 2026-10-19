@@ -82,10 +82,6 @@ func TestImmutableEventIdentity(t *testing.T) {
 		t.Fatalf("equivalent instant: %+v", res)
 	}
 
-	// Same event after credential rotation → already_accepted.
-	pool, authSvc := openTestRepo(t)
-	_ = pool
-	_ = authSvc
 }
 
 // Exact integer identity must survive PostgreSQL JSONB normalization and retry.

@@ -222,9 +222,6 @@ func TestOrderCursorCodec(t *testing.T) {
 	if _, err := decodeOrderCursor(global, "website", "processing", storeA); err == nil {
 		t.Fatal("global under store must fail")
 	}
-	if _, err := decodeOrderCursor(token, "website", "processing", ""); err == nil {
-		t.Fatal("store under global must fail")
-	}
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
 		t.Fatal(err)

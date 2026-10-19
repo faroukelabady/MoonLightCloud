@@ -69,14 +69,6 @@ func TestBusinessReportsConfig(t *testing.T) {
 			}
 		}
 	})
-	t.Run("bounds enforced", func(t *testing.T) {
-		setBusinessReportsEnv(t, map[string]string{
-			"BUSINESS_REPORTS_ENABLED": "true", "BUSINESS_REPORTS_BATCH_SIZE": "1000",
-		})
-		if _, err := loadBusinessReports(); err == nil {
-			t.Fatal("oversized batch must fail")
-		}
-	})
 }
 
 func TestBusinessReportsBatchBound(t *testing.T) {

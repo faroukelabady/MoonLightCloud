@@ -40,12 +40,10 @@ func tableExists(t *testing.T, conn *sql.DB, table string) bool {
 	return exists
 }
 
-// Fresh database migrates to the single baseline with all core tables.
-func TestFreshToLatest(t *testing.T) {
-	conn, ctx := openRaw(t)
-	if err := migrate.Up(ctx, conn); err != nil {
-		t.Fatal(err)
-	}
+// requireLatestSchema checks a migrated database is at the single baseline
+// with all core tables and none of the removed objects.
+func requireLatestSchema(t *testing.T, conn *sql.DB, ctx context.Context) {
+	t.Helper()
 	if v := version(t, conn, ctx); v != migrate.TargetVersion {
 		t.Fatalf("want %d, got %d", migrate.TargetVersion, v)
 	}
@@ -75,12 +73,14 @@ func TestFreshToLatest(t *testing.T) {
 	}
 }
 
-// Down removes every baseline object and Up rebuilds it (dev/test repair).
+// A fresh database migrates to the baseline; Down removes every baseline
+// object and Up rebuilds it (dev/test repair).
 func TestBaselineDownThenUp(t *testing.T) {
 	conn, ctx := openRaw(t)
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
+	requireLatestSchema(t, conn, ctx)
 	if err := migrate.DownTo(ctx, conn, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -93,9 +93,7 @@ func TestBaselineDownThenUp(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if v := version(t, conn, ctx); v != migrate.TargetVersion {
-		t.Fatalf("version after re-up = %d, want %d", v, migrate.TargetVersion)
-	}
+	requireLatestSchema(t, conn, ctx)
 }
 
 // ADR-0055: a database built from an older migration chain or an older

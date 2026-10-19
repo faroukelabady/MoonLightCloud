@@ -230,26 +230,21 @@ func TestReportSummaryNet(t *testing.T) {
 // TestReportNegativeNet proves a refund-only period reports signed net
 // without clamping, overflow, or schema failure.
 func TestReportNegativeNet(t *testing.T) {
+	// A dedicated pair: sale on 09-18, return on 09-20; querying 09-20
+	// lands only the return.
 	env := openSaleEnv(t)
-	returnScenario(t, env)
-
-	// Only Sale D's return falls on 09-21... no: returns are on 09-20.
-	// Use a dedicated pair: sale on 09-18, return on 09-20, query 09-20
-	// restricted so only the return lands: craft via custom dates on a
-	// fresh env instead.
-	env2 := openSaleEnv(t)
-	projectSale(t, env2, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "2026-09-18T10:00:00Z", nil)
+	projectSale(t, env, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "2026-09-18T10:00:00Z", nil)
 	var saleE map[string]any
 	if err := json.Unmarshal([]byte(fixture(t, "sale_egp.json")), &saleE); err != nil {
 		t.Fatal(err)
 	}
 	lineE := saleE["lines"].([]any)[0].(map[string]any)
-	projectReturnSync(t, env2,
+	projectReturnSync(t, env,
 		"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "MLR-20260918-eeeeeeee", "EGP", nil, saleE["shop"].(map[string]any),
 		lineE["sale_item_id"].(string), strPtrOf(lineE["product_id"]), 2,
 		200000, 0, 0, 200000, int64Ptr(800),
 		"2026-09-20T10:00:00Z", "return", "other", "NEG")
-	sum := reportSummary(t, env2, "custom", "2026-09-20", "2026-09-20", "")
+	sum := reportSummary(t, env, "custom", "2026-09-20", "2026-09-20", "")
 	if len(sum.CurrencyTotals) != 1 {
 		t.Fatalf("one bucket: %+v", sum.CurrencyTotals)
 	}

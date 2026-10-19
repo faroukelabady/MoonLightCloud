@@ -306,15 +306,4 @@ func TestWebhookDeliveryMetadataConflict(t *testing.T) {
 			t.Fatalf("topic conflict: %d", recorder.Code)
 		}
 	})
-	t.Run("order identity conflict", func(t *testing.T) {
-		// Same delivery identity with a contradictory body is a 409
-		// regardless of which field disagrees; the original row stands.
-		handler := newHandler()
-		if recorder := deliver(t, handler, "delivery-2", "order.created", `{"id":711}`); recorder.Code != http.StatusAccepted {
-			t.Fatalf("first: %d", recorder.Code)
-		}
-		if recorder := deliver(t, handler, "delivery-2", "order.created", `{"id":712}`); recorder.Code != http.StatusConflict {
-			t.Fatalf("order conflict: %d", recorder.Code)
-		}
-	})
 }

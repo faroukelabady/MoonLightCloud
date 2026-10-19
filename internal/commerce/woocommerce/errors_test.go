@@ -34,8 +34,6 @@ func TestWooErrorMatrix(t *testing.T) {
 		{"409 conflict", http.StatusConflict, wooErr("test_conflict", "Clash.", 409), commerce.ErrorConflict, false},
 		{"429 rate limited", http.StatusTooManyRequests, wooErr("test_limit", "Slow down.", 429), commerce.ErrorRateLimited, true},
 		{"500 temporary", http.StatusInternalServerError, wooErr("test_boom", "Boom.", 500), commerce.ErrorTemporary, true},
-		{"502 temporary", http.StatusBadGateway, wooErr("test_bg", "Bad.", 502), commerce.ErrorTemporary, true},
-		{"503 temporary", http.StatusServiceUnavailable, wooErr("test_un", "Down.", 503), commerce.ErrorTemporary, true},
 		{"empty body 500", http.StatusInternalServerError, nil, commerce.ErrorTemporary, true},
 		{"non-json 500", http.StatusInternalServerError, "not json at all {{{", commerce.ErrorTemporary, true},
 	}

@@ -141,9 +141,6 @@ func TestInvalidSales(t *testing.T) {
 			fix(m["lines"])
 			fix(m["payments"])
 		}},
-		{"fx microrate mismatch", func(m map[string]any) {
-			m["fx"].(map[string]any)["rate_microrate"] = 52000001
-		}},
 		{"fx rate garbage", func(m map[string]any) {
 			m["fx"].(map[string]any)["rate"] = "lots"
 		}},

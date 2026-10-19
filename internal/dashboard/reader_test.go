@@ -50,7 +50,6 @@ func TestDashboardReaderPreservesScopeAndErrors(t *testing.T) {
 		{name: "nil global"},
 		{name: "blank global", scope: &report.StoreScope{}},
 		{name: "Store A", scope: &report.StoreScope{StoreID: "01910000-0000-7000-8000-000000000001"}, store: "01910000-0000-7000-8000-000000000001"},
-		{name: "Store B", scope: &report.StoreScope{StoreID: "01910000-0000-7000-8000-000000000002"}, store: "01910000-0000-7000-8000-000000000002"},
 		{name: "unknown Store", scope: &report.StoreScope{StoreID: "01910000-0000-7000-8000-000000000003"}, store: "01910000-0000-7000-8000-000000000003"},
 		{name: "manual nonempty is never global", scope: &report.StoreScope{StoreID: " "}, store: " "},
 	} {

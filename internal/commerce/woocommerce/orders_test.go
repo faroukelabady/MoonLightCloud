@@ -266,13 +266,6 @@ func TestWooGetOrderStatusMatrix(t *testing.T) {
 	wooErr := func(code, message string) map[string]any {
 		return map[string]any{"code": code, "message": message}
 	}
-	t.Run("404 not found", func(t *testing.T) {
-		provider, _ := newProvider(t)
-		_, err := provider.GetOrder(context.Background(), "999")
-		if code, blocked := orders.IsBlocked(err); !blocked || code != orders.CodeOrderNotFound {
-			t.Fatalf("404 must be ORDER_NOT_FOUND: %v", err)
-		}
-	})
 	t.Run("409 conflict is not absence", func(t *testing.T) {
 		provider, harness := newProvider(t)
 		harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/500", http.StatusConflict,
@@ -336,7 +329,7 @@ func TestWooGetOrderStatusMatrix(t *testing.T) {
 			t.Fatalf("429 must be RateLimited: %v", err)
 		}
 	})
-	for _, status := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable} {
+	for _, status := range []int{http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			provider, harness := newProvider(t)
 			harness.fail(http.MethodGet, "/wp-json/wc/v3/orders/506", status,

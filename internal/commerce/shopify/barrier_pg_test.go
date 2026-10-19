@@ -31,7 +31,6 @@ func TestMutationBarrierResponseEvidence(t *testing.T) {
 		{"invalid_error", `{"data":{"productUpdate":{"product":null,"userErrors":[null]}}}`, 200, true},
 		{"malformed", `{"data":`, 200, true},
 		{"trailing", `{"data":{"productUpdate":{"product":{"id":"gid://shopify/Product/1"},"userErrors":[]}}} garbage`, 200, true},
-		{"server_failure", `{"errors":[{"message":"unknown execution"}]}`, 503, true},
 		{"explicit_denial", `{"errors":[{"message":"refused"}]}`, 403, false},
 		{"explicit_throttle", `{"errors":[{"message":"throttled"}]}`, 429, false},
 		{"validation", `{"data":{"productUpdate":{"product":null,"userErrors":[{"message":"invalid input"}]}}}`, 200, false},

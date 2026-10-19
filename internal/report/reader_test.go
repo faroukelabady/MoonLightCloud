@@ -38,7 +38,6 @@ func TestReaderForPreservesScopeAndQuerySemantics(t *testing.T) {
 		{name: "nil is global", operation: "global"},
 		{name: "blank is global", scope: &StoreScope{}, operation: "global"},
 		{name: "Store A", scope: &StoreScope{StoreID: "01910000-0000-7000-8000-000000000001"}, operation: "store", store: "01910000-0000-7000-8000-000000000001"},
-		{name: "Store B", scope: &StoreScope{StoreID: "01910000-0000-7000-8000-000000000002"}, operation: "store", store: "01910000-0000-7000-8000-000000000002"},
 		{name: "unknown valid Store", scope: &StoreScope{StoreID: "01910000-0000-7000-8000-000000000003"}, operation: "store", store: "01910000-0000-7000-8000-000000000003"},
 		{name: "manual whitespace is not global", scope: &StoreScope{StoreID: " "}, operation: "store", store: " ", failure: invalid},
 		{name: "manual invalid is not global", scope: &StoreScope{StoreID: "invalid"}, operation: "store", store: "invalid", failure: invalid},

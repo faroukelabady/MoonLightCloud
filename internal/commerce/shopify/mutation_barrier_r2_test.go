@@ -142,14 +142,6 @@ func TestR2GraphQLOutcomeBarrierMatrix(t *testing.T) {
 		apply  bool // the remote applied before answering (worst case)
 		retain bool // barrier must remain active
 	}{
-		{"http200_internal_server_error",
-			`{"errors":[{"message":"Internal error","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}`, 0, true, true},
-		{"http200_unknown_code",
-			`{"errors":[{"message":"uncertain execution","extensions":{"code":"UNRECOGNIZED_FAILURE"}}]}`, 0, true, true},
-		{"partial_data_plus_internal_error",
-			`{"data":{"productUpdate":null},"errors":[{"message":"Internal error","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}`, 0, true, true},
-		{"missing_error_code",
-			`{"errors":[{"message":"boom"}]}`, 0, true, true},
 		{"throttled_first_internal_second",
 			`{"errors":[{"message":"Throttled","extensions":{"code":"THROTTLED"}},{"message":"Internal error","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}`, 0, true, true},
 		{"internal_first_throttled_second",

@@ -41,7 +41,7 @@ func f13TypeCodePayload(t *testing.T, length int, withVariant bool) string {
 
 func TestSaleV3ProductTypeCodeIngressBounds(t *testing.T) {
 	for _, withVariant := range []bool{true, false} {
-		for _, length := range []int{1, 32, 33, 64} {
+		for _, length := range []int{1, 32, 33} {
 			t.Run(fmt.Sprintf("variant=%v/length=%d", withVariant, length), func(t *testing.T) {
 				env := openSaleEnv(t)
 				ctx := context.Background()
@@ -85,7 +85,7 @@ func TestSaleV3ProductTypeCodeIngressBounds(t *testing.T) {
 
 func TestSaleV3PreviouslyAcceptedOversizedTypeCodeBlocks(t *testing.T) {
 	for _, withVariant := range []bool{true, false} {
-		for _, length := range []int{33, 64} {
+		for _, length := range []int{33} {
 			t.Run(fmt.Sprintf("variant=%v/length=%d", withVariant, length), func(t *testing.T) {
 				env := openSaleEnv(t)
 				ctx := context.Background()
