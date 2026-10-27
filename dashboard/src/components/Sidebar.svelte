@@ -9,35 +9,32 @@
 		allStores = false
 	}: { route: string; navigate: (r: string) => void; permissions?: string[]; allStores?: boolean } = $props();
 
-	const entries = [
-		{ r: 'overview', ar: 'نظرة عامة', en: 'Overview', ready: true, icon: 'home' },
-		{ r: 'sales', ar: 'ملخص المبيعات', en: 'Sales Summary', ready: true, icon: 'chart' },
-		{ r: 'daily', ar: 'الاتجاهات اليومية', en: 'Daily Trends', ready: true, icon: 'trend' },
-		{ r: 'products', ar: 'المنتجات', en: 'Products', ready: true, icon: 'box' },
-		{ r: 'categories', ar: 'الفئات', en: 'Categories', ready: true, icon: 'layers' },
-		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', ready: true, icon: 'clip' },
-		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', ready: true, icon: 'cloud', perm: 'devices.read' },
-		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', ready: true, icon: 'gear', perm: 'catalog.read' },
-		{ r: 'operations', ar: 'العمليات', en: 'Operations', ready: true, icon: 'clip', perm: 'operations.read', all: true },
-		{ r: 'updates', ar: 'التحديثات', en: 'Updates', ready: true, icon: 'cloud', perm: 'releases.read' },
-		{ r: 'users', ar: 'المستخدمون والأمان', en: 'Users & Security', ready: true, icon: 'gear', perm: 'users.read' },
-		{ r: 'reports', ar: 'التقارير', en: 'Reports', ready: false, note: 'قريبًا', icon: 'report' },
-		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', ready: true, icon: 'cloud' },
-		{ r: 'settings', ar: 'الإعدادات', en: 'Settings', ready: false, note: 'قريبًا', icon: 'gear' },
-		{ r: 'help', ar: 'مركز المساعدة', en: 'Help Center', ready: false, note: 'قريبًا', icon: 'help' }
+	// Business views first, then administration. Overview already carries the
+	// daily trend and product table, so they have no entries of their own.
+	const entries: { r: string; ar: string; en: string; icon: string; perm?: string; all?: boolean }[] = [
+		{ r: 'overview', ar: 'نظرة عامة', en: 'Overview', icon: 'home' },
+		{ r: 'sales', ar: 'ملخص المبيعات', en: 'Sales Summary', icon: 'chart' },
+		{ r: 'categories', ar: 'الفئات والوسوم', en: 'Categories & Tags', icon: 'layers' },
+		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', icon: 'clip' },
+		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', icon: 'sync' },
+		{ r: 'admin', ar: 'إدارة الكتالوج', en: 'Catalog Admin', icon: 'box', perm: 'catalog.read' },
+		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', icon: 'device', perm: 'devices.read' },
+		{ r: 'updates', ar: 'التحديثات', en: 'Updates', icon: 'download', perm: 'releases.read' },
+		{ r: 'operations', ar: 'العمليات', en: 'Operations', icon: 'pulse', perm: 'operations.read', all: true },
+		{ r: 'users', ar: 'المستخدمون والأمان', en: 'Users & Security', icon: 'users', perm: 'users.read' }
 	];
 
 	const icons: Record<string, string> = {
 		home: 'M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5',
 		chart: 'M4 20V10M10 20V4M16 20v-8M21 20H3',
-		trend: 'M3 17l6-6 4 4 8-8M15 7h6v6',
-		box: 'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9',
 		layers: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5',
 		clip: 'M9 4h6v4H9zM7 6H5v15h14V6h-2M9 12h6M9 16h6',
-		report: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h6',
-		cloud: 'M7 18a4 4 0 1 1 .6-7.96A5.5 5.5 0 0 1 18.3 12H18a3 3 0 0 1 0 6H7z',
-		gear: 'M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5zM19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4.4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z',
-		help: 'M12 3a9 9 0 1 0 9 9M9.5 9.5A2.5 2.5 0 1 1 12 12.5V14M12 17.5v.5'
+		sync: 'M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4',
+		box: 'M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9',
+		device: 'M4 5h16v11H4zM9 20h6M12 16v4',
+		download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+		pulse: 'M3 12h4l3-7 4 14 3-7h4',
+		users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7'
 	};
 </script>
 
@@ -54,28 +51,18 @@
 	<ul>
 		{#each entries.filter((e) => (!e.perm || permissions.includes(e.perm)) && (!e.all || allStores)) as e}
 			<li>
-				{#if e.ready}
-					<button
-						type="button"
-						class:active={route === e.r}
-						aria-current={route === e.r ? 'page' : undefined}
-						onclick={() => navigate(e.r)}
-					>
-						<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={icons[e.icon]} /></svg>
-						<span class="tx">
-							<span class="t">{t(e.ar, e.en)}</span>
-							{#if sub(e.en)}<span class="s">{sub(e.en)}</span>{/if}
-						</span>
-					</button>
-				{:else}
-					<span class="future" title={t(e.note ?? '', 'Coming soon')} aria-disabled="true">
-						<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={icons[e.icon]} /></svg>
-						<span class="tx">
-							<span class="t">{t(e.ar, e.en)}</span>
-							<span class="s">{arabic() ? `${e.en} · ${e.note ?? ''}` : 'Coming soon'}</span>
-						</span>
+				<button
+					type="button"
+					class:active={route === e.r}
+					aria-current={route === e.r ? 'page' : undefined}
+					onclick={() => navigate(e.r)}
+				>
+					<svg class="ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={icons[e.icon]} /></svg>
+					<span class="tx">
+						<span class="t">{t(e.ar, e.en)}</span>
+						{#if sub(e.en)}<span class="s">{sub(e.en)}</span>{/if}
 					</span>
-				{/if}
+				</button>
 			</li>
 		{/each}
 	</ul>
@@ -136,8 +123,7 @@
 		gap: 2px;
 		flex: 1;
 	}
-	button,
-	.future {
+	button {
 		display: flex;
 		align-items: center;
 		gap: 10px;
@@ -176,10 +162,6 @@
 		font-size: 0.7rem;
 		color: #9aa5bd;
 		line-height: 1.3;
-	}
-	.future {
-		opacity: 0.45;
-		cursor: not-allowed;
 	}
 	.foot {
 		margin-top: 12px;

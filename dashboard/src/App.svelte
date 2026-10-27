@@ -62,9 +62,11 @@
 			operations: 'operations',
 			users: 'users',
 			updates: 'updates',
+			admin: 'admin',
 			sales: 'sales',
-			daily: 'daily',
-			products: 'products',
+			// Former pages whose content now lives in Sales Summary and Overview.
+			daily: 'sales',
+			products: 'overview',
 			categories: 'categories',
 			sync: 'sync'
 		};
@@ -670,12 +672,12 @@
 						<TagCard data={tagList} status={tagState} errStatus={tagErr} onretry={retryAll} currency={currency} />
 					</div>
 				{/if}
-				{#if route === 'overview' || route === 'products'}
+				{#if route === 'overview'}
 					<div class="cell a-products">
 						<TopProducts rows={products} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={productsState} errStatus={productsErr} onretry={retryAll} />
 					</div>
 				{/if}
-				{#if route === 'overview' || route === 'sales' || route === 'daily'}
+				{#if route === 'overview' || route === 'sales'}
 					<div class="cell a-trend">
 						<TrendChart
 							titleAr="الاتجاه اليومي (إجمالي / مرتجعات / صافي)"
