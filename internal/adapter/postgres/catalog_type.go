@@ -217,11 +217,13 @@ func currentProductTypeSnapshot(ctx context.Context, q *sqlcgen.Queries, tuid pg
 	if row.DescriptionEn.Valid {
 		descEN = &row.DescriptionEn.String
 	}
-	return catalog.NormalizedProductType{
+	// Compare both sides through the same set normalization. Dimensions are
+	// stored in display order, which can differ from lexical comparison order.
+	return catalog.NormalizeProductTypeSnapshot(catalog.ProductTypeSnapshot{
 		ProductTypeID: uuidString(tuid), Code: row.Code,
 		NameAR: row.NameAr, NameEN: row.NameEn,
 		DescriptionAR: descAR, DescriptionEN: descEN,
 		IsActive: row.IsActive, Position: int(row.Position),
-		Dimensions: dims, Capabilities: caps, Revision: row.TypeRevision,
-	}, true, nil
+		Dimensions: dims, Capabilities: caps, TypeRevision: row.TypeRevision,
+	}), true, nil
 }

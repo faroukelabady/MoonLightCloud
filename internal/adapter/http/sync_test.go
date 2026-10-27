@@ -9,9 +9,47 @@ import (
 	"testing"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
+
+// A supported Product event with an internal storage ID must report invalid
+// data, never tell Retail to wait for deployment support for that event type.
+func TestSyncValidationErrorCodes(t *testing.T) {
+	h, token := syncTestSetup(t, sync.NewRegistry(map[string]sync.Validator{
+		"catalog.product.snapshot.v2": func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductSnapshotV2(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductSnapshotV2(p)
+			return err
+		},
+	}))
+	for _, tc := range []struct {
+		name, eventType, payload, code string
+	}{
+		{"unknown type", "unknown.event.v1", `{}`, "UNSUPPORTED_EVENT"},
+		{"invalid product type identity", "catalog.product.snapshot.v2",
+			`{"product_type_id":"8161901a-9e38-55be-9368-92edf09976d1"}`, "INVALID_EVENT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"events":[{"event_id":"22222222-2222-7222-8222-222222222222","event_type":"` + tc.eventType + `","occurred_at":"2026-09-19T10:20:30Z","payload":` + tc.payload + `}]}`
+			rec := postBatch(t, h, token, body, "application/json")
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("want 422, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var envelope Envelope
+			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Code != tc.code {
+				t.Fatalf("want %s, got %+v", tc.code, envelope.Error)
+			}
+		})
+	}
+}
 
 // memSyncRepo is an in-memory ingestion repo for handler tests.
 type memSyncRepo struct {

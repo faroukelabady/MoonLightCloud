@@ -56,7 +56,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			status = http.StatusRequestEntityTooLarge
 		case apperr.UnsupportedMedia:
 			status = http.StatusUnsupportedMediaType
-		case apperr.Unprocessable:
+		case apperr.Unprocessable, apperr.UnsupportedEvent:
 			status = http.StatusUnprocessableEntity
 		case apperr.TooManyRequests:
 			status = http.StatusTooManyRequests

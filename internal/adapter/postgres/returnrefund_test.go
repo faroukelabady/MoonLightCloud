@@ -205,7 +205,7 @@ func TestReturnUnsupportedVersionRejected(t *testing.T) {
 		returnFixture(t, "return_partial.json"))
 	if _, err := env.syncSvc.Ingest(context.Background(), env.devID, env.credID, []byte(body)); err == nil {
 		t.Fatal("v2 must be rejected")
-	} else if kindOfReturnErr(err) != apperr.Unprocessable {
+	} else if kindOfReturnErr(err) != apperr.UnsupportedEvent {
 		t.Fatalf("want 422, got %v", err)
 	}
 }

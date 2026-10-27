@@ -146,7 +146,8 @@ raw strings, and does not require cross-equality before ACK.
 | 409 EVENT_ID_REUSE | same ID, different content | no — new event_id |
 | 413 too large | over limits | no — shrink |
 | 415 wrong content type | must be application/json | no |
-| 422 unsupported/invalid semantics | unknown type, absurd timestamp | no |
+| 422 `UNSUPPORTED_EVENT` | unknown event type; wait for matching server support | no |
+| 422 `INVALID_EVENT` | supported type with invalid payload or absurd timestamp; correct the data | no |
 | 429 / 5xx | throttling / transient | **yes**, exponential backoff |
 | 503 + `Retry-After` where sent | DB/service unavailable | yes |
 

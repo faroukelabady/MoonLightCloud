@@ -213,7 +213,7 @@ func (r Registry) parseEvent(raw json.RawMessage, authedDeviceID string, now tim
 		return Event{}, apperr.New(apperr.InvalidInput, "malformed event: invalid event_type")
 	}
 	if _, supported := r.validators[*re.EventType]; !supported {
-		return Event{}, apperr.New(apperr.Unprocessable,
+		return Event{}, apperr.New(apperr.UnsupportedEvent,
 			fmt.Sprintf("unsupported event type %q", *re.EventType))
 	}
 	// Device identity comes from authentication. An echoed device_id must

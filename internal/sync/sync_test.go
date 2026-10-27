@@ -68,7 +68,7 @@ func TestParseFailures(t *testing.T) {
 		{"bad event id", batchJSON(eventJSON("nope", "system.test.v1", "2026-09-19T10:20:30Z", `{}`)), apperr.InvalidInput},
 		{"missing event id", batchJSON(`{"event_type":"system.test.v1","occurred_at":"2026-09-19T10:20:30Z","payload":{}}`), apperr.InvalidInput},
 		{"bad type format", batchJSON(eventJSON(id, "NOPE", "2026-09-19T10:20:30Z", `{}`)), apperr.InvalidInput},
-		{"unsupported type", batchJSON(eventJSON(id, "sale.finalized.v3", "2026-09-19T10:20:30Z", `{}`)), apperr.Unprocessable},
+		{"unsupported type", batchJSON(eventJSON(id, "sale.finalized.v3", "2026-09-19T10:20:30Z", `{}`)), apperr.UnsupportedEvent},
 		{"device mismatch", batchJSON(`{"event_id":"` + id + `","event_type":"system.test.v1","device_id":"99999999-9999-7999-8999-999999999999","occurred_at":"2026-09-19T10:20:30Z","payload":{}}`), apperr.Forbidden},
 		{"bad occurred", batchJSON(eventJSON(id, "system.test.v1", "yesterday", `{}`)), apperr.InvalidInput},
 		{"absurd past", batchJSON(eventJSON(id, "system.test.v1", "1999-01-01T00:00:00Z", `{}`)), apperr.Unprocessable},

@@ -17,6 +17,7 @@ const (
 	UnsupportedMedia
 	Unprocessable
 	TooManyRequests
+	UnsupportedEvent
 )
 
 // Error is a classified application error.
@@ -55,6 +56,8 @@ func (e *Error) Code() string {
 	case UnsupportedMedia:
 		return "UNSUPPORTED_MEDIA_TYPE"
 	case Unprocessable:
+		return "INVALID_EVENT"
+	case UnsupportedEvent:
 		return "UNSUPPORTED_EVENT"
 	case TooManyRequests:
 		return "RATE_LIMITED"

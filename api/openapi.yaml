@@ -1202,7 +1202,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
-          description: Unsupported event type or absurd timestamp. Not retryable as-is.
+          description: UNSUPPORTED_EVENT for an unknown event type; INVALID_EVENT for invalid semantics of a supported event (including an absurd timestamp). Not retryable as-is.
           content:
             application/json:
               schema:
