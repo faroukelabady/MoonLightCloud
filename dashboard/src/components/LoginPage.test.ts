@@ -64,7 +64,12 @@ describe('LoginPage (ADR-0053)', () => {
 		await fireEvent.input(screen.getByLabelText(/Email or login/), { target: { value: 'owner@shop.test' } });
 		await fireEvent.input(screen.getByLabelText(/Password/), { target: { value: 'test-only-password-1' } });
 		await fireEvent.submit(screen.getByTestId('login-form'));
-		expect((await screen.findByTestId('totp-secret')).textContent).toBe('JBSW Y3DP EHPK 3PXP');
+		const qr = await screen.findByTestId('totp-qr');
+		expect(qr.getAttribute('aria-label')).toMatch(/QR/);
+		expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M\d+ \d+h1v1h-1z/);
+		expect(screen.queryByTestId('totp-secret')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: /Show the key/ }));
+		expect(screen.getByTestId('totp-secret').textContent).toBe('JBSW Y3DP EHPK 3PXP');
 		await fireEvent.input(screen.getByLabelText(/Code/), { target: { value: '654321' } });
 		await fireEvent.submit(screen.getByTestId('setup-form'));
 		const codes = await screen.findByTestId('recovery-codes');

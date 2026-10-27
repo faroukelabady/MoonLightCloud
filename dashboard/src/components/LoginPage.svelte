@@ -2,6 +2,7 @@
 	import { arabic, lang, setLang, t, tb } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, type AuthStage } from '../lib/api.js';
+	import QrCode from './QrCode.svelte';
 
 	// Human sign-in (ADR-0053): password -> MFA (verify or first-time
 	// enrollment) -> full session. Activation of a new account arrives as
@@ -21,6 +22,8 @@
 	let enrollment = $state<{ secret: string; otpauth_uri: string } | null>(null);
 	let recoveryCodes = $state<string[]>([]);
 	let saved = $state(false);
+	// The key stays hidden behind the QR code until asked for.
+	let showKey = $state(false);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
 
@@ -42,6 +45,7 @@
 		try {
 			const e = await authApi.enrollStart();
 			enrollment = { secret: e.secret, otpauth_uri: e.otpauth_uri };
+			showKey = false;
 		} catch (err) {
 			error = authErrorText(err);
 		}
@@ -179,12 +183,19 @@
 			<form onsubmit={submitSetup} data-testid="setup-form">
 				<h1>{t('إعداد التحقق بخطوتين', 'Set up two-step verification')}</h1>
 				<p class="muted">
-					Two-step verification is required for every account. Add this key to an authenticator app (manual entry), then enter the
-					6-digit code.
+					{t('التحقق بخطوتين مطلوب لكل حساب. امسح رمز QR بتطبيق المصادقة، ثم أدخل الرمز المكوّن من 6 أرقام.', 'Two-step verification is required for every account. Scan this QR code with an authenticator app, then enter the 6-digit code.')}
 				</p>
 				{#if enrollment}
-					<div class="secret" dir="ltr" data-testid="totp-secret">{grouped(enrollment.secret)}</div>
-					<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{tb('otpauth:// — فتح في تطبيق المصادقة', 'open in authenticator')}</a>
+					<QrCode value={enrollment.otpauth_uri} label={t('رمز QR لتطبيق المصادقة', 'QR code for your authenticator app')} />
+					<button type="button" class="link keytoggle" aria-expanded={showKey} aria-controls="totp-key" onclick={() => (showKey = !showKey)}>
+						{showKey ? tb('إخفاء المفتاح', 'Hide key') : tb('لا يمكنك المسح؟ اعرض المفتاح', "Can't scan? Show the key")}
+					</button>
+					{#if showKey}
+						<div id="totp-key">
+							<div class="secret" dir="ltr" data-testid="totp-secret">{grouped(enrollment.secret)}</div>
+							<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{tb('otpauth:// — فتح في تطبيق المصادقة', 'open in authenticator')}</a>
+						</div>
+					{/if}
 				{/if}
 				<label
 					>{tb('الرمز', 'Code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
@@ -224,13 +235,17 @@
 	.login h1 {
 		margin: 0;
 	}
-	.langswitch {
-		float: inline-end;
+	.login button.langswitch {
+		display: block;
+		width: auto;
+		margin: 0 0 8px auto;
 		background: transparent;
+		color: var(--text);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		padding: 3px 10px;
 		font-size: 0.8rem;
+		font-weight: 400;
 		cursor: pointer;
 	}
 	.login label {
@@ -266,6 +281,11 @@
 		color: inherit;
 		text-decoration: underline;
 		margin-top: 8px;
+	}
+	.login button.keytoggle {
+		display: block;
+		margin: 4px auto 0;
+		font-size: 0.85rem;
 	}
 	.secret {
 		margin-top: 12px;
