@@ -62,8 +62,6 @@
 		opacity: 0.85;
 	}
 	select {
-		font-family: monospace;
-		direction: ltr;
 		max-width: 16rem;
 	}
 	.storeerror {
