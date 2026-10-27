@@ -10,6 +10,7 @@ export DATABASE_URL="${DATABASE_URL:-postgres://test:test@localhost:5432/moonlig
 require_local_dev_db
 
 echo "WARNING: destroying local dev volume moonlightcloud_pgdata (DEVELOPMENT ONLY)."
+allow_compose_down
 $(compose_cmd) -f "$COMPOSE_FILE" down
 volume="$(podman volume ls --format '{{.Name}}' 2>/dev/null | grep -x 'moonlightcloud_pgdata' || true)"
 if [[ -n "$volume" ]]; then

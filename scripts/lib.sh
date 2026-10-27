@@ -76,6 +76,13 @@ ensure_dev_auth_env() {
   echo "generated a local development AUTH_MFA_ENCRYPTION_KEY in .env.local" >&2
 }
 
+# allow_compose_down lets `compose down` parse compose.yaml, which requires
+# AUTH_MFA_ENCRYPTION_KEY to be set. Stopping containers never uses the key,
+# so a placeholder is safe when .env.local has none; a real key is kept.
+allow_compose_down() {
+  export AUTH_MFA_ENCRYPTION_KEY="${AUTH_MFA_ENCRYPTION_KEY:-unused-by-compose-down}"
+}
+
 require_dev() {
   local env="${ENVIRONMENT:-development}"
   if [[ "$env" != "development" ]]; then
