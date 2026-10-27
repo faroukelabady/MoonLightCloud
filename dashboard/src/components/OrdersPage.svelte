@@ -4,6 +4,7 @@
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
+	import SingleSelect from './ui/SingleSelect.svelte';
 	import { formatMinor } from '../lib/money.js';
 	import type { OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats } from '../lib/api.js';
 
@@ -60,13 +61,15 @@
 <Card ar="الطلبات عبر الإنترنت" en="Online Orders">
 	<div class="muted label-gap foot-note">{tb('طلبات ووكومرس للقراءة فقط — ليست مبيعات', 'Read-only WooCommerce orders, never Sales')}</div>
 	<div class="filters">
-		<label>{tb('الحالة', 'Status')}
-			<select value={filterStatus} onchange={(e) => onstatus((e.target as HTMLSelectElement).value)}>
-				<option value="">{tb('الكل', 'All')}</option>
-				{#each statuses as s}<option value={s}>{s}</option>{/each}
-			</select>
-		</label>
-		<label>{tb('المزود', 'Provider')}
+		<SingleSelect
+			id="orders-status"
+			label={tb('الحالة', 'Status')}
+			testid="orders-status"
+			value={filterStatus}
+			options={[{ value: '', label: tb('الكل', 'All') }, ...statuses.map((s) => ({ value: s, label: s, dir: 'ltr' as const }))]}
+			onchange={onstatus}
+		/>
+		<label class="field">{tb('المزود', 'Provider')}
 			<input value={filterProvider} placeholder="website" oninput={(e) => onprovider((e.target as HTMLInputElement).value)} />
 		</label>
 	</div>
@@ -164,9 +167,9 @@
 		font-size: 0.76rem;
 	}
 	.filters {
-		display: flex;
-		gap: 0.75rem;
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 220px));
+		gap: 12px;
 		margin-bottom: 0.5rem;
 	}
 	.more {

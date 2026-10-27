@@ -72,8 +72,13 @@ export function mutationHeaders(extra: Record<string, string> = {}): Record<stri
 }
 
 export async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+	return sendJson<T>('POST', path, body, signal);
+}
+
+// sendJson sends one JSON mutation (POST, PUT, DELETE) with the CSRF token.
+export async function sendJson<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal): Promise<T> {
 	const res = await fetch(path, {
-		method: 'POST',
+		method,
 		headers: mutationHeaders({ 'content-type': 'application/json' }),
 		credentials: 'same-origin',
 		body: JSON.stringify(body),

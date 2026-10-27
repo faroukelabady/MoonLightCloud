@@ -252,30 +252,34 @@
 	.login label {
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 6px;
 		margin-top: 12px;
-		font-size: 0.9rem;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--field-label);
 	}
 	.login label.check {
 		flex-direction: row;
 		align-items: center;
 	}
 	.login input:not([type='checkbox']) {
-		padding: 8px 10px;
-		border: 1px solid var(--border);
-		border-radius: 6px;
+		min-height: 40px;
+		font-size: 0.9rem;
 	}
 	.login button {
 		margin-top: 14px;
 		width: 100%;
-		background: var(--color-primary);
+		min-height: 40px;
+		background: var(--button-primary);
 		color: #fff;
 		border: 0;
-		border-radius: 6px;
+		border-radius: 8px;
 		padding: 9px;
+		font-weight: 700;
+		box-shadow: 0 5px 14px #096ad433;
 	}
 	.login button:disabled {
-		opacity: 0.6;
+		opacity: 0.5;
 	}
 	.login button.link {
 		background: none;

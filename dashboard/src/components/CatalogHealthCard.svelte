@@ -4,6 +4,7 @@
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
+	import SingleSelect from './ui/SingleSelect.svelte';
 	import { formatInt } from '../lib/money.js';
 	import type { CatalogHealthResponse } from '../lib/api.js';
 
@@ -64,18 +65,13 @@
 		<WidgetError status={errStatus} {onretry} />
 	{:else if data}
 		<div class="filters" role="group" aria-label={arabic() ? 'Provider filter / فلتر المزود' : 'Provider filter'}>
-			<label for="health-provider">{t('المزود', 'Provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</label>
-			<select
+			<SingleSelect
 				id="health-provider"
-				dir="ltr"
+				label={arabic() ? 'المزود / Provider' : 'Provider'}
 				value={provider}
-				onchange={(e) => onprovider((e.currentTarget as HTMLSelectElement).value)}
-			>
-				<option value="">{arabic() ? 'All providers / كل المزودين' : 'All providers'}</option>
-				{#each providers as p (p)}
-					<option value={p}>{p}</option>
-				{/each}
-			</select>
+				options={[{ value: '', label: arabic() ? 'All providers / كل المزودين' : 'All providers' }, ...providers.map((p) => ({ value: p, label: p, dir: 'ltr' as const }))]}
+				onchange={onprovider}
+			/>
 		</div>
 		{#if status === 'empty'}
 			<EmptyState ar="لا توجد مشاكل في الكتالوج ضمن هذا النطاق" en="No catalog issues found in this scope" />
@@ -127,9 +123,7 @@
 
 <style>
 	.filters {
-		display: flex;
-		gap: 0.5rem;
-		align-items: center;
+		max-width: 260px;
 		margin-bottom: 0.5rem;
 	}
 	.counts {

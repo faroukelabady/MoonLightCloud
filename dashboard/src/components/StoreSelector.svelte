@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { arabic, tb } from '../lib/i18n.svelte.js';
 	import type { StoreRow } from '../lib/api.js';
+	import SingleSelect from './ui/SingleSelect.svelte';
 
 	// StoreSelector: one coherent Store scope control shared by every
-	// Store-aware page. Native <select> keeps keyboard access and RTL
-	// behavior free; selection is by immutable Store UUID (never name —
+	// Store-aware page, using the shared Retail-style selector; selection
+	// is by immutable Store UUID (never name —
 	// two Stores may share a display name). Empty value = All Stores.
 	// state='error' surfaces a registry failure with an explicit retry;
 	// the current selection is never silently widened to global.
@@ -25,31 +26,24 @@
 	function shortID(id: string): string {
 		return id.length > 13 ? `${id.slice(0, 8)}…` : id;
 	}
+	let options = $derived([
+		{ value: '', label: tb('كل المتاجر', 'All Stores') },
+		...stores.map((s) => ({ value: s.store_id, label: `${s.display_name} (${shortID(s.store_id)})`, dir: 'ltr' as const }))
+	]);
 </script>
 
-<label class="storeselect">
-	<span class="storelabel">{tb('المتجر', 'Store')}</span>
-	<select
-		data-testid="store-selector"
-		aria-label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'}
-		aria-busy={state === 'loading'}
-		value={value}
-		onchange={(e) => onchange((e.currentTarget as HTMLSelectElement).value)}
-	>
-		<option value="">{tb('كل المتاجر', 'All Stores')}</option>
-		{#each stores as s (s.store_id)}
-			<option value={s.store_id} dir="ltr">
-				{s.display_name} ({shortID(s.store_id)})
-			</option>
-		{/each}
-	</select>
+<div class="storeselect" aria-busy={state === 'loading'}>
+	<span class="storelabel" aria-hidden="true">{tb('المتجر', 'Store')}</span>
+	<div class="picker">
+		<SingleSelect id="store-scope" label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'} hideLabel testid="store-selector" {value} {options} {onchange} />
+	</div>
 	{#if state === 'error'}
 		<span class="storeerror" role="alert">{tb('تعذر تحميل المتاجر', 'Stores unavailable')}</span>
-		<button type="button" class="storeretry" data-testid="store-retry" onclick={() => onretry()}>
+		<button type="button" class="storeretry btn-secondary btn-sm" data-testid="store-retry" onclick={() => onretry()}>
 			{tb('إعادة المحاولة', 'Retry')}
 		</button>
 	{/if}
-</label>
+</div>
 
 <style>
 	.storeselect {
@@ -61,18 +55,15 @@
 		font-size: 0.85rem;
 		opacity: 0.85;
 	}
-	select {
-		max-width: 16rem;
+	.picker {
+		width: 16rem;
+		max-width: 100%;
 	}
 	.storeerror {
 		font-size: 0.78rem;
 		color: var(--danger);
 	}
 	.storeretry {
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		padding: 4px 10px;
-		font-size: 0.78rem;
+		min-height: 30px;
 	}
 </style>

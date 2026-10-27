@@ -22,7 +22,8 @@
 		{ r: 'devices', ar: 'الأجهزة', en: 'Devices', icon: 'device', perm: 'devices.read' },
 		{ r: 'updates', ar: 'التحديثات', en: 'Updates', icon: 'download', perm: 'releases.read' },
 		{ r: 'operations', ar: 'العمليات', en: 'Operations', icon: 'pulse', perm: 'operations.read', all: true },
-		{ r: 'users', ar: 'المستخدمون والأمان', en: 'Users & Security', icon: 'users', perm: 'users.read' }
+		{ r: 'users', ar: 'المستخدمون والأمان', en: 'Users & Security', icon: 'users', perm: 'users.read' },
+		{ r: 'settings', ar: 'الإعدادات', en: 'Settings', icon: 'gear' }
 	];
 
 	const icons: Record<string, string> = {
@@ -36,6 +37,7 @@
 		device: 'M4 5h16v11H4zM9 20h6M12 16v4',
 		download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
 		pulse: 'M3 12h4l3-7 4 14 3-7h4',
+		gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
 		users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7'
 	};
 </script>

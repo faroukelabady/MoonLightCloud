@@ -41,9 +41,8 @@ describe('UsersPage', () => {
 
 		await fireEvent.input(screen.getByLabelText(/Login/), { target: { value: 'new@x.test' } });
 		await fireEvent.input(screen.getByLabelText(/Display name/), { target: { value: 'New' } });
-		const stores = screen.getByLabelText(/Stores/, { selector: 'select' }) as HTMLSelectElement;
-		stores.options[0].selected = true;
-		await fireEvent.change(stores);
+		await fireEvent.click(screen.getByTestId('user-stores'));
+		await fireEvent.click(document.querySelector<HTMLInputElement>(`#user-stores-popup input[data-value="${STORE}"]`)!);
 		await fireEvent.submit(screen.getByTestId('create-user'));
 
 		expect(await screen.findByTestId('activation-link')).toBeTruthy();

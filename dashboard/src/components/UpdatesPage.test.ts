@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import UpdatesPage from './UpdatesPage.svelte';
 import { updatesApi, ApiError, updateStateLabel, previewEnvelope } from '../lib/api.js';
+import { choose } from '../test/choose.js';
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;
@@ -123,10 +124,12 @@ describe('UpdatesPage', () => {
 		api.rolloutAction.mockResolvedValue({ ...draft, status: 'active' });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		const select = (await screen.findByTestId('rollout-release')) as HTMLSelectElement;
+		const select = await screen.findByTestId('rollout-release');
 		// Revoked releases are not offered for new rollouts.
-		expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'r1']);
-		await fireEvent.change(select, { target: { value: 'r1' } });
+		await fireEvent.click(select);
+		expect(Array.from(document.querySelectorAll<HTMLElement>('#rollout-release-popup [role="option"]')).map((o) => o.dataset.value)).toEqual(['', 'r1']);
+		await fireEvent.click(select);
+		await choose(select, 'r1');
 		await fireEvent.click(await screen.findByTestId('create-rollout'));
 		expect(api.createRollout).toHaveBeenCalledWith(expect.objectContaining({ release_id: 'r1', scope: 'store', store_id: STORE, device_id: undefined }));
 		const row = await screen.findByTestId('rollout-row');
@@ -148,8 +151,7 @@ describe('UpdatesPage', () => {
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		const select = (await screen.findByTestId('rollout-release')) as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: 'r1' } });
+		await choose(await screen.findByTestId('rollout-release'), 'r1');
 		expect(((await screen.findByTestId('create-rollout')) as HTMLButtonElement).disabled).toBe(true);
 	});
 
@@ -160,8 +162,8 @@ describe('UpdatesPage', () => {
 		api.createRollout.mockResolvedValue({ target_count: 1 });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		await fireEvent.change(await screen.findByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
+		await choose(await screen.findByTestId('rollout-release'), 'r1');
+		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: '  device-a  ' } });
 		await fireEvent.click(screen.getByTestId('create-rollout'));
 		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
@@ -175,8 +177,8 @@ describe('UpdatesPage', () => {
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
+		await choose(screen.getByTestId('rollout-release'), 'r1');
+		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
 		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.getByText('اختر متجرًا أولاً / Choose a Store first.')).toBeTruthy();
@@ -190,8 +192,8 @@ describe('UpdatesPage', () => {
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		const { rerender } = render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
+		await choose(screen.getByTestId('rollout-release'), 'r1');
+		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
 		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(false);
 		await rerender({ store: '22222222-2222-4222-8222-222222222222' });
@@ -208,10 +210,10 @@ describe('UpdatesPage', () => {
 		api.createRollout.mockResolvedValue({ target_count: 2 });
 		render(UpdatesPage, { store: STORE });
 		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
-		await fireEvent.change(screen.getByTestId('rollout-release'), { target: { value: 'r1' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'device' } });
+		await choose(screen.getByTestId('rollout-release'), 'r1');
+		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
-		await fireEvent.change(screen.getByTestId('rollout-scope'), { target: { value: 'all' } });
+		await choose(screen.getByTestId('rollout-scope'), 'all');
 		await fireEvent.click(screen.getByTestId('create-rollout'));
 		expect(api.createRollout).toHaveBeenCalledExactlyOnceWith({
 			release_id: 'r1', scope: 'all', store_id: undefined, device_id: undefined, mode: 'optional', percentage: 10

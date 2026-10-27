@@ -31,8 +31,8 @@
 		</button>
 	</header>
 	<div class="report-tabs screen-only" role="tablist" aria-label={t('نوع التقرير', 'Report type')}>
-		<button type="button" role="tab" aria-selected={view === 'sales'} class:active={view === 'sales'} onclick={() => (view = 'sales')}>{t('المبيعات', 'Sales')}</button>
-		<button type="button" role="tab" aria-selected={view === 'stocktaking'} class:active={view === 'stocktaking'} onclick={() => (view = 'stocktaking')}>{t('الجرد والزكاة', 'Stocktaking & zakat')}</button>
+		<button type="button" class="tab" role="tab" aria-selected={view === 'sales'} class:active={view === 'sales'} onclick={() => (view = 'sales')}>{t('المبيعات', 'Sales')}</button>
+		<button type="button" class="tab" role="tab" aria-selected={view === 'stocktaking'} class:active={view === 'stocktaking'} onclick={() => (view = 'stocktaking')}>{t('الجرد والزكاة', 'Stocktaking & zakat')}</button>
 	</div>
 	{#if view === 'sales'}
 		<SalesReportView {params} store={scope} {storeName} />

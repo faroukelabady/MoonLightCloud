@@ -6,6 +6,8 @@
 	import { lang, t } from '../lib/i18n.svelte.js';
 	import { NISAB_GOLD_GRAMS, calculateZakat, parseMajor, type ZakatYear } from '../lib/zakat.js';
 	import ReportLetterhead from './ReportLetterhead.svelte';
+	import SingleSelect from './ui/SingleSelect.svelte';
+	import MoneyField from './ui/MoneyField.svelte';
 
 	// Stock on hand as last synced from MoonLightRetail, valued in EGP, with
 	// the zakat calculator. Zakat inputs stay on this page and are never sent.
@@ -83,7 +85,7 @@
 
 <div class="stocktaking-toolbar screen-only">
 	<p class="muted">{t('المخزون حسب آخر مزامنة من MoonLightRetail، مقيّماً بسعر التكلفة وسعر البيع الحالي بالجنيه المصري.', 'Stock on hand as last synced from MoonLightRetail, valued at cost and at the current EGP selling price.')}</p>
-	<button type="button" class="btn-ghost" disabled={loading} onclick={() => (refresh += 1)}>{t('تحديث', 'Refresh')}</button>
+	<button type="button" class="btn-secondary" disabled={loading} onclick={() => (refresh += 1)}>{t('تحديث', 'Refresh')}</button>
 </div>
 {#if error}<div class="report-alert screen-only" role="alert">{error}</div>{/if}
 {#if loading && !report}<div class="card muted" role="status">{t('جارٍ تحميل الجرد…', 'Loading stocktaking…')}</div>
@@ -129,24 +131,31 @@
 			<h2 id="zakat-heading">{t('زكاة عروض التجارة', 'Zakat on trade goods')}</h2>
 			<p>{t('تجب زكاة بضاعة المحل إذا حال عليها الحول وبلغ المجموع الخاضع للزكاة النصاب. أدخل سعر الذهب اليوم وأموال المحل الأخرى لحسابها.', 'Zakat on shop stock is due once a full year passes while the zakatable total stays at or above nisab. Enter today’s gold price and the shop’s other money to calculate it.')}</p>
 			<div class="report-filter-grid screen-only">
-				<label>
-					<span>{t('تقييم البضاعة', 'Value stock at')}</span>
-					<select bind:value={basis} data-testid="zakat-basis">
-						<option value="retail">{t('بسعر البيع (القيمة السوقية)', 'Selling price (market value)')}</option>
-						<option value="cost">{t('بسعر التكلفة', 'Cost price')}</option>
-					</select>
-				</label>
-				<label>
-					<span>{t('سنة الزكاة', 'Zakat year')}</span>
-					<select bind:value={year}>
-						<option value="hijri">{t('سنة هجرية — 2.5%', 'Hijri year — 2.5%')}</option>
-						<option value="gregorian">{t('سنة ميلادية — 2.577%', 'Gregorian year — 2.577%')}</option>
-					</select>
-				</label>
-				<label><span>{t('سعر جرام الذهب (ج.م)', 'Gold price per gram (EGP)')}</span><input inputmode="decimal" autocomplete="off" bind:value={goldGram} data-testid="zakat-gold" /></label>
-				<label><span>{t('النقدية وأرصدة البنوك (ج.م)', 'Cash and bank balances (EGP)')}</span><input inputmode="decimal" autocomplete="off" bind:value={cash} /></label>
-				<label><span>{t('ديون لك مرجوّ تحصيلها (ج.م)', 'Receivables you expect to collect (EGP)')}</span><input inputmode="decimal" autocomplete="off" bind:value={receivables} /></label>
-				<label><span>{t('ديون عليك مستحقة (ج.م)', 'Debts due (EGP)')}</span><input inputmode="decimal" autocomplete="off" bind:value={debts} /></label>
+				<SingleSelect
+					id="zakat-basis"
+					label={t('تقييم البضاعة', 'Value stock at')}
+					testid="zakat-basis"
+					value={basis}
+					options={[
+						{ value: 'retail', label: t('بسعر البيع (القيمة السوقية)', 'Selling price (market value)') },
+						{ value: 'cost', label: t('بسعر التكلفة', 'Cost price') }
+					]}
+					onchange={(v) => (basis = v as typeof basis)}
+				/>
+				<SingleSelect
+					id="zakat-year"
+					label={t('سنة الزكاة', 'Zakat year')}
+					value={year}
+					options={[
+						{ value: 'hijri', label: t('سنة هجرية — 2.5%', 'Hijri year — 2.5%') },
+						{ value: 'gregorian', label: t('سنة ميلادية — 2.577%', 'Gregorian year — 2.577%') }
+					]}
+					onchange={(v) => (year = v as ZakatYear)}
+				/>
+				<MoneyField id="zakat-gold" label={t('سعر جرام الذهب', 'Gold price per gram')} testid="zakat-gold" invalid={amounts.goldGram === undefined} bind:value={goldGram} />
+				<MoneyField id="zakat-cash" label={t('النقدية وأرصدة البنوك', 'Cash and bank balances')} invalid={amounts.cash === undefined} bind:value={cash} />
+				<MoneyField id="zakat-receivables" label={t('ديون لك مرجوّ تحصيلها', 'Receivables you expect to collect')} invalid={amounts.receivables === undefined} bind:value={receivables} />
+				<MoneyField id="zakat-debts" label={t('ديون عليك مستحقة', 'Debts due')} invalid={amounts.debts === undefined} bind:value={debts} />
 			</div>
 			<p class="report-note screen-only">{t('اترك الحقل فارغاً للصفر. هذه الأرقام لا تُحفظ ولا تُرسل.', 'Leave a field empty for zero. These figures are neither saved nor sent.')}</p>
 			{#if invalidInput}<p class="field-error" role="alert">{t('أدخل مبالغ موجبة بمنزلتين عشريتين كحد أقصى.', 'Enter positive amounts with at most two decimals.')}</p>{/if}

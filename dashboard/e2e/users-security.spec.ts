@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { admin, hasAdmin, uiLogin } from './auth';
+import { choose } from './support/select';
 
 // Phase 18 Users & Security surface (ADR-0053) against the live server:
 // real password + TOTP sign-in, real user list and real account creation
@@ -36,8 +37,9 @@ test('OWNER begins ADMIN creation and receives a one-time activation link', asyn
 	const login = `pending-${Date.now()}@e2e.test`;
 	await form.getByLabel(/Login/).fill(login);
 	await form.getByLabel(/Display name/).fill('Pending Admin');
-	await form.getByLabel(/Role/).selectOption('admin');
-	await form.locator('select[multiple]').selectOption({ label: 'Store A' });
+	await choose(form.getByTestId('user-role'), 'admin');
+	await form.getByTestId('user-stores').click();
+	await page.locator('#user-stores-popup').getByText('Store A').click();
 	await form.getByRole('button', { name: /Create/ }).click();
 	const link = page.getByTestId('activation-link');
 	await expect(link).toContainText(login);

@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { ApiError, type PeriodParams } from '../lib/http.js';
-	import { reportsApi, type ReportDisplay, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
+	import { emptyFilter, reportsApi, type FilterOption, type ReportDisplay, type ReportFilter, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
 	import { formatInt, formatMinor } from '../lib/money.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { lang, t } from '../lib/i18n.svelte.js';
 	import { parseMajor } from '../lib/zakat.js';
 	import ReportLetterhead from './ReportLetterhead.svelte';
+	import SingleSelect from './ui/SingleSelect.svelte';
+	import MultiSelect from './ui/MultiSelect.svelte';
+	import TextField from './ui/TextField.svelte';
+	import MoneyField from './ui/MoneyField.svelte';
 
 	// The sales report MoonLightRetail prints, read from synced Sales. The
 	// period and Store come from the dashboard header; the currency and
@@ -14,6 +18,7 @@
 
 	const PAGE = 50;
 	let currency = $state<ReportDisplay>('EGP');
+	let filter = $state<ReportFilter>(emptyFilter());
 	let offset = $state(0);
 	let report = $state<SalesReport | null>(null);
 	let loading = $state(true);
@@ -29,13 +34,13 @@
 	let generation = 0;
 	$effect(() => {
 		// Reload when the header period or Store, the currency or the page changes.
-		const request = { params: { ...params }, store, currency, offset };
+		const request = { params: { ...params }, store, currency, filter: $state.snapshot(filter) as ReportFilter, offset };
 		const current = ++generation;
 		const controller = new AbortController();
 		loading = true;
 		error = '';
 		reportsApi
-			.sales(request.params, request.currency, request.store, request.offset, PAGE, controller.signal)
+			.sales(request.params, request.currency, request.filter, request.store, request.offset, PAGE, controller.signal)
 			.then((value) => {
 				if (current !== generation) return;
 				report = value;
@@ -53,8 +58,8 @@
 	function failure(err: unknown): string {
 		if (err instanceof ApiError && err.detail === 'EXCHANGE_RATE_REQUIRED')
 			return t(
-				'لا يوجد سعر صرف للدولار لهذا المتجر بعد. يظهر السعر بعد مزامنة أول عملية بيع بالدولار من MoonLightRetail.',
-				'This Store has no USD exchange rate yet. One appears once a USD sale syncs from MoonLightRetail.'
+				'لا يوجد سعر صرف للدولار بعد. أضف سعراً من صفحة الإعدادات.',
+				'There is no USD exchange rate yet. Add one on the Settings page.'
 			);
 		if (err instanceof ApiError && err.detail === 'STORE_SCOPE_REQUIRED') return t('اختر متجراً من أعلى الصفحة.', 'Choose a Store at the top of the page.');
 		if (err instanceof ApiError && err.code === 'FORBIDDEN') return t('ليست لديك صلاحية عرض التقارير.', 'You do not have permission to view reports.');
@@ -65,12 +70,34 @@
 		currency = value as ReportDisplay;
 		offset = 0;
 	}
+	function setFilter(next: Partial<ReportFilter>) {
+		filter = { ...filter, ...next };
+		offset = 0;
+	}
+	function resetFilters() {
+		filter = emptyFilter();
+		currency = 'EGP';
+		offset = 0;
+	}
+	// Choices come from the period's own sales, unfiltered.
+	let filterOptions = $derived(report?.filter_options ?? { categories: [], subcategories: [], tags: [] });
+	function optionsOf(list: FilterOption[]) {
+		const labelOf = (o: FilterOption) => (lang() === 'ar' ? o.name_ar || o.name_en : o.name_en || o.name_ar);
+		const counts = new Map<string, number>();
+		for (const o of list) counts.set(labelOf(o), (counts.get(labelOf(o)) ?? 0) + 1);
+		return list.map((o) => ({ value: o.id, label: counts.get(labelOf(o)) === 1 ? labelOf(o) : `${labelOf(o)} · ${o.id.slice(0, 8)}` }));
+	}
+	let filtered = $derived(filter.root_category_ids.length + filter.subcategory_ids.length + filter.tag_ids.length > 0 || filter.payment_method !== '');
 
 	let summary = $derived(report?.summary ?? []);
 	let any = (pick: (row: ReportSummaryRow) => boolean) => summary.some(pick);
-	let showTax = $derived(any((r) => r.tax_minor !== '0'));
-	let showDiscount = $derived(any((r) => r.discount_minor !== '0'));
-	let showRefunds = $derived(any((r) => r.return_count > 0));
+	// The business toggles decide, as in MoonLightRetail; discounts and
+	// refunds still show when the period holds them, so totals reconcile.
+	// With tax off the server already left tax out of every total.
+	let settings = $derived(report?.settings);
+	let showTax = $derived(settings?.tax_enabled ?? false);
+	let showDiscount = $derived((settings?.discount_enabled ?? false) || any((r) => r.discount_minor !== '0'));
+	let showRefunds = $derived((settings?.returns_enabled ?? false) || any((r) => r.return_count > 0));
 	let egpOnly = $derived(summary.length === 1 && summary[0].currency === 'EGP');
 	let hasActivity = $derived(summary.some((r) => r.sales_count > 0 || r.return_count > 0));
 	let extraTotal = $derived(costs.reduce((sum, c) => sum + c.minor, 0n));
@@ -217,24 +244,73 @@
 	</table>
 {/snippet}
 
-<section class="card report-controls screen-only" aria-label={t('خيارات التقرير', 'Report options')}>
+<section class="card report-controls screen-only" aria-label={t('فترة التقرير والتصفية', 'Report range and filters')}>
+	<div class="filter-head">
+		<h2>{t('فترة التقرير والتصفية', 'Report range and filters')}</h2>
+		<button type="button" class="btn-link" onclick={resetFilters}>{t('إعادة الضبط', 'Reset')}</button>
+	</div>
 	<div class="report-filter-grid">
-		<label>
-			<span>{t('العملة', 'Currency')}</span>
-			<select value={currency} onchange={(e) => setCurrency(e.currentTarget.value)} data-testid="report-currency">
-				<option value="EGP">{t('جنيه مصري (مع تحويل مبيعات الدولار)', 'EGP (USD sales converted)')}</option>
-				<option value="USD">{t('دولار أمريكي (مع تحويل مبيعات الجنيه)', 'USD (EGP sales converted)')}</option>
-				<option value="all">{t('الكل (كل عملة على حدة)', 'All (each currency separately)')}</option>
-			</select>
-		</label>
+		<SingleSelect
+			id="report-currency"
+			label={t('العملة', 'Currency')}
+			testid="report-currency"
+			value={currency}
+			options={[
+				{ value: 'EGP', label: t('جنيه مصري (مع تحويل مبيعات الدولار)', 'EGP (USD sales converted)') },
+				{ value: 'USD', label: t('دولار أمريكي (مع تحويل مبيعات الجنيه)', 'USD (EGP sales converted)') },
+				{ value: 'all', label: t('الكل (كل عملة على حدة)', 'All (each currency separately)') }
+			]}
+			onchange={setCurrency}
+		/>
+		<SingleSelect
+			id="report-payment"
+			label={t('الدفع', 'Payment')}
+			testid="report-payment"
+			value={filter.payment_method}
+			options={[
+				{ value: '', label: t('الكل', 'All') },
+				{ value: 'cash', label: t('نقدي', 'Cash') },
+				{ value: 'card', label: t('بطاقة', 'Card') },
+				{ value: 'other', label: t('أخرى', 'Other') }
+			]}
+			onchange={(v) => setFilter({ payment_method: v as ReportFilter['payment_method'] })}
+		/>
+		<MultiSelect
+			id="report-categories"
+			label={t('التصنيفات الرئيسية', 'Root categories')}
+			testid="report-categories"
+			emptyLabel={t('كل التصنيفات التاريخية', 'All historical categories')}
+			options={optionsOf(filterOptions.categories)}
+			selected={filter.root_category_ids}
+			onchange={(values) => setFilter({ root_category_ids: values })}
+		/>
+		<MultiSelect
+			id="report-subcategories"
+			label={t('التصنيفات الفرعية', 'Subcategories')}
+			testid="report-subcategories"
+			emptyLabel={t('كل التصنيفات الفرعية التاريخية', 'All historical subcategories')}
+			options={optionsOf(filterOptions.subcategories)}
+			selected={filter.subcategory_ids}
+			onchange={(values) => setFilter({ subcategory_ids: values })}
+		/>
+		<MultiSelect
+			id="report-tags"
+			label={t('الوسوم', 'Tags')}
+			testid="report-tags"
+			emptyLabel={t('كل الوسوم', 'All tags')}
+			options={optionsOf(filterOptions.tags)}
+			selected={filter.tag_ids}
+			onchange={(values) => setFilter({ tag_ids: values })}
+		/>
 	</div>
 	<p class="report-filter-note">
+		{t('تختار تصفية التصنيف والدفع عمليات البيع الكاملة التي تحتوي بنداً تاريخياً مطابقاً؛ وتظل إجماليات العملية والمدفوعات كاملة.', 'Classification and payment filters select complete sales containing a matching historical item; complete sale totals and payments remain intact.')}
 		{#if currency === 'all'}
 			{t('تُعرض كل عملة بشكل منفصل دون تحويل.', 'Each currency is shown separately, without conversion.')}
 		{:else}
 			{t(
-				`تُعرض كل المبيعات بعملة ${currency}. تُحوَّل مبيعات الدولار بسعر الصرف المحفوظ مع كل بيع، ومبيعات الجنيه بسعر أقرب بيع بالدولار في المتجر نفسه.`,
-				`All sales are shown in ${currency}. USD sales convert at the rate saved with each sale; EGP sales at the rate of the Store's nearest USD sale.`
+				`تُعرض كل المبيعات بعملة ${currency}. تُحوَّل مبيعات الدولار بسعر الصرف المحفوظ مع كل بيع، ومبيعات الجنيه بسعر الصرف المسجل في الإعدادات وقت البيع.`,
+				`All sales are shown in ${currency}. USD sales convert at the rate saved with each sale; EGP sales at the rate in Settings when they were made.`
 			)}
 		{/if}
 		{t('الفترة والمتجر من أعلى الصفحة.', 'The period and Store come from the top of the page.')}
@@ -244,14 +320,14 @@
 		{#if drafts.length === 0}<p class="muted">{t('لم تتم إضافة تكاليف إضافية.', 'No extra costs added.')}</p>{/if}
 		{#each drafts as draft, index (draft.id)}
 			<div class="report-extra-cost-row">
-				<label><span>{t('وصف مختصر', 'Short description')} {index + 1}</span><input maxlength="120" bind:value={draft.description} /></label>
-				<label><span>{t('المبلغ (ج.م)', 'Amount (EGP)')} {index + 1}</span><input inputmode="decimal" autocomplete="off" bind:value={draft.amount} /></label>
-				<button type="button" class="btn-ghost" onclick={() => removeCost(draft.id)}>{t('حذف', 'Remove')}</button>
+				<TextField id={`extra-cost-desc-${draft.id}`} label={`${t('وصف مختصر', 'Short description')} ${index + 1}`} maxlength={120} bind:value={draft.description} />
+				<MoneyField id={`extra-cost-amount-${draft.id}`} label={`${t('المبلغ', 'Amount')} ${index + 1}`} bind:value={draft.amount} />
+				<button type="button" class="btn-danger btn-sm" onclick={() => removeCost(draft.id)}>{t('حذف', 'Remove')}</button>
 			</div>
 		{/each}
-		<div class="report-extra-cost-actions">
-			<button type="button" class="btn-ghost" disabled={drafts.length >= 50} onclick={addCost}>+ {t('إضافة تكلفة', 'Add cost')}</button>
-			<button type="button" class="btn-ghost" onclick={applyCosts}>{t('تحديث تكاليف التقرير', 'Update report costs')}</button>
+		<div class="btn-row">
+			<button type="button" class="btn-secondary" disabled={drafts.length >= 50} onclick={addCost}>+ {t('إضافة تكلفة', 'Add cost')}</button>
+			<button type="button" class="btn-secondary" onclick={applyCosts}>{t('تحديث تكاليف التقرير', 'Update report costs')}</button>
 		</div>
 		<p class="muted">{t('تكاليف اختيارية بالجنيه المصري لهذا التقرير ونسخة الطباعة فقط، ولا يتم حفظها.', 'Optional EGP costs for this report and printout only. They are not saved.')}</p>
 		{#if costsError}<p class="field-error" role="alert">{t('يجب أن تحتوي كل تكلفة على وصف مختصر ومبلغ موجب بمنزلتين عشريتين كحد أقصى.', 'Every cost needs a short description and a positive amount with at most two decimals.')}</p>{/if}
@@ -264,7 +340,7 @@
 	{#if hasActivity}
 		<div class="report-tabs screen-only" role="tablist" aria-label={t('أقسام التقرير', 'Report sections')}>
 			{#each panels as p}
-				<button type="button" role="tab" aria-selected={panel === p.id} class:active={panel === p.id} onclick={() => (panel = p.id)}>{t(p.ar, p.en)}</button>
+				<button type="button" class="tab" role="tab" aria-selected={panel === p.id} class:active={panel === p.id} onclick={() => (panel = p.id)}>{t(p.ar, p.en)}</button>
 			{/each}
 		</div>
 	{/if}
@@ -279,7 +355,11 @@
 		{#if !hasActivity}
 			<div class="card report-empty">
 				<h2>{t('لا توجد مبيعات في هذه الفترة', 'No sales in this period')}</h2>
-				<p class="muted">{t('اختر فترة أخرى أو متجراً آخر من أعلى الصفحة.', 'Choose another period or Store at the top of the page.')}</p>
+				<p class="muted">
+					{filtered
+						? t('اختر فترة أخرى أو أزل تصفيات التقرير.', 'Choose another period or clear the report filters.')
+						: t('اختر فترة أخرى أو متجراً آخر من أعلى الصفحة.', 'Choose another period or Store at the top of the page.')}
+				</p>
 			</div>
 		{:else}
 			<div class="report-panel" class:active={panel === 'overview'}>
@@ -492,8 +572,8 @@
 					{#if report.sales_total_count > PAGE}
 						<div class="pager">
 							<span class="num">{offset + 1}–{Math.min(offset + report.sales.length, report.sales_total_count)} / {report.sales_total_count}</span>
-							<button type="button" class="btn-ghost screen-only" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - PAGE))}>{t('السابق', 'Previous')}</button>
-							<button type="button" class="btn-ghost screen-only" disabled={offset + PAGE >= report.sales_total_count} onclick={() => (offset += PAGE)}>{t('التالي', 'Next')}</button>
+							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - PAGE))}>{t('السابق', 'Previous')}</button>
+							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset + PAGE >= report.sales_total_count} onclick={() => (offset += PAGE)}>{t('التالي', 'Next')}</button>
 						</div>
 					{/if}
 				</section>

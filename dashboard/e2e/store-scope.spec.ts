@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { uiLogin } from './auth';
+import { choose, optionCount } from './support/select';
 
 // Phase 9-R1 independent browser regression suite for Store scope
 // transitions (F03) and authenticated Store-registry initialization (F05).
@@ -170,63 +171,63 @@ function selector(page: Page) {
 test('login with a valid Store in the URL selects it', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page, `login?store_id=${STORE_B}`);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 });
 
 test('two Stores with equal display names stay distinct by UUID', async ({ page }) => {
 	await mockStoreScope(page, { stores: [{ id: STORE_A, name: 'Same Name' }, { id: STORE_B, name: 'Same Name' }] });
 	await login(page);
-	await expect(selector(page).locator('option')).toHaveCount(3);
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await expect.poll(() => optionCount(selector(page))).toBe(3);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 });
 
 test('registry failure shows a truthful retry and recovers', async ({ page }) => {
 	await mockStoreScope(page, { failFirstStoreList: true });
 	await login(page);
 	await expect(page.getByTestId('store-retry')).toBeVisible();
-	await expect(selector(page).locator('option')).toHaveCount(1); // only All Stores
+	await expect.poll(() => optionCount(selector(page))).toBe(1); // only All Stores
 	await page.getByTestId('store-retry').click();
-	await expect(selector(page).locator('option')).toHaveCount(3);
+	await expect.poll(() => optionCount(selector(page))).toBe(3);
 	await expect(page.getByTestId('store-retry')).toBeHidden();
 });
 
 test('logout and login reinitializes the registry', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
-	await expect(selector(page).locator('option')).toHaveCount(3);
+	await expect.poll(() => optionCount(selector(page))).toBe(3);
 	await page.getByRole('button', { name: /خروج \/ Logout/ }).click();
 	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible();
 	await login(page);
-	await expect(selector(page).locator('option')).toHaveCount(3);
+	await expect.poll(() => optionCount(selector(page))).toBe(3);
 });
 
 test('explicit Store change clears order detail', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await page.goto(`orders?store_id=${STORE_A}`);
-	await expect(selector(page).locator('option')).toHaveCount(3);
+	await expect.poll(() => optionCount(selector(page))).toBe(3);
 	await openFirstDetail(page);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeVisible();
-	await selector(page).selectOption(STORE_B);
+	await choose(selector(page), STORE_B);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 });
 
 test('Back/Forward navigation restores Store and clears foreign detail', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await page.goto(`orders?store_id=${STORE_B}`);
-	await selector(page).selectOption(STORE_A);
-	await expect(selector(page)).toHaveValue(STORE_A);
+	await choose(selector(page), STORE_A);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_A);
 	await openFirstDetail(page);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeVisible();
 	await page.goBack();
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();
 	await expect(page.getByText('B-900')).toBeVisible();
 	await page.goForward();
-	await expect(selector(page)).toHaveValue(STORE_A);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_A);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();
 });
 
@@ -236,8 +237,8 @@ test('slow Store A detail response cannot leak after switching to B', async ({ p
 	await page.goto(`orders?store_id=${STORE_A}`);
 	await openFirstDetail(page);
 	// Switch before the slow A detail resolves.
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await page.waitForTimeout(1600);
 	await expect(page.getByText('alice-store-a@example.invalid')).toBeHidden();
 	await expect(page.getByText('B-900')).toBeVisible();
@@ -247,8 +248,8 @@ test('slow Store A list response cannot restore A rows under B', async ({ page }
 	await mockStoreScope(page, { slowListStore: STORE_A });
 	await login(page);
 	await page.goto(`orders?store_id=${STORE_A}`);
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await page.waitForTimeout(1600);
 	await expect(page.getByText('A-800')).toBeHidden();
 	await expect(page.getByText('B-900')).toBeVisible();
@@ -260,8 +261,8 @@ test('slow Store A continuation cannot append after switching to B', async ({ pa
 	await page.goto(`orders?store_id=${STORE_A}`);
 	await expect(page.getByText('A-800')).toBeVisible();
 	await page.getByRole('button', { name: /تحميل المزيد/ }).click();
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await page.waitForTimeout(1600);
 	await expect(page.getByText('A-801')).toHaveCount(0);
 	await expect(page.getByText('A-800')).toHaveCount(0);
@@ -275,8 +276,8 @@ test('failed Store B request does not restore Store A data', async ({ page }) =>
 	await expect(page.getByText('A-800')).toBeVisible();
 	// Make the B list fail; A data must not reappear after the scope change.
 	await page.route('**/api/v1/dashboard/orders*', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: 'x' } }) }));
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await page.waitForTimeout(500);
 	await expect(page.getByText('A-800')).toBeHidden();
 });
@@ -291,8 +292,8 @@ test('slow Store A financial overview cannot overwrite the B scope', async ({ pa
 	});
 	await login(page);
 	await page.goto(`?store_id=${STORE_A}`);
-	await selector(page).selectOption(STORE_B);
-	await expect(selector(page)).toHaveValue(STORE_B);
+	await choose(selector(page), STORE_B);
+	await expect(selector(page)).toHaveAttribute('data-value', STORE_B);
 	await page.waitForTimeout(1600);
 	await expect(page.getByText('222', { exact: true }).first()).toBeVisible();
 	await expect(page.getByText('111', { exact: true })).toHaveCount(0);

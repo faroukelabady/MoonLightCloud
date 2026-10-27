@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { IncidentRow } from '../lib/api';
+	import SingleSelect from './ui/SingleSelect.svelte';
 
 	let incidents: IncidentRow[] = [];
 	let loading = true;
@@ -78,34 +79,25 @@
 	<h2>Operations</h2>
 	<p class="hint">Open and acknowledged incidents need operator attention. Acknowledge suppresses the unacknowledged state only — it never claims recovery.</p>
 	<div class="filters">
-		<label>State
-			<select data-testid="filter-state" bind:value={filterState} on:change={applyFilters}>
-				<option value="">All</option>
-				<option value="open">Open</option>
-				<option value="acknowledged">Acknowledged</option>
-				<option value="resolved">Resolved</option>
-			</select>
-		</label>
-		<label>Severity
-			<select data-testid="filter-severity" bind:value={filterSeverity} on:change={applyFilters}>
-				<option value="">All</option>
-				<option value="warning">Warning</option>
-				<option value="urgent">Urgent</option>
-			</select>
-		</label>
-		<label>Rule
-			<select data-testid="filter-rule" bind:value={filterRule} on:change={applyFilters}>
-				<option value="">All</option>
-				<option value="DEVICE_OFFLINE">Device offline</option>
-				<option value="DEVICE_SYNC_FAILED">Sync failed</option>
-				<option value="DEVICE_SYNC_STALE">Sync stale</option>
-				<option value="BUSINESS_REPORT_BLOCKED">Report blocked</option>
-				<option value="BUSINESS_REPORT_STALE">Report stale</option>
-				<option value="NOTIFICATION_BLOCKED">Notification blocked</option>
-				<option value="NOTIFICATION_AMBIGUOUS">Notification ambiguous</option>
-				<option value="NOTIFICATION_RETRY_STALE">Notification retry stale</option>
-			</select>
-		</label>
+		<SingleSelect id="filter-state" label="State" testid="filter-state" value={filterState}
+			options={[{ value: '', label: 'All' }, { value: 'open', label: 'Open' }, { value: 'acknowledged', label: 'Acknowledged' }, { value: 'resolved', label: 'Resolved' }]}
+			onchange={(v) => { filterState = v; applyFilters(); }} />
+		<SingleSelect id="filter-severity" label="Severity" testid="filter-severity" value={filterSeverity}
+			options={[{ value: '', label: 'All' }, { value: 'warning', label: 'Warning' }, { value: 'urgent', label: 'Urgent' }]}
+			onchange={(v) => { filterSeverity = v; applyFilters(); }} />
+		<SingleSelect id="filter-rule" label="Rule" testid="filter-rule" value={filterRule}
+			options={[
+				{ value: '', label: 'All' },
+				{ value: 'DEVICE_OFFLINE', label: 'Device offline' },
+				{ value: 'DEVICE_SYNC_FAILED', label: 'Sync failed' },
+				{ value: 'DEVICE_SYNC_STALE', label: 'Sync stale' },
+				{ value: 'BUSINESS_REPORT_BLOCKED', label: 'Report blocked' },
+				{ value: 'BUSINESS_REPORT_STALE', label: 'Report stale' },
+				{ value: 'NOTIFICATION_BLOCKED', label: 'Notification blocked' },
+				{ value: 'NOTIFICATION_AMBIGUOUS', label: 'Notification ambiguous' },
+				{ value: 'NOTIFICATION_RETRY_STALE', label: 'Notification retry stale' }
+			]}
+			onchange={(v) => { filterRule = v; applyFilters(); }} />
 	</div>
 	{#if loading}<p>Loading…</p>
 	{:else if error}<p role="alert">Failed: {error}</p>
@@ -123,16 +115,16 @@
 						<span data-testid="intent-review" title="Alert intent predates atomic writes; reconcile explicitly if review warrants it">needs review</span>
 					{/if}
 					{#if i.state === 'open'}
-						<button data-testid="ack" disabled={!!acting[i.id]} on:click={() => ack(i.id)}>Acknowledge</button>
+						<button class="btn-secondary btn-sm" data-testid="ack" disabled={!!acting[i.id]} on:click={() => ack(i.id)}>Acknowledge</button>
 					{/if}
 					{#if i.state !== 'resolved'}
-						<button data-testid="resolve" disabled={!!acting[i.id]} on:click={() => resolve(i.id)}>Resolve</button>
+						<button class="btn-secondary btn-sm" data-testid="resolve" disabled={!!acting[i.id]} on:click={() => resolve(i.id)}>Resolve</button>
 					{/if}
 				</li>
 			{/each}
 		</ul>
 		{#if next}
-			<button data-testid="more" on:click={() => load(true)}>More</button>
+			<button class="btn-secondary btn-sm" data-testid="more" on:click={() => load(true)}>More</button>
 		{/if}
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
@@ -143,8 +135,9 @@
 		color: var(--muted, #666);
 	}
 	.filters {
-		display: flex;
-		gap: 1rem;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 220px));
+		gap: 12px;
 		margin-bottom: 1rem;
 	}
 </style>

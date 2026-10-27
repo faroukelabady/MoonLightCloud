@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import OrdersPage from './OrdersPage.svelte';
 import type { OrderSummary } from '../lib/api.js';
+import { choose } from '../test/choose.js';
 
 const order: OrderSummary = {
 	provider_key: 'website',
@@ -97,8 +98,7 @@ describe('OrdersPage', () => {
 	it('forwards status filter changes', async () => {
 		const onstatus = vi.fn();
 		render(OrdersPage, { props: { ...base, onstatus, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
-		const select = screen.getByLabelText(/الحالة \/ Status/) as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: 'completed' } });
+		await choose(screen.getByTestId('orders-status'), 'completed');
 		expect(onstatus).toHaveBeenCalledWith('completed');
 	});
 

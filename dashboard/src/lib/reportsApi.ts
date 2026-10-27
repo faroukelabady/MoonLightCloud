@@ -92,8 +92,32 @@ export interface ReportSaleRow {
 	total_minor: string;
 }
 
+export interface BusinessSettings {
+	tax_enabled: boolean;
+	discount_enabled: boolean;
+	returns_enabled: boolean;
+	revision: number;
+	updated_at: string;
+}
+
+export interface ReportFilter {
+	root_category_ids: string[];
+	subcategory_ids: string[];
+	tag_ids: string[];
+	payment_method: '' | 'cash' | 'card' | 'other';
+}
+
+export interface FilterOption {
+	id: string;
+	name_ar: string;
+	name_en: string;
+}
+
 export interface SalesReport {
 	generated_at: string;
+	settings: BusinessSettings;
+	filter: ReportFilter;
+	filter_options: { categories: FilterOption[]; subcategories: FilterOption[]; tags: FilterOption[] };
 	period: { kind: string; timezone: string; start_date: string; end_date: string };
 	store_id: string | null;
 	display_currency: ReportDisplay;
@@ -147,13 +171,28 @@ export interface StockReport {
 	items: StockRow[];
 }
 
+function filterParams(f: ReportFilter): string {
+	const q = new URLSearchParams();
+	if (f.root_category_ids.length) q.set('root_category_ids', f.root_category_ids.join(','));
+	if (f.subcategory_ids.length) q.set('subcategory_ids', f.subcategory_ids.join(','));
+	if (f.tag_ids.length) q.set('tag_ids', f.tag_ids.join(','));
+	if (f.payment_method) q.set('payment_method', f.payment_method);
+	const s = q.toString();
+	return s ? `&${s}` : '';
+}
+
+export const emptyFilter = (): ReportFilter => ({ root_category_ids: [], subcategory_ids: [], tag_ids: [], payment_method: '' });
+
 function storeParam(store: string): string {
 	return store ? `&store_id=${encodeURIComponent(store)}` : '';
 }
 
 export const reportsApi = {
-	sales: (p: PeriodParams, currency: ReportDisplay, store: string, offset: number, limit: number, s?: AbortSignal) =>
-		get<SalesReport>(`/api/v1/dashboard/reports/sales?${query(p)}&currency=${currency}&detail_offset=${offset}&detail_limit=${limit}${storeParam(store)}`, s),
+	sales: (p: PeriodParams, currency: ReportDisplay, filter: ReportFilter, store: string, offset: number, limit: number, s?: AbortSignal) =>
+		get<SalesReport>(
+			`/api/v1/dashboard/reports/sales?${query(p)}&currency=${currency}${filterParams(filter)}&detail_offset=${offset}&detail_limit=${limit}${storeParam(store)}`,
+			s
+		),
 	stock: (store: string, s?: AbortSignal) =>
 		get<StockReport>(`/api/v1/dashboard/reports/stocktaking${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s)
 };

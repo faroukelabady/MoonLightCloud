@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tb } from '../lib/i18n.svelte.js';
+	import SingleSelect from './ui/SingleSelect.svelte';
 	import { untrack } from 'svelte';
 	import { updatesApi, updateStateLabel, previewEnvelope, ApiError } from '../lib/api.js';
 	import type { ReleaseView, RolloutView, FleetDeviceRow, UpdateTargetView } from '../lib/api.js';
@@ -260,9 +261,9 @@
 		{tb('يتم توقيع الإصدارات خارج السحابة؛ السحابة تتحقق فقط وتوزع.', 'Releases are signed offline; Cloud only verifies and distributes. Store-scoped views follow the Store selector.')}
 	</p>
 	<div class="tabs" role="tablist">
-		<button class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>{tb('الأسطول', 'Fleet')}</button>
-		<button class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>{tb('الإصدارات', 'Releases')}</button>
-		<button class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>{tb('الطرح', 'Rollouts')}</button>
+		<button class="tab" class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>{tb('الأسطول', 'Fleet')}</button>
+		<button class="tab" class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>{tb('الإصدارات', 'Releases')}</button>
+		<button class="tab" class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>{tb('الطرح', 'Rollouts')}</button>
 	</div>
 	{#if notice}
 		<p class="notice {notice.kind}" role="status" data-testid="updates-notice">{notice.text}</p>
@@ -297,14 +298,14 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if fleetCursor}<button onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
+			{#if fleetCursor}<button class="btn-secondary btn-sm" onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
 		{/if}
 	{/if}
 
 	{#if tab === 'releases'}
 		<fieldset class="import">
 			<legend>{tb('استيراد إصدار موقّع', 'Import signed release')}</legend>
-			<label>{tb('ملف الغلاف', 'Envelope file')} <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
+			<label class="field">{tb('ملف الغلاف', 'Envelope file')} <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
 			<textarea rows="4" bind:value={envelopeText} placeholder="release-envelope.json" data-testid="envelope-text"></textarea>
 			{#if envelopeText.trim() && !preview}
 				<p role="alert">{tb('غلاف غير صالح', 'Not a release envelope.')}</p>
@@ -314,7 +315,7 @@
 				{#each preview.files as f}
 					<label class="url">{f} <input type="url" placeholder="https://…" bind:value={urls[f]} data-testid="artifact-url" /></label>
 				{/each}
-				<button onclick={importRelease} disabled={busy} data-testid="import-release">{tb('استيراد', 'Import')}</button>
+				<button class="btn-primary" onclick={importRelease} disabled={busy} data-testid="import-release">{tb('استيراد', 'Import')}</button>
 			{/if}
 		</fieldset>
 		{#if releasesState === 'error'}
@@ -334,9 +335,9 @@
 							<td>{when(r.imported_at)} · {r.imported_by}</td>
 							<td>
 								{#if r.status === 'active'}
-									<button onclick={() => setStatus(r, 'revoked')} disabled={busy}>{tb('إلغاء', 'Revoke')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'revoked')} disabled={busy}>{tb('إلغاء', 'Revoke')}</button>
 								{:else}
-									<button onclick={() => setStatus(r, 'active')} disabled={busy}>{tb('تفعيل', 'Reactivate')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'active')} disabled={busy}>{tb('تفعيل', 'Reactivate')}</button>
 								{/if}
 							</td>
 						</tr>
@@ -349,36 +350,42 @@
 	{#if tab === 'rollouts'}
 		<fieldset class="create">
 			<legend>{tb('طرح جديد', 'New rollout')}</legend>
-			<label>
-				{tb('الإصدار', 'Release')}
-				<select bind:value={form.release_id} data-testid="rollout-release">
-					<option value="">—</option>
-					{#each activeReleases as r (r.id)}<option value={r.id}>{r.version} (#{r.release_sequence})</option>{/each}
-				</select>
-			</label>
-			<label>
-				{tb('النطاق', 'Scope')}
-				<select bind:value={form.scope} data-testid="rollout-scope">
-					<option value="store">{tb('المتجر المحدد', 'Selected Store')}</option>
-					<option value="device">{tb('جهاز', 'Device')}</option>
-					<option value="all">{tb('كل الأجهزة', 'All devices')}</option>
-				</select>
-			</label>
+			<SingleSelect
+				id="rollout-release"
+				label={tb('الإصدار', 'Release')}
+				testid="rollout-release"
+				value={form.release_id}
+				options={[{ value: '', label: '—' }, ...activeReleases.map((r) => ({ value: r.id, label: `${r.version} (#${r.release_sequence})`, dir: 'ltr' as const }))]}
+				onchange={(v) => (form.release_id = v)}
+			/>
+			<SingleSelect
+				id="rollout-scope"
+				label={tb('النطاق', 'Scope')}
+				testid="rollout-scope"
+				value={form.scope}
+				options={[
+					{ value: 'store', label: tb('المتجر المحدد', 'Selected Store') },
+					{ value: 'device', label: tb('جهاز', 'Device') },
+					{ value: 'all', label: tb('كل الأجهزة', 'All devices') }
+				]}
+				onchange={(v) => (form.scope = v as typeof form.scope)}
+			/>
 			{#if form.scope === 'device'}
-				<label>Device ID <input bind:value={form.device_id} /></label>
+				<label class="field">Device ID <input bind:value={form.device_id} /></label>
 			{/if}
-			<label>
-				{tb('الوضع', 'Mode')}
-				<select bind:value={form.mode}>
-					<option value="optional">{tb('اختياري', 'Optional')}</option>
-					<option value="mandatory">{tb('إلزامي', 'Mandatory')}</option>
-				</select>
-			</label>
-			<label>% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
+			<SingleSelect
+				id="rollout-mode"
+				label={tb('الوضع', 'Mode')}
+				testid="rollout-mode"
+				value={form.mode}
+				options={[{ value: 'optional', label: tb('اختياري', 'Optional') }, { value: 'mandatory', label: tb('إلزامي', 'Mandatory') }]}
+				onchange={(v) => (form.mode = v as typeof form.mode)}
+			/>
+			<label class="field">% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
 			{#if form.scope !== 'all' && !store}
 				<p class="muted">{tb('اختر متجرًا أولاً', 'Choose a Store first.')}</p>
 			{/if}
-			<button
+			<button class="btn-primary"
 				onclick={createRollout}
 				disabled={busy || !form.release_id || (form.scope !== 'all' && !store) || (form.scope === 'device' && !form.device_id.trim())}
 				data-testid="create-rollout">{tb('إنشاء مسودة', 'Create draft')}</button
@@ -403,14 +410,14 @@
 								{#each Object.entries(r.counts ?? {}) as [state, n]}<span class="chip">{updateStateLabel(state)}: {n}</span>{/each}
 							</td>
 							<td class="actions">
-								{#if r.status === 'draft'}<button onclick={() => act(r, 'start')} disabled={busy}>{tb('بدء', 'Start')}</button>{/if}
-								{#if r.status === 'active'}<button onclick={() => act(r, 'pause')} disabled={busy}>{tb('إيقاف مؤقت', 'Pause')}</button>{/if}
-								{#if r.status === 'paused'}<button onclick={() => act(r, 'resume')} disabled={busy}>{tb('استئناف', 'Resume')}</button>{/if}
+								{#if r.status === 'draft'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'start')} disabled={busy}>{tb('بدء', 'Start')}</button>{/if}
+								{#if r.status === 'active'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'pause')} disabled={busy}>{tb('إيقاف مؤقت', 'Pause')}</button>{/if}
+								{#if r.status === 'paused'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'resume')} disabled={busy}>{tb('استئناف', 'Resume')}</button>{/if}
 								{#if (r.status === 'active' || r.status === 'paused' || r.status === 'draft') && r.percentage < 100}
-									<button onclick={() => widen(r)} disabled={busy}>{tb('توسيع', 'Widen')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => widen(r)} disabled={busy}>{tb('توسيع', 'Widen')}</button>
 								{/if}
 								{#if r.status !== 'completed' && r.status !== 'cancelled'}
-									<button onclick={() => act(r, 'cancel')} disabled={busy}>{tb('إلغاء', 'Cancel')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => act(r, 'cancel')} disabled={busy}>{tb('إلغاء', 'Cancel')}</button>
 								{/if}
 								<button class="link" onclick={() => showTargets(r)}>{tb('الأجهزة', 'Devices')}</button>
 							</td>
@@ -431,7 +438,7 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if rolloutsCursor}<button onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
+			{#if rolloutsCursor}<button class="btn-secondary btn-sm" onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
 		{/if}
 	{/if}
 </section>
@@ -439,8 +446,6 @@
 <style>
 	.updates { display: flex; flex-direction: column; gap: 0.75rem; }
 	.tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-	.tabs button { padding: 0.4rem 0.8rem; }
-	.tabs button.active { font-weight: bold; text-decoration: underline; }
 	fieldset { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
 	fieldset textarea { width: 100%; font-family: monospace; }
 	.url { display: flex; gap: 0.5rem; align-items: center; width: 100%; }

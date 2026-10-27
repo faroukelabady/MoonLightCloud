@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { uiLogin } from './auth';
+import { choose } from './support/select';
 
 // Phase 18 Updates page (ADR-0051/0052). Sign-in is real (production cookie
 // over HTTPS in scripts/e2e-dashboard.sh); the release/rollout/fleet data
@@ -89,7 +90,7 @@ test('Store switch never shows the previous Store fleet while the next one loads
 	await mockUpdates(page, { fleetB: 'slow' });
 	await openUpdates(page);
 	await expect(page.getByTestId('fleet-row')).toContainText('A-TILL');
-	await page.getByTestId('store-selector').selectOption(STORE_B);
+	await choose(page.getByTestId('store-selector'), STORE_B);
 	// Store B's response is held for 1.5 s: Store A's device must already be gone.
 	await expect(page.getByText('A-TILL')).toHaveCount(0, { timeout: 1000 });
 	await expect(page.getByTestId('fleet-row')).toContainText('B-TILL');
@@ -100,7 +101,7 @@ test('failed Store switch does not restore the previous Store fleet', async ({ p
 	await mockUpdates(page, { fleetB: 'fail' });
 	await openUpdates(page);
 	await expect(page.getByTestId('fleet-row')).toContainText('A-TILL');
-	await page.getByTestId('store-selector').selectOption(STORE_B);
+	await choose(page.getByTestId('store-selector'), STORE_B);
 	await expect(page.getByTestId('updates-page').getByRole('alert')).toContainText(/Could not load fleet/);
 	await expect(page.getByText('A-TILL')).toHaveCount(0);
 });

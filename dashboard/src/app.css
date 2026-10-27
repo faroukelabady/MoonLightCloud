@@ -26,6 +26,17 @@
 	--space-md: 12px;
 	--space-lg: 20px;
 	--background: #eef1f6;
+	/* Form controls follow MoonLightRetail: soft border, blue focus ring,
+	   red invalid state. Shared by inputs, selects and the ui/ components. */
+	--field-border: #d9e0e8;
+	--field-border-hover: #b9c4d3;
+	--field-focus: #1971cf;
+	--field-ring: 0 0 0 3px #1971cf16;
+	--field-invalid: #c84335;
+	--field-invalid-bg: #fff9f8;
+	--field-label: #526078;
+	--button-primary: #096ad4;
+	--button-danger: #b83b31;
 }
 
 * {
@@ -51,23 +62,60 @@ button {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
-	outline: 2px solid var(--primary);
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+	outline: 3px solid #1971cf55;
 	outline-offset: 2px;
 }
 
-/* Selects match MoonLightRetail's single-value selector: white field, soft
-   border, rounded corners, a chevron at the inline end and a blue focus
-   ring. The chevron is a data: image, which the dashboard CSP allows. */
-select {
+/* Text fields and selects match MoonLightRetail's fields. :where() keeps
+   these at zero specificity, so a component's own rules always win. */
+:where(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range'], [type='color']), textarea, select) {
 	font: inherit;
 	font-size: 0.88rem;
 	color: var(--text);
 	background-color: var(--surface);
-	border: 1px solid #d9e0e8;
+	border: 1px solid var(--field-border);
 	border-radius: 8px;
 	min-height: 38px;
 	padding: 8px 12px;
+	outline: none;
+	transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+:where(textarea) {
+	min-height: 75px;
+	resize: vertical;
+}
+:where(input, textarea, select):hover:not(:disabled) {
+	border-color: var(--field-border-hover);
+}
+:where(input, textarea, select):focus,
+:where(input, textarea, select):focus-visible {
+	border-color: var(--field-focus);
+	box-shadow: var(--field-ring);
+	outline: none;
+}
+:where(input, textarea, select)[aria-invalid='true'] {
+	border-color: var(--field-invalid);
+	background-color: var(--field-invalid-bg);
+	box-shadow: 0 0 0 3px #c8433515;
+}
+:where(input, textarea, select):disabled {
+	background-color: #f1f5f9;
+	color: #64748b;
+	cursor: not-allowed;
+}
+:where(input[readonly]) {
+	background-color: var(--surface-muted);
+}
+:where(input[type='checkbox'], input[type='radio']) {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	accent-color: #086bd6;
+	cursor: pointer;
+}
+select {
 	cursor: pointer;
 }
 select:not([multiple]) {
@@ -81,27 +129,133 @@ select:not([multiple]) {
 html[dir='rtl'] select:not([multiple]) {
 	background-position: left 12px center;
 }
-select:hover {
+/* A labelled field: the label text above its control. */
+.field {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--field-label);
+}
+.field-hint {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+	font-weight: 400;
+}
+.field-error {
+	margin: 4px 0 0;
+	color: #b13226;
+	font-size: 0.78rem;
+	font-weight: 700;
+}
+.check {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.86rem;
+	color: var(--text);
+	cursor: pointer;
+}
+/* Buttons follow MoonLightRetail's primary / secondary / danger / link set. */
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-danger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 38px;
+	padding: 8px 16px;
+	border-radius: 8px;
+	font-size: 0.86rem;
+	font-weight: 700;
+	white-space: nowrap;
+	cursor: pointer;
+}
+.btn-primary {
+	border: 0;
+	background: var(--button-primary);
+	color: #fff;
+	box-shadow: 0 5px 14px #096ad433;
+}
+.btn-primary:hover:not(:disabled) {
+	background: #0759b3;
+}
+.btn-secondary,
+.btn-ghost {
+	border: 1px solid #d8dfe8;
+	background: var(--surface);
+	color: #23344e;
+}
+.btn-secondary:hover:not(:disabled),
+.btn-ghost:hover:not(:disabled) {
 	border-color: #b9c4d3;
+	background: #f8fafc;
 }
-select:focus,
-select:focus-visible {
-	outline: none;
-	border-color: #1971cf;
-	box-shadow: 0 0 0 3px #1971cf16;
+.btn-danger {
+	border: 1px solid #cc4c40;
+	background: var(--button-danger);
+	color: #fff;
 }
-select:disabled {
-	opacity: 0.6;
+.btn-link,
+.link {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #155fba;
+	font-weight: 600;
+	cursor: pointer;
+}
+.btn-link:hover:not(:disabled),
+.link:hover:not(:disabled) {
+	text-decoration: underline;
+}
+.btn-sm {
+	min-height: 30px;
+	padding: 4px 10px;
+	font-size: 0.8rem;
+}
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-ghost:disabled,
+.btn-danger:disabled,
+.btn-link:disabled {
+	opacity: 0.5;
 	cursor: not-allowed;
 }
-select[multiple] {
-	padding: 4px;
+/* Page tabs (Updates, Catalog Admin, Reports) share MoonLightRetail's tab look. */
+.tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
 }
-select[multiple] option {
-	padding: 5px 8px;
-	border-radius: 6px;
+.tab {
+	min-height: 36px;
+	padding: 6px 14px;
+	border: 1px solid #cbd5e1;
+	border-radius: 8px;
+	background: var(--surface);
+	color: #475569;
+	font-weight: 700;
+	white-space: nowrap;
 }
-
+.tab:hover {
+	border-color: #94a3b8;
+}
+.tab.active {
+	border-color: var(--primary);
+	background: var(--primary-soft);
+	color: var(--primary);
+}
+.btn-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
 .card {
 	background: var(--surface);
 	border: 1px solid var(--border);
@@ -222,23 +376,6 @@ table.data th {
 
 .label-gap {
 	margin-bottom: 4px;
-}
-
-.btn-primary {
-	background: var(--primary);
-	color: #fff;
-	border: 0;
-	border-radius: var(--radius-control);
-	padding: 8px 14px;
-	font-weight: 600;
-}
-
-.btn-ghost {
-	background: transparent;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-control);
-	padding: 7px 14px;
-	color: var(--text);
 }
 
 .w0 { width: 0%; }

@@ -2,6 +2,7 @@ import {render,fireEvent,waitFor,cleanup} from '@testing-library/svelte';
 import {it,expect,vi,afterEach} from 'vitest';
 import App from '../App.svelte';
 import {dashboardApi,ApiError} from '../lib/api.js';
+import {choose} from '../test/choose.js';
 vi.mock('../lib/chartAction.js',()=>({chart:()=>({destroy(){}})}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -25,9 +26,9 @@ it('R1 regression: Store B selected while loaded Store A Tags remain visible',as
  vi.mocked(dashboardApi.tags).mockImplementation(async(_p,_c,s)=>s===A?tags('ONLY_STORE_A'):await new Promise(()=>{}));
  const r=render(App);
  await waitFor(()=>expect(r.container.textContent).toContain('ONLY_STORE_A'));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});
+ await choose(r.getByTestId('store-selector'),B);
  await waitFor(()=>expect(vi.mocked(dashboardApi.tags).mock.calls.some(c=>c[2]===B)).toBe(true));
- expect((r.getByTestId('store-selector') as HTMLSelectElement).value).toBe(B);
+ expect(r.getByTestId('store-selector').dataset.value).toBe(B);
  expect(r.container.textContent).not.toContain('ONLY_STORE_A');
 });
 it('R1 regression: Store B selected while loaded Store A health remains visible',async()=>{
@@ -46,9 +47,9 @@ it('R1 regression: Store B selected while loaded Store A health remains visible'
  vi.mocked(dashboardApi.tags).mockResolvedValue({rows:[],overlap_note:''} as any);
  const r=render(App);
  await waitFor(()=>expect(r.container.textContent).toContain('ONLY_STORE_A'));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});
+ await choose(r.getByTestId('store-selector'),B);
  await waitFor(()=>expect(vi.mocked(dashboardApi.catalogHealth).mock.calls.some(c=>c[0]===B)).toBe(true));
- expect((r.getByTestId('store-selector') as HTMLSelectElement).value).toBe(B);
+ expect(r.getByTestId('store-selector').dataset.value).toBe(B);
  expect(r.container.textContent).not.toContain('ONLY_STORE_A');
 });
 it('R1 regression: new Store B Retail totals appear beside old Store A online totals',async()=>{
@@ -67,9 +68,9 @@ it('R1 regression: new Store B Retail totals appear beside old Store A online to
  vi.mocked(dashboardApi.tags).mockResolvedValue({rows:[],overlap_note:''} as any);
  const r=render(App);
  await waitFor(()=>expect(r.container.textContent).toContain('ONLY_STORE_A'));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});
+ await choose(r.getByTestId('store-selector'),B);
  await waitFor(()=>expect(vi.mocked(dashboardApi.orderSummary).mock.calls.some(c=>c[1]===B)).toBe(true));
- expect((r.getByTestId('store-selector') as HTMLSelectElement).value).toBe(B);
+ expect(r.getByTestId('store-selector').dataset.value).toBe(B);
  expect(r.container.textContent).not.toContain('ONLY_STORE_A');
  expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull();
 });
@@ -99,21 +100,21 @@ function setupScopes(){
 }
 for(const first of ['retail','online'] as const)it(`coherent comparison waits for both current responses (${first} first), errors and retry`,async()=>{
  const h=setupScopes(),r=render(App);await waitFor(()=>expect(h.onlineCalls.length).toBe(1));h.retailCalls[0].pending.resolve(h.retail('1100'));h.onlineCalls[0].pending.resolve(h.online('A_READY'));await waitFor(()=>expect(r.container.textContent).toContain('A_READY'));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});await waitFor(()=>expect(h.onlineCalls.length).toBe(2));expect(r.container.textContent).not.toContain('A_READY');
+ await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(h.onlineCalls.length).toBe(2));expect(r.container.textContent).not.toContain('A_READY');
  if(first==='retail')h.retailCalls[1].pending.resolve(h.retail('2200'));else h.onlineCalls[1].pending.resolve(h.online('B_READY'));
  await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull());
  if(first==='retail')h.onlineCalls[1].pending.resolve(h.online('B_READY'));else h.retailCalls[1].pending.resolve(h.retail('2200'));
  await waitFor(()=>expect(r.container.textContent).toContain('B_READY'));expect(r.getByLabelText('Finalized Retail Sales / المبيعات النهائية').textContent).toContain('22');
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:A}});await waitFor(()=>expect(h.onlineCalls.length).toBe(3));h.retailCalls[2].pending.resolve(h.retail('3300'));h.onlineCalls[2].pending.reject(new ApiError(503,'UNAVAILABLE','bounded fixture failure'));await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull());expect(r.container.textContent).not.toContain('B_READY');
+ await choose(r.getByTestId('store-selector'),A);await waitFor(()=>expect(h.onlineCalls.length).toBe(3));h.retailCalls[2].pending.resolve(h.retail('3300'));h.onlineCalls[2].pending.reject(new ApiError(503,'UNAVAILABLE','bounded fixture failure'));await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull());expect(r.container.textContent).not.toContain('B_READY');
  await waitFor(()=>expect(r.container.textContent).toContain('Reporting is temporarily unavailable'));const retries=r.getAllByRole('button').filter(b=>b.textContent?.includes('Retry'));expect(retries.length).toBeGreaterThan(0);await fireEvent.click(retries[0]);await waitFor(()=>expect(h.onlineCalls.length).toBe(4));h.retailCalls[3].pending.resolve(h.retail('3300'));h.onlineCalls[3].pending.resolve(h.online('A_RETRY'));await waitFor(()=>expect(r.container.textContent).toContain('A_RETRY'));
 });
 it('late A, rapid A→B→A, combined period/currency and history scopes remain fenced',async()=>{
  const h=setupScopes(),r=render(App);await waitFor(()=>expect(h.onlineCalls.length).toBe(1));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});await waitFor(()=>expect(h.onlineCalls.length).toBe(2));h.retailCalls[1].pending.resolve(h.retail('2200'));h.onlineCalls[1].pending.resolve(h.online('B_CURRENT'));await waitFor(()=>expect(r.container.textContent).toContain('B_CURRENT'));
+ await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(h.onlineCalls.length).toBe(2));h.retailCalls[1].pending.resolve(h.retail('2200'));h.onlineCalls[1].pending.resolve(h.online('B_CURRENT'));await waitFor(()=>expect(r.container.textContent).toContain('B_CURRENT'));
  h.retailCalls[0].pending.resolve(h.retail('1100'));h.onlineCalls[0].pending.resolve(h.online('A_STALE'));await Promise.resolve();expect(r.container.textContent).not.toContain('A_STALE');expect(r.container.textContent).toContain('B_CURRENT');
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:A}});await waitFor(()=>expect(h.onlineCalls.length).toBe(3));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});await waitFor(()=>expect(h.onlineCalls.length).toBe(4));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:A}});await waitFor(()=>expect(h.onlineCalls.length).toBe(5));h.retailCalls[4].pending.resolve(h.retail('5500'));h.onlineCalls[4].pending.resolve(h.online('A_NEW'));await waitFor(()=>expect(r.container.textContent).toContain('A_NEW'));
+ await choose(r.getByTestId('store-selector'),A);await waitFor(()=>expect(h.onlineCalls.length).toBe(3));
+ await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(h.onlineCalls.length).toBe(4));
+ await choose(r.getByTestId('store-selector'),A);await waitFor(()=>expect(h.onlineCalls.length).toBe(5));h.retailCalls[4].pending.resolve(h.retail('5500'));h.onlineCalls[4].pending.resolve(h.online('A_NEW'));await waitFor(()=>expect(r.container.textContent).toContain('A_NEW'));
  for(const i of [2,3]){h.retailCalls[i].pending.resolve(h.retail('9900'));h.onlineCalls[i].pending.resolve(h.online('SUPERSEDED'))}await Promise.resolve();expect(r.container.textContent).not.toContain('SUPERSEDED');
  window.history.pushState({},'',`/dashboard/sales?store_id=${B}&period=yesterday&currency=USD`);window.dispatchEvent(new PopStateEvent('popstate'));await waitFor(()=>expect(h.onlineCalls.length).toBe(6));expect(r.container.textContent).not.toContain('A_NEW');expect(h.onlineCalls[5].scope).toBe(B);expect(h.onlineCalls[5].currency).toBe('USD');expect(vi.mocked(dashboardApi.orderSummary).mock.calls[5][0].period).toBe('yesterday');h.retailCalls[5].pending.resolve(h.retail('6600'));h.onlineCalls[5].pending.resolve(h.online('B_HISTORY'));await waitFor(()=>expect(r.container.textContent).toContain('B_HISTORY'));
 });
@@ -145,7 +146,7 @@ it('replacing an order list rejects old continuation but preserves a pending det
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
  await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));
  await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
- await fireEvent.change(r.getByLabelText(/الحالة \/ Status/),{target:{value:'completed'}});
+ await choose(r.getByTestId('orders-status'),'completed');
  await waitFor(()=>expect(r.queryByText('ORDER_filtered')).not.toBeNull());
  more.resolve(orderPage(['old-continuation'],null));detail.resolve(orderDetail('a'));
  await waitFor(()=>expect(r.queryByText('DETAIL_a')).not.toBeNull());
@@ -156,7 +157,7 @@ it('order filters do not discard pending analytics siblings',async()=>{
  const h=setupScopes();window.history.replaceState({},'',`/dashboard/?store_id=${A}`);
  vi.mocked(dashboardApi.orders).mockResolvedValue(orderPage(['a'],null) as any);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
- await fireEvent.change(r.getByLabelText(/الحالة \/ Status/),{target:{value:'completed'}});
+ await choose(r.getByTestId('orders-status'),'completed');
  h.retailCalls[0].pending.resolve(h.retail('4242'));
  await waitFor(()=>expect(r.container.textContent).toContain('42.42'));
  expect(h.retailCalls).toHaveLength(1);
@@ -179,7 +180,7 @@ it('a Store transition fences every old order sibling including late authorizati
  vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
  await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
+ await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
  more.reject(new ApiError(401,'UNAUTHORIZED','old session'));detail.resolve(orderDetail('a'));
  await Promise.resolve();await Promise.resolve();
  expect(r.queryByText('DETAIL_a')).toBeNull();expect(r.queryByText('ORDER_b')).not.toBeNull();
@@ -191,7 +192,7 @@ it('does not start new Store reads while logout is pending',async()=>{
  vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,_c,store)=>store===A?orderPage(['a'],null):late.promise as any);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
  await fireEvent.click(r.getByRole('button',{name:/خروج \/ Logout/}));
- await fireEvent.change(r.getByTestId('store-selector'),{target:{value:B}});
+ await choose(r.getByTestId('store-selector'),B);
  expect(vi.mocked(dashboardApi.orders).mock.calls.map(c=>c[3])).toEqual([A]);
  logout.resolve(undefined);
  await waitFor(()=>expect(r.queryByTestId('store-selector')).toBeNull());

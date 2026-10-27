@@ -24,6 +24,7 @@
 	import UpdatesPage from './components/UpdatesPage.svelte';
 	import UsersPage from './components/UsersPage.svelte';
 	import ReportsPage from './components/ReportsPage.svelte';
+	import SettingsPage from './components/SettingsPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { createRequestScope } from './lib/requestScope';
 	import { dashboardApi, ApiError, isStoreID, setCSRFToken } from './lib/api.js';
@@ -66,6 +67,7 @@
 			admin: 'admin',
 			sales: 'sales',
 			reports: 'reports',
+			settings: 'settings',
 			// Former pages whose content now lives in Sales Summary and Overview.
 			daily: 'sales',
 			products: 'overview',
@@ -750,6 +752,11 @@
 						<ReportsPage {params} {store} {stores} />
 					</div>
 				{/if}
+				{#if route === 'settings' && me}
+					<div class="cell a-orders">
+						<SettingsPage canManage={me.permissions.includes('settings.manage') && me.all_stores} />
+					</div>
+				{/if}
 				{#if route === 'devices'}
 					<div class="cell a-orders">
 						<DevicesPage />
@@ -901,6 +908,15 @@
 	}
 	.cell > :global(.card) {
 		flex: 1;
+		min-height: 0;
+	}
+	/* Overview cards keep one readable height per row; longer lists and
+	   tables scroll inside their card instead of stretching the page. */
+	.dash.ov .cell:not(.a-kpis) {
+		max-height: 440px;
+	}
+	.dash.ov .a-orders {
+		max-height: 560px;
 	}
 	.cell { grid-column: span 6; }
 	.a-kpis {

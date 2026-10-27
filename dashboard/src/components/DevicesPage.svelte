@@ -138,14 +138,14 @@
 					{/if}
 					{#if active}
 						<span data-testid="command-status">{userFacing(active.status)}</span>
-						<button disabled title="A sync request is already active">Sync Now</button>
+						<button class="btn-secondary btn-sm" disabled title="A sync request is already active">Sync Now</button>
 					{:else}
 						{#if terminal}
 							<span data-testid="last-sync">Last sync: {userFacing(terminal.status)}</span>
 						{:else}
 							<span data-testid="command-status">idle</span>
 						{/if}
-						<button data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
+						<button class="btn-secondary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
 						{#if past.length > 0}
 							<ul data-testid="sync-history">
 								{#each past as c (c.id)}
