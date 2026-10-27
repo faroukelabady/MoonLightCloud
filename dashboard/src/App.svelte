@@ -877,55 +877,54 @@
 		padding: 6px 12px;
 		font-size: 0.82rem;
 	}
+	/* Every row of the 12-column grid is filled and its cards stretch to the
+	same height, so no card leaves an empty band beside or below it. The
+	overview orders cards explicitly; other routes show two cards per row
+	with KPIs and wide tables (orders, devices, admin) spanning the grid. */
 	.dash {
 		display: grid;
-		grid-template-columns: repeat(12, 1fr);
+		grid-template-columns: repeat(12, minmax(0, 1fr));
 		gap: 12px;
-		align-items: start;
+		align-items: stretch;
 	}
 	.cell {
 		min-width: 0;
+		display: flex;
+		flex-direction: column;
 	}
-	.a-sync { grid-column: span 3; }
-	/* Overview composition: the tall Sync Health card spans rows 1-2 in
-	its own track so it never defines sibling row heights (R3-01). Row 2
-	cards use 3-col spans to share the remaining 9 columns. Other routes
-	keep simple flow to avoid placement holes. */
-	.dash.ov .a-sync { grid-row: span 2; }
-	.dash.ov .a-trend { grid-column: span 3; }
-	.dash.ov .a-products { grid-column: span 3; }
-	.dash.ov .a-cat { grid-column: span 3; }
-	.a-sales { grid-column: span 6; }
+	.cell > :global(.card) {
+		flex: 1;
+	}
+	.cell { grid-column: span 6; }
 	.a-kpis {
-		grid-column: span 3;
+		grid-column: span 12;
 		display: grid;
-		grid-template-columns: 1fr 1fr;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 12px;
-		align-content: start;
 	}
-	.a-trend { grid-column: span 4; }
-	.a-products { grid-column: span 4; }
-	.a-cat { grid-column: span 4; }
-	.a-act { grid-column: span 3; }
-	.a-latest { grid-column: span 6; }
-	.a-branch { grid-column: span 3; }
-	/* Wide read-only tables (orders/devices/operations) span the full grid
-	so their min-content width can never overflow the viewport on the
-	overview composition (F06: no horizontal overflow). */
 	.a-orders { grid-column: span 12; }
+	.dash.ov .a-kpis { order: 1; }
+	.dash.ov .a-sales { order: 2; grid-column: span 6; }
+	.dash.ov .a-sync { order: 3; grid-column: span 3; }
+	.dash.ov .a-cat { order: 4; grid-column: span 3; }
+	.dash.ov .a-trend { order: 5; grid-column: span 6; }
+	.dash.ov .a-products { order: 6; grid-column: span 3; }
+	.dash.ov .a-branch { order: 7; grid-column: span 3; }
+	.dash.ov .a-latest { order: 8; grid-column: span 6; }
+	.dash.ov .a-act { order: 9; grid-column: span 6; }
+	.dash.ov .a-orders { order: 10; }
 	@media (max-width: 1280px) {
-		.a-sync { grid-column: span 4; grid-row: auto; }
-		.dash.ov .a-trend { grid-column: span 6; }
-		.dash.ov .a-products { grid-column: span 6; }
-		.dash.ov .a-cat { grid-column: span 12; }
-		.a-sales { grid-column: span 8; }
-		.a-kpis { grid-column: span 12; grid-template-columns: repeat(4, 1fr); }
-		.a-trend { grid-column: span 6; }
-		.a-products { grid-column: span 6; }
-		.a-cat { grid-column: span 12; }
-		.a-act { grid-column: span 5; }
-		.a-latest { grid-column: span 7; }
-		.a-branch { grid-column: span 12; }
+		.dash.ov .a-sales { grid-column: span 7; }
+		.dash.ov .a-sync { order: 3; grid-column: span 5; }
+		.dash.ov .a-trend { order: 4; grid-column: span 7; }
+		.dash.ov .a-products { order: 5; grid-column: span 5; }
+		.dash.ov .a-cat { order: 6; grid-column: span 5; }
+		.dash.ov .a-branch { order: 7; grid-column: span 7; }
+		.dash.ov .a-latest { order: 8; grid-column: span 7; }
+		.dash.ov .a-act { order: 9; grid-column: span 5; }
+	}
+	@media (max-width: 1100px) {
+		.a-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	}
 	@media (max-width: 900px) {
 		.shell {
@@ -941,15 +940,12 @@
 			flex-basis: 100%;
 			order: 3;
 		}
-		.dash > .cell {
-			grid-column: span 12;
-			grid-row: auto;
-		}
+		.dash > .cell,
 		.dash.ov > .cell {
 			grid-column: span 12;
 		}
 		.a-kpis {
-			grid-template-columns: 1fr;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 </style>

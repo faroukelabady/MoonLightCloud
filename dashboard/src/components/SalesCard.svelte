@@ -121,6 +121,7 @@
 				<div class="kpi-value num">{formatInt(average()?.units ?? data.summary.units_sold)}</div>
 			</div>
 			<div class="kpi">
+				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13l-3-3M20 15H7l3 3" /></svg></div>
 				<div class="kpi-label">{t('الوحدات المرتجعة', 'Units Returned')}{#if arabic()}<br /><span class="muted">Units Returned</span>{/if}</div>
 				<div class="kpi-value num">{formatInt(unitsReturned())}</div>
 			</div>
@@ -159,9 +160,11 @@
 	.helper-en {
 		font-size: 0.7rem;
 	}
+	/* Four tiles in a two-by-two block, so none is left alone
+	on a row of its own. */
 	.kpis {
 		display: grid;
-		grid-template-columns: repeat(3, 1fr);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 6px;
 		margin-top: 8px;
 	}
