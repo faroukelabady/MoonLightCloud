@@ -34,3 +34,6 @@ dashboard/dist/
 dashboard/node_modules/
 dashboard/test-results/
 dashboard/playwright-report/
+
+# Generated development credentials (scripts/dev-up.sh)
+/.dev-credentials

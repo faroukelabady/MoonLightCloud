@@ -75,7 +75,12 @@ reissues it (older links stop working).
 ## Development
 
 `scripts/dev-up.sh` (and the other scripts) generate a local development
-`AUTH_MFA_ENCRYPTION_KEY` into `.env.local` once. Bootstrap a development
-OWNER the same way (`go run ./cmd/moonlight-cloud auth bootstrap-owner …`).
+`AUTH_MFA_ENCRYPTION_KEY` into `.env.local` once. On an empty development
+database `dev-up.sh` also bootstraps an OWNER (`dev@example.test` unless
+`--owner-login` is given) with a generated password and creates one device,
+printing both and saving them to the gitignored, owner-only
+`.dev-credentials`. `--reset` wipes the dev database first; `--device NAME`
+adds a device; `--no-setup` only starts the stack. The first sign-in still
+enrolls MFA.
 Tests create explicit OWNER/ADMIN fixtures; nothing relies on default
 credentials.

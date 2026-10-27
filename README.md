@@ -19,7 +19,9 @@ monolith, OCI-portable.
 
 ```bash
 cp .env.example .env.local   # safe placeholders; edit as needed
-./scripts/dev-up.sh          # compose up + wait + migrate + readiness
+./scripts/dev-up.sh          # compose up + wait + migrate + readiness; on an empty DB
+                             # also creates a dev OWNER + device (saved to .dev-credentials)
+./scripts/dev-up.sh --reset  # DESTROYS the local dev DB first, then the same fresh setup
 curl localhost:8080/health/live
 curl localhost:8080/health/ready
 curl localhost:8080/version
@@ -39,7 +41,7 @@ Compose, then `go run ./cmd/moonlight-cloud serve` on the host. Canonical
 
 | Task | Script (canonical) | Make alias |
 |---|---|---|
-| Start dev env | `./scripts/dev-up.sh` | `make dev-up` |
+| Start dev env | `./scripts/dev-up.sh [--reset] [--device NAME] [--no-setup]` | `make dev-up` |
 | Stop | `./scripts/dev-down.sh` | `make dev-down` |
 | Destroy dev DB | `./scripts/dev-reset.sh` | `make dev-reset` |
 | Migrate | `./scripts/migrate.sh up\|status` | `make migrate` |
