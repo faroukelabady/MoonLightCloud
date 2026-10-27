@@ -74,6 +74,7 @@ describe('LoginPage (ADR-0053)', () => {
 		await fireEvent.submit(screen.getByTestId('setup-form'));
 		const codes = await screen.findByTestId('recovery-codes');
 		expect(codes.textContent).toContain('AAAA-BBBB-CCCC-DDDD');
+		expect(screen.getByTestId('download-codes').textContent).toContain('Download codes');
 		const cont = screen.getByText(/Continue/) as HTMLButtonElement;
 		expect(cont.disabled).toBe(true);
 		await fireEvent.click(screen.getByRole('checkbox'));

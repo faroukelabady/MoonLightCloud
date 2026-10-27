@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { downloadRecoveryCodes } from '../lib/recoveryCodes.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, usersApi } from '../lib/api.js';
 	import type { AuthAuditRow, Me, StoreRow, UserView } from '../lib/api.js';
@@ -170,6 +171,7 @@
 		{#if codes.length}
 			<p class="muted">{t('تظهر مرة واحدة — احفظها في مكان آمن:', 'Shown once — store them safely:')}</p>
 			<ol class="codes" dir="ltr">{#each codes as c (c)}<li><code>{c}</code></li>{/each}</ol>
+			<button type="button" data-testid="download-codes" onclick={() => downloadRecoveryCodes(me.user.login, codes)}>{tb('تنزيل الرموز', 'Download codes')}</button>
 		{/if}
 	</fieldset>
 

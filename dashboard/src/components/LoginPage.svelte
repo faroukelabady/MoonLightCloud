@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, type AuthStage } from '../lib/api.js';
 	import QrCode from './QrCode.svelte';
+	import { downloadRecoveryCodes } from '../lib/recoveryCodes.js';
 
 	// Human sign-in (ADR-0053): password -> MFA (verify or first-time
 	// enrollment) -> full session. Activation of a new account arrives as
@@ -207,12 +208,12 @@
 			<div data-testid="recovery-codes">
 				<h1>{t('رموز الاسترداد', 'Recovery codes')}</h1>
 				<p class="muted">
-					Save these one-time recovery codes somewhere safe. Each works once if you lose your authenticator. They will not be shown
-					again.
+					{t('احفظ رموز الاسترداد هذه في مكان آمن. يعمل كل رمز مرة واحدة إذا فقدت تطبيق المصادقة، ولن تظهر مجددًا.', 'Save these one-time recovery codes somewhere safe. Each works once if you lose your authenticator. They will not be shown again.')}
 				</p>
 				<ol class="codes" dir="ltr">
 					{#each recoveryCodes as c (c)}<li><code>{c}</code></li>{/each}
 				</ol>
+				<button type="button" class="download" data-testid="download-codes" onclick={() => downloadRecoveryCodes(login, recoveryCodes)}>{tb('تنزيل الرموز', 'Download codes')}</button>
 				<label class="check"><input type="checkbox" bind:checked={saved} /> {tb('حفظت الرموز', 'I have saved these codes')}</label>
 				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{tb('متابعة', 'Continue')}</button>
 			</div>
@@ -281,6 +282,11 @@
 		color: inherit;
 		text-decoration: underline;
 		margin-top: 8px;
+	}
+	.login button.download {
+		background: transparent;
+		color: var(--color-primary);
+		border: 1px solid var(--color-primary);
 	}
 	.login button.keytoggle {
 		display: block;
