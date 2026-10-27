@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -36,10 +37,10 @@
 		<EmptyState ar="لا توجد طلبات عبر الإنترنت في هذه الفترة" en="No online orders in this period" />
 	{:else if online}
 		<div class="compare">
-			<section aria-label="Finalized Retail Sales / المبيعات النهائية">
-				<h3>المبيعات النهائية (نقدية)<br /><span class="th-en">Finalized Retail Sales</span></h3>
+			<section aria-label={arabic() ? 'Finalized Retail Sales / المبيعات النهائية' : 'Finalized Retail Sales'}>
+				<h3>{t('المبيعات النهائية (نقدية)', 'Finalized Retail Sales')}{#if arabic()}<br /><span class="th-en">Finalized Retail Sales</span>{/if}</h3>
 				{#if retail}
-					<p class="num">{formatInt(retail.summary.transaction_count)} <span class="th-en">transactions (all Retail currencies) / معاملات بكل العملات</span></p>
+					<p class="num">{formatInt(retail.summary.transaction_count)} <span class="th-en">{arabic() ? 'transactions (all Retail currencies) / معاملات بكل العملات' : 'transactions (all Retail currencies)'}</span></p>
 					{#each retail.summary.currency_totals.filter((t) => currency === 'all' || t.currency === currency) as total (total.currency)}
 						<p class="num" dir="ltr">
 							{formatMinor(total.net_sales_minor, cur(total.currency))}
@@ -48,8 +49,8 @@
 					{/each}
 				{/if}
 			</section>
-			<section aria-label="Online Orders / الطلبات عبر الإنترنت">
-				<h3>الطلبات عبر الإنترنت (تشغيلية)<br /><span class="th-en">Online Orders (operational)</span></h3>
+			<section aria-label={arabic() ? 'Online Orders / الطلبات عبر الإنترنت' : 'Online Orders'}>
+				<h3>{t('الطلبات عبر الإنترنت (تشغيلية)', 'Online Orders (operational)')}{#if arabic()}<br /><span class="th-en">Online Orders (operational)</span>{/if}</h3>
 				{#each online.currency_totals.filter((t) => currency === 'all' || t.currency === currency) as total (total.currency)}
 					<p class="num" dir="ltr">
 						{formatMinor(total.value_minor, cur(total.currency))}
@@ -61,12 +62,12 @@
 				{/if}
 			</section>
 		</div>
-		<h4>حالة الطلبات / <span class="th-en">Order status</span></h4>
+		<h4>{t('حالة الطلبات', 'Order status')}{#if arabic()} / <span class="th-en">Order status</span>{/if}</h4>
 		<table>
 			<thead>
 				<tr>
-					<th scope="col">الحالة / <span class="th-en">Status</span></th>
-					<th scope="col">الطلبات / <span class="th-en">Orders</span></th>
+					<th scope="col">{t('الحالة', 'Status')}{#if arabic()} / <span class="th-en">Status</span>{/if}</th>
+					<th scope="col">{t('الطلبات', 'Orders')}{#if arabic()} / <span class="th-en">Orders</span>{/if}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -78,14 +79,14 @@
 				{/each}
 			</tbody>
 		</table>
-		<h4>حسب المزود / <span class="th-en">By provider</span></h4>
+		<h4>{t('حسب المزود', 'By provider')}{#if arabic()} / <span class="th-en">By provider</span>{/if}</h4>
 		<table>
 			<thead>
 				<tr>
-					<th scope="col">المزود / <span class="th-en">Provider</span></th>
-					<th scope="col">العملة / <span class="th-en">Currency</span></th>
-					<th scope="col">الطلبات / <span class="th-en">Orders</span></th>
-					<th scope="col">قيمة الطلبات / <span class="th-en">Order value</span></th>
+					<th scope="col">{t('المزود', 'Provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</th>
+					<th scope="col">{t('العملة', 'Currency')}{#if arabic()} / <span class="th-en">Currency</span>{/if}</th>
+					<th scope="col">{t('الطلبات', 'Orders')}{#if arabic()} / <span class="th-en">Orders</span>{/if}</th>
+					<th scope="col">{t('قيمة الطلبات', 'Order value')}{#if arabic()} / <span class="th-en">Order value</span>{/if}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -100,8 +101,8 @@
 			</tbody>
 		</table>
 		<p class="note" role="note">
-			الطلبات عبر الإنترنت هي طلبات تشغيلية من المزودين، وقد لا تمثل إيرادًا مُعترفًا به إضافةً إلى المبيعات النهائية.<br />
-			<span class="th-en">Online orders are operational provider orders and may not represent additional recognized revenue beyond finalized Retail Sales. The two sources are shown separately and never summed.</span>
+			{t('الطلبات عبر الإنترنت هي طلبات تشغيلية من المزودين، وقد لا تمثل إيرادًا مُعترفًا به إضافةً إلى المبيعات النهائية.', 'Online orders are operational provider orders and may not represent additional recognized revenue beyond finalized Retail Sales. The two sources are shown separately and never summed.')}{#if arabic()}<br />
+			<span class="th-en">Online orders are operational provider orders and may not represent additional recognized revenue beyond finalized Retail Sales. The two sources are shown separately and never summed.</span>{/if}
 		</p>
 	{/if}
 </Card>

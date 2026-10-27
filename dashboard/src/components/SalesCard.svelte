@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -72,7 +73,7 @@
 	{#snippet actions()}
 		<Segmented
 			options={[
-				{ value: 'all', ar: 'الكل' },
+				{ value: 'all', ar: 'الكل', en: 'All' },
 				{ value: 'EGP', ar: 'EGP' },
 				{ value: 'USD', ar: 'USD' }
 			]}
@@ -96,39 +97,39 @@
 			{/if}
 		</div>
 		<div class="split num">
-			<span>إجمالي المبيعات / Gross: {formatMinor(grossMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
-			<span class="refund">المرتجعات / Refunds: {formatMinor(refundMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
+			<span>{tb('إجمالي المبيعات', 'Gross')}: {formatMinor(grossMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
+			<span class="refund">{tb('المرتجعات', 'Refunds')}: {formatMinor(refundMinor() ?? '0', mode === 'all' ? 'EGP' : mode)}</span>
 		</div>
 		{#if mode === 'all'}
-			<div class="muted helper">بعد تحويل مبيعات USD باستخدام سعر الصرف التاريخي لكل عملية بيع</div>
-			<div class="muted sub-en helper-en">USD sales converted using each sale's historical FX rate</div>
+			<div class="muted helper">{t('بعد تحويل مبيعات USD باستخدام سعر الصرف التاريخي لكل عملية بيع', "USD sales converted using each sale's historical FX rate")}</div>
+			{#if arabic()}<div class="muted sub-en helper-en">USD sales converted using each sale's historical FX rate</div>{/if}
 		{/if}
 		<div class="kpis">
 			<div class="kpi">
 				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-3-3M20 17H7l3 3" /></svg></div>
-				<div class="kpi-label">عدد المعاملات<br /><span class="muted">Transactions</span></div>
+				<div class="kpi-label">{t('عدد المعاملات', 'Transactions')}{#if arabic()}<br /><span class="muted">Transactions</span>{/if}</div>
 				<div class="kpi-value num">{txnDisplay}</div>
 			</div>
 			<div class="kpi">
 				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6" /></svg></div>
-				<div class="kpi-label">متوسط قيمة العملية<br /><span class="muted">Average transaction value</span></div>
+				<div class="kpi-label">{t('متوسط قيمة العملية', 'Average transaction value')}{#if arabic()}<br /><span class="muted">Average transaction value</span>{/if}</div>
 				<div class="kpi-value num">{avgDisplay}</div>
 			</div>
 			<div class="kpi">
 				<div class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" /></svg></div>
-				<div class="kpi-label">الوحدات المباعة<br /><span class="muted">Units Sold</span></div>
+				<div class="kpi-label">{t('الوحدات المباعة', 'Units Sold')}{#if arabic()}<br /><span class="muted">Units Sold</span>{/if}</div>
 				<div class="kpi-value num">{formatInt(average()?.units ?? data.summary.units_sold)}</div>
 			</div>
 			<div class="kpi">
-				<div class="kpi-label">الوحدات المرتجعة<br /><span class="muted">Units Returned</span></div>
+				<div class="kpi-label">{t('الوحدات المرتجعة', 'Units Returned')}{#if arabic()}<br /><span class="muted">Units Returned</span>{/if}</div>
 				<div class="kpi-value num">{formatInt(unitsReturned())}</div>
 			</div>
 		</div>
 		{#if mode === 'all' && data.fx.has_usd}
 			<div class="fx muted">
-				آخر سعر صرف مسجل: 1 USD = {data.fx.latest_rate ?? '?'} EGP
-				<span class="sub-en">Latest historical FX rate (not a live market rate)</span>
-				{#if data.fx.multiple_rates_used}<span class="badge warn">أسعار تاريخية متعددة / Multiple historical rates used</span>{/if}
+				{t('آخر سعر صرف مسجل', 'Latest historical FX rate')}: 1 USD = {data.fx.latest_rate ?? '?'} EGP
+				<span class="sub-en">{t('Latest historical FX rate (not a live market rate)', '(not a live market rate)')}</span>
+				{#if data.fx.multiple_rates_used}<span class="badge warn">{tb('أسعار تاريخية متعددة', 'Multiple historical rates used')}</span>{/if}
 			</div>
 		{/if}
 	{/if}

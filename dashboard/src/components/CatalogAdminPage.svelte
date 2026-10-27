@@ -1,4 +1,10 @@
 <script lang="ts">
+	import { arabic, tb } from '../lib/i18n.svelte.js';
+
+	// queued confirms a command waiting for Retail to apply it.
+	function queued(id: string, ar = 'بانتظار الكاشير', en = 'waiting for Retail'): string {
+		return arabic() ? `تم إدراج التغيير في قائمة الانتظار — ${ar}. الأمر ${id.slice(0, 8)}… / Change queued — ${en}.` : `Change queued — ${en}. Command ${id.slice(0, 8)}…`;
+	}
 	import { untrack } from 'svelte';
 	import { productClassificationCommand, productOnlinePolicyCommand, categoryOnlinePolicyCommand, productDetailsCommand, categoryDetailsCommand, categoryParentsCommand, tagDetailsCommand, productTypeDetailsCommand, productTypeStatusCommand, productTypeCreateCommand, productTypeAssignmentCommand } from '../lib/catalogCommands.js';
 	import { dashboardApi, ApiError } from '../lib/api.js';
@@ -25,15 +31,15 @@
 		if (err instanceof ApiError) {
 			switch (err.code) {
 				case 'REVISION_CONFLICT':
-					return 'تعارض مراجعة — تغيّر العنصر في الكاشير بعد تحميل الصفحة. حدّث قبل إعادة المحاولة. / Revision conflict — refresh before retrying.';
+					return tb('تعارض مراجعة — تغيّر العنصر في الكاشير بعد تحميل الصفحة. حدّث قبل إعادة المحاولة.', 'Revision conflict — refresh before retrying.');
 				case 'STORE_SCOPE_CONFLICT':
-					return 'نطاق متجر غير صالح. / Invalid Store scope.';
+					return tb('نطاق متجر غير صالح.', 'Invalid Store scope.');
 				case 'ENTITY_NOT_FOUND':
-					return 'العنصر غير موجود. / Entity not found.';
+					return tb('العنصر غير موجود.', 'Entity not found.');
 				case 'VALIDATION_FAILED':
-					return 'تحقق غير صالح — راجع القيم. / Invalid values.';
+					return tb('تحقق غير صالح — راجع القيم.', 'Invalid values.');
 				case 'UNSUPPORTED_COMMAND':
-					return 'أمر غير مدعوم. / Unsupported command.';
+					return tb('أمر غير مدعوم.', 'Unsupported command.');
 				default:
 					return `${fallback} (${err.code})`;
 			}
@@ -99,20 +105,20 @@
 		const egp = (document.getElementById('pd-egp') as HTMLInputElement)?.value.trim() ?? '';
 		const usd = (document.getElementById('pd-usd') as HTMLInputElement)?.value.trim() ?? '';
 		const cost = (document.getElementById('pd-cost') as HTMLInputElement)?.value.trim() ?? '';
-		if (!ar) return say('err', 'الاسم العربي مطلوب. / Arabic name required.');
+		if (!ar) return say('err', tb('الاسم العربي مطلوب.', 'Arabic name required.'));
 		for (const [label, v] of [['EGP', egp], ['USD', usd], ['cost', cost]] as const) {
-			if (!/^\d+$/.test(v)) return say('err', `قيمة ${label} يجب أن تكون أرقامًا صحيحة (وحدات صغرى). / ${label} must be integer minor units.`);
+			if (!/^\d+$/.test(v)) return say('err', arabic() ? `قيمة ${label} يجب أن تكون أرقامًا صحيحة (وحدات صغرى). / ${label} must be integer minor units.` : `${label} must be integer minor units.`);
 		}
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productDetailsCommand(store, p, { arabic_name: ar, english_name: en, egp_price_cents: egp, usd_price_cents: usd, cost_cents: cost }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -126,11 +132,11 @@
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productOnlinePolicyCommand(store, p, next));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -147,11 +153,11 @@
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productClassificationCommand(store, p, { top_category_id: top, subcategory_ids: subs, tag_ids: tagIds }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -185,7 +191,7 @@
 	async function saveCategoryOnline(next: boolean) {
 		if (!selectedCategory || !store || saving) return;
 		if (!next) {
-			const ok = confirm('تعطيل هذه الفئة يزيل المنتجات المتأثرة من القنوات الإلكترونية دون تغيير قيمة sell_online لكل منتج. متابعة؟ / Disabling removes affected Products from online channels without changing each Product\u2019s own sell_online. Continue?');
+			const ok = confirm(tb('تعطيل هذه الفئة يزيل المنتجات المتأثرة من القنوات الإلكترونية دون تغيير قيمة sell_online لكل منتج. متابعة؟', 'Disabling removes affected Products from online channels without changing each Product\u2019s own sell_online. Continue?'));
 			if (!ok) return;
 		}
 		const c = selectedCategory;
@@ -194,11 +200,11 @@
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(categoryOnlinePolicyCommand(store, c, next));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -210,17 +216,17 @@
 		const ar = (document.getElementById('cd-ar') as HTMLInputElement)?.value.trim() ?? '';
 		const en = (document.getElementById('cd-en') as HTMLInputElement)?.value.trim() ?? '';
 		const status = (document.getElementById('cd-status') as HTMLSelectElement)?.value ?? c.status;
-		if (!ar) return say('err', 'الاسم العربي مطلوب. / Arabic name required.');
+		if (!ar) return say('err', tb('الاسم العربي مطلوب.', 'Arabic name required.'));
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(categoryDetailsCommand(store, c, { name_ar: ar, name_en: en, status }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -235,11 +241,11 @@
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(categoryParentsCommand(store, c, checked));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — يتحقق الكاشير من عدم وجود دورات. الأمر ${cmd.id.slice(0, 8)}… / Change queued — Retail validates the graph.`);
+			say('ok', queued(cmd.id, 'يتحقق الكاشير من عدم وجود دورات', 'Retail validates the graph'));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -272,17 +278,17 @@
 		const ar = (document.getElementById('td-ar') as HTMLInputElement)?.value.trim() ?? '';
 		const en = (document.getElementById('td-en') as HTMLInputElement)?.value.trim() ?? '';
 		const active = (document.getElementById('td-active') as HTMLInputElement)?.checked ?? t.is_active;
-		if (!ar) return say('err', 'الاسم العربي مطلوب. / Arabic name required.');
+		if (!ar) return say('err', tb('الاسم العربي مطلوب.', 'Arabic name required.'));
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(tagDetailsCommand(store, t, { name_ar: ar, name_en: en, is_active: active }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -314,17 +320,17 @@
 		const t = selectedType;
 		const ar = (document.getElementById('tt-ar') as HTMLInputElement)?.value.trim() ?? '';
 		const en = (document.getElementById('tt-en') as HTMLInputElement)?.value.trim() ?? '';
-		if (!ar || !en) return say('err', 'التسميات مطلوبة. / Labels required.');
+		if (!ar || !en) return say('err', tb('التسميات مطلوبة.', 'Labels required.'));
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productTypeDetailsCommand(store, t, { name_ar: ar, name_en: en }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -338,11 +344,11 @@
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productTypeStatusCommand(store, t, next));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -353,19 +359,19 @@
 		const code = (document.getElementById('nt-code') as HTMLInputElement)?.value.trim().toLowerCase() ?? '';
 		const ar = (document.getElementById('nt-ar') as HTMLInputElement)?.value.trim() ?? '';
 		const en = (document.getElementById('nt-en') as HTMLInputElement)?.value.trim() ?? '';
-		if (!/^[a-z0-9_]{1,32}$/.test(code)) return say('err', 'رمز غير صالح. / Invalid code.');
-		if (!ar || !en) return say('err', 'التسميات مطلوبة. / Labels required.');
+		if (!/^[a-z0-9_]{1,32}$/.test(code)) return say('err', tb('رمز غير صالح.', 'Invalid code.'));
+		if (!ar || !en) return say('err', tb('التسميات مطلوبة.', 'Labels required.'));
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productTypeCreateCommand(store, { code, name_ar: ar, name_en: en, position: productTypes.length }));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 			void loadTypes();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -375,17 +381,17 @@
 		if (!selectedProduct || !store || saving) return;
 		const p = selectedProduct;
 		const typeId = (document.getElementById('pt-assign') as HTMLSelectElement)?.value ?? '';
-		if (!typeId) return say('err', 'اختر النوع. / Select a type.');
+		if (!typeId) return say('err', tb('اختر النوع.', 'Select a type.'));
 		const actionEpoch = epoch;
 		saving = true;
 		try {
 			const cmd = await dashboardApi.adminCreateCommand(productTypeAssignmentCommand(store, p, typeId));
 			if (actionEpoch !== epoch) return;
-			say('ok', `تم إدراج التغيير في قائمة الانتظار — بانتظار الكاشير. الأمر ${cmd.id.slice(0, 8)}… / Change queued — waiting for Retail.`);
+			say('ok', queued(cmd.id));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل إنشاء الأمر. / Command failed.'));
+			say('err', apiErrorText(err, tb('فشل إنشاء الأمر.', 'Command failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -423,7 +429,7 @@
 			selectedCommand = v;
 		} catch (err) {
 			if (my !== epoch || request !== requests.openCommand || store !== myStore) return;
-			say('err', apiErrorText(err, 'فشل تحميل الأمر. / Load failed.'));
+			say('err', apiErrorText(err, tb('فشل تحميل الأمر.', 'Load failed.')));
 		}
 	}
 
@@ -435,11 +441,11 @@
 			const cancelled = await dashboardApi.adminCancelCommand(store, id);
 			if (actionEpoch !== epoch) return;
 			selectedCommand = cancelled;
-			say('ok', 'تم إلغاء الأمر المعلق. / Pending command cancelled.');
+			say('ok', tb('تم إلغاء الأمر المعلق.', 'Pending command cancelled.'));
 			void loadCommands();
 		} catch (err) {
 			if (actionEpoch !== epoch) return;
-			say('err', apiErrorText(err, 'فشل الإلغاء. / Cancel failed.'));
+			say('err', apiErrorText(err, tb('فشل الإلغاء.', 'Cancel failed.')));
 		} finally {
 			if (actionEpoch === epoch) saving = false;
 		}
@@ -447,15 +453,15 @@
 
 	function aggregateLabel(a: string): string {
 		switch (a) {
-			case 'pending': return 'بانتظار الكاشير / Pending';
-			case 'delivered': return 'تم التسليم — بانتظار التطبيق / Delivered';
-			case 'applied': return 'مطبق في الكاشير — بانتظار المزامنة / Applied — syncing';
-			case 'converged': return 'مكتمل ومتزامن / Converged';
-			case 'partial': return 'جزئي — راجع الأجهزة / Partial';
-			case 'conflict': return 'تعارض — حدّث قبل إعادة المحاولة / Conflict';
-			case 'blocked_capability': return 'يتطلب تحديث الكاشير / Retail update required';
-			case 'skipped_revoked': return 'تم تخطي الجهاز الملغى أو المنقول / Revoked or rebound device skipped';
-			case 'cancelled': return 'ملغي / Cancelled';
+			case 'pending': return tb('بانتظار الكاشير', 'Pending');
+			case 'delivered': return tb('تم التسليم — بانتظار التطبيق', 'Delivered');
+			case 'applied': return tb('مطبق في الكاشير — بانتظار المزامنة', 'Applied — syncing');
+			case 'converged': return tb('مكتمل ومتزامن', 'Converged');
+			case 'partial': return tb('جزئي — راجع الأجهزة', 'Partial');
+			case 'conflict': return tb('تعارض — حدّث قبل إعادة المحاولة', 'Conflict');
+			case 'blocked_capability': return tb('يتطلب تحديث الكاشير', 'Retail update required');
+			case 'skipped_revoked': return tb('تم تخطي الجهاز الملغى أو المنقول', 'Revoked or rebound device skipped');
+			case 'cancelled': return tb('ملغي', 'Cancelled');
 			default: return a;
 		}
 	}
@@ -504,91 +510,91 @@
 
 <div class="admin">
 	{#if !store}
-		<p class="muted">اختر المتجر أولًا من منتقي المتجر. / Select a Store first.</p>
+		<p class="muted">{tb('اختر المتجر أولًا من منتقي المتجر.', 'Select a Store first.')}</p>
 	{:else}
 		{#if notice}<p class="notice {notice.kind}" role="status">{notice.text}</p>{/if}
 		<div class="tabs" role="tablist" aria-label="Catalog admin sections">
-			{#each [['products', 'المنتجات / Products'], ['types', 'الأنواع / Types'], ['categories', 'الفئات / Categories'], ['tags', 'الوسوم / Tags'], ['commands', 'الأوامر / Commands']] as [id, label]}
+			{#each [['products', tb('المنتجات', 'Products')], ['types', tb('الأنواع', 'Types')], ['categories', tb('الفئات', 'Categories')], ['tags', tb('الوسوم', 'Tags')], ['commands', tb('الأوامر', 'Commands')]] as [id, label]}
 				<button type="button" role="tab" aria-selected={tab === id} class:active={tab === id} onclick={() => (tab = id as typeof tab)}>{label}</button>
 			{/each}
 		</div>
 
 		{#if tab === 'products'}
 			<div class="row">
-				<input id="admin-search" type="search" placeholder="SKU أو الاسم / SKU or name" bind:value={search} aria-label="Search products" />
-				<button type="button" onclick={() => void loadProducts(true)}>بحث / Search</button>
+				<input id="admin-search" type="search" placeholder={tb('SKU أو الاسم', 'SKU or name')} bind:value={search} aria-label="Search products" />
+				<button type="button" onclick={() => void loadProducts(true)}>{tb('بحث', 'Search')}</button>
 			</div>
-			{#if productsState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
-			{:else if productsState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadProducts(true)}>إعادة / Retry</button></p>
-			{:else if productsState === 'empty'}<p class="muted">لا توجد منتجات. / No products.</p>
+			{#if productsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
+			{:else if productsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button type="button" onclick={() => void loadProducts(true)}>{tb('إعادة', 'Retry')}</button></p>
+			{:else if productsState === 'empty'}<p class="muted">{tb('لا توجد منتجات.', 'No products.')}</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>المتغيرات / Variants</th><th>الاسم / Name</th><th>أونلاين / Online</th><th>الحالة / State</th></tr></thead>
+					<thead><tr><th>{tb('المتغيرات', 'Variants')}</th><th>{tb('الاسم', 'Name')}</th><th>{tb('أونلاين', 'Online')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each products as p (p.product_id)}
 							<tr>
 								<td class="num" dir="ltr">{variantSummary(p)}</td>
 								<td><button type="button" class="link" onclick={() => void openProduct(p.product_id)}>{p.name_ar}</button></td>
-								<td>{p.sell_online ? 'نعم / Yes' : 'لا / No'}</td>
-								<td>{p.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
+								<td>{p.sell_online ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
+								<td>{p.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
-				{#if productCursor}<button type="button" onclick={() => void loadProducts(false)}>المزيد / More</button>{/if}
+				{#if productCursor}<button type="button" onclick={() => void loadProducts(false)}>{tb('المزيد', 'More')}</button>{/if}
 			{/if}
 			{#if productState === 'loading'}
-			<p role="status">جارٍ تحميل المنتج… / Loading Product…</p>
+			<p role="status">{tb('جارٍ تحميل المنتج…', 'Loading Product…')}</p>
 		{:else if productState === 'error'}
-			<p role="alert">تعذر تحميل المنتج. / Product could not be loaded.</p>
+			<p role="alert">{tb('تعذر تحميل المنتج.', 'Product could not be loaded.')}</p>
 		{/if}
 		{#if selectedProduct}
 				{@const p = selectedProduct}
 				<section class="detail" aria-label="Product editor">
 					<h3>{p.name_ar} <span class="muted num" dir="ltr">{variantSummary(p)}</span></h3>
-					<p class="muted">مراجعة الكتالوج <span class="num" dir="ltr">{p.catalog_revision}</span> · سياسة البيع <span class="num" dir="ltr">{p.sales_policy_revision}</span> · التكوينات <span class="num" dir="ltr">{p.configuration_revision}</span> · المخزون المشتق (قراءة فقط) <span class="num" dir="ltr">{p.derived_stock}</span></p>
+					<p class="muted">{arabic() ? 'مراجعة الكتالوج' : 'Catalog revision'} <span class="num" dir="ltr">{p.catalog_revision}</span> · {arabic() ? 'سياسة البيع' : 'Sales policy'} <span class="num" dir="ltr">{p.sales_policy_revision}</span> · {arabic() ? 'التكوينات' : 'Configurations'} <span class="num" dir="ltr">{p.configuration_revision}</span> · {arabic() ? 'المخزون المشتق (قراءة فقط)' : 'Derived stock (read-only)'} <span class="num" dir="ltr">{p.derived_stock}</span></p>
 					{#if p.variants && p.variants.length > 0}
-						<h4>المتغيرات / Variants</h4>
+						<h4>{tb('المتغيرات', 'Variants')}</h4>
 						<table class="data">
-							<thead><tr><th>SKU</th><th>الخيار / Option</th><th>المخزون / Stock</th><th>الحالة / State</th></tr></thead>
+							<thead><tr><th>SKU</th><th>{tb('الخيار', 'Option')}</th><th>{tb('المخزون', 'Stock')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 							<tbody>
 								{#each p.variants as v (v.variant_id)}
 									<tr>
 										<td class="num" dir="ltr">{v.sku}</td>
 										<td>{v.attributes.map((a) => `${a.definition_name_ar}: ${a.name_ar}`).join(' · ') || '—'}</td>
 										<td class="num" dir="ltr">{v.stock_quantity}</td>
-										<td>{v.deleted ? 'محذوف / Deleted' : v.is_active ? 'نشط / Active' : 'معطّل / Inactive'}</td>
+										<td>{v.deleted ? tb('محذوف', 'Deleted') : v.is_active ? tb('نشط', 'Active') : tb('معطّل', 'Inactive')}</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					{/if}
-					{#if p.has_pending}<p class="notice ok" role="status">يوجد تغيير معلق — القيم الحالية أدناه هي المعروضة من السحابة، وليست نجاحًا بعد. / Pending change exists — values below are current projections, not success.</p>{/if}
-					<h4>البيانات والأسعار / Details &amp; prices</h4>
+					{#if p.has_pending}<p class="notice ok" role="status">{tb('يوجد تغيير معلق — القيم الحالية أدناه هي المعروضة من السحابة، وليست نجاحًا بعد.', 'Pending change exists — values below are current projections, not success.')}</p>{/if}
+					<h4>{tb('البيانات والأسعار', 'Details &amp; prices')}</h4>
 					<div class="grid">
-						<label>الاسم العربي / Arabic name <input id="pd-ar" type="text" value={p.name_ar} /></label>
-						<label>الاسم الإنجليزي / English name <input id="pd-en" type="text" value={p.name_en ?? ''} dir="ltr" /></label>
-						<label>سعر الجنيه (وحدات صغرى) / EGP minor <input id="pd-egp" type="text" inputmode="numeric" value={p.egp_price_minor} dir="ltr" /></label>
-						<label>سعر الدولار (وحدات صغرى) / USD minor <input id="pd-usd" type="text" inputmode="numeric" value={p.usd_price_minor ?? '0'} dir="ltr" /></label>
-						<label>التكلفة (وحدات صغرى) / Cost minor <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
+						<label>{tb('الاسم العربي', 'Arabic name')} <input id="pd-ar" type="text" value={p.name_ar} /></label>
+						<label>{tb('الاسم الإنجليزي', 'English name')} <input id="pd-en" type="text" value={p.name_en ?? ''} dir="ltr" /></label>
+						<label>{tb('سعر الجنيه (وحدات صغرى)', 'EGP minor')} <input id="pd-egp" type="text" inputmode="numeric" value={p.egp_price_minor} dir="ltr" /></label>
+						<label>{tb('سعر الدولار (وحدات صغرى)', 'USD minor')} <input id="pd-usd" type="text" inputmode="numeric" value={p.usd_price_minor ?? '0'} dir="ltr" /></label>
+						<label>{tb('التكلفة (وحدات صغرى)', 'Cost minor')} <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
 					</div>
-					<button type="button" disabled={saving} onclick={() => void saveProductDetails()}>إدراج تعديل البيانات / Queue details change</button>
-					<h4>النوع / Product type</h4>
-					<p class="muted">النوع الحالي: <span dir="ltr">{p.product_type_id?.slice(0, 8) ?? '—'}…</span> — التغيير يخضع لتحقق التوافق في الكاشير. / Assignment is compatibility-checked by Retail.</p>
+					<button type="button" disabled={saving} onclick={() => void saveProductDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
+					<h4>{tb('النوع', 'Product type')}</h4>
+					<p class="muted">{arabic() ? 'النوع الحالي:' : 'Current type:'} <span dir="ltr">{p.product_type_id?.slice(0, 8) ?? '—'}…</span> {tb('— التغيير يخضع لتحقق التوافق في الكاشير.', 'Assignment is compatibility-checked by Retail.')}</p>
 					<div class="row">
 						<select id="pt-assign" aria-label="Assign product type">
 							{#each productTypes as t (t.type_id)}
 								<option value={t.type_id} selected={t.type_id === p.product_type_id}>{t.name_ar} ({t.code})</option>
 							{/each}
 						</select>
-						<button type="button" disabled={saving} onclick={() => void assignProductType()}>إدراج تغيير النوع / Queue type change</button>
+						<button type="button" disabled={saving} onclick={() => void assignProductType()}>{tb('إدراج تغيير النوع', 'Queue type change')}</button>
 					</div>
-					<h4>التوفر أونلاين / Online availability</h4>
-					<p class="muted">القيمة الحالية: {p.sell_online ? 'مفعّل / On' : 'معطّل / Off'} — التبديل لا يغيّر sell_offline.</p>
-					<button type="button" disabled={saving} onclick={() => void saveProductOnline(!p.sell_online)}>{p.sell_online ? 'تعطيل البيع أونلاين / Disable online' : 'تفعيل البيع أونلاين / Enable online'}</button>
-					<h4>التصنيف / Classification</h4>
-					<p class="muted">الفئة العليا الحالية: <span dir="ltr">{p.top_category_id.slice(0, 8)}…</span> — يستخدم الكاشير نفس مدققات العمل. / Retail reuses canonical validators.</p>
-					<label>الفئة العليا / Top category
+					<h4>{tb('التوفر أونلاين', 'Online availability')}</h4>
+					<p class="muted">{arabic() ? 'القيمة الحالية:' : 'Current value:'} {p.sell_online ? tb('مفعّل', 'On') : tb('معطّل', 'Off')} — {arabic() ? 'التبديل لا يغيّر sell_offline.' : 'Switching does not change sell_offline.'}</p>
+					<button type="button" disabled={saving} onclick={() => void saveProductOnline(!p.sell_online)}>{p.sell_online ? tb('تعطيل البيع أونلاين', 'Disable online') : tb('تفعيل البيع أونلاين', 'Enable online')}</button>
+					<h4>{tb('التصنيف', 'Classification')}</h4>
+					<p class="muted">{arabic() ? 'الفئة العليا الحالية:' : 'Current top category:'} <span dir="ltr">{p.top_category_id.slice(0, 8)}…</span> {tb('— يستخدم الكاشير نفس مدققات العمل.', 'Retail reuses canonical validators.')}</p>
+					<label>{tb('الفئة العليا', 'Top category')}
 						<select id="pc-top">
 							{#each categories as c (c.category_id)}
 								<option value={c.category_id} selected={c.category_id === p.top_category_id}>{c.name_ar}</option>
@@ -596,25 +602,25 @@
 						</select>
 					</label>
 					<fieldset>
-						<legend>الفئات الفرعية / Subcategories</legend>
+						<legend>{tb('الفئات الفرعية', 'Subcategories')}</legend>
 						{#each categories.filter((x) => x.category_id !== p.top_category_id) as c (c.category_id)}
 							<label class="check"><input type="checkbox" class="pc-sub-check" value={c.category_id} checked={p.subcategory_ids.includes(c.category_id)} /> {c.name_ar}</label>
 						{/each}
 					</fieldset>
 					<fieldset>
-						<legend>الوسوم / Tags</legend>
+						<legend>{tb('الوسوم', 'Tags')}</legend>
 						{#each tags as t (t.tag_id)}
 							<label class="check"><input type="checkbox" class="pc-tag-check" value={t.tag_id} checked={p.tag_ids.includes(t.tag_id)} /> {t.name_ar}</label>
 						{/each}
 					</fieldset>
-					<div><button type="button" disabled={saving} onclick={() => void saveProductClassification()}>إدراج تعديل التصنيف / Queue classification change</button></div>
-					<h4>خيارات الإطار / Frame options</h4>
-					<p class="muted">تُدار خيارات الإطار في تطبيق الكاشير وتظهر هنا للعرض فقط. / Frame choices are managed in the Retail app and shown here read-only.</p>
-					{#if configurations.length === 0}<p class="muted">لا توجد خيارات. / No frame choices.</p>
+					<div><button type="button" disabled={saving} onclick={() => void saveProductClassification()}>{tb('إدراج تعديل التصنيف', 'Queue classification change')}</button></div>
+					<h4>{tb('خيارات الإطار', 'Frame options')}</h4>
+					<p class="muted">{tb('تُدار خيارات الإطار في تطبيق الكاشير وتظهر هنا للعرض فقط.', 'Frame choices are managed in the Retail app and shown here read-only.')}</p>
+					{#if configurations.length === 0}<p class="muted">{tb('لا توجد خيارات.', 'No frame choices.')}</p>
 					{:else}
 						<ul data-testid="frame-configurations">
 							{#each configurations as c (c.id)}
-								<li>{c.style_name_ar} / {c.color_name_ar} <span class="num" dir="ltr">+{c.egp_delta_minor} EGP{c.usd_delta_minor !== null ? ` · +${c.usd_delta_minor} USD` : ''}</span>{c.enabled ? '' : ' · معطّل / disabled'}</li>
+								<li>{c.style_name_ar} / {c.color_name_ar} <span class="num" dir="ltr">+{c.egp_delta_minor} EGP{c.usd_delta_minor !== null ? ` · +${c.usd_delta_minor} USD` : ''}</span>{c.enabled ? '' : tb('· معطّل', 'disabled')}</li>
 							{/each}
 						</ul>
 					{/if}
@@ -623,19 +629,19 @@
 		{/if}
 
 		{#if tab === 'types'}
-			{#if typesState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
-			{:else if typesState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadTypes()}>إعادة / Retry</button></p>
-			{:else if typesState === 'empty'}<p class="muted">لا توجد أنواع. / No types.</p>
+			{#if typesState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
+			{:else if typesState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button type="button" onclick={() => void loadTypes()}>{tb('إعادة', 'Retry')}</button></p>
+			{:else if typesState === 'empty'}<p class="muted">{tb('لا توجد أنواع.', 'No types.')}</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>النوع / Type</th><th>الرمز / Code</th><th>نشط / Active</th><th>الحالة / State</th></tr></thead>
+					<thead><tr><th>{tb('النوع', 'Type')}</th><th>{tb('الرمز', 'Code')}</th><th>{tb('نشط', 'Active')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each productTypes as t (t.type_id)}
 							<tr>
 								<td><button type="button" class="link" onclick={() => (selectedType = t)}>{t.name_ar}</button></td>
 								<td class="num" dir="ltr">{t.code}</td>
-								<td>{t.is_active ? 'نعم / Yes' : 'لا / No'}</td>
-								<td>{t.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
+								<td>{t.is_active ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
+								<td>{t.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -645,42 +651,42 @@
 				{@const t = selectedType}
 				<section class="detail" aria-label="Type editor">
 					<h3>{t.name_ar} <span class="muted num" dir="ltr">{t.code} · rev {t.type_revision}</span></h3>
-					<p class="muted">الأبعاد: {t.dimensions.join(', ') || '—'} · القدرات: {t.capabilities.join(', ') || '—'}</p>
+					<p class="muted">{arabic() ? 'الأبعاد' : 'Dimensions'}: {t.dimensions.join(', ') || '—'} · {arabic() ? 'القدرات' : 'Capabilities'}: {t.capabilities.join(', ') || '—'}</p>
 					<div class="grid">
-						<label>الاسم العربي / Arabic name <input id="tt-ar" type="text" value={t.name_ar} /></label>
-						<label>الاسم الإنجليزي / English name <input id="tt-en" type="text" value={t.name_en} dir="ltr" /></label>
+						<label>{tb('الاسم العربي', 'Arabic name')} <input id="tt-ar" type="text" value={t.name_ar} /></label>
+						<label>{tb('الاسم الإنجليزي', 'English name')} <input id="tt-en" type="text" value={t.name_en} dir="ltr" /></label>
 					</div>
 					<div class="row">
-						<button type="button" disabled={saving} onclick={() => void saveTypeDetails()}>إدراج تعديل النوع / Queue type change</button>
-						<button type="button" disabled={saving} onclick={() => void saveTypeStatus(!t.is_active)}>{t.is_active ? 'تعطيل / Deactivate' : 'تفعيل / Activate'}</button>
+						<button type="button" disabled={saving} onclick={() => void saveTypeDetails()}>{tb('إدراج تعديل النوع', 'Queue type change')}</button>
+						<button type="button" disabled={saving} onclick={() => void saveTypeStatus(!t.is_active)}>{t.is_active ? tb('تعطيل', 'Deactivate') : tb('تفعيل', 'Activate')}</button>
 					</div>
 				</section>
 			{/if}
 			<section class="detail" aria-label="Create type">
-				<h3>نوع جديد / New type</h3>
+				<h3>{tb('نوع جديد', 'New type')}</h3>
 				<div class="grid">
-					<label>الرمز / Code <input id="nt-code" type="text" dir="ltr" placeholder="book" /></label>
-					<label>الاسم العربي / Arabic name <input id="nt-ar" type="text" /></label>
-					<label>الاسم الإنجليزي / English name <input id="nt-en" type="text" dir="ltr" /></label>
+					<label>{tb('الرمز', 'Code')} <input id="nt-code" type="text" dir="ltr" placeholder="book" /></label>
+					<label>{tb('الاسم العربي', 'Arabic name')} <input id="nt-ar" type="text" /></label>
+					<label>{tb('الاسم الإنجليزي', 'English name')} <input id="nt-en" type="text" dir="ltr" /></label>
 				</div>
-				<button type="button" disabled={saving} onclick={() => void createType()}>إدراج إنشاء النوع / Queue type creation</button>
+				<button type="button" disabled={saving} onclick={() => void createType()}>{tb('إدراج إنشاء النوع', 'Queue type creation')}</button>
 			</section>
 		{/if}
 
 		{#if tab === 'categories'}
-			{#if categoriesState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
-			{:else if categoriesState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadCategories()}>إعادة / Retry</button></p>
-			{:else if categoriesState === 'empty'}<p class="muted">لا توجد فئات. / No categories.</p>
+			{#if categoriesState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
+			{:else if categoriesState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button type="button" onclick={() => void loadCategories()}>{tb('إعادة', 'Retry')}</button></p>
+			{:else if categoriesState === 'empty'}<p class="muted">{tb('لا توجد فئات.', 'No categories.')}</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>الاسم / Name</th><th>الحالة / Status</th><th>أونلاين / Online</th><th>الحالة / State</th></tr></thead>
+					<thead><tr><th>{tb('الاسم', 'Name')}</th><th>{tb('الحالة', 'Status')}</th><th>{tb('أونلاين', 'Online')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each categories as c (c.category_id)}
 							<tr>
 								<td><button type="button" class="link" onclick={() => (selectedCategory = c)}>{c.name_ar}</button></td>
 								<td>{c.status}</td>
-								<td>{c.online_enabled ? 'نعم / Yes' : 'لا / No'}</td>
-								<td>{c.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
+								<td>{c.online_enabled ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
+								<td>{c.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -690,45 +696,45 @@
 				{@const c = selectedCategory}
 				<section class="detail" aria-label="Category editor">
 					<h3>{c.name_ar} <span class="muted num" dir="ltr">rev {c.catalog_revision}</span></h3>
-					{#if c.has_pending}<p class="notice ok" role="status">يوجد تغيير معلق. / Pending change exists.</p>{/if}
+					{#if c.has_pending}<p class="notice ok" role="status">{tb('يوجد تغيير معلق.', 'Pending change exists.')}</p>{/if}
 					<div class="grid">
-						<label>الاسم العربي / Arabic name <input id="cd-ar" type="text" value={c.name_ar} /></label>
-						<label>الاسم الإنجليزي / English name <input id="cd-en" type="text" value={c.name_en ?? ''} dir="ltr" /></label>
-						<label>الحالة / Status
+						<label>{tb('الاسم العربي', 'Arabic name')} <input id="cd-ar" type="text" value={c.name_ar} /></label>
+						<label>{tb('الاسم الإنجليزي', 'English name')} <input id="cd-en" type="text" value={c.name_en ?? ''} dir="ltr" /></label>
+						<label>{tb('الحالة', 'Status')}
 							<select id="cd-status" value={c.status}>
 								<option value="active">active</option>
 								<option value="hidden">hidden</option>
 							</select>
 						</label>
 					</div>
-					<button type="button" disabled={saving} onclick={() => void saveCategoryDetails()}>إدراج تعديل البيانات / Queue details change</button>
-					<h4>التوفر أونلاين للفئة / Category online availability</h4>
-					<p class="muted">تعطيل الفئة يزيل المنتجات المتأثرة من القنوات الإلكترونية دون تغيير قيمة sell_online لكل منتج.</p>
-					<button type="button" disabled={saving} onclick={() => void saveCategoryOnline(!c.online_enabled)}>{c.online_enabled ? 'تعطيل أونلاين / Disable online' : 'تفعيل أونلاين / Enable online'}</button>
-					<h4>الآباء / Parents</h4>
-					<p class="muted">الكاشير يتحقق نهائيًا من عدم وجود دورات وحدود العمق. / Retail is the final DAG validator.</p>
+					<button type="button" disabled={saving} onclick={() => void saveCategoryDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
+					<h4>{tb('التوفر أونلاين للفئة', 'Category online availability')}</h4>
+					<p class="muted">{arabic() ? 'تعطيل الفئة يزيل المنتجات المتأثرة من القنوات الإلكترونية دون تغيير قيمة sell_online لكل منتج.' : 'Disabling the category removes affected products from online channels without changing each product’s sell_online.'}</p>
+					<button type="button" disabled={saving} onclick={() => void saveCategoryOnline(!c.online_enabled)}>{c.online_enabled ? tb('تعطيل أونلاين', 'Disable online') : tb('تفعيل أونلاين', 'Enable online')}</button>
+					<h4>{tb('الآباء', 'Parents')}</h4>
+					<p class="muted">{tb('الكاشير يتحقق نهائيًا من عدم وجود دورات وحدود العمق.', 'Retail is the final DAG validator.')}</p>
 					{#each categories.filter((x) => x.category_id !== c.category_id) as other (other.category_id)}
 						<label class="check"><input type="checkbox" class="cat-parent-check" value={other.category_id} checked={c.parent_ids.includes(other.category_id)} /> {other.name_ar}</label>
 					{/each}
-					<div><button type="button" disabled={saving} onclick={() => void saveCategoryParents()}>إدراج تعديل الآباء / Queue parents change</button></div>
+					<div><button type="button" disabled={saving} onclick={() => void saveCategoryParents()}>{tb('إدراج تعديل الآباء', 'Queue parents change')}</button></div>
 				</section>
 			{/if}
 		{/if}
 
 		{#if tab === 'tags'}
-			{#if tagsState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
-			{:else if tagsState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadTags()}>إعادة / Retry</button></p>
-			{:else if tagsState === 'empty'}<p class="muted">لا توجد وسوم. / No tags.</p>
+			{#if tagsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
+			{:else if tagsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button type="button" onclick={() => void loadTags()}>{tb('إعادة', 'Retry')}</button></p>
+			{:else if tagsState === 'empty'}<p class="muted">{tb('لا توجد وسوم.', 'No tags.')}</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>الاسم / Name</th><th>slug</th><th>نشط / Active</th><th>الحالة / State</th></tr></thead>
+					<thead><tr><th>{tb('الاسم', 'Name')}</th><th>slug</th><th>{tb('نشط', 'Active')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each tags as t (t.tag_id)}
 							<tr>
 								<td><button type="button" class="link" onclick={() => (selectedTag = t)}>{t.name_ar}</button></td>
 								<td class="num" dir="ltr">{t.slug}</td>
-								<td>{t.is_active ? 'نعم / Yes' : 'لا / No'}</td>
-								<td>{t.has_pending ? 'تغيير معلق / Pending change' : '—'}</td>
+								<td>{t.is_active ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
+								<td>{t.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -739,22 +745,22 @@
 				<section class="detail" aria-label="Tag editor">
 					<h3>{t.name_ar} <span class="muted num" dir="ltr">rev {t.catalog_revision}</span></h3>
 					<div class="grid">
-						<label>الاسم العربي / Arabic name <input id="td-ar" type="text" value={t.name_ar} /></label>
-						<label>الاسم الإنجليزي / English name <input id="td-en" type="text" value={t.name_en ?? ''} dir="ltr" /></label>
-						<label class="check"><input id="td-active" type="checkbox" checked={t.is_active} /> نشط / Active</label>
+						<label>{tb('الاسم العربي', 'Arabic name')} <input id="td-ar" type="text" value={t.name_ar} /></label>
+						<label>{tb('الاسم الإنجليزي', 'English name')} <input id="td-en" type="text" value={t.name_en ?? ''} dir="ltr" /></label>
+						<label class="check"><input id="td-active" type="checkbox" checked={t.is_active} /> {tb('نشط', 'Active')}</label>
 					</div>
-					<button type="button" disabled={saving} onclick={() => void saveTagDetails()}>إدراج تعديل الوسم / Queue tag change</button>
+					<button type="button" disabled={saving} onclick={() => void saveTagDetails()}>{tb('إدراج تعديل الوسم', 'Queue tag change')}</button>
 				</section>
 			{/if}
 		{/if}
 
 		{#if tab === 'commands'}
-			{#if commandsState === 'loading'}<p class="muted">جارٍ التحميل… / Loading…</p>
-			{:else if commandsState === 'error'}<p class="muted">فشل التحميل. <button type="button" onclick={() => void loadCommands()}>إعادة / Retry</button></p>
-			{:else if commandsState === 'empty'}<p class="muted">لا توجد أوامر. / No commands.</p>
+			{#if commandsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
+			{:else if commandsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button type="button" onclick={() => void loadCommands()}>{tb('إعادة', 'Retry')}</button></p>
+			{:else if commandsState === 'empty'}<p class="muted">{tb('لا توجد أوامر.', 'No commands.')}</p>
 			{:else}
 				<table class="data">
-					<thead><tr><th>النوع / Type</th><th>الحالة / Aggregate</th><th>الفاعل / Actor</th></tr></thead>
+					<thead><tr><th>{tb('النوع', 'Type')}</th><th>{tb('الحالة', 'Aggregate')}</th><th>{tb('الفاعل', 'Actor')}</th></tr></thead>
 					<tbody>
 						{#each commands as cmd (cmd.id)}
 							<tr>
@@ -774,20 +780,20 @@
 					{#if cmd.target_kind === 'create'}
 						<p class="muted">
 							{#if cmd.result_entity_id}
-								تم الإنشاء / Created — <span class="num" dir="ltr">{cmd.result_entity_id}</span>
+								{tb('تم الإنشاء', 'Created')} — <span class="num" dir="ltr">{cmd.result_entity_id}</span>
 							{:else}
-								إنشاء “{cmd.requested_key}” — بانتظار الكاشير / Create “{cmd.requested_key}” — waiting for Retail
+								{#if arabic()}إنشاء “{cmd.requested_key}” — بانتظار الكاشير / {/if}Create “{cmd.requested_key}” — waiting for Retail
 							{/if}
 						</p>
 					{/if}
 					{#if cmd.targets}
 						<table class="data">
-							<thead><tr><th>الجهاز / Device</th><th>الحالة / Status</th><th>الكود / Code</th></tr></thead>
+							<thead><tr><th>{tb('الجهاز', 'Device')}</th><th>{tb('الحالة', 'Status')}</th><th>{tb('الكود', 'Code')}</th></tr></thead>
 							<tbody>
 								{#each cmd.targets as tgt (tgt.id)}
 									<tr>
 										<td class="num" dir="ltr">{tgt.device_name || tgt.device_id.slice(0, 8)}</td>
-										<td>{aggregateLabel(tgt.status)}{#if tgt.capable === false} — يتطلب تحديث الكاشير / Retail update required{/if}</td>
+										<td>{aggregateLabel(tgt.status)}{#if tgt.capable === false} — {tb('يتطلب تحديث الكاشير', 'Retail update required')}{/if}</td>
 										<td class="num" dir="ltr">{tgt.result_code ?? '—'}</td>
 									</tr>
 								{/each}
@@ -795,7 +801,7 @@
 						</table>
 					{/if}
 					{#if cmd.status === 'pending' && !cmd.targets?.some(t => t.status === 'delivered' || t.status === 'applied')}
-						<button type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>إلغاء الأمر المعلق / Cancel pending command</button>
+						<button type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>{tb('إلغاء الأمر المعلق', 'Cancel pending command')}</button>
 					{/if}
 				</section>
 			{/if}

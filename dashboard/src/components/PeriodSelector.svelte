@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	import type { PeriodParams } from '../lib/api.js';
 
 	let {
@@ -56,11 +57,11 @@
 
 	function applyCustom() {
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(customFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(customTo)) {
-			customError = 'أدخل تاريخين صحيحين بصيغة YYYY-MM-DD / Enter two valid YYYY-MM-DD dates';
+			customError = tb('أدخل تاريخين صحيحين بصيغة YYYY-MM-DD', 'Enter two valid YYYY-MM-DD dates');
 			return;
 		}
 		if (customFrom > customTo) {
-			customError = 'تاريخ البداية يجب أن يسبق تاريخ النهاية / Start date must not be after end date';
+			customError = tb('تاريخ البداية يجب أن يسبق تاريخ النهاية', 'Start date must not be after end date');
 			return;
 		}
 		customError = null;
@@ -69,7 +70,7 @@
 </script>
 
 <div class="periodbar">
-	<div class="modes" role="group" aria-label="الفترة / Period">
+	<div class="modes" role="group" aria-label={tb('الفترة', 'Period')}>
 		{#each periods as p}
 			<button
 				type="button"
@@ -77,15 +78,15 @@
 				aria-pressed={draftPeriod === p.v}
 				onclick={() => pick(p.v)}
 			>
-				{p.ar}
+				{t(p.ar, p.en)}
 			</button>
 		{/each}
 	</div>
 	{#if draftPeriod === 'custom'}
 		<div class="custom">
-			<label>من <span class="muted">from</span><input type="date" bind:value={customFrom} /></label>
-			<label>إلى <span class="muted">to</span><input type="date" bind:value={customTo} /></label>
-			<button type="button" class="apply" onclick={applyCustom}>عرض / Show</button>
+			<label>{t('من', 'From')}{#if arabic()} <span class="muted">from</span>{/if}<input type="date" bind:value={customFrom} /></label>
+			<label>{t('إلى', 'To')}{#if arabic()} <span class="muted">to</span>{/if}<input type="date" bind:value={customTo} /></label>
+			<button type="button" class="apply" onclick={applyCustom}>{tb('عرض', 'Show')}</button>
 		</div>
 		{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{/if}

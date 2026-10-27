@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, usersApi } from '../lib/api.js';
 	import type { AuthAuditRow, Me, StoreRow, UserView } from '../lib/api.js';
@@ -41,7 +42,7 @@
 			await authApi.changePassword(current, next);
 			current = '';
 			next = '';
-			notice = { kind: 'ok', text: 'تم تغيير كلمة المرور وإنهاء الجلسات الأخرى. / Password changed; other sessions were signed out.' };
+			notice = { kind: 'ok', text: tb('تم تغيير كلمة المرور وإنهاء الجلسات الأخرى.', 'Password changed; other sessions were signed out.') };
 		});
 	}
 
@@ -129,8 +130,8 @@
 	}
 
 	function storeNames(u: UserView): string {
-		if (u.all_stores) return 'كل المتاجر / All Stores';
-		return u.store_ids.map((id) => stores.find((s) => s.store_id === id)?.display_name ?? id.slice(0, 8)).join('، ');
+		if (u.all_stores) return tb('كل المتاجر', 'All Stores');
+		return u.store_ids.map((id) => stores.find((s) => s.store_id === id)?.display_name ?? id.slice(0, 8)).join(t('، ', ', '));
 	}
 
 	// ---- security audit (all-Stores OWNERs) ----
@@ -151,57 +152,57 @@
 </script>
 
 <section class="users" data-testid="users-page">
-	<h2>المستخدمون والأمان / Users & Security</h2>
+	<h2>{tb('المستخدمون والأمان', 'Users & Security')}</h2>
 	{#if notice}<p class="notice {notice.kind}" role="status" data-testid="users-notice">{notice.text}</p>{/if}
 
 	<fieldset>
-		<legend>حسابي / My account — {me.user.display_name} ({me.user.role})</legend>
+		<legend>{tb('حسابي', 'My account')} — {me.user.display_name} ({me.user.role})</legend>
 		<form class="row" onsubmit={changePassword}>
-			<label>كلمة المرور الحالية / Current password<input type="password" autocomplete="current-password" bind:value={current} required /></label>
+			<label>{tb('كلمة المرور الحالية', 'Current password')}<input type="password" autocomplete="current-password" bind:value={current} required /></label>
 			<label
-				>كلمة المرور الجديدة / New password<input type="password" autocomplete="new-password" minlength="12" bind:value={next} required /></label
+				>{tb('كلمة المرور الجديدة', 'New password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={next} required /></label
 			>
-			<button type="submit" disabled={busy}>تغيير / Change</button>
+			<button type="submit" disabled={busy}>{tb('تغيير', 'Change')}</button>
 		</form>
 		<button type="button" onclick={regenerateCodes} disabled={busy} data-testid="regenerate-codes">
-			إعادة إنشاء رموز الاسترداد / Regenerate recovery codes
+			{tb('إعادة إنشاء رموز الاسترداد', 'Regenerate recovery codes')}
 		</button>
 		{#if codes.length}
-			<p class="muted">Shown once — store them safely:</p>
+			<p class="muted">{t('تظهر مرة واحدة — احفظها في مكان آمن:', 'Shown once — store them safely:')}</p>
 			<ol class="codes" dir="ltr">{#each codes as c (c)}<li><code>{c}</code></li>{/each}</ol>
 		{/if}
 	</fieldset>
 
 	{#if canManage}
 		<fieldset>
-			<legend>إضافة مستخدم / Add user</legend>
+			<legend>{tb('إضافة مستخدم', 'Add user')}</legend>
 			<form class="row" onsubmit={createUser} data-testid="create-user">
-				<label>البريد أو اسم الدخول / Login<input bind:value={form.login} required /></label>
-				<label>الاسم / Display name<input bind:value={form.display_name} required /></label>
+				<label>{tb('البريد أو اسم الدخول', 'Login')}<input bind:value={form.login} required /></label>
+				<label>{tb('الاسم', 'Display name')}<input bind:value={form.display_name} required /></label>
 				<label>
-					الدور / Role
+					{tb('الدور', 'Role')}
 					<select bind:value={form.role}>
-						<option value="admin">مسؤول / ADMIN</option>
-						{#if me.all_stores}<option value="owner">مالك / OWNER</option>{/if}
+						<option value="admin">{tb('مسؤول', 'ADMIN')}</option>
+						{#if me.all_stores}<option value="owner">{tb('مالك', 'OWNER')}</option>{/if}
 					</select>
 				</label>
 				{#if me.all_stores}
-					<label class="check"><input type="checkbox" bind:checked={form.all_stores} /> كل المتاجر / All Stores</label>
+					<label class="check"><input type="checkbox" bind:checked={form.all_stores} /> {tb('كل المتاجر', 'All Stores')}</label>
 				{/if}
 				{#if !form.all_stores}
 					<label>
-						المتاجر / Stores
+						{tb('المتاجر', 'Stores')}
 						<select multiple bind:value={form.store_ids} required>
 							{#each stores as s (s.store_id)}<option value={s.store_id}>{s.display_name}</option>{/each}
 						</select>
 					</label>
 				{/if}
-				<button type="submit" disabled={busy}>إنشاء / Create</button>
+				<button type="submit" disabled={busy}>{tb('إنشاء', 'Create')}</button>
 			</form>
 			{#if activation}
 				<div class="activation" data-testid="activation-link">
 					<p>
-						رابط التفعيل لمرة واحدة لـ {activation.login} (صالح 24 ساعة). أرسله بطريقة آمنة؛ لن يظهر مجددًا. / One-time activation link for
+						{#if arabic()}رابط التفعيل لمرة واحدة لـ {activation.login} (صالح 24 ساعة). أرسله بطريقة آمنة؛ لن يظهر مجددًا. / {/if}One-time activation link for
 						{activation.login} (valid 24 h). Send it securely; it will not be shown again.
 					</p>
 					<input readonly value={activation.link} dir="ltr" onfocus={(e) => (e.currentTarget as HTMLInputElement).select()} />
@@ -224,24 +225,24 @@
 						<td>{u.mfa_enabled ? '✓' : '—'}</td>
 						<td class="actions">
 							{#if canManage && u.id !== me.user.id}
-								{#if u.status === 'active'}<button onclick={() => setStatus(u, 'disabled')}>تعطيل / Disable</button>{/if}
-								{#if u.status === 'disabled'}<button onclick={() => setStatus(u, 'active')}>تفعيل / Enable</button>{/if}
-								{#if u.status === 'pending_setup'}<button onclick={() => reissue(u)}>رابط جديد / New link</button>{/if}
-								{#if u.role === 'admin' && me.all_stores}<button onclick={() => setRole(u, 'owner')}>ترقية / Make owner</button>{/if}
-								{#if u.role === 'owner'}<button onclick={() => setRole(u, 'admin')}>خفض / Make admin</button>{/if}
-								{#if canSecurity && u.mfa_enabled}<button onclick={() => resetMFA(u)}>إعادة MFA / Reset MFA</button>{/if}
-								<button onclick={() => revokeSessions(u)}>تسجيل الخروج / Sign out</button>
+								{#if u.status === 'active'}<button onclick={() => setStatus(u, 'disabled')}>{tb('تعطيل', 'Disable')}</button>{/if}
+								{#if u.status === 'disabled'}<button onclick={() => setStatus(u, 'active')}>{tb('تفعيل', 'Enable')}</button>{/if}
+								{#if u.status === 'pending_setup'}<button onclick={() => reissue(u)}>{tb('رابط جديد', 'New link')}</button>{/if}
+								{#if u.role === 'admin' && me.all_stores}<button onclick={() => setRole(u, 'owner')}>{tb('ترقية', 'Make owner')}</button>{/if}
+								{#if u.role === 'owner'}<button onclick={() => setRole(u, 'admin')}>{tb('خفض', 'Make admin')}</button>{/if}
+								{#if canSecurity && u.mfa_enabled}<button onclick={() => resetMFA(u)}>{tb('إعادة MFA', 'Reset MFA')}</button>{/if}
+								<button onclick={() => revokeSessions(u)}>{tb('تسجيل الخروج', 'Sign out')}</button>
 							{/if}
 						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
-		{#if cursor}<button onclick={() => loadUsers(false)} disabled={busy}>المزيد / More</button>{/if}
+		{#if cursor}<button onclick={() => loadUsers(false)} disabled={busy}>{tb('المزيد', 'More')}</button>{/if}
 	{/if}
 
 	{#if audit.length}
-		<h3>سجل الأمان / Security audit (latest 50)</h3>
+		<h3>{tb('سجل الأمان', 'Security audit (latest 50)')}</h3>
 		<ul class="audit">
 			{#each audit as a (a.id)}
 				<li><span class="muted" dir="ltr">{new Date(a.occurred_at).toLocaleString()}</span> {a.action} · {a.outcome}{a.reason ? ` · ${a.reason}` : ''}</li>

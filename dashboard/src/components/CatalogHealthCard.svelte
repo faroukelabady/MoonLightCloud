@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -42,7 +43,7 @@
 	};
 	function label(code: string): string {
 		const l = labels[code];
-		return l ? `${l.ar} / ${l.en}` : code;
+		return l ? tb(l.ar, l.en) : code;
 	}
 	// Provider options come from durable rows only (never invented).
 	let providers = $derived(
@@ -56,21 +57,21 @@
 </script>
 
 <Card ar="صحة الكتالوج (تشخيص)" en="Catalog Health (diagnostics)">
-	<p class="note" role="note">صحة الكتالوج تعكس الحالة الحالية للكتالوج والتكامل؛ فترة التقرير المختارة لا ترشح هذه النتائج.<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span></p>
+	<p class="note" role="note">{t('صحة الكتالوج تعكس الحالة الحالية للكتالوج والتكامل؛ فترة التقرير المختارة لا ترشح هذه النتائج.', 'Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.')}{#if arabic()}<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span>{/if}</p>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
 	{:else if data}
-		<div class="filters" role="group" aria-label="Provider filter / فلتر المزود">
-			<label for="health-provider">المزود / <span class="th-en">Provider</span></label>
+		<div class="filters" role="group" aria-label={arabic() ? 'Provider filter / فلتر المزود' : 'Provider filter'}>
+			<label for="health-provider">{t('المزود', 'Provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</label>
 			<select
 				id="health-provider"
 				dir="ltr"
 				value={provider}
 				onchange={(e) => onprovider((e.currentTarget as HTMLSelectElement).value)}
 			>
-				<option value="">All providers / كل المزودين</option>
+				<option value="">{arabic() ? 'All providers / كل المزودين' : 'All providers'}</option>
 				{#each providers as p (p)}
 					<option value={p}>{p}</option>
 				{/each}
@@ -93,10 +94,10 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col">السبب / <span class="th-en">Reason</span></th>
+							<th scope="col">{t('السبب', 'Reason')}{#if arabic()} / <span class="th-en">Reason</span>{/if}</th>
 							<th scope="col">SKU</th>
-							<th scope="col">المنتج / <span class="th-en">Product</span></th>
-							<th scope="col">المزود / <span class="th-en">Provider</span></th>
+							<th scope="col">{t('المنتج', 'Product')}{#if arabic()} / <span class="th-en">Product</span>{/if}</th>
+							<th scope="col">{t('المزود', 'Provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -113,13 +114,13 @@
 			</div>
 			{#if data.detail_truncated}
 				<p class="note" role="status">
-					عرض أول {formatInt(data.detail_limit)} من النتائج / <span class="th-en">Showing the first {formatInt(data.detail_limit)} rows; summary counts are complete.</span>
+					{#if arabic()}عرض أول {formatInt(data.detail_limit)} من النتائج / {/if}<span class="th-en">Showing the first {formatInt(data.detail_limit)} rows; summary counts are complete.</span>
 				</p>
 			{/if}
 		{/if}
 		<p class="note" role="note">
-			للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط.<br />
-			<span class="th-en">Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.</span>
+			{t('للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط.', 'Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.')}{#if arabic()}<br />
+			<span class="th-en">Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.</span>{/if}
 		</p>
 	{/if}
 </Card>

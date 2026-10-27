@@ -1,15 +1,16 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	let { status, onretry }: { status: number | null; onretry: () => void } = $props();
 </script>
 
 <div class="werr" role="alert">
 	{#if status === 503}
-		<div>خدمة التقارير غير متاحة مؤقتًا</div>
-		<div class="muted sub-en">Reporting is temporarily unavailable</div>
-		<button type="button" onclick={onretry}>إعادة المحاولة / Retry</button>
+		<div>{t('خدمة التقارير غير متاحة مؤقتًا', 'Reporting is temporarily unavailable')}</div>
+		{#if arabic()}<div class="muted sub-en">Reporting is temporarily unavailable</div>{/if}
+		<button type="button" onclick={onretry}>{tb('إعادة المحاولة', 'Retry')}</button>
 	{:else}
-		<div>تعذر تحميل البيانات</div>
-		<div class="muted sub-en">Could not load data</div>
+		<div>{t('تعذر تحميل البيانات', 'Could not load data')}</div>
+		{#if arabic()}<div class="muted sub-en">Could not load data</div>{/if}
 	{/if}
 </div>
 

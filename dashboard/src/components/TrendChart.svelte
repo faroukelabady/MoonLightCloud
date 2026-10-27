@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -45,7 +46,7 @@
 		if (status !== 'loaded' || values.length === 0) return null;
 		const series: { name: string; type: 'line'; data: number[]; smooth: boolean; symbol: string; symbolSize: number; areaStyle?: { opacity: number }; lineStyle: { color: string; width: number }; itemStyle: { color: string } }[] = [
 			{
-				name: 'Gross / الإجمالي',
+				name: arabic() ? 'Gross / الإجمالي' : 'Gross',
 				type: 'line',
 				data: values,
 				smooth: true,
@@ -58,7 +59,7 @@
 		];
 		if (refundValues && refundValues.length === values.length) {
 			series.push({
-				name: 'Refunds / المرتجعات',
+				name: arabic() ? 'Refunds / المرتجعات' : 'Refunds',
 				type: 'line',
 				data: refundValues,
 				smooth: true,
@@ -70,7 +71,7 @@
 		}
 		if (netValues && netValues.length === values.length) {
 			series.push({
-				name: 'Net / الصافي',
+				name: arabic() ? 'Net / الصافي' : 'Net',
 				type: 'line',
 				data: netValues,
 				smooth: true,
@@ -98,7 +99,7 @@
 			<Segmented
 				size="sm"
 				options={[
-					{ value: 'all', ar: 'الكل' },
+					{ value: 'all', ar: 'الكل', en: 'All' },
 					{ value: 'EGP', ar: 'EGP' },
 					{ value: 'USD', ar: 'USD' }
 				]}
@@ -120,7 +121,7 @@
 		</div>
 		<ul class="exact">
 			{#each exact as d, i}
-				<li><span class="num" dir="ltr">{d.date}</span> — <span class="num">{d.amount_minor} {unit}</span>{#if refundExact?.[i]} <span class="num refund">مرتجعات {refundExact[i].refund_minor}</span>{/if}</li>
+				<li><span class="num" dir="ltr">{d.date}</span> — <span class="num">{d.amount_minor} {unit}</span>{#if refundExact?.[i]} <span class="num refund">{t('مرتجعات', 'Refunds')} {refundExact[i].refund_minor}</span>{/if}</li>
 			{/each}
 		</ul>
 	{:else if values.length === 0}

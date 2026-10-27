@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, lang, t, tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -22,54 +23,54 @@
 		<div class="hero">
 			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg></span>
 			<div>
-				<div class="headline">متصل · المبيعات والمرتجعات محدّثة</div>
-				<div class="muted sub">Connected · sales & returns up to date</div>
+				<div class="headline">{t('متصل · المبيعات والمرتجعات محدّثة', 'Connected · sales & returns up to date')}</div>
+				{#if arabic()}<div class="muted sub">Connected · sales & returns up to date</div>{/if}
 			</div>
 		</div>
 		<div class="grid">
 			<div class="ghead" aria-hidden="true"></div>
-			<div class="ghead">مبيعات<br /><span class="sub-en">Sales</span></div>
-			<div class="ghead">مرتجعات<br /><span class="sub-en">Returns</span></div>
-			<div class="gl">آخر حدث<br /><span class="muted sub-en">Latest event</span></div>
-			<div class="gv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, 'ar') : '—'}</div>
-			<div class="gv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, 'ar') : '—'}</div>
-			<div class="gl">متأخر<br /><span class="muted sub-en">Backlog</span></div>
+			<div class="ghead">{t('مبيعات', 'Sales')}{#if arabic()}<br /><span class="sub-en">Sales</span>{/if}</div>
+			<div class="ghead">{t('مرتجعات', 'Returns')}{#if arabic()}<br /><span class="sub-en">Returns</span>{/if}</div>
+			<div class="gl">{t('آخر حدث', 'Latest event')}{#if arabic()}<br /><span class="muted sub-en">Latest event</span>{/if}</div>
+			<div class="gv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</div>
+			<div class="gv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</div>
+			<div class="gl">{t('متأخر', 'Backlog')}{#if arabic()}<br /><span class="muted sub-en">Backlog</span>{/if}</div>
 			<div class="gv num">{f.projection_backlog_count}<span class="muted det"> · {health.pending_count} pending · {health.retry_count} retry</span></div>
 			<div class="gv num">{f.return_backlog_count}<span class="muted det"> · {health.return_pending_count} pending · {health.return_retry_count} retry</span></div>
-			<div class="gl">محظور<br /><span class="muted sub-en">Blocked</span></div>
+			<div class="gl">{t('محظور', 'Blocked')}{#if arabic()}<br /><span class="muted sub-en">Blocked</span>{/if}</div>
 			<div class="gv num">{f.blocked_sale_event_count}</div>
 			<div class="gv num">{f.return_blocked_count}</div>
-			<div class="gl">الحالة<br /><span class="muted sub-en">Status</span></div>
+			<div class="gl">{t('الحالة', 'Status')}{#if arabic()}<br /><span class="muted sub-en">Status</span>{/if}</div>
 			<div class="gv">
 				{#if f.blocked_sale_event_count > 0}
-					<span class="badge warn">محظورة / Blocked</span>
+					<span class="badge warn">{tb('محظورة', 'Blocked')}</span>
 				{:else if f.cloud_projection_complete}
-					<span class="badge ok">مكتمل / Complete</span>
+					<span class="badge ok">{tb('مكتمل', 'Complete')}</span>
 				{:else}
-					<span class="badge">يلحق / Catching up</span>
+					<span class="badge">{tb('يلحق', 'Catching up')}</span>
 				{/if}
 			</div>
 			<div class="gv">
 				{#if f.return_blocked_count > 0}
-					<span class="badge warn">محظورة / Blocked</span>
+					<span class="badge warn">{tb('محظورة', 'Blocked')}</span>
 				{:else if f.return_projection_complete}
-					<span class="badge ok">مكتمل / Complete</span>
+					<span class="badge ok">{tb('مكتمل', 'Complete')}</span>
 				{:else}
-					<span class="badge">يلحق / Catching up</span>
+					<span class="badge">{tb('يلحق', 'Catching up')}</span>
 				{/if}
 			</div>
 		</div>
 		{#if health.last_error_code}
-			<div class="muted errmsg">آخر خطأ: {health.last_error_label_ar ?? health.last_error_code}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span></div>
+			<div class="muted errmsg">{t('آخر خطأ', 'Last error')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic()}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span>{/if}</div>
 		{/if}
 		{#if health.return_last_error_code}
-			<div class="muted errmsg">آخر خطأ مرتجعات: {health.return_last_error_label_ar ?? health.return_last_error_code}<br /><span class="sub-en">{health.return_last_error_label_en ?? ''}</span></div>
+			<div class="muted errmsg">{t('آخر خطأ مرتجعات', 'Last return error')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic()}<br /><span class="sub-en">{health.return_last_error_label_en ?? ''}</span>{/if}</div>
 		{/if}
 		<div class="muted note">
-			التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.
-			<br /><span class="sub-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>
+			{t('التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.', 'Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.')}{#if arabic()}
+			<br /><span class="sub-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
 		</div>
-		<button type="button" class="refresh" aria-label="تحديث الحالة / Refresh status" onclick={onrefresh}><span class="rb-ar">تحديث الحالة</span><span class="rb-en">Refresh status</span></button>
+		<button type="button" class="refresh" aria-label={tb('تحديث الحالة', 'Refresh status')} onclick={onrefresh}><span class="rb-ar">{t('تحديث الحالة', 'Refresh status')}</span>{#if arabic()}<span class="rb-en">Refresh status</span>{/if}</button>
 	{/if}
 </Card>
 

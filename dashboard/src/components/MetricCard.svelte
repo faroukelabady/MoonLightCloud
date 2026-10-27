@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Skeleton from './Skeleton.svelte';
+	import { sub, t } from '../lib/i18n.svelte.js';
 
 	let {
 		ar,
@@ -24,8 +25,8 @@
 			<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d={icon} /></svg>
 		</span>
 		<span class="titles">
-			<span class="ar">{ar}</span>
-			<span class="en">{en}</span>
+			<span class="ar">{t(ar, en)}</span>
+			{#if sub(en)}<span class="en">{sub(en)}</span>{/if}
 		</span>
 	</div>
 	{#if status === 'loading'}

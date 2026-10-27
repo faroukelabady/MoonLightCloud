@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, lang, setLang, t, tb } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, type AuthStage } from '../lib/api.js';
 
@@ -74,7 +75,7 @@
 	function submitActivation(e: Event) {
 		e.preventDefault();
 		if (password !== password2) {
-			error = 'كلمتا المرور غير متطابقتين. / Passwords do not match.';
+			error = tb('كلمتا المرور غير متطابقتين.', 'Passwords do not match.');
 			return;
 		}
 		void run(async () => {
@@ -125,39 +126,40 @@
 
 <div class="loginwrap">
 	<div class="card login" data-testid="auth-card">
+		<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>{arabic() ? 'English' : 'العربية'}</button>
 		{#if view === 'login'}
 			<form onsubmit={submitLogin} data-testid="login-form">
-				<h1>تسجيل الدخول</h1>
-				<p class="muted">Sign in</p>
-				<label>البريد أو اسم الدخول / Email or login<input name="login" autocomplete="username" bind:value={login} required /></label>
+				<h1>{t('تسجيل الدخول', 'Sign in')}</h1>
+				{#if arabic()}<p class="muted">Sign in</p>{/if}
+				<label>{tb('البريد أو اسم الدخول', 'Email or login')}<input name="login" autocomplete="username" bind:value={login} required /></label>
 				<label
-					>كلمة المرور / Password<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
+					>{tb('كلمة المرور', 'Password')}<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : 'دخول / Sign in'}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : tb('دخول', 'Sign in')}</button>
 			</form>
 		{:else if view === 'activate'}
 			<form onsubmit={submitActivation} data-testid="activate-form">
-				<h1>تفعيل الحساب</h1>
+				<h1>{t('تفعيل الحساب', 'Activate account')}</h1>
 				<p class="muted">Activate your account — choose a password (at least 12 characters).</p>
 				<label
-					>كلمة المرور / Password<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
+					>{tb('كلمة المرور', 'Password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
 				>
 				<label
-					>تأكيد كلمة المرور / Repeat password<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
+					>{tb('تأكيد كلمة المرور', 'Repeat password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : 'تفعيل / Activate'}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : tb('تفعيل', 'Activate')}</button>
 			</form>
 		{:else if view === 'mfa'}
 			<form onsubmit={submitMFA} data-testid="mfa-form">
-				<h1>التحقق بخطوتين</h1>
-				<p class="muted">Two-step verification</p>
+				<h1>{t('التحقق بخطوتين', 'Two-step verification')}</h1>
+				{#if arabic()}<p class="muted">Two-step verification</p>{/if}
 				{#if useRecovery}
-					<label>رمز الاسترداد / Recovery code<input autocomplete="one-time-code" bind:value={code} required /></label>
+					<label>{tb('رمز الاسترداد', 'Recovery code')}<input autocomplete="one-time-code" bind:value={code} required /></label>
 				{:else}
 					<label
-						>رمز التطبيق / Authenticator code<input
+						>{tb('رمز التطبيق', 'Authenticator code')}<input
 							inputmode="numeric"
 							autocomplete="one-time-code"
 							pattern="[0-9 ]*"
@@ -168,31 +170,31 @@
 					>
 				{/if}
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : 'تحقق / Verify'}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : tb('تحقق', 'Verify')}</button>
 				<button type="button" class="link" onclick={() => ((useRecovery = !useRecovery), (code = ''), (error = null))}>
-					{useRecovery ? 'استخدام رمز التطبيق / Use authenticator code' : 'استخدام رمز استرداد / Use a recovery code'}
+					{useRecovery ? tb('استخدام رمز التطبيق', 'Use authenticator code') : tb('استخدام رمز استرداد', 'Use a recovery code')}
 				</button>
 			</form>
 		{:else if view === 'setup'}
 			<form onsubmit={submitSetup} data-testid="setup-form">
-				<h1>إعداد التحقق بخطوتين</h1>
+				<h1>{t('إعداد التحقق بخطوتين', 'Set up two-step verification')}</h1>
 				<p class="muted">
 					Two-step verification is required for every account. Add this key to an authenticator app (manual entry), then enter the
 					6-digit code.
 				</p>
 				{#if enrollment}
 					<div class="secret" dir="ltr" data-testid="totp-secret">{grouped(enrollment.secret)}</div>
-					<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">otpauth:// — فتح في تطبيق المصادقة / open in authenticator</a>
+					<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{tb('otpauth:// — فتح في تطبيق المصادقة', 'open in authenticator')}</a>
 				{/if}
 				<label
-					>الرمز / Code<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
+					>{tb('الرمز', 'Code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : 'تأكيد / Confirm'}</button>
+				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : tb('تأكيد', 'Confirm')}</button>
 			</form>
 		{:else}
 			<div data-testid="recovery-codes">
-				<h1>رموز الاسترداد</h1>
+				<h1>{t('رموز الاسترداد', 'Recovery codes')}</h1>
 				<p class="muted">
 					Save these one-time recovery codes somewhere safe. Each works once if you lose your authenticator. They will not be shown
 					again.
@@ -200,8 +202,8 @@
 				<ol class="codes" dir="ltr">
 					{#each recoveryCodes as c (c)}<li><code>{c}</code></li>{/each}
 				</ol>
-				<label class="check"><input type="checkbox" bind:checked={saved} /> حفظت الرموز / I have saved these codes</label>
-				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>متابعة / Continue</button>
+				<label class="check"><input type="checkbox" bind:checked={saved} /> {tb('حفظت الرموز', 'I have saved these codes')}</label>
+				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{tb('متابعة', 'Continue')}</button>
 			</div>
 		{/if}
 	</div>
@@ -221,6 +223,15 @@
 	}
 	.login h1 {
 		margin: 0;
+	}
+	.langswitch {
+		float: inline-end;
+		background: transparent;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		padding: 3px 10px;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 	.login label {
 		display: flex;

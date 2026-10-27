@@ -1,3 +1,4 @@
+import { tb } from './i18n.svelte.js';
 import { get, postJson, q } from './http';
 
 // Phase 18 release registry + fleet rollout control (ADR-0051/0052).
@@ -128,39 +129,39 @@ export function updateStateLabel(state: string | undefined): string {
 	switch (state) {
 		case undefined:
 		case '':
-			return 'غير مستهدف / Not targeted';
+			return tb('غير مستهدف', 'Not targeted');
 		case 'not_selected':
-			return 'خارج المرحلة الحالية / Not in current stage';
+			return tb('خارج المرحلة الحالية', 'Not in current stage');
 		case 'pending':
-			return 'بانتظار التسليم / Pending';
+			return tb('بانتظار التسليم', 'Pending');
 		case 'delivered':
-			return 'تم التسليم / Delivered';
+			return tb('تم التسليم', 'Delivered');
 		case 'downloading':
-			return 'جارٍ التنزيل / Downloading';
+			return tb('جارٍ التنزيل', 'Downloading');
 		case 'verified':
-			return 'تم التحقق / Verified';
+			return tb('تم التحقق', 'Verified');
 		case 'waiting_safe_boundary':
-			return 'بانتظار نقطة آمنة / Waiting for safe boundary';
+			return tb('بانتظار نقطة آمنة', 'Waiting for safe boundary');
 		case 'installing':
-			return 'جارٍ التثبيت / Installing';
+			return tb('جارٍ التثبيت', 'Installing');
 		case 'awaiting_health':
-			return 'فحص التشغيل / Checking health';
+			return tb('فحص التشغيل', 'Checking health');
 		case 'succeeded':
-			return 'تم التحديث / Succeeded';
+			return tb('تم التحديث', 'Succeeded');
 		case 'already_compliant':
-			return 'محدَّث مسبقًا / Already compliant';
+			return tb('محدَّث مسبقًا', 'Already compliant');
 		case 'failed':
-			return 'فشل / Failed';
+			return tb('فشل', 'Failed');
 		case 'rolled_back':
-			return 'تم التراجع / Rolled back';
+			return tb('تم التراجع', 'Rolled back');
 		case 'manual_action_required':
-			return 'يتطلب تدخلًا يدويًا / Manual action required';
+			return tb('يتطلب تدخلًا يدويًا', 'Manual action required');
 		case 'skipped_newer':
-			return 'إصدار أحدث مثبت / Skipped (newer installed)';
+			return tb('إصدار أحدث مثبت', 'Skipped (newer installed)');
 		case 'unsupported':
-			return 'غير مدعوم / Unsupported';
+			return tb('غير مدعوم', 'Unsupported');
 		case 'cancelled':
-			return 'أُلغي / Cancelled';
+			return tb('أُلغي', 'Cancelled');
 		default:
 			return state;
 	}

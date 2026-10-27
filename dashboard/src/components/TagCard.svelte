@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -37,11 +38,11 @@
 				<thead>
 					<tr>
 						<th scope="col">#</th>
-						<th scope="col">الوسم<br /><span class="th-en">Tag</span></th>
-						<th scope="col">الوحدات<br /><span class="th-en">Units</span></th>
-						<th scope="col">الإيراد<br /><span class="th-en">Gross</span></th>
-						<th scope="col">المرتجعات<br /><span class="th-en">Refunds</span></th>
-						<th scope="col">الصافي<br /><span class="th-en">Net</span></th>
+						<th scope="col">{t('الوسم', 'Tag')}{#if arabic()}<br /><span class="th-en">Tag</span>{/if}</th>
+						<th scope="col">{t('الوحدات', 'Units')}{#if arabic()}<br /><span class="th-en">Units</span>{/if}</th>
+						<th scope="col">{t('الإيراد', 'Gross')}{#if arabic()}<br /><span class="th-en">Gross</span>{/if}</th>
+						<th scope="col">{t('المرتجعات', 'Refunds')}{#if arabic()}<br /><span class="th-en">Refunds</span>{/if}</th>
+						<th scope="col">{t('الصافي', 'Net')}{#if arabic()}<br /><span class="th-en">Net</span>{/if}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -78,8 +79,8 @@
 			</table>
 		</div>
 		<p class="note" role="note">
-			قد يساهم بند البيع في عدة وسوم، لذا تتداخل مجموعات الوسوم ويجب عدم جمع إجمالياتها لحساب إيراد النشاط.<br />
-			<span class="th-en">Tag totals overlap (one line can carry several tags) and must not be summed to derive total business revenue.</span>
+			{t('قد يساهم بند البيع في عدة وسوم، لذا تتداخل مجموعات الوسوم ويجب عدم جمع إجمالياتها لحساب إيراد النشاط.', 'Tag totals overlap (one line can carry several tags) and must not be summed to derive total business revenue.')}{#if arabic()}<br />
+			<span class="th-en">Tag totals overlap (one line can carry several tags) and must not be summed to derive total business revenue.</span>{/if}
 		</p>
 	{/if}
 </Card>

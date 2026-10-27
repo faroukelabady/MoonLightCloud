@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '../lib/i18n.svelte.js';
 	let {
 		options,
 		value,
@@ -21,10 +22,10 @@
 			type="button"
 			class:active={o.value === value}
 			aria-pressed={o.value === value}
-			aria-label={o.aria ?? o.ar}
+			aria-label={o.aria ?? t(o.ar, o.en ?? o.ar)}
 			onclick={() => onchange(o.value)}
 		>
-			{o.ar}
+			{t(o.ar, o.en ?? o.ar)}
 		</button>
 	{/each}
 </div>

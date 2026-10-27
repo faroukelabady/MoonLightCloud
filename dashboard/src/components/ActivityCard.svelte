@@ -4,6 +4,7 @@
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
 	import { relativeTime } from '../lib/time.js';
+	import { lang, t } from '../lib/i18n.svelte.js';
 	import type { ActivityItem } from '../lib/api.js';
 
 	let { items, status, errStatus, onretry }: { items: ActivityItem[]; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } = $props();
@@ -34,7 +35,7 @@
 	{:else}
 		<ul class="feed">
 			{#each items as it}
-				{@const [ar, , cls] = kindLabel(it.kind)}
+				{@const [ar, en, cls] = kindLabel(it.kind)}
 				<li>
 					<span class="aic {cls}" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d={iconOf(it.kind)} /></svg></span>
 					<span class="tx">
@@ -43,8 +44,8 @@
 						{#if it.detail}<span class="muted num det">{it.detail}</span>{/if}
 					</span>
 					<span class="side">
-						<span class="badge {cls}">{ar}</span>
-						<span class="when muted">{relativeTime(it.timestamp, 'ar')}</span>
+						<span class="badge {cls}">{t(ar, en)}</span>
+						<span class="when muted">{relativeTime(it.timestamp, lang())}</span>
 					</span>
 				</li>
 			{/each}

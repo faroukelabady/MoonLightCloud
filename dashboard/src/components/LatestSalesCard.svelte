@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -10,7 +11,7 @@
 </script>
 
 <Card ar="أحدث المبيعات" en="Latest Sales">
-	<div class="muted label-gap foot-note">تتبع الطلبات سيتوفر عند تفعيل التكامل مع المتجر الإلكتروني / Order tracking arrives with online-commerce integration</div>
+	<div class="muted label-gap foot-note">{tb('تتبع الطلبات سيتوفر عند تفعيل التكامل مع المتجر الإلكتروني', 'Order tracking arrives with online-commerce integration')}</div>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -19,7 +20,7 @@
 		<EmptyState ar="لا توجد مبيعات بعد" en="No sales yet" />
 	{:else}
 		<table class="data">
-			<thead><tr><th>#</th><th>رقم البيع / Number</th><th>القناة / Channel</th><th>الكاشير / Cashier</th><th>الإجمالي / Total</th></tr></thead>
+			<thead><tr><th>#</th><th>{tb('رقم البيع', 'Number')}</th><th>{tb('القناة', 'Channel')}</th><th>{tb('الكاشير', 'Cashier')}</th><th>{tb('الإجمالي', 'Total')}</th></tr></thead>
 			<tbody>
 				{#each sales as s, i}
 					<tr>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -60,25 +61,25 @@
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد فروع في هذه الفترة" en="No branches in this period" />
 	{:else}
-		<div class="cols muted"><span>الفرع / القناة<br /><span class="sub-en">Branch / Channel</span></span><span class="num">قيمة المبيعات<br /><span class="sub-en">Sales Value</span></span></div>
+		<div class="cols muted"><span>{t('الفرع / القناة', 'Branch / Channel')}{#if arabic()}<br /><span class="sub-en">Branch / Channel</span>{/if}</span><span class="num">{t('قيمة المبيعات', 'Sales Value')}{#if arabic()}<br /><span class="sub-en">Sales Value</span>{/if}</span></div>
 		<div class="bars">
 			{#each rows as r}
 				{@const bucket = bucketOf(r)}
 				<div class="row">
 					<div class="label">
-						<div class="lname">{r.shop_name_ar}</div>
-						<div class="muted lsub">{r.shop_name_en} · {r.channel}</div>
+						<div class="lname">{t(r.shop_name_ar, r.shop_name_en || r.shop_name_ar)}</div>
+						<div class="muted lsub">{arabic() ? `${r.shop_name_en} · ${r.channel}` : r.channel}</div>
 					</div>
 					<div class="track" role="img" aria-label={`${r.shop_name_en}: ${valueOf(r)}`}><div class="fill w{bucket}"></div></div>
-					<div class="num val">{valueOf(r)}<br /><span class="muted refund">مرتجعات {refundOf(r)}</span></div>
+					<div class="num val">{valueOf(r)}<br /><span class="muted refund">{t('مرتجعات', 'Refunds')} {refundOf(r)}</span></div>
 				</div>
 			{/each}
 		</div>
 		<Segmented
 			options={[
-				{ value: 'value', ar: 'قيمة المبيعات' },
-				{ value: 'transactions', ar: 'المعاملات' },
-				{ value: 'units', ar: 'الوحدات' }
+				{ value: 'value', ar: 'قيمة المبيعات', en: 'Sales value' },
+				{ value: 'transactions', ar: 'المعاملات', en: 'Transactions' },
+				{ value: 'units', ar: 'الوحدات', en: 'Units' }
 			]}
 			value={metric}
 			onchange={(v) => (metric = v as 'value' | 'transactions' | 'units')}

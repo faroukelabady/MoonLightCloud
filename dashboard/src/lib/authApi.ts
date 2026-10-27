@@ -1,3 +1,4 @@
+import { tb } from './i18n.svelte.js';
 import { ApiError, get, mutationHeaders, postJson, setCSRFToken } from './http';
 
 // Phase 18 R1 human authentication & user administration (ADR-0053).
@@ -97,27 +98,27 @@ export function authErrorText(err: unknown): string {
 	const reason = err instanceof ApiError ? err.detail || err.code : '';
 	switch (reason) {
 		case 'INVALID_CREDENTIALS':
-			return 'البريد أو كلمة المرور غير صحيحة. / Invalid email or password.';
+			return tb('البريد أو كلمة المرور غير صحيحة.', 'Invalid email or password.');
 		case 'RATE_LIMITED':
-			return 'محاولات كثيرة — حاول لاحقًا. / Too many attempts, try again later.';
+			return tb('محاولات كثيرة — حاول لاحقًا.', 'Too many attempts, try again later.');
 		case 'INVALID_MFA_CODE':
-			return 'رمز التحقق غير صحيح. / Invalid verification code.';
+			return tb('رمز التحقق غير صحيح.', 'Invalid verification code.');
 		case 'WEAK_PASSWORD':
-			return 'كلمة المرور يجب أن تكون 12 حرفًا على الأقل. / Password must be at least 12 characters.';
+			return tb('كلمة المرور يجب أن تكون 12 حرفًا على الأقل.', 'Password must be at least 12 characters.');
 		case 'ACTIVATION_INVALID':
-			return 'رابط التفعيل غير صالح أو منتهي. / Activation link is invalid or expired.';
+			return tb('رابط التفعيل غير صالح أو منتهي.', 'Activation link is invalid or expired.');
 		case 'AUTH_REQUIRED':
 		case 'UNAUTHORIZED':
-			return 'انتهت الجلسة — سجّل الدخول مجددًا. / Session expired, please sign in again.';
+			return tb('انتهت الجلسة — سجّل الدخول مجددًا.', 'Session expired, please sign in again.');
 		case 'FORBIDDEN':
 		case 'STORE_FORBIDDEN':
-			return 'غير مصرح لك. / Not authorized.';
+			return tb('غير مصرح لك.', 'Not authorized.');
 		case 'LAST_OWNER':
-			return 'يجب أن يبقى مالك نشط واحد على الأقل. / At least one active owner must remain.';
+			return tb('يجب أن يبقى مالك نشط واحد على الأقل.', 'At least one active owner must remain.');
 		case 'LOGIN_TAKEN':
-			return 'اسم الدخول مستخدم. / That login already exists.';
+			return tb('اسم الدخول مستخدم.', 'That login already exists.');
 		default:
-			return 'تعذر إكمال العملية. / The operation could not be completed.';
+			return tb('تعذر إكمال العملية.', 'The operation could not be completed.');
 	}
 }
 

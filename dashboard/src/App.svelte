@@ -29,6 +29,7 @@
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
+	import { arabic, lang, setLang, t, tb } from './lib/i18n.svelte.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -572,14 +573,14 @@
 		if (!overview) return '—';
 		return formatInt(overview.summary.units_returned);
 	});
-	let scopeLabel = $derived(currency === 'all' ? 'النطاق: الكل' : `النطاق: ${currency}`);
+	let scopeLabel = $derived(currency === 'all' ? t('النطاق: الكل', 'Scope: all') : `${t('النطاق', 'Scope')}: ${currency}`);
 
 	let branchContext = $derived.by(() => {
 		if (branchesState === 'loading') return '…';
-		if (branches.length === 0) return 'لا توجد فروع في هذه الفترة';
+		if (branches.length === 0) return t('لا توجد فروع في هذه الفترة', 'No branches in this period');
 		const first = branches[0];
 		const extra = branches.length > 1 ? ` +${branches.length - 1}` : '';
-		return `${first.shop_name_ar}${extra}`;
+		return `${t(first.shop_name_ar, first.shop_name_en || first.shop_name_ar)}${extra}`;
 	});
 
 	let periodRange = $derived.by(() => {
@@ -608,7 +609,7 @@
 </script>
 
 {#if authed === null}
-	<div class="muted pad">جارٍ التحميل… / Loading…</div>
+	<div class="muted pad">{tb('جارٍ التحميل…', 'Loading…')}</div>
 {:else if !authed}
 	<LoginPage stage={pendingStage} onauthenticated={() => void onAuthenticated()} />
 {:else}
@@ -618,7 +619,7 @@
 			<header class="topbar">
 				<div class="brandblock">
 					<div class="brandname">MoonLightCloud</div>
-					<h1 class="dash-title">لوحة متابعة المبيعات</h1>
+					<h1 class="dash-title">{t('لوحة متابعة المبيعات', 'Sales dashboard')}</h1>
 					<div class="muted brandsub">Your business insights in one place</div>
 				</div>
 				<div class="periodblock">
@@ -629,11 +630,11 @@
 				<div class="actorblock">
 					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
 					{#if operatorName}<div class="muted op">{operatorName}</div>{/if}
-					<span class="langfuture" title="تبديل اللغة الكامل قريبًا / Full language switching is coming soon" aria-disabled="true">
+					<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={t('Switch to English', 'التبديل إلى العربية')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
-						English
-					</span>
-					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>خروج / Logout</button>
+						{arabic() ? 'English' : 'العربية'}
+					</button>
+					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>{tb('خروج', 'Logout')}</button>
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
@@ -851,17 +852,21 @@
 	.op {
 		font-size: 0.78rem;
 	}
-	.langfuture {
+	.langswitch {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
 		font-size: 0.8rem;
-		color: var(--text-muted);
+		color: var(--text);
+		background: transparent;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
 		padding: 5px 10px;
-		opacity: 0.6;
-		cursor: not-allowed;
+		cursor: pointer;
+	}
+	.langswitch:hover {
+		border-color: var(--primary);
+		color: var(--primary);
 	}
 	.logout {
 		background: transparent;

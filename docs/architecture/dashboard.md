@@ -68,6 +68,13 @@ explicit OWNER/ADMIN accounts and test-owned data; see
 
 - Arabic primary, English muted sublabel; `dir="rtl" lang="ar"` shell;
   numbers/currency/codes stay LTR (`.num` class).
+- English mode: the topbar and sign-in card switch the language per
+  browser (`localStorage`, never sent to the server). English shows English
+  only, `dir="ltr" lang="en"`. Write UI text through `src/lib/i18n.svelte.ts`:
+  `t(ar, en)` for one language, `tb(ar, en)` for the Arabic-mode
+  "عربي / English" pairing, and `arabic()` to keep an English sublabel in
+  Arabic mode only. Shared components (`Card`, `EmptyState`, `MetricCard`,
+  `Segmented`) take `ar`/`en` and localize themselves.
 - Money: server strings (`amount_minor`), formatted with BigInt only
   (`src/lib/money.ts`); charts use `toChartNumber` safe-range conversion.
 - One typed client (`src/lib/api.ts`); AbortController per filter change;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, t, tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -57,15 +58,15 @@
 </script>
 
 <Card ar="الطلبات عبر الإنترنت" en="Online Orders">
-	<div class="muted label-gap foot-note">طلبات ووكومرس للقراءة فقط — ليست مبيعات / Read-only WooCommerce orders, never Sales</div>
+	<div class="muted label-gap foot-note">{tb('طلبات ووكومرس للقراءة فقط — ليست مبيعات', 'Read-only WooCommerce orders, never Sales')}</div>
 	<div class="filters">
-		<label>الحالة / Status
+		<label>{tb('الحالة', 'Status')}
 			<select value={filterStatus} onchange={(e) => onstatus((e.target as HTMLSelectElement).value)}>
-				<option value="">الكل / All</option>
+				<option value="">{tb('الكل', 'All')}</option>
 				{#each statuses as s}<option value={s}>{s}</option>{/each}
 			</select>
 		</label>
-		<label>المزود / Provider
+		<label>{tb('المزود', 'Provider')}
 			<input value={filterProvider} placeholder="website" oninput={(e) => onprovider((e.target as HTMLInputElement).value)} />
 		</label>
 	</div>
@@ -83,16 +84,16 @@
 		<EmptyState ar="لا توجد طلبات عبر الإنترنت" en="No online orders yet" />
 	{:else}
 		<table class="data">
-			<thead><tr><th>#</th><th>رقم الطلب / Number</th><th>الحالة / Status</th><th>الإجمالي / Total</th><th>الربط / Mapping</th><th></th></tr></thead>
+			<thead><tr><th>#</th><th>{tb('رقم الطلب', 'Number')}</th><th>{tb('الحالة', 'Status')}</th><th>{tb('الإجمالي', 'Total')}</th><th>{tb('الربط', 'Mapping')}</th><th></th></tr></thead>
 			<tbody>
 				{#each orders as o (o.provider_key + '/' + o.external_order_id)}
 					<tr>
 						<td class="num">{o.external_order_id}</td>
 						<td class="num">{o.order_number || '—'}</td>
-						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">محذوف / deleted</span>{/if}</td>
+						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">{tb('محذوف', 'deleted')}</span>{/if}</td>
 						<td class="num"><strong>{money(o)}</strong> {o.currency}</td>
-						<td>{#if o.mapping_complete}<span class="ok">مكتمل / complete</span>{:else}<span class="warn">غير مكتمل ({o.unmapped_line_count}) / incomplete</span>{/if}</td>
-						<td><button class="link" onclick={() => onselect(o)}>عرض / View</button></td>
+						<td>{#if o.mapping_complete}<span class="ok">{tb('مكتمل', 'complete')}</span>{:else}<span class="warn">{t('غير مكتمل', 'incomplete')} ({o.unmapped_line_count}){#if arabic()} / incomplete{/if}</span>{/if}</td>
+						<td><button class="link" onclick={() => onselect(o)}>{tb('عرض', 'View')}</button></td>
 					</tr>
 				{/each}
 			</tbody>
@@ -100,7 +101,7 @@
 		{#if nextCursor}
 			<div class="more">
 				<button class="link" disabled={more === 'loading'} onclick={onloadmore}>
-					{more === 'loading' ? 'جارٍ التحميل… / Loading…' : 'تحميل المزيد / Load more'}
+					{more === 'loading' ? tb('جارٍ التحميل…', 'Loading…') : tb('تحميل المزيد', 'Load more')}
 				</button>
 			</div>
 		{/if}
@@ -109,10 +110,10 @@
 		{/if}
 	{/if}
 	{#if selected}
-		<div class="drawer" role="dialog" aria-label="Order detail">
+		<div class="drawer" role="dialog" aria-label={t('تفاصيل الطلب', 'Order detail')}>
 			<div class="drawer-head">
-				<strong>طلب {selected.summary.order_number || selected.summary.external_order_id} / Order</strong>
-				<button class="link" onclick={() => onselect(null)}>إغلاق / Close</button>
+				<strong>{t('طلب', 'Order')} {selected.summary.order_number || selected.summary.external_order_id}{#if arabic()} / Order{/if}</strong>
+				<button class="link" onclick={() => onselect(null)}>{tb('إغلاق', 'Close')}</button>
 			</div>
 			{#if detailStatus === 'loading'}
 				<Skeleton />
@@ -120,20 +121,20 @@
 				<WidgetError status={detailErr} onretry={() => onselect(selected.summary)} />
 			{:else if detailStatus === 'loaded'}
 				{#if !selected.summary.mapping_complete}
-					<div class="alert" role="alert">يحتوي على منتجات غير مربوطة بكتالوج MoonLight / Contains products not mapped to MoonLight catalog</div>
+					<div class="alert" role="alert">{tb('يحتوي على منتجات غير مربوطة بكتالوج MoonLight', 'Contains products not mapped to MoonLight catalog')}</div>
 				{/if}
 				{#if selected.summary.provider_deleted}
-					<div class="alert" role="status">محذوف لدى المزود / Deleted at provider — last-known details shown</div>
+					<div class="alert" role="status">{tb('محذوف لدى المزود', 'Deleted at provider — last-known details shown')}</div>
 				{/if}
 				<dl class="grid">
-					<div><dt>الحالة / Status</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
-					<div><dt>الإجمالي / Total</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
-					<div><dt>العميل / Customer</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
-					<div><dt>التواصل / Contact</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
-					<div><dt>الدفع / Payment</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
+					<div><dt>{tb('الحالة', 'Status')}</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
+					<div><dt>{tb('الإجمالي', 'Total')}</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
+					<div><dt>{tb('العميل', 'Customer')}</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
+					<div><dt>{tb('التواصل', 'Contact')}</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
+					<div><dt>{tb('الدفع', 'Payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
 				</dl>
 				<table class="data">
-					<thead><tr><th>المنتج / Item</th><th>SKU</th><th>الكمية / Qty</th><th>الإجمالي / Total</th><th>الربط / Mapped</th></tr></thead>
+					<thead><tr><th>{tb('المنتج', 'Item')}</th><th>SKU</th><th>{tb('الكمية', 'Qty')}</th><th>{tb('الإجمالي', 'Total')}</th><th>{tb('الربط', 'Mapped')}</th></tr></thead>
 					<tbody>
 						{#each selected.lines as line}
 							<tr>

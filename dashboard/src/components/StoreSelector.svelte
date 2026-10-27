@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { arabic, tb } from '../lib/i18n.svelte.js';
 	import type { StoreRow } from '../lib/api.js';
 
 	// StoreSelector: one coherent Store scope control shared by every
@@ -26,16 +27,16 @@
 	}
 </script>
 
-<label class="storeselect" dir="rtl">
-	<span class="storelabel">المتجر / Store</span>
+<label class="storeselect">
+	<span class="storelabel">{tb('المتجر', 'Store')}</span>
 	<select
 		data-testid="store-selector"
-		aria-label="Store scope / نطاق المتجر"
+		aria-label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'}
 		aria-busy={state === 'loading'}
 		value={value}
 		onchange={(e) => onchange((e.currentTarget as HTMLSelectElement).value)}
 	>
-		<option value="">كل المتاجر / All Stores</option>
+		<option value="">{tb('كل المتاجر', 'All Stores')}</option>
 		{#each stores as s (s.store_id)}
 			<option value={s.store_id} dir="ltr">
 				{s.display_name} ({shortID(s.store_id)})
@@ -43,9 +44,9 @@
 		{/each}
 	</select>
 	{#if state === 'error'}
-		<span class="storeerror" role="alert">تعذر تحميل المتاجر / Stores unavailable</span>
+		<span class="storeerror" role="alert">{tb('تعذر تحميل المتاجر', 'Stores unavailable')}</span>
 		<button type="button" class="storeretry" data-testid="store-retry" onclick={() => onretry()}>
-			إعادة المحاولة / Retry
+			{tb('إعادة المحاولة', 'Retry')}
 		</button>
 	{/if}
 </label>

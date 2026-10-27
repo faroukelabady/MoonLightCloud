@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tb } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { DeviceRow, DeviceCommandWire, StoreRow } from '../lib/api';
@@ -131,8 +132,8 @@
 					{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
 						<span class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
 							{d.control === 'never_polled'
-								? 'متصل بالمزامنة ولم يستعلم بعد / Syncing, not polled yet — Sync Now waits for its first poll'
-								: 'متصل بالمزامنة وقناة التحكم متأخرة / Syncing, control poll stale — Sync Now may be delayed'}
+								? tb('متصل بالمزامنة ولم يستعلم بعد', 'Syncing, not polled yet — Sync Now waits for its first poll')
+								: tb('متصل بالمزامنة وقناة التحكم متأخرة', 'Syncing, control poll stale — Sync Now may be delayed')}
 						</span>
 					{/if}
 					{#if active}

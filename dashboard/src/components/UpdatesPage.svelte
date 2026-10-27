@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tb } from '../lib/i18n.svelte.js';
 	import { untrack } from 'svelte';
 	import { updatesApi, updateStateLabel, previewEnvelope, ApiError } from '../lib/api.js';
 	import type { ReleaseView, RolloutView, FleetDeviceRow, UpdateTargetView } from '../lib/api.js';
@@ -27,17 +28,17 @@
 				case 'UPDATE_KEY_UNKNOWN':
 				case 'UPDATE_MANIFEST_INVALID':
 				case 'UPDATE_MANIFEST_UNSUPPORTED':
-					return `توقيع أو بيان الإصدار مرفوض. / Release signature or manifest rejected (${reason}).`;
+					return `${tb('توقيع أو بيان الإصدار مرفوض.', 'Release signature or manifest rejected')} (${reason}).`;
 				case 'RELEASE_SEQUENCE_CONFLICT':
-					return 'تعارض: نفس التسلسل بمحتوى مختلف. / Conflict: same sequence with different content.';
+					return tb('تعارض: نفس التسلسل بمحتوى مختلف.', 'Conflict: same sequence with different content.');
 				case 'RELEASE_TRUST_NOT_CONFIGURED':
-					return 'لم يتم تكوين مفاتيح الإصدار العامة. / Release public keys are not configured.';
+					return tb('لم يتم تكوين مفاتيح الإصدار العامة.', 'Release public keys are not configured.');
 				case 'RELEASE_REVOKED':
-					return 'الإصدار ملغى. / Release is revoked.';
+					return tb('الإصدار ملغى.', 'Release is revoked.');
 				case 'ROLLOUT_STATE_CONFLICT':
-					return 'لا يمكن تنفيذ هذا الإجراء في الحالة الحالية. / Not allowed in the current rollout state.';
+					return tb('لا يمكن تنفيذ هذا الإجراء في الحالة الحالية.', 'Not allowed in the current rollout state.');
 				case 'ROLLOUT_PERCENTAGE_CONFLICT':
-					return 'يجب أن تزيد النسبة وألا تتجاوز 100. / Percentage must increase and be at most 100.';
+					return tb('يجب أن تزيد النسبة وألا تتجاوز 100.', 'Percentage must increase and be at most 100.');
 			}
 			return `${fallback} (${err.code}${reason ? `: ${reason}` : ''})`;
 		}
@@ -68,9 +69,9 @@
 	}
 
 	function capability(d: FleetDeviceRow): string {
-		if (!d.updater_reported) return 'لم يبلغ بعد / Not reported (pre-Phase 18 Retail)';
-		if (!d.updater_capable) return `غير مدعوم / Unsupported${d.unsupported_reason ? ` (${d.unsupported_reason})` : ''}`;
-		return `مدعوم / Capable (protocol ${d.updater_protocol})`;
+		if (!d.updater_reported) return tb('لم يبلغ بعد', 'Not reported (pre-Phase 18 Retail)');
+		if (!d.updater_capable) return `${tb('غير مدعوم', 'Unsupported')}${d.unsupported_reason ? ` (${d.unsupported_reason})` : ''}`;
+		return `${tb('مدعوم', 'Capable')} (protocol ${d.updater_protocol})`;
 	}
 
 	// ---- releases ----
@@ -105,12 +106,12 @@
 			const artifactURLs: Record<string, string> = {};
 			for (const f of preview.files) if (urls[f]?.trim()) artifactURLs[f] = urls[f].trim();
 			const r = await updatesApi.importRelease(envelopeText.trim(), artifactURLs);
-			notice = { kind: 'ok', text: `تم استيراد الإصدار / Imported release ${r.version} (#${r.release_sequence})` };
+			notice = { kind: 'ok', text: `${tb('تم استيراد الإصدار', 'Imported release')} ${r.version} (#${r.release_sequence})` };
 			envelopeText = '';
 			urls = {};
 			await loadReleases();
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل الاستيراد / Import failed') };
+			notice = { kind: 'err', text: errText(e, tb('فشل الاستيراد', 'Import failed')) };
 		} finally {
 			busy = false;
 		}
@@ -121,10 +122,10 @@
 		busy = true;
 		try {
 			await updatesApi.setReleaseStatus(r.id, status);
-			notice = { kind: 'ok', text: status === 'revoked' ? 'تم إلغاء الإصدار / Release revoked' : 'تمت إعادة التفعيل / Release reactivated' };
+			notice = { kind: 'ok', text: status === 'revoked' ? tb('تم إلغاء الإصدار', 'Release revoked') : tb('تمت إعادة التفعيل', 'Release reactivated') };
 			await loadReleases();
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل التغيير / Change failed') };
+			notice = { kind: 'err', text: errText(e, tb('فشل التغيير', 'Change failed')) };
 		} finally {
 			busy = false;
 		}
@@ -169,10 +170,10 @@
 				mode: form.mode,
 				percentage: Number(form.percentage)
 			});
-			notice = { kind: 'ok', text: `تم إنشاء طرح كمسودة / Rollout created as draft (${r.target_count} devices)` };
+			notice = { kind: 'ok', text: `${tb('تم إنشاء طرح كمسودة', 'Rollout created as draft')} (${r.target_count} devices)` };
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل الإنشاء / Create failed') };
+			notice = { kind: 'err', text: errText(e, tb('فشل الإنشاء', 'Create failed')) };
 		} finally {
 			busy = false;
 		}
@@ -186,7 +187,7 @@
 			await updatesApi.rolloutAction(r.id, action);
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل الإجراء / Action failed') };
+			notice = { kind: 'err', text: errText(e, tb('فشل الإجراء', 'Action failed')) };
 		} finally {
 			busy = false;
 		}
@@ -200,7 +201,7 @@
 			await updatesApi.widenRollout(r.id, Number(raw));
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, 'فشل التوسيع / Widen failed') };
+			notice = { kind: 'err', text: errText(e, tb('فشل التوسيع', 'Widen failed')) };
 		} finally {
 			busy = false;
 		}
@@ -213,7 +214,7 @@
 			if (my !== epoch) return; // scope changed while loading
 			openTargets = { id: r.id, rows: v.targets };
 		} catch (e) {
-			if (my === epoch) notice = { kind: 'err', text: errText(e, 'فشل التحميل / Load failed') };
+			if (my === epoch) notice = { kind: 'err', text: errText(e, tb('فشل التحميل', 'Load failed')) };
 		}
 	}
 
@@ -254,15 +255,14 @@
 </script>
 
 <section class="updates" data-testid="updates-page">
-	<h2>التحديثات / Updates</h2>
+	<h2>{tb('التحديثات', 'Updates')}</h2>
 	<p class="muted">
-		يتم توقيع الإصدارات خارج السحابة؛ السحابة تتحقق فقط وتوزع. / Releases are signed offline; Cloud only verifies and distributes. Store-scoped
-		views follow the Store selector.
+		{tb('يتم توقيع الإصدارات خارج السحابة؛ السحابة تتحقق فقط وتوزع.', 'Releases are signed offline; Cloud only verifies and distributes. Store-scoped views follow the Store selector.')}
 	</p>
 	<div class="tabs" role="tablist">
-		<button class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>الأسطول / Fleet</button>
-		<button class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>الإصدارات / Releases</button>
-		<button class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>الطرح / Rollouts</button>
+		<button class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>{tb('الأسطول', 'Fleet')}</button>
+		<button class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>{tb('الإصدارات', 'Releases')}</button>
+		<button class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>{tb('الطرح', 'Rollouts')}</button>
 	</div>
 	{#if notice}
 		<p class="notice {notice.kind}" role="status" data-testid="updates-notice">{notice.text}</p>
@@ -270,9 +270,9 @@
 
 	{#if tab === 'fleet'}
 		{#if fleetState === 'error'}
-			<p role="alert">تعذر تحميل الأسطول / Could not load fleet.</p>
+			<p role="alert">{tb('تعذر تحميل الأسطول', 'Could not load fleet.')}</p>
 		{:else if fleetState === 'loaded' && fleet.length === 0}
-			<p class="muted">لا توجد أجهزة / No devices.</p>
+			<p class="muted">{tb('لا توجد أجهزة', 'No devices.')}</p>
 		{:else}
 			<table class="data">
 				<thead>
@@ -297,28 +297,28 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if fleetCursor}<button onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>المزيد / More</button>{/if}
+			{#if fleetCursor}<button onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
 		{/if}
 	{/if}
 
 	{#if tab === 'releases'}
 		<fieldset class="import">
-			<legend>استيراد إصدار موقّع / Import signed release</legend>
-			<label>ملف الغلاف / Envelope file <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
+			<legend>{tb('استيراد إصدار موقّع', 'Import signed release')}</legend>
+			<label>{tb('ملف الغلاف', 'Envelope file')} <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
 			<textarea rows="4" bind:value={envelopeText} placeholder="release-envelope.json" data-testid="envelope-text"></textarea>
 			{#if envelopeText.trim() && !preview}
-				<p role="alert">غلاف غير صالح / Not a release envelope.</p>
+				<p role="alert">{tb('غلاف غير صالح', 'Not a release envelope.')}</p>
 			{/if}
 			{#if preview}
-				<p class="muted">معاينة غير موثقة — يتحقق الخادم من التوقيع / Unverified preview — the server verifies the signature: {preview.version} (#{preview.sequence})</p>
+				<p class="muted">{tb('معاينة غير موثقة — يتحقق الخادم من التوقيع', 'Unverified preview — the server verifies the signature')}: {preview.version} (#{preview.sequence})</p>
 				{#each preview.files as f}
 					<label class="url">{f} <input type="url" placeholder="https://…" bind:value={urls[f]} data-testid="artifact-url" /></label>
 				{/each}
-				<button onclick={importRelease} disabled={busy} data-testid="import-release">استيراد / Import</button>
+				<button onclick={importRelease} disabled={busy} data-testid="import-release">{tb('استيراد', 'Import')}</button>
 			{/if}
 		</fieldset>
 		{#if releasesState === 'error'}
-			<p role="alert">تعذر تحميل الإصدارات / Could not load releases.</p>
+			<p role="alert">{tb('تعذر تحميل الإصدارات', 'Could not load releases.')}</p>
 		{:else}
 			<table class="data">
 				<thead>
@@ -334,9 +334,9 @@
 							<td>{when(r.imported_at)} · {r.imported_by}</td>
 							<td>
 								{#if r.status === 'active'}
-									<button onclick={() => setStatus(r, 'revoked')} disabled={busy}>إلغاء / Revoke</button>
+									<button onclick={() => setStatus(r, 'revoked')} disabled={busy}>{tb('إلغاء', 'Revoke')}</button>
 								{:else}
-									<button onclick={() => setStatus(r, 'active')} disabled={busy}>تفعيل / Reactivate</button>
+									<button onclick={() => setStatus(r, 'active')} disabled={busy}>{tb('تفعيل', 'Reactivate')}</button>
 								{/if}
 							</td>
 						</tr>
@@ -348,44 +348,44 @@
 
 	{#if tab === 'rollouts'}
 		<fieldset class="create">
-			<legend>طرح جديد / New rollout</legend>
+			<legend>{tb('طرح جديد', 'New rollout')}</legend>
 			<label>
-				الإصدار / Release
+				{tb('الإصدار', 'Release')}
 				<select bind:value={form.release_id} data-testid="rollout-release">
 					<option value="">—</option>
 					{#each activeReleases as r (r.id)}<option value={r.id}>{r.version} (#{r.release_sequence})</option>{/each}
 				</select>
 			</label>
 			<label>
-				النطاق / Scope
+				{tb('النطاق', 'Scope')}
 				<select bind:value={form.scope} data-testid="rollout-scope">
-					<option value="store">المتجر المحدد / Selected Store</option>
-					<option value="device">جهاز / Device</option>
-					<option value="all">كل الأجهزة / All devices</option>
+					<option value="store">{tb('المتجر المحدد', 'Selected Store')}</option>
+					<option value="device">{tb('جهاز', 'Device')}</option>
+					<option value="all">{tb('كل الأجهزة', 'All devices')}</option>
 				</select>
 			</label>
 			{#if form.scope === 'device'}
 				<label>Device ID <input bind:value={form.device_id} /></label>
 			{/if}
 			<label>
-				الوضع / Mode
+				{tb('الوضع', 'Mode')}
 				<select bind:value={form.mode}>
-					<option value="optional">اختياري / Optional</option>
-					<option value="mandatory">إلزامي / Mandatory</option>
+					<option value="optional">{tb('اختياري', 'Optional')}</option>
+					<option value="mandatory">{tb('إلزامي', 'Mandatory')}</option>
 				</select>
 			</label>
 			<label>% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
 			{#if form.scope !== 'all' && !store}
-				<p class="muted">اختر متجرًا أولاً / Choose a Store first.</p>
+				<p class="muted">{tb('اختر متجرًا أولاً', 'Choose a Store first.')}</p>
 			{/if}
 			<button
 				onclick={createRollout}
 				disabled={busy || !form.release_id || (form.scope !== 'all' && !store) || (form.scope === 'device' && !form.device_id.trim())}
-				data-testid="create-rollout">إنشاء مسودة / Create draft</button
+				data-testid="create-rollout">{tb('إنشاء مسودة', 'Create draft')}</button
 			>
 		</fieldset>
 		{#if rolloutsState === 'error'}
-			<p role="alert">تعذر تحميل الطرح / Could not load rollouts.</p>
+			<p role="alert">{tb('تعذر تحميل الطرح', 'Could not load rollouts.')}</p>
 		{:else}
 			<table class="data">
 				<thead>
@@ -403,16 +403,16 @@
 								{#each Object.entries(r.counts ?? {}) as [state, n]}<span class="chip">{updateStateLabel(state)}: {n}</span>{/each}
 							</td>
 							<td class="actions">
-								{#if r.status === 'draft'}<button onclick={() => act(r, 'start')} disabled={busy}>بدء / Start</button>{/if}
-								{#if r.status === 'active'}<button onclick={() => act(r, 'pause')} disabled={busy}>إيقاف مؤقت / Pause</button>{/if}
-								{#if r.status === 'paused'}<button onclick={() => act(r, 'resume')} disabled={busy}>استئناف / Resume</button>{/if}
+								{#if r.status === 'draft'}<button onclick={() => act(r, 'start')} disabled={busy}>{tb('بدء', 'Start')}</button>{/if}
+								{#if r.status === 'active'}<button onclick={() => act(r, 'pause')} disabled={busy}>{tb('إيقاف مؤقت', 'Pause')}</button>{/if}
+								{#if r.status === 'paused'}<button onclick={() => act(r, 'resume')} disabled={busy}>{tb('استئناف', 'Resume')}</button>{/if}
 								{#if (r.status === 'active' || r.status === 'paused' || r.status === 'draft') && r.percentage < 100}
-									<button onclick={() => widen(r)} disabled={busy}>توسيع / Widen</button>
+									<button onclick={() => widen(r)} disabled={busy}>{tb('توسيع', 'Widen')}</button>
 								{/if}
 								{#if r.status !== 'completed' && r.status !== 'cancelled'}
-									<button onclick={() => act(r, 'cancel')} disabled={busy}>إلغاء / Cancel</button>
+									<button onclick={() => act(r, 'cancel')} disabled={busy}>{tb('إلغاء', 'Cancel')}</button>
 								{/if}
-								<button class="link" onclick={() => showTargets(r)}>الأجهزة / Devices</button>
+								<button class="link" onclick={() => showTargets(r)}>{tb('الأجهزة', 'Devices')}</button>
 							</td>
 						</tr>
 						{#if openTargets?.id === r.id}
@@ -431,7 +431,7 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if rolloutsCursor}<button onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>المزيد / More</button>{/if}
+			{#if rolloutsCursor}<button onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>{tb('المزيد', 'More')}</button>{/if}
 		{/if}
 	{/if}
 </section>
