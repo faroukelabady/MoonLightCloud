@@ -24,10 +24,12 @@ func TestRunServerBindFailure(t *testing.T) {
 	cleaned := atomic.Bool{}
 	srv := &http.Server{Addr: addr, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})}
 	done := make(chan error, 1)
-	go func() {
+	run := func() error {
 		defer func() { cleaned.Store(true) }()
-		done <- runServer(context.Background(), srv, 2*time.Second, slog.Default())
-	}()
+		return runServer(context.Background(), srv, 2*time.Second, slog.Default())
+	}
+	// Publish the result after run's deferred cleanup, not before it.
+	go func() { done <- run() }()
 	select {
 	case err := <-done:
 		if err == nil {
