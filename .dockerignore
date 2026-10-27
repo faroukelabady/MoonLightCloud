@@ -1,0 +1,20 @@
+# Local credentials, backups and repository metadata never enter image layers.
+.git
+.env
+.env.*
+backups/
+tmp/
+*.dump
+*.sql.gz
+
+# Each build stage installs dependencies and builds its own assets.
+bin/
+dist/
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+dashboard/test-results/
+dashboard/playwright-report/
+*.test
+coverage*.txt
+coverage*.html
