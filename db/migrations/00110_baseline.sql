@@ -2231,6 +2231,41 @@ CREATE INDEX idx_sync_recovery_required ON sync_recovery_state(required) WHERE r
 ALTER TABLE sync_recovery_state
     ADD COLUMN verify_missing BIGINT NOT NULL DEFAULT 0 CHECK (verify_missing >= 0);
 
+-- ==== 00046_business_settings ====
+-- Business-wide dashboard settings and Cloud-entered exchange rates. Both
+-- apply to every Store and are Cloud-only durable state (back them up; no
+-- projection rebuild touches them).
+
+-- One row: which sales features the business uses. The Reports page shows
+-- tax, discount and refund rows when the feature is on, or when the period
+-- still holds such amounts. Every change bumps revision so concurrent
+-- editors cannot overwrite each other silently.
+CREATE TABLE business_settings (
+    id               BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+    tax_enabled      BOOLEAN NOT NULL DEFAULT FALSE,
+    discount_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    returns_enabled  BOOLEAN NOT NULL DEFAULT FALSE,
+    revision         BIGINT NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    updated_by       UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO business_settings (id) VALUES (TRUE);
+
+-- USD->EGP rates entered in Cloud. A report showing an EGP Sale in USD
+-- uses the rate in effect when the Sale was made (else the earliest one).
+-- USD Sales always keep the rate saved with them in Retail.
+CREATE TABLE exchange_rates (
+    id             UUID PRIMARY KEY,
+    base           TEXT NOT NULL CHECK (base = 'USD'),
+    quote          TEXT NOT NULL CHECK (quote = 'EGP'),
+    rate_microrate BIGINT NOT NULL CHECK (rate_microrate > 0),
+    effective_at   TIMESTAMPTZ NOT NULL,
+    note           TEXT CHECK (note IS NULL OR char_length(note) BETWEEN 1 AND 120),
+    created_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (base, quote, effective_at)
+);
+
 -- Product stock is a read-only aggregate. Independent Variant revisions are
 -- never collapsed into an invented Product inventory revision. Incomplete or
 -- contradictory inventory cannot expose partial positive availability.
@@ -2251,6 +2286,8 @@ LEFT JOIN catalog_product_variant_inventory i
 GROUP BY p.product_id, p.store_id;
 
 -- +goose Down
+DROP TABLE IF EXISTS exchange_rates CASCADE;
+DROP TABLE IF EXISTS business_settings CASCADE;
 DROP VIEW IF EXISTS catalog_product_stock;
 -- Dev/test only: removes every baseline object.
 DROP VIEW IF EXISTS catalog_product_online_state;

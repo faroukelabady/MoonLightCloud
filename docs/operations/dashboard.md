@@ -119,7 +119,8 @@ accessible Store is chosen automatically.
   every Sale in EGP: USD Sales use their own FX snapshot. USD shows every
   Sale in USD: an EGP Sale uses the USD rate of the same Store's nearest
   USD Sale (latest at or before it, else the earliest after it), because
-  EGP Sales carry no rate. With no USD Sale in that Store the request
+  EGP Sales carry no rate (Cloud-entered rates take precedence, see
+  Settings). With no rate at all the request
   fails with `EXCHANGE_RATE_REQUIRED` (409). `all` keeps currencies
   apart. Returns use their Sale's conversion.
 - Each Sale, line, payment and refund converts on its own and rounds half
@@ -131,6 +132,30 @@ accessible Store is chosen automatically.
 - Extra costs and zakat inputs live in the page only; nothing is stored
   or sent. Printing uses the browser's print dialog with A4 margins, and
   every section prints whichever tab is open.
+- Filters match MoonLightRetail: root categories, subcategories and tags
+  (several each) and a payment method keep whole Sales; a Sale stays when
+  it has a payment of that method and one line matches every chosen list.
+  Returns follow their Sale. The choices list the period's own
+  categories and tags.
+
+## Settings page
+
+Business-wide (every Store) and stored in Cloud only:
+
+- Report toggles: tax, discounts, returns. Off hides that feature's rows
+  and columns unless the period still holds such amounts; tax off also
+  removes tax from sales and refund totals, as Retail does. Saves carry
+  the revision that was read (`SETTINGS_CHANGED` when someone saved first).
+- Exchange rates: dated USD→EGP rates. A report showing an EGP Sale in
+  USD uses the Cloud rate in effect at the Sale (else the earliest), and
+  only without any Cloud rate the nearest USD Sale's saved rate. USD Sales
+  always keep the rate saved with them.
+- Report delivery over WhatsApp and Telegram: see
+  [business-reports.md](business-reports.md#dashboard-settings).
+
+Every report reader sees the toggles and rates; changing them, and
+anything about report delivery, needs `settings.manage` and all-Stores
+access.
 
 ## History and custom ranges
 

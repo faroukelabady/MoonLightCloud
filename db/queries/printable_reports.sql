@@ -22,15 +22,22 @@ SELECT s.sale_id, s.sale_number, s.occurred_at, s.currency,
     s.subtotal_minor, s.discount_minor, s.tax_minor, s.total_minor,
     s.fx_rate_microrate,
     (s.occurred_at >= @start_utc AND s.occurred_at < @end_utc)::boolean AS in_period,
-    -- USD->EGP rate for showing an EGP Sale in USD: the latest USD Sale
-    -- snapshot of the same Store at or before the Sale, else the earliest
-    -- after it. 0 when the Store has no USD Sale at all.
-    COALESCE(CASE WHEN @with_usd_rates::boolean AND s.currency = 'EGP' THEN (
-        SELECT r.fx_rate_microrate FROM sales_projection r
-        WHERE r.store_id = s.store_id AND r.currency = 'USD' AND r.fx_rate_microrate IS NOT NULL
-        ORDER BY (r.occurred_at <= s.occurred_at) DESC,
-                 abs(extract(epoch FROM r.occurred_at - s.occurred_at)), r.sale_id
-        LIMIT 1) END, 0)::bigint AS usd_rate_microrate
+    -- USD->EGP rate for showing an EGP Sale in USD: the Cloud rate in
+    -- effect at the Sale (else the earliest Cloud rate); without Cloud
+    -- rates, the latest USD Sale snapshot of the same Store at or before
+    -- the Sale, else the earliest after it. 0 when none exists.
+    COALESCE(CASE WHEN @with_usd_rates::boolean AND s.currency = 'EGP' THEN COALESCE(
+        (SELECT x.rate_microrate FROM exchange_rates x
+         WHERE x.base = 'USD' AND x.quote = 'EGP'
+         ORDER BY (x.effective_at <= s.occurred_at) DESC,
+                  CASE WHEN x.effective_at <= s.occurred_at THEN x.effective_at END DESC,
+                  x.effective_at, x.id
+         LIMIT 1),
+        (SELECT r.fx_rate_microrate FROM sales_projection r
+         WHERE r.store_id = s.store_id AND r.currency = 'USD' AND r.fx_rate_microrate IS NOT NULL
+         ORDER BY (r.occurred_at <= s.occurred_at) DESC,
+                  abs(extract(epoch FROM r.occurred_at - s.occurred_at)), r.sale_id
+         LIMIT 1)) END, 0)::bigint AS usd_rate_microrate
 FROM sales_projection s
 JOIN sale_set USING (sale_id)
 ORDER BY s.occurred_at DESC, s.sale_id;
@@ -81,12 +88,21 @@ FROM sale_item_tag_snapshots t
 JOIN sale_set USING (sale_id)
 ORDER BY t.sale_id, t.sale_item_id, t.tag_id;
 
+-- Payments of the whole sale set: the payment filter also decides which
+-- returns of earlier Sales count.
 -- name: PrintableReportSalePayments :many
+WITH sale_set AS (
+    SELECT s.sale_id FROM sales_projection s
+    WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+      AND (sqlc.narg('store_id')::uuid IS NULL OR s.store_id = sqlc.narg('store_id')::uuid)
+    UNION
+    SELECT r.sale_id FROM return_refund_projection r
+    WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+      AND (sqlc.narg('store_id')::uuid IS NULL OR r.store_id = sqlc.narg('store_id')::uuid)
+)
 SELECT p.sale_id, p.method, p.amount_minor, p.change_minor
 FROM sale_payments_projection p
-JOIN sales_projection s ON s.sale_id = p.sale_id
-WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
-  AND (sqlc.narg('store_id')::uuid IS NULL OR s.store_id = sqlc.narg('store_id')::uuid)
+JOIN sale_set USING (sale_id)
 ORDER BY p.sale_id, p.position;
 
 -- name: PrintableReportReturns :many

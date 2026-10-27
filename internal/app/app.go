@@ -39,6 +39,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
 	"github.com/faroukelabady/MoonLightCloud/internal/salesreport"
+	"github.com/faroukelabady/MoonLightCloud/internal/settings"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/faroukelabady/MoonLightCloud/internal/syncrecovery"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -174,8 +175,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.HumanAuth = humanAuthSvc
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
+	businessSettings := settings.NewService(postgres.NewBusinessSettings(pool, cfg.DBQueryTimeout), ids.System{}.New, time.Now)
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log).
-		WithPrintableReports(salesreport.NewService(reportingStore))
+		WithPrintableReports(salesreport.NewService(reportingStore, businessSettings))
 	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
 	commerceStore := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)
@@ -288,18 +290,21 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.Log.Info("notification providers", "count", a.NotificationRegistry.Count(),
 		"whatsapp", cfg.WhatsAppNotifications.Enabled,
 		"telegram", cfg.TelegramNotifications.Enabled)
+	// Recipients and schedules are configurable (CLI, dashboard Settings)
+	// even while the scheduler is off; only the planner and runner need it.
+	reportsLoc, err := businessreports.LoadCairo()
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	reportStore := postgres.NewBusinessReports(pool, cfg.DBQueryTimeout)
+	a.ReportService = businessreports.NewService(reportStore, reportStore, reportStore, reportStore,
+		a.Reports, notifications.NewService(notificationStore, notificationStore, log),
+		businessreports.SystemClock{}, reportsLoc,
+		cfg.BusinessReports.LeaseDuration, cfg.BusinessReports.BatchSize, log)
 	if cfg.BusinessReports.Enabled {
-		loc, err := businessreports.LoadCairo()
-		if err != nil {
-			pool.Close()
-			return nil, err
-		}
+		loc := reportsLoc
 		notificationService := notifications.NewService(notificationStore, notificationStore, log)
-		reportStore := postgres.NewBusinessReports(pool, cfg.DBQueryTimeout)
-		a.ReportService = businessreports.NewService(reportStore, reportStore, reportStore, reportStore,
-			a.Reports, notificationService,
-			businessreports.SystemClock{}, loc,
-			cfg.BusinessReports.LeaseDuration, cfg.BusinessReports.BatchSize, log)
 		a.ReportPlanner = businessreports.NewPlanner(reportStore,
 			businessreports.SystemClock{}, loc,
 			cfg.BusinessReports.PollInterval, cfg.BusinessReports.BatchSize, log)
@@ -358,9 +363,22 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	// Phase 18 release registry + fleet rollout control (ADR-0051/0052).
 	updateHandlers := newUpdateHandlers(cfg, pool, log)
+	var messagingProviders []adapterhttp.MessagingProvider
+	if cfg.WhatsAppNotifications.Enabled {
+		messagingProviders = append(messagingProviders, adapterhttp.MessagingProvider{Key: cfg.WhatsAppNotifications.ProviderKey, Kind: "whatsapp"})
+	}
+	if cfg.TelegramNotifications.Enabled {
+		messagingProviders = append(messagingProviders, adapterhttp.MessagingProvider{Key: cfg.TelegramNotifications.ProviderKey, Kind: "telegram"})
+	}
+	settingsHandlers := &adapterhttp.SettingsHandlers{
+		Settings:  businessSettings,
+		Reports:   a.ReportService,
+		Templates: notificationStore, Providers: messagingProviders,
+		SchedulerEnabled: cfg.BusinessReports.Enabled,
+	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, settingsHandlers, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

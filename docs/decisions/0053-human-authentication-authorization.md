@@ -52,6 +52,7 @@ Named permissions mapped centrally from roles (`humanauth.RoleHas`):
 | catalog.read / catalog.manage, reports.read | ✓ | ✓ |
 | devices.read / devices.manage, operations.read / operations.manage | ✓ | ✓ |
 | providers.manage, releases.read / releases.manage, rollouts.read / rollouts.manage | ✓ | ✓ |
+| settings.manage (business toggles, exchange rates, report delivery; all-Stores principals only) | ✓ | ✓ |
 | users.read / users.manage / security.manage | ✓ | — |
 
 Every `/api/v1/dashboard/*` route is registered through `HumanAuth.Guard`

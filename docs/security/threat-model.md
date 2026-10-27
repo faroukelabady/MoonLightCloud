@@ -26,6 +26,7 @@ is solved for features that do not exist yet.
 | Auth timing oracle on unknown credential | Fixed dummy HMAC over constant-sized material on unknown-ID paths; credential IDs are high-entropy UUIDs so residual DB-lookup deltas are an accepted LOW note |
 | Lost ACK | Retry returns already_accepted; ACK only after commit |
 | DB outage during ingestion | No ACK before commit; all-or-nothing batches; 503 retryable |
+| Report-delivery misuse from the dashboard (sending business totals to an attacker-chosen number) | Settings mutations need `settings.manage`, an all-Stores principal, a FULL (MFA) session and CSRF; recipients are read back masked (last four characters); provider credentials stay in the server environment and never reach the database or the dashboard |
 
 ## Future (documented, not yet mitigated)
 

@@ -112,6 +112,13 @@ business_report_schedules.next_run_local_date date NOT NULL
 business_report_schedules.next_run_at timestamptz NOT NULL
 business_report_schedules.created_at timestamptz NOT NULL DEFAULT now()
 business_report_schedules.updated_at timestamptz NOT NULL DEFAULT now()
+business_settings.id bool NOT NULL DEFAULT true
+business_settings.tax_enabled bool NOT NULL DEFAULT false
+business_settings.discount_enabled bool NOT NULL DEFAULT false
+business_settings.returns_enabled bool NOT NULL DEFAULT false
+business_settings.revision int8 NOT NULL DEFAULT 1
+business_settings.updated_by uuid
+business_settings.updated_at timestamptz NOT NULL DEFAULT now()
 catalog_admin_command_targets.id uuid NOT NULL
 catalog_admin_command_targets.command_id uuid NOT NULL
 catalog_admin_command_targets.device_id uuid NOT NULL
@@ -501,6 +508,14 @@ devices.created_at timestamptz NOT NULL DEFAULT now()
 devices.updated_at timestamptz NOT NULL DEFAULT now()
 devices.last_seen_at timestamptz
 devices.revoked_at timestamptz
+exchange_rates.id uuid NOT NULL
+exchange_rates.base text NOT NULL
+exchange_rates.quote text NOT NULL
+exchange_rates.rate_microrate int8 NOT NULL
+exchange_rates.effective_at timestamptz NOT NULL
+exchange_rates.note text
+exchange_rates.created_by uuid
+exchange_rates.created_at timestamptz NOT NULL DEFAULT now()
 notification_delivery_status_history.notification_id uuid NOT NULL
 notification_delivery_status_history.provider_key text NOT NULL
 notification_delivery_status_history.provider_message_id text NOT NULL
@@ -994,6 +1009,16 @@ business_report_schedules business_report_schedules_revision_not_null NOT NULL r
 business_report_schedules business_report_schedules_timezone_check CHECK ((timezone = 'Africa/Cairo'::text))
 business_report_schedules business_report_schedules_timezone_not_null NOT NULL timezone
 business_report_schedules business_report_schedules_updated_at_not_null NOT NULL updated_at
+business_settings business_settings_discount_enabled_not_null NOT NULL discount_enabled
+business_settings business_settings_id_check CHECK (id)
+business_settings business_settings_id_not_null NOT NULL id
+business_settings business_settings_pkey PRIMARY KEY (id)
+business_settings business_settings_returns_enabled_not_null NOT NULL returns_enabled
+business_settings business_settings_revision_check CHECK ((revision >= 1))
+business_settings business_settings_revision_not_null NOT NULL revision
+business_settings business_settings_tax_enabled_not_null NOT NULL tax_enabled
+business_settings business_settings_updated_at_not_null NOT NULL updated_at
+business_settings business_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES admin_users(id) ON DELETE SET NULL
 catalog_admin_commands catalog_admin_commands_actor_check CHECK (((char_length(actor) >= 1) AND (char_length(actor) <= 128)))
 catalog_admin_commands catalog_admin_commands_actor_not_null NOT NULL actor
 catalog_admin_commands catalog_admin_commands_command_type_check CHECK ((command_type = ANY (ARRAY['catalog.product.details.update.v1'::text, 'catalog.product.online-policy.update.v1'::text, 'catalog.product.classification.update.v1'::text, 'catalog.category.details.update.v1'::text, 'catalog.category.parents.update.v1'::text, 'catalog.category.online-policy.update.v1'::text, 'catalog.tag.details.update.v1'::text, 'catalog.product.variants.update.v1'::text, 'catalog.product.variant.update.v1'::text, 'catalog.variant.attributes.update.v1'::text, 'catalog.product-type.create.v1'::text, 'catalog.product-type.details.update.v1'::text, 'catalog.product-type.dimensions.update.v1'::text, 'catalog.product-type.capabilities.update.v1'::text, 'catalog.product-type.status.update.v1'::text, 'catalog.product.type.assign.v1'::text])))
@@ -1533,6 +1558,19 @@ device_update_status device_update_status_updater_protocol_check CHECK (((update
 device_update_status device_update_status_updater_protocol_not_null NOT NULL updater_protocol
 device_update_status device_update_status_version_check CHECK (((char_length(version) >= 1) AND (char_length(version) <= 64)))
 device_update_status device_update_status_version_not_null NOT NULL version
+exchange_rates exchange_rates_base_check CHECK ((base = 'USD'::text))
+exchange_rates exchange_rates_base_not_null NOT NULL base
+exchange_rates exchange_rates_base_quote_effective_at_key UNIQUE (base, quote, effective_at)
+exchange_rates exchange_rates_created_at_not_null NOT NULL created_at
+exchange_rates exchange_rates_created_by_fkey FOREIGN KEY (created_by) REFERENCES admin_users(id) ON DELETE SET NULL
+exchange_rates exchange_rates_effective_at_not_null NOT NULL effective_at
+exchange_rates exchange_rates_id_not_null NOT NULL id
+exchange_rates exchange_rates_note_check CHECK (((note IS NULL) OR ((char_length(note) >= 1) AND (char_length(note) <= 120))))
+exchange_rates exchange_rates_pkey PRIMARY KEY (id)
+exchange_rates exchange_rates_quote_check CHECK ((quote = 'EGP'::text))
+exchange_rates exchange_rates_quote_not_null NOT NULL quote
+exchange_rates exchange_rates_rate_microrate_check CHECK ((rate_microrate > 0))
+exchange_rates exchange_rates_rate_microrate_not_null NOT NULL rate_microrate
 notification_delivery_status_history notification_delivery_status_histo_provider_message_id_not_null NOT NULL provider_message_id
 notification_delivery_status_history notification_delivery_status_histo_provider_status_raw_not_null NOT NULL provider_status_raw
 notification_delivery_status_history notification_delivery_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['unknown'::text, 'accepted'::text, 'sent'::text, 'delivered'::text, 'read'::text, 'failed'::text])))
@@ -2037,6 +2075,7 @@ CREATE UNIQUE INDEX business_report_schedule_recipients_pkey ON public.business_
 CREATE UNIQUE INDEX business_report_schedules_name_key ON public.business_report_schedules USING btree (name)
 CREATE UNIQUE INDEX business_report_schedules_pkey ON public.business_report_schedules USING btree (id)
 CREATE INDEX idx_report_schedules_due ON public.business_report_schedules USING btree (enabled, next_run_at)
+CREATE UNIQUE INDEX business_settings_pkey ON public.business_settings USING btree (id)
 CREATE UNIQUE INDEX catalog_admin_command_targets_command_id_device_id_key ON public.catalog_admin_command_targets USING btree (command_id, device_id)
 CREATE UNIQUE INDEX catalog_admin_command_targets_pkey ON public.catalog_admin_command_targets USING btree (id)
 CREATE INDEX idx_catalog_admin_targets_command ON public.catalog_admin_command_targets USING btree (command_id)
@@ -2133,6 +2172,8 @@ CREATE INDEX idx_device_store_bindings_store ON public.device_store_bindings USI
 CREATE UNIQUE INDEX device_update_status_pkey ON public.device_update_status USING btree (device_id)
 CREATE UNIQUE INDEX devices_pkey ON public.devices USING btree (id)
 CREATE INDEX idx_devices_status ON public.devices USING btree (status)
+CREATE UNIQUE INDEX exchange_rates_base_quote_effective_at_key ON public.exchange_rates USING btree (base, quote, effective_at)
+CREATE UNIQUE INDEX exchange_rates_pkey ON public.exchange_rates USING btree (id)
 CREATE INDEX idx_notification_history_lookup ON public.notification_delivery_status_history USING btree (provider_key, provider_message_id)
 CREATE UNIQUE INDEX notification_delivery_status_history_pkey ON public.notification_delivery_status_history USING btree (notification_id, event_fingerprint)
 CREATE INDEX idx_notification_due ON public.notification_messages USING btree (dispatch_status, next_attempt_at, created_at)

@@ -130,17 +130,18 @@ type BaseSummary struct {
 
 // Sections is the computed body of a sales report.
 type Sections struct {
-	Summary           []SummaryRow `json:"summary"`
-	Base              BaseSummary  `json:"base"`
-	Daily             []DailyRow   `json:"daily"`
-	Categories        []GroupRow   `json:"categories"`
-	Subcategories     []GroupRow   `json:"subcategories"`
-	Tags              []GroupRow   `json:"tags"`
-	Products          []GroupRow   `json:"products"`
-	Payments          []PaymentRow `json:"payments"`
-	Sales             []SaleRow    `json:"sales"`
-	SalesTotalCount   int          `json:"sales_total_count"`
-	UnclassifiedItems int64        `json:"unclassified_items"`
+	Summary           []SummaryRow  `json:"summary"`
+	Base              BaseSummary   `json:"base"`
+	Daily             []DailyRow    `json:"daily"`
+	Categories        []GroupRow    `json:"categories"`
+	Subcategories     []GroupRow    `json:"subcategories"`
+	Tags              []GroupRow    `json:"tags"`
+	Products          []GroupRow    `json:"products"`
+	Payments          []PaymentRow  `json:"payments"`
+	Sales             []SaleRow     `json:"sales"`
+	SalesTotalCount   int           `json:"sales_total_count"`
+	UnclassifiedItems int64         `json:"unclassified_items"`
+	Options           FilterOptions `json:"filter_options"`
 }
 
 // conversion turns one Sale's amounts into the report currency:
@@ -264,9 +265,32 @@ type lineFacts struct {
 	hasCost  bool
 }
 
-// Build computes every report section. display is all, EGP or USD; loc
-// decides calendar days; offset/limit page the Sales details table.
-func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sections, error) {
+// Filter keeps whole Sales, as MoonLightRetail does: a Sale stays when it
+// has a payment of Payment (if set) and one of its lines matches every
+// set of root categories, subcategories and tags given. Returns follow
+// their Sale.
+type Filter struct {
+	RootIDs        []string `json:"root_category_ids"`
+	SubcategoryIDs []string `json:"subcategory_ids"`
+	TagIDs         []string `json:"tag_ids"`
+	Payment        string   `json:"payment_method"`
+}
+
+// Options shape one report: display is all, EGP or USD; Loc decides
+// calendar days; Offset/Limit page the Sales details; ExcludeTax shows
+// sales and refunds without tax (the business does not use tax).
+type Options struct {
+	Display    string
+	Loc        *time.Location
+	Offset     int
+	Limit      int
+	Filter     Filter
+	ExcludeTax bool
+}
+
+// Build computes every report section.
+func Build(f Facts, o Options) (Sections, error) {
+	display, loc, offset, limit := o.Display, o.Loc, o.Offset, o.Limit
 	b := &builder{}
 	sales := map[string]Sale{}
 	conv := map[string]conversion{}
@@ -293,6 +317,14 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 	for _, t := range f.Tags {
 		k := lineKey{t.SaleID, t.ItemID}
 		tags[k] = append(tags[k], t)
+	}
+	keep := keptSales(f, o.Filter, roots, subs, tags)
+	// withoutTax drops tax from a total when the business does not use tax.
+	withoutTax := func(total, tax int64) int64 {
+		if !o.ExcludeTax {
+			return total
+		}
+		return max(total-tax, 0)
 	}
 
 	summary := map[string]*SummaryRow{}
@@ -338,7 +370,7 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 	details := []SaleRow{}
 	detailIndex := map[string]int{}
 	for _, s := range f.Sales {
-		if !s.InPeriod {
+		if !s.InPeriod || !keep[s.ID] {
 			continue
 		}
 		c := conv[s.ID]
@@ -346,8 +378,10 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 		row.SalesCount++
 		b.add(&row.Gross, b.convert(c, s.Subtotal))
 		b.add(&row.Discount, b.convert(c, s.Discount))
-		b.add(&row.Tax, b.convert(c, s.Tax))
-		total := b.convert(c, s.Total)
+		if !o.ExcludeTax {
+			b.add(&row.Tax, b.convert(c, s.Tax))
+		}
+		total := b.convert(c, withoutTax(s.Total, s.Tax))
 		b.add(&row.Sales, total)
 		d := day(s.OccurredAt, c.currency)
 		d.SalesCount++
@@ -372,7 +406,7 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 		}
 		k := lineKey{l.SaleID, l.ItemID}
 		lines[k] = lf
-		if !s.InPeriod {
+		if !s.InPeriod || !keep[l.SaleID] {
 			continue
 		}
 		missing := int64(0)
@@ -426,7 +460,7 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 	}
 	for _, p := range f.Payments {
 		c, ok := conv[p.SaleID]
-		if !ok {
+		if !ok || !sales[p.SaleID].InPeriod || !keep[p.SaleID] {
 			continue
 		}
 		applied := b.convert(c, p.Amount-p.Change)
@@ -447,12 +481,17 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 		if !ok {
 			return Sections{}, apperr.New(apperr.Internal, "projection integrity: return without its sale")
 		}
+		if !keep[r.SaleID] {
+			continue
+		}
 		returnConv[r.ID] = c
-		refund := b.convert(c, r.Total)
+		refund := b.convert(c, withoutTax(r.Total, r.Tax))
 		row := sum(c.currency)
 		row.ReturnCount++
 		b.add(&row.Refund, refund)
-		b.add(&row.RefundedTax, b.convert(c, r.Tax))
+		if !o.ExcludeTax {
+			b.add(&row.RefundedTax, b.convert(c, r.Tax))
+		}
 		d := day(r.OccurredAt, c.currency)
 		b.add(&d.Refund, refund)
 	}
@@ -498,6 +537,7 @@ func Build(f Facts, display string, loc *time.Location, offset, limit int) (Sect
 		Categories: categories.sorted(), Subcategories: subcategories.sorted(),
 		Tags: tagRows.sorted(), Products: products.sorted(),
 		UnclassifiedItems: unclassified,
+		Options:           filterOptions(f),
 	}
 	for _, currency := range []string{DisplayEGP, DisplayUSD} {
 		row, ok := summary[currency]
@@ -605,4 +645,112 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// FilterOption is one category, subcategory or tag the period's Sales
+// carry, offered as a report filter.
+type FilterOption struct {
+	ID     string `json:"id"`
+	NameAr string `json:"name_ar"`
+	NameEn string `json:"name_en"`
+}
+
+// FilterOptions lists the filter choices for the period, unfiltered.
+type FilterOptions struct {
+	Categories    []FilterOption `json:"categories"`
+	Subcategories []FilterOption `json:"subcategories"`
+	Tags          []FilterOption `json:"tags"`
+}
+
+func filterOptions(f Facts) FilterOptions {
+	out := FilterOptions{Categories: []FilterOption{}, Subcategories: []FilterOption{}, Tags: []FilterOption{}}
+	seen := map[string]bool{}
+	add := func(list *[]FilterOption, kind, id, ar, en string) {
+		if seen[kind+id] {
+			return
+		}
+		seen[kind+id] = true
+		*list = append(*list, FilterOption{ID: id, NameAr: ar, NameEn: firstNonEmpty(en, ar)})
+	}
+	for _, c := range f.Classifications {
+		if c.Kind == "root" {
+			add(&out.Categories, "r", c.ID, c.NameAr, c.NameEn)
+		} else {
+			add(&out.Subcategories, "s", c.ID, c.NameAr, c.NameEn)
+		}
+	}
+	for _, t := range f.Tags {
+		add(&out.Tags, "t", t.ID, t.NameAr, t.NameEn)
+	}
+	for _, list := range []*[]FilterOption{&out.Categories, &out.Subcategories, &out.Tags} {
+		sort.Slice(*list, func(i, j int) bool {
+			if (*list)[i].NameAr != (*list)[j].NameAr {
+				return (*list)[i].NameAr < (*list)[j].NameAr
+			}
+			return (*list)[i].ID < (*list)[j].ID
+		})
+	}
+	return out
+}
+
+// keptSales applies the Filter to every Sale in the sale set.
+func keptSales(f Facts, filter Filter, roots, subs map[lineKey][]Classification, tags map[lineKey][]Tag) map[string]bool {
+	keep := make(map[string]bool, len(f.Sales))
+	for _, s := range f.Sales {
+		keep[s.ID] = true
+	}
+	if filter.Payment != "" {
+		paid := map[string]bool{}
+		for _, p := range f.Payments {
+			if p.Method == filter.Payment {
+				paid[p.SaleID] = true
+			}
+		}
+		for id := range keep {
+			keep[id] = paid[id]
+		}
+	}
+	if len(filter.RootIDs)+len(filter.SubcategoryIDs)+len(filter.TagIDs) == 0 {
+		return keep
+	}
+	wanted := func(ids []string) map[string]bool {
+		set := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			set[id] = true
+		}
+		return set
+	}
+	rootSet, subSet, tagSet := wanted(filter.RootIDs), wanted(filter.SubcategoryIDs), wanted(filter.TagIDs)
+	matches := func(set map[string]bool, ids []string) bool {
+		if len(set) == 0 {
+			return true
+		}
+		for _, id := range ids {
+			if set[id] {
+				return true
+			}
+		}
+		return false
+	}
+	matched := map[string]bool{}
+	for _, l := range f.Lines {
+		k := lineKey{l.SaleID, l.ItemID}
+		var r, s, t []string
+		for _, c := range roots[k] {
+			r = append(r, c.ID)
+		}
+		for _, c := range subs[k] {
+			s = append(s, c.ID)
+		}
+		for _, tg := range tags[k] {
+			t = append(t, tg.ID)
+		}
+		if matches(rootSet, r) && matches(subSet, s) && matches(tagSet, t) {
+			matched[l.SaleID] = true
+		}
+	}
+	for id := range keep {
+		keep[id] = keep[id] && matched[id]
+	}
+	return keep
 }

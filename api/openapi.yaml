@@ -2306,6 +2306,501 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/settings:
+    get:
+      summary: Business settings (report toggles) and Cloud exchange rates
+      operationId: dashboardSettings
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Toggles and the newest rates first (at most 200).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardSettings'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/business:
+    put:
+      summary: Update the business report toggles (settings.manage, all Stores)
+      operationId: dashboardSettingsUpdate
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardBusinessSettingsUpdate'}
+      responses:
+        '200':
+          description: Saved toggles with the new revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardBusinessSettings'}
+        '409':
+          description: SETTINGS_CHANGED (message) - the revision is stale; reload and retry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid body or missing revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/exchange-rates:
+    post:
+      summary: Add a USD→EGP exchange rate (settings.manage, all Stores)
+      operationId: dashboardExchangeRateCreate
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardExchangeRateCreate'}
+      responses:
+        '201':
+          description: The stored rate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardExchangeRate'}
+        '409':
+          description: RATE_TIME_TAKEN (message) - a rate already starts at that instant.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid rate (positive, at most 6 decimals), time or note.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/exchange-rates/{id}:
+    delete:
+      summary: Delete an exchange rate (settings.manage, all Stores)
+      operationId: dashboardExchangeRateDelete
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: {type: object, required: [deleted], properties: {deleted: {type: boolean}}}
+        '404':
+          description: No such rate.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging:
+    get:
+      summary: Business-report delivery over WhatsApp/Telegram (settings.manage, all Stores)
+      operationId: dashboardMessaging
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Configured providers with report templates, masked recipients, schedules and recent runs. Provider credentials stay in the server environment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessaging'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/recipients:
+    post:
+      summary: Add a report recipient
+      operationId: dashboardMessagingRecipientCreate
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardMessagingRecipientCreate'}
+      responses:
+        '201':
+          description: The recipient, masked.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingRecipient'}
+        '400':
+          description: UNKNOWN_PROVIDER, INVALID_RECIPIENT (WhatsApp wants 7..15 digits; Telegram a chat ID or @username) or invalid label/locale.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/recipients/{id}/{action}:
+    post:
+      summary: Enable or disable a report recipient
+      operationId: dashboardMessagingRecipientToggle
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [enable, disable]}
+      responses:
+        '200':
+          description: The new state.
+          content:
+            application/json:
+              schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}}}
+        '400':
+          description: Invalid id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/schedules:
+    post:
+      summary: Create a report schedule (Africa/Cairo)
+      operationId: dashboardMessagingScheduleCreate
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardMessagingScheduleCreate'}
+      responses:
+        '201':
+          description: The schedule with its first future run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingSchedule'}
+        '409':
+          description: A schedule with this name exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid name, kind, time, anchor date or no recipient.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/schedules/{id}/{action}:
+    post:
+      summary: Enable or disable a report schedule
+      operationId: dashboardMessagingScheduleToggle
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: action
+          in: path
+          required: true
+          schema: {type: string, enum: [enable, disable]}
+      responses:
+        '200':
+          description: The new state.
+          content:
+            application/json:
+              schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}}}
+        '404':
+          description: No such schedule.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/schedules/{id}/run:
+    post:
+      summary: Send a schedule report now
+      operationId: dashboardMessagingScheduleRun
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [request_key]
+              properties:
+                request_key: {type: string, description: Client-generated key; repeating it never sends twice.}
+      responses:
+        '200':
+          description: The manual run; created is false for a repeated request_key. Delivery happens only while the scheduler runs (scheduler_enabled).
+          content:
+            application/json:
+              schema: 
+                type: object
+                required: [run_id, created, scheduler_enabled]
+                properties:
+                  run_id: {type: string, format: uuid}
+                  created: {type: boolean}
+                  scheduler_enabled: {type: boolean}
+        '404':
+          description: No such schedule.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '400':
+          description: Invalid request key.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/templates:
+    put:
+      summary: Set which provider template carries a report in one language
+      operationId: dashboardMessagingTemplateSet
+      security:
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardMessagingTemplate'}
+      responses:
+        '200':
+          description: The saved template.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingTemplate'}
+        '400':
+          description: UNKNOWN_PROVIDER, UNKNOWN_TEMPLATE or INVALID_TEMPLATE.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   /api/v1/dashboard/reports/sales:
     get:
       summary: Printable sales report (the sections MoonLightRetail prints)
@@ -2317,7 +2812,12 @@ paths:
         the earliest after it); currency=all keeps each currency separate. Each
         Sale, line, payment and refund is converted on its own and rounded half
         away from zero, so sections can differ by one minor unit. Returns use
-        their Sale's conversion. Sales details are paged.
+        their Sale's conversion. Sales details are paged. Cloud-entered
+        exchange rates take precedence for EGP Sales shown in USD. Filters keep
+        whole Sales (and their returns): a Sale stays when it has a payment of
+        payment_method and one of its lines matches every given category,
+        subcategory and tag list. With the business tax toggle off, totals and
+        refunds exclude tax.
       operationId: dashboardSalesReport
       security:
         - dashboardSession: []
@@ -2329,6 +2829,21 @@ paths:
         - name: currency
           in: query
           schema: {type: string, enum: [EGP, USD, all], default: EGP}
+        - name: root_category_ids
+          in: query
+          description: Comma-separated root category UUIDs (at most 100).
+          schema: {type: string}
+        - name: subcategory_ids
+          in: query
+          description: Comma-separated subcategory UUIDs (at most 100).
+          schema: {type: string}
+        - name: tag_ids
+          in: query
+          description: Comma-separated tag UUIDs (at most 100).
+          schema: {type: string}
+        - name: payment_method
+          in: query
+          schema: {type: string, enum: [cash, card, other]}
         - name: detail_offset
           in: query
           schema: {type: integer, minimum: 0, default: 0}
@@ -6061,6 +6576,127 @@ components:
               timestamp: {type: string, format: date-time}
               device_name: {type: string, nullable: true}
               detail: {type: string, nullable: true, description: "Blocked error code, if any."}
+    DashboardBusinessSettings:
+      type: object
+      required: [tax_enabled, discount_enabled, returns_enabled, revision, updated_at]
+      properties:
+        tax_enabled: {type: boolean}
+        discount_enabled: {type: boolean}
+        returns_enabled: {type: boolean}
+        revision: {type: integer}
+        updated_at: {type: string, format: date-time}
+    DashboardBusinessSettingsUpdate:
+      type: object
+      required: [tax_enabled, discount_enabled, returns_enabled, revision]
+      properties:
+        tax_enabled: {type: boolean}
+        discount_enabled: {type: boolean}
+        returns_enabled: {type: boolean}
+        revision: {type: integer, description: The revision that was read.}
+    DashboardExchangeRate:
+      type: object
+      required: [id, rate, rate_microrate, effective_at, note, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        rate: {type: string, description: 'EGP per USD, decimal.'}
+        rate_microrate: {type: integer}
+        effective_at: {type: string, format: date-time}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+    DashboardExchangeRateCreate:
+      type: object
+      required: [rate]
+      properties:
+        rate: {type: string, description: 'Positive decimal with at most 6 decimals.'}
+        effective_at: {type: string, format: date-time, description: Defaults to now.}
+        note: {type: string, maxLength: 120}
+    DashboardSettings:
+      type: object
+      required: [business, exchange_rates]
+      properties:
+        business: {$ref: '#/components/schemas/DashboardBusinessSettings'}
+        exchange_rates: {type: array, items: {$ref: '#/components/schemas/DashboardExchangeRate'}}
+    DashboardMessagingTemplate:
+      type: object
+      required: [provider_key, template_key, locale, external_name, language, params, enabled]
+      properties:
+        provider_key: {type: string}
+        template_key: {type: string, enum: [daily_business_report_v1, ten_day_business_report_v1]}
+        locale: {type: string, enum: [ar, en]}
+        external_name: {type: string, description: 'Approved WhatsApp template name, or telegram_text_v1 for Telegram.'}
+        language: {type: string}
+        params: {type: array, items: {type: string}}
+        enabled: {type: boolean}
+    DashboardMessagingRecipient:
+      type: object
+      required: [id, label, provider_key, recipient_masked, locale, enabled]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        provider_key: {type: string}
+        recipient_masked: {type: string, description: Last four characters only.}
+        locale: {type: string, enum: [ar, en]}
+        enabled: {type: boolean}
+    DashboardMessagingRecipientCreate:
+      type: object
+      required: [label, provider_key, recipient, locale]
+      properties:
+        label: {type: string, maxLength: 64}
+        provider_key: {type: string}
+        recipient: {type: string}
+        locale: {type: string, enum: [ar, en]}
+    DashboardMessagingSchedule:
+      type: object
+      required: [id, name, kind, local_time, anchor_local_date, enabled, next_run_at, recipient_ids]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        kind: {type: string, enum: [daily, ten_day]}
+        local_time: {type: string, description: 'HH:MM, Africa/Cairo.'}
+        anchor_local_date: {type: string}
+        enabled: {type: boolean}
+        next_run_at: {type: string, format: date-time}
+        recipient_ids: {type: array, items: {type: string, format: uuid}}
+    DashboardMessagingScheduleCreate:
+      type: object
+      required: [name, kind, local_time, recipient_ids]
+      properties:
+        name: {type: string, maxLength: 64}
+        kind: {type: string, enum: [daily, ten_day]}
+        local_time: {type: string}
+        anchor_local_date: {type: string, format: date, description: Required for ten_day.}
+        recipient_ids: {type: array, items: {type: string, format: uuid}}
+    DashboardMessaging:
+      type: object
+      required: [scheduler_enabled, providers, recipients, schedules, runs]
+      properties:
+        scheduler_enabled: {type: boolean}
+        providers:
+          type: array
+          items:
+            type: object
+            required: [key, kind, templates]
+            properties:
+              key: {type: string}
+              kind: {type: string, enum: [whatsapp, telegram]}
+              templates: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingTemplate'}}
+        recipients: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingRecipient'}}
+        schedules: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingSchedule'}}
+        runs:
+          type: array
+          items:
+            type: object
+            required: [id, schedule_id, kind, status, scheduled_for, period_start, period_end, attempt_count, last_error_code]
+            properties:
+              id: {type: string, format: uuid}
+              schedule_id: {type: string, format: uuid}
+              kind: {type: string, enum: [scheduled, manual]}
+              status: {type: string, enum: [pending, retry, completed, blocked]}
+              scheduled_for: {type: string, format: date-time}
+              period_start: {type: string, format: date-time}
+              period_end: {type: string, format: date-time}
+              attempt_count: {type: integer}
+              last_error_code: {type: string}
     DashboardReportShop:
       type: object
       nullable: true
@@ -6091,7 +6727,7 @@ components:
         net_sales_minor: {type: string, description: Exact minor units as a decimal string.}
     DashboardSalesReport:
       type: object
-      required: [generated_at, period, store_id, display_currency, shop, summary, base, daily, categories, subcategories, tags, products, payments, sales, sales_total_count, unclassified_items, detail_offset, detail_limit]
+      required: [generated_at, period, store_id, display_currency, shop, settings, filter, filter_options, summary, base, daily, categories, subcategories, tags, products, payments, sales, sales_total_count, unclassified_items, detail_offset, detail_limit]
       properties:
         generated_at: {type: string, format: date-time}
         period:
@@ -6105,6 +6741,23 @@ components:
         store_id: {type: string, format: uuid, nullable: true}
         display_currency: {type: string, enum: [EGP, USD, all]}
         shop: {$ref: '#/components/schemas/DashboardReportShop'}
+        settings: {$ref: '#/components/schemas/DashboardBusinessSettings'}
+        filter:
+          type: object
+          required: [root_category_ids, subcategory_ids, tag_ids, payment_method]
+          properties:
+            root_category_ids: {type: array, items: {type: string, format: uuid}}
+            subcategory_ids: {type: array, items: {type: string, format: uuid}}
+            tag_ids: {type: array, items: {type: string, format: uuid}}
+            payment_method: {type: string}
+        filter_options:
+          type: object
+          description: Categories, subcategories and tags of the period, unfiltered.
+          required: [categories, subcategories, tags]
+          properties:
+            categories: {type: array, items: {type: object, required: [id, name_ar, name_en], properties: {id: {type: string, format: uuid}, name_ar: {type: string}, name_en: {type: string}}}}
+            subcategories: {type: array, items: {type: object, required: [id, name_ar, name_en], properties: {id: {type: string, format: uuid}, name_ar: {type: string}, name_en: {type: string}}}}
+            tags: {type: array, items: {type: object, required: [id, name_ar, name_en], properties: {id: {type: string, format: uuid}, name_ar: {type: string}, name_en: {type: string}}}}
         summary:
           type: array
           description: One row per report currency.

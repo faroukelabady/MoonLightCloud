@@ -59,7 +59,12 @@ func (h DashboardDataHandlers) SalesReport(w http.ResponseWriter, r *http.Reques
 		WriteError(w, r, err)
 		return
 	}
-	res, err := h.printable.Sales(r.Context(), req, display, offset, limit)
+	filter, err := salesreport.ParseFilter(q.Get("root_category_ids"), q.Get("subcategory_ids"), q.Get("tag_ids"), q.Get("payment_method"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	res, err := h.printable.Sales(r.Context(), req, display, filter, offset, limit)
 	if err != nil {
 		WriteError(w, r, err)
 		return

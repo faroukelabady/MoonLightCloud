@@ -160,6 +160,16 @@ type BusinessReportScheduleRecipient struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type BusinessSetting struct {
+	ID              bool               `json:"id"`
+	TaxEnabled      bool               `json:"tax_enabled"`
+	DiscountEnabled bool               `json:"discount_enabled"`
+	ReturnsEnabled  bool               `json:"returns_enabled"`
+	Revision        int64              `json:"revision"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CatalogAdminCommand struct {
 	ID               pgtype.UUID        `json:"id"`
 	StoreID          pgtype.UUID        `json:"store_id"`
@@ -661,6 +671,17 @@ type DeviceUpdateStatus struct {
 	UpdateState       string             `json:"update_state"`
 	UpdateError       pgtype.Text        `json:"update_error"`
 	ReportedAt        pgtype.Timestamptz `json:"reported_at"`
+}
+
+type ExchangeRate struct {
+	ID            pgtype.UUID        `json:"id"`
+	Base          string             `json:"base"`
+	Quote         string             `json:"quote"`
+	RateMicrorate int64              `json:"rate_microrate"`
+	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
+	Note          pgtype.Text        `json:"note"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type NotificationDeliveryStatusHistory struct {

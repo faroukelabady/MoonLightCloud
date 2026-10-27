@@ -18,6 +18,18 @@ Disabled (default): no planner, no runner, CLI configuration still
 works, Cloud stays healthy. Enabling needs no provider network:
 schedules and recipients are local Cloud state.
 
+## Dashboard Settings
+
+The dashboard Settings page (all-Stores owners and admins with
+`settings.manage`) manages everything below without the CLI: per-provider
+report templates (WhatsApp approved template name and language; Telegram
+uses the built-in `telegram_text_v1` text), recipients (shown masked),
+schedules, enabling and disabling, and "send now" (a manual run keyed by a
+client request key, so a double click sends once). Provider credentials
+stay in the server environment; the page lists only providers enabled
+there. Runs are delivered only while `BUSINESS_REPORTS_ENABLED=true`; the
+page warns when the scheduler is off.
+
 ## Prerequisites per notification provider
 
 For each recipient provider (today `whatsapp-main`), configure the

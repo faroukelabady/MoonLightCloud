@@ -59,7 +59,7 @@ func TestBuildConvertsEverySaleIntoTheDisplayCurrency(t *testing.T) {
 		{display: DisplayUSD, sales: 219, cost: 110, refund: 10, profit: 104, categorySales: 219},
 	}
 	for _, tc := range cases {
-		got, err := Build(fixture(), tc.display, cairo, 0, 50)
+		got, err := Build(fixture(), Options{Display: tc.display, Loc: cairo, Offset: 0, Limit: 50})
 		if err != nil {
 			t.Fatalf("%s: %v", tc.display, err)
 		}
@@ -95,7 +95,7 @@ func TestBuildConvertsEverySaleIntoTheDisplayCurrency(t *testing.T) {
 }
 
 func TestBuildAllKeepsCurrenciesSeparate(t *testing.T) {
-	got, err := Build(fixture(), DisplayAll, cairo, 0, 50)
+	got, err := Build(fixture(), Options{Display: DisplayAll, Loc: cairo, Offset: 0, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestBuildAllKeepsCurrenciesSeparate(t *testing.T) {
 }
 
 func TestBuildDetailsPageAndListNames(t *testing.T) {
-	got, err := Build(fixture(), DisplayEGP, cairo, 1, 1)
+	got, err := Build(fixture(), Options{Display: DisplayEGP, Loc: cairo, Offset: 1, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,12 +134,12 @@ func TestBuildDetailsPageAndListNames(t *testing.T) {
 func TestBuildNeedsARateToShowEGPInUSD(t *testing.T) {
 	f := fixture()
 	f.Sales[1].USDRateMicrorate = 0
-	_, err := Build(f, DisplayUSD, cairo, 0, 50)
+	_, err := Build(f, Options{Display: DisplayUSD, Loc: cairo, Offset: 0, Limit: 50})
 	var ae *apperr.Error
 	if !errors.As(err, &ae) || ae.Message != ErrRateRequired {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := Build(f, DisplayEGP, cairo, 0, 50); err != nil {
+	if _, err := Build(f, Options{Display: DisplayEGP, Loc: cairo, Offset: 0, Limit: 50}); err != nil {
 		t.Fatalf("EGP keeps working from USD snapshots: %v", err)
 	}
 }
@@ -147,7 +147,7 @@ func TestBuildNeedsARateToShowEGPInUSD(t *testing.T) {
 func TestBuildFlagsLinesWithoutCost(t *testing.T) {
 	f := fixture()
 	f.Lines[0].UnitCost = nil
-	got, err := Build(f, DisplayAll, cairo, 0, 50)
+	got, err := Build(f, Options{Display: DisplayAll, Loc: cairo, Offset: 0, Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,5 +196,59 @@ func TestBuildStockValuesEveryVariant(t *testing.T) {
 	}
 	if len(rows) != 4 || rows[1].Cost != nil || *rows[0].Retail != 3_000 {
 		t.Fatalf("rows %+v", rows)
+	}
+}
+
+func TestBuildFiltersWholeSalesAndTheirReturns(t *testing.T) {
+	all := Options{Display: DisplayAll, Loc: cairo, Limit: 50}
+
+	byTag := all
+	byTag.Filter = Filter{TagIDs: []string{"t1"}}
+	got, err := Build(fixture(), byTag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Summary) != 1 || got.Summary[0].Currency != "EGP" || got.Summary[0].ReturnCount != 1 {
+		t.Fatalf("tag keeps the EGP sale and its return: %+v", got.Summary)
+	}
+
+	// The category matches both lines, the card payment only the USD sale.
+	byCard := all
+	byCard.Filter = Filter{RootIDs: []string{"c1"}, Payment: "card"}
+	got, err = Build(fixture(), byCard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Summary) != 1 || got.Summary[0].Currency != "USD" || got.Summary[0].ReturnCount != 0 {
+		t.Fatalf("card keeps the USD sale only: %+v", got.Summary)
+	}
+	if len(got.Options.Categories) != 1 || len(got.Options.Tags) != 1 {
+		t.Fatalf("options list the unfiltered period: %+v", got.Options)
+	}
+
+	// Category and tag must match on the same line.
+	none := all
+	none.Filter = Filter{RootIDs: []string{"c1"}, TagIDs: []string{"missing"}}
+	if got, _ = Build(fixture(), none); len(got.Summary) != 0 || got.SalesTotalCount != 0 {
+		t.Fatalf("no line matches: %+v", got.Summary)
+	}
+}
+
+func TestBuildExcludesTaxWhenTheBusinessDoesNotUseIt(t *testing.T) {
+	f := fixture()
+	f.Sales[1].Tax, f.Sales[1].Total = 140, 1140
+	f.Returns[0].Tax, f.Returns[0].Total = 70, 570
+	opts := Options{Display: DisplayAll, Loc: cairo, Limit: 50, ExcludeTax: true}
+	got, err := Build(f, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	egp := got.Summary[0]
+	if egp.Sales != 1000 || egp.Tax != 0 || egp.Refund != 500 || egp.RefundedTax != 0 || got.Sales[1].Total != 1000 {
+		t.Fatalf("tax excluded: %+v", egp)
+	}
+	opts.ExcludeTax = false
+	if got, _ = Build(f, opts); got.Summary[0].Sales != 1140 || got.Summary[0].Tax != 140 {
+		t.Fatalf("tax kept: %+v", got.Summary[0])
 	}
 }

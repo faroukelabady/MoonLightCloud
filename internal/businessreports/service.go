@@ -90,6 +90,16 @@ func (s *Service) DisableRecipient(ctx context.Context, id string) error {
 	return s.recipients.SetRecipientEnabled(ctx, id, false)
 }
 
+// EnableRecipient lets future runs use this destination again.
+func (s *Service) EnableRecipient(ctx context.Context, id string) error {
+	return s.recipients.SetRecipientEnabled(ctx, id, true)
+}
+
+// ScheduleRecipients lists the destinations linked to one schedule.
+func (s *Service) ScheduleRecipients(ctx context.Context, scheduleID string) ([]Recipient, error) {
+	return s.schedules.ListScheduleRecipients(ctx, scheduleID)
+}
+
 // CreateSchedule stores one cadence with at least one enabled
 // recipient and positions next_run at the first future slot. Nothing
 // historical is ever materialized: creation never backfills.

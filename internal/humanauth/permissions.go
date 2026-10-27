@@ -51,6 +51,9 @@ const (
 	PermUsersRead       Permission = "users.read"
 	PermUsersManage     Permission = "users.manage"
 	PermSecurityManage  Permission = "security.manage"
+	// PermSettingsManage changes business-wide settings: report toggles,
+	// exchange rates and report delivery (recipients, schedules).
+	PermSettingsManage Permission = "settings.manage"
 )
 
 // adminPermissions operate the shop but never touch account ownership or
@@ -59,7 +62,7 @@ var adminPermissions = []Permission{
 	PermCatalogRead, PermCatalogManage, PermReportsRead,
 	PermDevicesRead, PermDevicesManage, PermOperationsRead, PermOperationsAct,
 	PermProvidersManage, PermReleasesRead, PermReleasesManage,
-	PermRolloutsRead, PermRolloutsManage,
+	PermRolloutsRead, PermRolloutsManage, PermSettingsManage,
 }
 
 // ownerOnly are reserved to OWNER: user administration and security.

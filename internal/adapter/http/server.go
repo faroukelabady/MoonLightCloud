@@ -30,7 +30,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, humanAuth *HumanAuth, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, syncRecovery *SyncRecoveryHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, humanAuth *HumanAuth, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, syncRecovery *SyncRecoveryHandlers, settingsH *SettingsHandlers, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -64,6 +64,27 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	// token) on every mutation. Device credentials are never valid here.
 	humanAuth.AuthRoutes(mux)
 	g := humanAuth.Guard
+	if settingsH != nil {
+		// Business-wide settings: every report reader sees the toggles and
+		// rates; only all-Stores principals with settings.manage change them
+		// or see report delivery (it reports on every Store).
+		manage := func(h http.HandlerFunc) http.Handler { return g(humanauth.PermSettingsManage, ScopeAllStores, h) }
+		mux.Handle("GET /api/v1/dashboard/settings", g(humanauth.PermReportsRead, ScopeNone, settingsH.Business))
+		mux.Handle("PUT /api/v1/dashboard/settings/business", manage(settingsH.UpdateBusiness))
+		mux.Handle("POST /api/v1/dashboard/settings/exchange-rates", manage(settingsH.AddRate))
+		mux.Handle("DELETE /api/v1/dashboard/settings/exchange-rates/{id}", manage(settingsH.DeleteRate))
+		if settingsH.Reports != nil {
+			mux.Handle("GET /api/v1/dashboard/settings/messaging", manage(settingsH.Messaging))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/recipients", manage(settingsH.AddRecipient))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/recipients/{id}/enable", manage(settingsH.SetRecipientEnabled(true)))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/recipients/{id}/disable", manage(settingsH.SetRecipientEnabled(false)))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/schedules", manage(settingsH.AddSchedule))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/schedules/{id}/enable", manage(settingsH.SetScheduleEnabled(true)))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/schedules/{id}/disable", manage(settingsH.SetScheduleEnabled(false)))
+			mux.Handle("POST /api/v1/dashboard/settings/messaging/schedules/{id}/run", manage(settingsH.RunSchedule))
+			mux.Handle("PUT /api/v1/dashboard/settings/messaging/templates", manage(settingsH.SetTemplate))
+		}
+	}
 	mux.Handle("GET /api/v1/dashboard/overview", g(humanauth.PermReportsRead, ScopeQuery, dashData.Overview))
 	mux.Handle("GET /api/v1/dashboard/daily", g(humanauth.PermReportsRead, ScopeQuery, dashData.Daily))
 	mux.Handle("GET /api/v1/dashboard/tags", g(humanauth.PermReportsRead, ScopeQuery, dashData.Tags))

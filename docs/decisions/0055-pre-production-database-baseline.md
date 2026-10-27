@@ -139,7 +139,13 @@ on all money-bearing documents.
   Retail. Codes stay UPPER: currencies, the sale channel `STORE`, and
   rule, reason, result and error codes (including `DEVICE_RECONNECT_SYNC`).
   Provider vocabularies (Shopify `ACTIVE`/`DRAFT`) are external and unchanged.
-- Phase 3: `00109_baseline.sql` is the final baseline (TargetVersion 109);
+- Baseline 00110 (2026-10-28) adds `business_settings` (one row: tax,
+  discount and returns toggles with an optimistic `revision`) and
+  `exchange_rates` (Cloud-entered USD→EGP rates by `effective_at`), both
+  business-wide Cloud-only state for the dashboard Settings and Reports
+  pages. Development databases built from 00109 must be recreated
+  (`./scripts/dev-up.sh --reset`).
+- Phase 3: `00110_baseline.sql` is the current baseline (TargetVersion 110);
   `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
   constraints, indexes, views, functions, triggers) and
   `TestSchemaMatchesReviewedTarget` fails on any drift.
