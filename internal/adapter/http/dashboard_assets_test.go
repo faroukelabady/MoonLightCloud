@@ -70,3 +70,18 @@ func TestDashboardAssets(t *testing.T) {
 	}
 	_ = http.StatusOK
 }
+
+func TestDashboardAssetsCachePolicy(t *testing.T) {
+	h := DashboardAssets(assetDir(t), slog.Default())
+	for path, want := range map[string]string{
+		"/dashboard/":               "no-cache",
+		"/dashboard/users":          "no-cache",
+		"/dashboard/assets/real.js": "public, max-age=31536000, immutable",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != want {
+			t.Fatalf("%s: want 200 with Cache-Control %q, got %d %q", path, want, rec.Code, rec.Header().Get("Cache-Control"))
+		}
+	}
+}

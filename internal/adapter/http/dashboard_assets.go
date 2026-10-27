@@ -35,7 +35,7 @@ func DashboardAssets(dir string, log *slog.Logger) http.Handler {
 		rel := strings.TrimPrefix(path.Clean(r.URL.Path), "/dashboard")
 		rel = strings.TrimPrefix(rel, "/")
 		if rel == "" {
-			serveDashboardFile(w, r, filepath.Join(abs, "index.html"), log)
+			serveDashboardFile(w, r, filepath.Join(abs, "index.html"), false, log)
 			return
 		}
 		if strings.Contains(rel, "..") || strings.HasPrefix(rel, ".") {
@@ -56,17 +56,27 @@ func DashboardAssets(dir string, log *slog.Logger) http.Handler {
 				return
 			}
 			// SPA subroutes fall back to the shell.
-			serveDashboardFile(w, r, filepath.Join(abs, "index.html"), log)
+			serveDashboardFile(w, r, filepath.Join(abs, "index.html"), false, log)
 			return
 		}
-		serveDashboardFile(w, r, full, log)
+		serveDashboardFile(w, r, full, strings.HasPrefix(rel, "assets/"), log)
 	})
 }
 
-func serveDashboardFile(w http.ResponseWriter, r *http.Request, full string, log *slog.Logger) {
+// serveDashboardFile sets the cache policy before serving. Vite names every
+// file under assets/ after its content hash, so those never change and are
+// cached for a year. The shell and other root files are revalidated on every
+// load; otherwise a browser keeps an old index.html after an upgrade and
+// shows the previous dashboard.
+func serveDashboardFile(w http.ResponseWriter, r *http.Request, full string, hashed bool, log *slog.Logger) {
 	if _, err := os.Stat(full); err != nil {
 		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
 		return
+	}
+	if hashed {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	http.ServeFile(w, r, full)
 }
