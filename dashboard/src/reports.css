@@ -1,0 +1,480 @@
+/* Reports page (sales report, stocktaking & zakat). The screen layout
+   follows the dashboard cards; the print layout matches MoonLightRetail's
+   printed report: A4 margins, the letterhead, every section in order, and
+   no table, summary or heading split awkwardly across pages. */
+
+.reports-page {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.reports-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.reports-head h2 {
+	margin: 0;
+	font-size: 1.1rem;
+}
+.report-tabs {
+	display: flex;
+	gap: 8px;
+	overflow-x: auto;
+}
+.report-tabs button {
+	min-height: 38px;
+	padding-inline: 16px;
+	border: 1px solid #cbd5e1;
+	border-radius: 8px;
+	background: var(--surface);
+	color: #475569;
+	font-weight: 700;
+	white-space: nowrap;
+}
+.report-tabs button.active {
+	border-color: var(--primary);
+	background: var(--primary-soft);
+	color: var(--primary);
+}
+.report-filter-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 12px;
+	align-items: end;
+}
+.report-filter-grid label,
+.report-extra-cost-row label {
+	display: grid;
+	gap: 6px;
+	font-size: 0.82rem;
+	font-weight: 600;
+	color: #334155;
+	min-width: 0;
+}
+.report-filter-grid input,
+.report-extra-cost-row input {
+	font: inherit;
+	font-size: 0.88rem;
+	min-height: 38px;
+	padding: 8px 12px;
+	border: 1px solid #d9e0e8;
+	border-radius: 8px;
+	background: var(--surface);
+	color: var(--text);
+	min-width: 0;
+}
+.report-filter-note,
+.report-note {
+	margin: 8px 0 0;
+	color: var(--text-muted);
+	font-size: 0.8rem;
+	line-height: 1.5;
+}
+.report-extra-costs {
+	margin: 12px 0 0;
+	padding: 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	display: grid;
+	gap: 10px;
+}
+.report-extra-costs legend {
+	padding-inline: 4px;
+	font-size: 0.82rem;
+	font-weight: 700;
+}
+.report-extra-costs p {
+	margin: 0;
+}
+.report-extra-cost-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 220px) auto;
+	gap: 10px;
+	align-items: end;
+}
+.report-extra-cost-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.field-error {
+	margin: 6px 0 0;
+	color: var(--danger);
+	font-size: 0.82rem;
+}
+.report-alert {
+	padding: 10px 14px;
+	border: 1px solid #fecaca;
+	border-radius: var(--radius-card);
+	background: #fef2f2;
+	color: var(--danger);
+}
+.report-surface {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.report-surface.stale {
+	opacity: 0.6;
+}
+.report-print-header {
+	display: none;
+}
+.report-panel {
+	display: none;
+	flex-direction: column;
+	gap: 12px;
+}
+.report-panel.active {
+	display: flex;
+}
+.report-surface h2,
+.report-section > h2 {
+	margin: 0 0 8px;
+	font-size: 1.02rem;
+}
+.report-money-grid,
+.report-performance-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+	align-items: start;
+}
+.report-money-grid > :only-child {
+	grid-column: 1 / -1;
+}
+.report-money-grid:empty {
+	display: none;
+}
+.report-money-detail h3 {
+	margin: 0 0 8px;
+	font-size: 0.95rem;
+}
+.report-reconciliation {
+	margin-top: 12px;
+}
+.report-reconciliation > h3 {
+	margin: 0 0 8px;
+	font-size: 0.95rem;
+}
+.report-section > p {
+	margin: -2px 0 10px;
+	color: var(--text-muted);
+	font-size: 0.8rem;
+}
+.table-scroll {
+	overflow-x: auto;
+}
+.report-section table,
+.report-money-detail table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.85rem;
+}
+.report-section th,
+.report-section td,
+.report-money-detail th,
+.report-money-detail td {
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+	text-align: start;
+	vertical-align: top;
+}
+.report-section thead th,
+.report-money-detail thead th {
+	background: var(--surface-muted);
+	color: var(--text-muted);
+	font-size: 0.76rem;
+}
+.report-section td small,
+.report-money-detail td small,
+.report-section th small {
+	display: block;
+	margin-top: 3px;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 400;
+}
+.report-section td bdi,
+.report-money-detail td bdi {
+	white-space: nowrap;
+}
+.report-total-row {
+	font-weight: 700;
+}
+.report-warning {
+	margin: 10px 0 0;
+	padding: 10px 12px;
+	border-inline-start: 4px solid #d97706;
+	border-radius: 6px;
+	background: #fff7ed;
+	color: #7c2d12;
+	font-size: 0.85rem;
+}
+.report-empty {
+	padding: 36px;
+	text-align: center;
+}
+.report-empty h2 {
+	margin: 0;
+}
+.pager {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 10px;
+}
+.mono {
+	font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+	font-size: 0.8rem;
+}
+.stocktaking-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.stocktaking-toolbar p {
+	margin: 0;
+}
+.stocktaking-notes {
+	margin: 12px 0 0;
+	padding-inline-start: 20px;
+	color: #475569;
+	font-size: 0.82rem;
+	line-height: 1.6;
+}
+.stocktaking-inactive {
+	color: var(--text-muted);
+}
+.stocktaking-count-cell {
+	min-width: 90px;
+}
+
+@media (max-width: 1100px) {
+	.report-filter-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.report-money-grid,
+	.report-performance-grid {
+		grid-template-columns: 1fr;
+	}
+}
+@media (max-width: 640px) {
+	.report-filter-grid,
+	.report-extra-cost-row {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media print {
+	@page {
+		size: A4 portrait;
+		margin: 15mm 14mm 16mm;
+	}
+	html,
+	body {
+		background: #fff !important;
+	}
+	/* Only the report surface prints: no sidebar, header, controls or tabs. */
+	.sidewrap,
+	.topbar,
+	.screen-only {
+		display: none !important;
+	}
+	.shell,
+	.main,
+	.dash,
+	.cell,
+	.reports-page {
+		display: block !important;
+		width: auto;
+		min-height: 0;
+		margin: 0 !important;
+		padding: 0 !important;
+		gap: 0;
+	}
+	.report-surface {
+		display: block;
+		padding-inline: 3mm;
+		font-size: 9pt;
+		line-height: 1.35;
+		color: #14283f;
+		opacity: 1 !important;
+		print-color-adjust: exact;
+		-webkit-print-color-adjust: exact;
+	}
+	/* Every section prints, whichever tab is open on screen. */
+	.report-panel {
+		display: block !important;
+	}
+	.report-print-header {
+		display: block;
+		margin-bottom: 3mm;
+		break-inside: avoid;
+	}
+	.report-print-masthead {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 6mm;
+		margin-bottom: 3mm;
+	}
+	.report-print-header h1 {
+		margin: 0;
+		font-size: 22pt;
+		line-height: 1.2;
+		color: #102b4b;
+	}
+	.report-shop {
+		text-align: end;
+		font-size: 9pt;
+	}
+	.report-shop p {
+		margin: 0 0 1mm;
+	}
+	.report-brand {
+		font-weight: 800;
+		color: #102b4b;
+	}
+	.report-print-header dl {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 2mm;
+		margin: 0;
+		padding: 2mm;
+		border: 1px solid #ccd8e4;
+		border-radius: 1mm;
+		background: #f5f8fb;
+	}
+	.report-print-header dt {
+		font-size: 7.5pt;
+		color: #52657a;
+	}
+	.report-print-header dd {
+		margin: 1mm 0 0;
+		font-size: 8.5pt;
+		font-weight: 700;
+	}
+	.report-money-grid,
+	.report-performance-grid {
+		display: block;
+	}
+	.card,
+	.report-money-detail,
+	.report-section {
+		margin: 2mm 0;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		box-shadow: none;
+		background: #fff;
+	}
+	/* Headings stay with what follows: the invisible block below each one
+	   needs 22mm of room, so a heading near the page end moves on. */
+	.report-surface h2,
+	.report-money-detail h3,
+	.report-reconciliation > h3 {
+		margin: 0 0 1.5mm;
+		padding-top: 1.5mm;
+		border-top: 1px solid #dbe4ee;
+		font-size: 12pt;
+		line-height: 1.3;
+		color: #102b4b;
+		break-after: avoid;
+		break-inside: avoid;
+	}
+	/* A summary card's own title needs no second rule under the section's. */
+	.report-surface h2 + .report-money-grid > .report-money-detail:first-child h3 {
+		border-top: 0;
+		padding-top: 0;
+	}
+	.report-surface h2::after,
+	.report-money-detail h3::after {
+		content: '';
+		display: block;
+		height: 22mm;
+		margin-bottom: -22mm;
+	}
+	/* Short summaries move to the next page whole; long tables break
+	   between rows and repeat their header row. */
+	.report-money-detail {
+		break-inside: avoid;
+	}
+	.report-section > p,
+	.report-warning,
+	.report-note {
+		margin: 0 0 1.5mm;
+		padding: 1mm;
+		font-size: 7pt;
+		line-height: 1.4;
+	}
+	.table-scroll {
+		overflow: visible;
+	}
+	.report-section table,
+	.report-money-detail table {
+		font-size: 7.5pt;
+		line-height: 1.4;
+		border-collapse: separate;
+		border-spacing: 0;
+	}
+	.report-section thead,
+	.report-money-detail thead {
+		display: table-header-group;
+	}
+	.report-section tr,
+	.report-money-detail tr {
+		break-inside: avoid;
+	}
+	.report-section th,
+	.report-section td,
+	.report-money-detail th,
+	.report-money-detail td {
+		padding: 1.2mm 1mm;
+		color: #14283f;
+		border-bottom: 1px solid #e5eaf0;
+		border-inline-end: 1px solid #e8eef4;
+		overflow-wrap: anywhere;
+	}
+	.report-section thead th,
+	.report-money-detail thead th {
+		background: #eaf0f6;
+		font-size: 7pt;
+		color: #415b78;
+		overflow-wrap: normal;
+	}
+	.report-section tbody tr:nth-child(even),
+	.report-money-detail tbody tr:nth-child(even) {
+		background: #f5f8fb;
+	}
+	.report-section td bdi,
+	.report-money-detail td bdi {
+		white-space: normal;
+	}
+	.report-section td small,
+	.report-section th small,
+	.report-money-detail td small {
+		font-size: 6.5pt;
+	}
+	.report-details table {
+		table-layout: fixed;
+	}
+	.report-surface .mono {
+		font-size: 7pt;
+	}
+	.stocktaking-notes {
+		font-size: 7pt;
+	}
+	.stocktaking-count-cell {
+		border-bottom: 1px solid #94a3b8 !important;
+	}
+	.pager {
+		justify-content: flex-start;
+		font-size: 7pt;
+	}
+}

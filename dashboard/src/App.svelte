@@ -23,6 +23,7 @@
 	import CatalogAdminPage from './components/CatalogAdminPage.svelte';
 	import UpdatesPage from './components/UpdatesPage.svelte';
 	import UsersPage from './components/UsersPage.svelte';
+	import ReportsPage from './components/ReportsPage.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { createRequestScope } from './lib/requestScope';
 	import { dashboardApi, ApiError, isStoreID, setCSRFToken } from './lib/api.js';
@@ -64,6 +65,7 @@
 			updates: 'updates',
 			admin: 'admin',
 			sales: 'sales',
+			reports: 'reports',
 			// Former pages whose content now lives in Sales Summary and Overview.
 			daily: 'sales',
 			products: 'overview',
@@ -741,6 +743,11 @@
 							onselect={selectOrder}
 							onretry={() => void reloadOrders()}
 						/>
+					</div>
+				{/if}
+				{#if route === 'reports'}
+					<div class="cell a-orders">
+						<ReportsPage {params} {store} {stores} />
 					</div>
 				{/if}
 				{#if route === 'devices'}
