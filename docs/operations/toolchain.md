@@ -5,8 +5,8 @@ one at a time, with a green `check.sh`.
 
 | Tool | Pinned version | Where |
 |---|---|---|
-| Go | 1.27.2 (`go 1.27.2` in go.mod; security release) | `go.mod`, CI `go-version-file` |
-| Build image | `golang:1.27.2-bookworm` | `deploy/Containerfile` |
+| Go | 1.27.3 (`go 1.27.3` in go.mod; security release) | `go.mod`, CI `go-version-file` |
+| Build image | `golang:1.27.3-bookworm` | `deploy/Containerfile` |
 | Runtime image | `gcr.io/distroless/static-debian12:nonroot` | `deploy/Containerfile` |
 | PostgreSQL | `postgres:18.1-bookworm` | `deploy/compose.yaml`, CI service, test helpers |
 | pgx | v5.11.0 | `go.mod` |
