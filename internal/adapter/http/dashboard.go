@@ -10,6 +10,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
+	"github.com/faroukelabady/MoonLightCloud/internal/salesreport"
 )
 
 // DashboardDataHandlers serves authenticated BFF reads. Each handler parses
@@ -19,6 +20,8 @@ type DashboardDataHandlers struct {
 	dash dashboard.Service
 	rep  report.Service
 	log  *slog.Logger
+	// printable serves the Reports page; nil leaves its routes out.
+	printable *salesreport.Service
 }
 
 // NewDashboardDataHandlers wires BFF data handlers.

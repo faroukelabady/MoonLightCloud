@@ -38,6 +38,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
+	"github.com/faroukelabady/MoonLightCloud/internal/salesreport"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 	"github.com/faroukelabady/MoonLightCloud/internal/syncrecovery"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -173,7 +174,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.HumanAuth = humanAuthSvc
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
-	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log)
+	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log).
+		WithPrintableReports(salesreport.NewService(reportingStore))
 	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
 	commerceStore := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)

@@ -105,6 +105,33 @@ and average come from the mode's server-computed bucket (truncating
 division, documented). There is no all-currency fallback while a native
 mode is selected.
 
+## Reports page (printable sales report, stocktaking & zakat)
+
+The sidebar's Reports page prints the same sales report as
+MoonLightRetail, plus the stocktaking count sheet and zakat calculator.
+It uses the header's period and Store; a principal without all-Stores
+access must pick a Store (`STORE_SCOPE_REQUIRED`), except that a single
+accessible Store is chosen automatically.
+
+- `GET /api/v1/dashboard/reports/sales?currency=EGP|USD|all` returns
+  every section (summary, daily, categories, subcategories, tags,
+  products, payments, paged Sales details). EGP is the default and shows
+  every Sale in EGP: USD Sales use their own FX snapshot. USD shows every
+  Sale in USD: an EGP Sale uses the USD rate of the same Store's nearest
+  USD Sale (latest at or before it, else the earliest after it), because
+  EGP Sales carry no rate. With no USD Sale in that Store the request
+  fails with `EXCHANGE_RATE_REQUIRED` (409). `all` keeps currencies
+  apart. Returns use their Sale's conversion.
+- Each Sale, line, payment and refund converts on its own and rounds half
+  away from zero, so sections can differ by one minor unit. Category, tag
+  and product amounts are line totals before sale-level discount and tax.
+- `GET /api/v1/dashboard/reports/stocktaking` values every sellable or
+  stocked Variant at its EGP cost and price (Variant override, else the
+  Product's) from the last synced inventory snapshot.
+- Extra costs and zakat inputs live in the page only; nothing is stored
+  or sent. Printing uses the browser's print dialog with A4 margins, and
+  every section prints whichever tab is open.
+
 ## History and custom ranges
 
 Applied filters (period, currency, valid custom ranges) push history

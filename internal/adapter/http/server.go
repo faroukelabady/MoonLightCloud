@@ -75,6 +75,10 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 	mux.Handle("GET /api/v1/dashboard/sync-health", g(humanauth.PermReportsRead, ScopeQuery, dashData.SyncHealth))
 	mux.Handle("GET /api/v1/dashboard/activity", g(humanauth.PermReportsRead, ScopeQuery, dashData.Activity))
 	mux.Handle("GET /api/v1/dashboard/sales/latest", g(humanauth.PermReportsRead, ScopeQuery, dashData.LatestSales))
+	if dashData.printable != nil {
+		mux.Handle("GET /api/v1/dashboard/reports/sales", g(humanauth.PermReportsRead, ScopeQuery, dashData.SalesReport))
+		mux.Handle("GET /api/v1/dashboard/reports/stocktaking", g(humanauth.PermReportsRead, ScopeQuery, dashData.StockReport))
+	}
 	mux.Handle("GET /api/v1/dashboard/orders", g(humanauth.PermReportsRead, ScopeQuery, dashOrders.Orders))
 	mux.Handle("GET /api/v1/dashboard/orders/{provider_key}/{external_order_id}", g(humanauth.PermReportsRead, ScopeQuery, dashOrders.OrderDetail))
 	if dashDevices != nil {
