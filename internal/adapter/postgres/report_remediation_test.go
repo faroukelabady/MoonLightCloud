@@ -448,7 +448,7 @@ func TestReportDBFailureSafeEnvelope(t *testing.T) {
 // connection) classifies as UNAVAILABLE with a generic safe message.
 func TestReportConnectionRefusedIs503(t *testing.T) {
 	pool, err := pgxpool.New(context.Background(),
-		"postgres://moonlight:moonlight@127.0.0.1:1/moonlight_dev?sslmode=disable&connect_timeout=2")
+		"postgres://test:test@127.0.0.1:1/moonlight_dev?sslmode=disable&connect_timeout=2")
 	if err != nil {
 		t.Fatal(err)
 	}

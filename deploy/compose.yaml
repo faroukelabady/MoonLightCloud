@@ -7,8 +7,8 @@ services:
     image: docker.io/library/postgres:18.1-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_USER: moonlight
-      POSTGRES_PASSWORD: moonlight
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
       POSTGRES_DB: moonlight_dev
     volumes:
       # Single mount at the parent: the postgres:18 image keeps versioned
@@ -17,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moonlight -d moonlight_dev"]
+      test: ["CMD-SHELL", "pg_isready -U test -d moonlight_dev"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -33,7 +33,7 @@ services:
     environment:
       ENVIRONMENT: development
       HTTP_ADDR: ":8080"
-      DATABASE_URL: postgres://moonlight:moonlight@postgres:5432/moonlight_dev?sslmode=disable
+      DATABASE_URL: postgres://test:test@postgres:5432/moonlight_dev?sslmode=disable
       LOG_LEVEL: info
       # Local development only: explicit opt-in for unauthenticated reports.
       # Never set this outside development (startup refuses it elsewhere).

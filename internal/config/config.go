@@ -87,6 +87,7 @@ var legacyDashboardEnv = []string{"DASHBOARD_USERNAME", "DASHBOARD_PASSWORD_HASH
 
 var devDBMarkers = []string{
 	"moonlight:moonlight@",
+	"test:test@",
 	"postgres:postgres@",
 	"password@",
 	"localhost",

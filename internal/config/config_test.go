@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 func TestLoadDevelopmentDefaults(t *testing.T) {
 	setReportingToken(t)
 	setenv(t, "ENVIRONMENT", "development")
-	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
+	setenv(t, "DATABASE_URL", "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable")
 	unsetenv(t, "HTTP_ADDR")
 	c, err := Load()
 	if err != nil {
@@ -71,11 +71,15 @@ func TestBadEnvironment(t *testing.T) {
 }
 
 func TestProductionRefusesDevCredentials(t *testing.T) {
-	setenv(t, "ENVIRONMENT", "production")
-	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@db:5432/app?sslmode=require")
-	setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
-	if _, err := Load(); err == nil {
-		t.Fatal("want error for dev DATABASE_URL in production")
+	for _, credential := range []string{"test:test", "moonlight:moonlight"} {
+		t.Run(credential, func(t *testing.T) {
+			setenv(t, "ENVIRONMENT", "production")
+			setenv(t, "DATABASE_URL", "postgres://"+credential+"@db:5432/app?sslmode=require")
+			setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
+			if _, err := Load(); err == nil {
+				t.Fatal("want error for dev DATABASE_URL in production")
+			}
+		})
 	}
 }
 
@@ -100,7 +104,7 @@ func TestProductionValid(t *testing.T) {
 
 func TestStoreTimezoneMatrix(t *testing.T) {
 	const url = "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
-	const devURL = "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	const devURL = "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable"
 	cases := []struct {
 		name    string
 		env     string
@@ -147,7 +151,7 @@ func TestStoreTimezoneMatrix(t *testing.T) {
 
 func TestReportingTokenMatrix(t *testing.T) {
 	const url = "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
-	const devURL = "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	const devURL = "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable"
 	const goodToken = "0123456789abcdef0123456789abcdef"
 	cases := []struct {
 		name string
@@ -208,7 +212,7 @@ func TestReportingTokenMatrix(t *testing.T) {
 
 func TestPepperMatrix(t *testing.T) {
 	validProdURL := "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
-	devURL := "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	devURL := "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable"
 	cases := []struct {
 		name    string
 		env     string
@@ -267,7 +271,7 @@ func pepperB64short() string {
 
 func TestPortOverride(t *testing.T) {
 	setenv(t, "ENVIRONMENT", "development")
-	setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
+	setenv(t, "DATABASE_URL", "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable")
 	unsetenv(t, "HTTP_ADDR")
 	setReportingToken(t)
 	setenv(t, "PORT", "1234")
@@ -284,7 +288,7 @@ func TestTrustedProxyCIDRs(t *testing.T) {
 	base := func(t *testing.T) {
 		t.Helper()
 		setenv(t, "ENVIRONMENT", "development")
-		setenv(t, "DATABASE_URL", "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable")
+		setenv(t, "DATABASE_URL", "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable")
 		setenv(t, "DEVICE_SECRET_PEPPER", pepperB64('v'))
 		setenv(t, "STORE_TIMEZONE", "Africa/Cairo")
 		setenv(t, "REPORTING_API_TOKEN", "0123456789abcdef0123456789abcdef")
@@ -327,7 +331,7 @@ func TestTrustedProxyCIDRs(t *testing.T) {
 // session timeouts are bounded; cookies are Secure outside development.
 func TestAuthConfigMatrix(t *testing.T) {
 	const url = "postgres://cloud:secret@10.0.0.5:5432/cloud?sslmode=require"
-	const devURL = "postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable"
+	const devURL = "postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable"
 	cases := []struct {
 		name, env, key, legacy, idle, absolute string
 		wantErr                                bool

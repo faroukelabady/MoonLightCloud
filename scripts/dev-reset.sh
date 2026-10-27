@@ -6,7 +6,7 @@ source "$(dirname "$0")/lib.sh"
 load_env
 
 export ENVIRONMENT="${ENVIRONMENT:-development}"
-export DATABASE_URL="${DATABASE_URL:-postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable}"
+export DATABASE_URL="${DATABASE_URL:-postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable}"
 require_local_dev_db
 
 echo "WARNING: destroying local dev volume moonlightcloud_pgdata (DEVELOPMENT ONLY)."

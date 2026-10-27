@@ -8,7 +8,7 @@ ensure_dev_reporting_env
 ensure_dev_auth_env
 
 export ENVIRONMENT="${ENVIRONMENT:-development}"
-export DATABASE_URL="${DATABASE_URL:-postgres://moonlight:moonlight@localhost:5432/moonlight_dev?sslmode=disable}"
+export DATABASE_URL="${DATABASE_URL:-postgres://test:test@localhost:5432/moonlight_dev?sslmode=disable}"
 require_dev
 
 name="${1:-shop-dev}"
