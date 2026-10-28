@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
+	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/media"
 )
 
@@ -145,5 +146,112 @@ func TestMediaBlobsStoreOnce(t *testing.T) {
 	var device string
 	if err := f.pool.QueryRow(context.Background(), `SELECT uploaded_by_device::text FROM media_blobs WHERE sha256 = $1`, blob.SHA256).Scan(&device); err != nil || device != f.devA {
 		t.Fatalf("first uploader kept: %q %v", device, err)
+	}
+}
+
+// ADR-0056 step 2: galleries and late files re-evaluate online channels,
+// the commerce read reports file presence, and created provider media is
+// recorded per Product and file.
+func TestProductMediaCommerceState(t *testing.T) {
+	f := openScopeFixture(t)
+	ctx := context.Background()
+	seq := 0
+	project := func(dev, cred, typ, payload string) {
+		t.Helper()
+		event := fmt.Sprintf("e3d1b000-0000-4000-8000-%012d", seq)
+		seq++
+		f.ingest(t, dev, cred, event, typ, payload)
+		if result := projectCatalogTerminal(t, f, event, typ); result.Outcome != catalog.OutcomeProcessed {
+			t.Fatalf("project %s: %+v", typ, result)
+		}
+	}
+	product := "33333333-0000-4000-8000-0000000000c1"
+	category := "aaaaaaaa-0000-4000-8000-0000000000c2"
+	project(f.devA, f.credA, catalog.EventCategorySnapshotV2,
+		categoryPayload(category, "active", map[string]string{"en": "Root"}, nil, 1))
+	project(f.devA, f.credA, catalog.EventProductSnapshotV2,
+		productPayload(product, "ML-MEDIA-C", "C", category, nil, nil, 1))
+
+	reason := func() string {
+		t.Helper()
+		var value string
+		err := f.pool.QueryRow(ctx, `SELECT reason FROM commerce_product_reevaluations WHERE product_id = $1`, product).Scan(&value)
+		if err != nil {
+			return ""
+		}
+		return value
+	}
+	clear := func() {
+		if _, err := f.pool.Exec(ctx, `DELETE FROM commerce_product_reevaluations`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clear()
+	project(f.devA, f.credA, catalog.EventProductMediaSnapshotV1, mediaPayload(product, 1,
+		mediaImage("55555555-0000-4000-8000-0000000000c1", nil, 0, true, "c")))
+	if got := reason(); got != "product_media" {
+		t.Fatalf("gallery change reason = %q", got)
+	}
+
+	read := catalog.NewService(NewCatalogProjection(f.pool, 5*time.Second))
+	images, err := read.GetProductMedia(ctx, product)
+	if err != nil || len(images) != 1 || images[0].Available {
+		t.Fatalf("before upload: %+v %v", images, err)
+	}
+
+	// The file arrives after the gallery: the Product is re-evaluated.
+	clear()
+	blobs := NewMediaBlobs(f.pool, 5*time.Second)
+	sha := strings.Repeat("c", 64)
+	if created, err := blobs.StoreBlob(ctx, media.Blob{SHA256: sha, ContentType: "image/jpeg", ByteSize: 3, Width: 1, Height: 1, Content: []byte{7, 8, 9}}, f.devA); err != nil || !created {
+		t.Fatalf("store: %v %v", created, err)
+	}
+	if got := reason(); got != "product_media" {
+		t.Fatalf("late file reason = %q", got)
+	}
+	if images, err = read.GetProductMedia(ctx, product); err != nil || !images[0].Available {
+		t.Fatalf("after upload: %+v %v", images, err)
+	}
+	content, err := blobs.MediaContent(ctx, sha)
+	if err != nil || content.ContentType != "image/jpeg" || len(content.Bytes) != 3 {
+		t.Fatalf("content: %+v %v", content, err)
+	}
+	if _, err := blobs.MediaContent(ctx, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("missing file read succeeded")
+	}
+
+	// Created provider media, keyed by provider, Product and file.
+	store := NewCommercePersistence(f.pool, 5*time.Second)
+	mapping := commerce.MediaMapping{SHA256: sha, ExternalProductID: "4100", ExternalMediaID: "9001"}
+	if err := store.CreateProductMediaMapping(ctx, "shopify-main", product, mapping); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateProductMediaMapping(ctx, "shopify-main", product, mapping); err != nil {
+		t.Fatalf("same row again: %v", err)
+	}
+	other := mapping
+	other.ExternalMediaID = "9002"
+	if err := store.CreateProductMediaMapping(ctx, "shopify-main", product, other); err == nil {
+		t.Fatal("second media for the same file accepted")
+	}
+	if err := store.CreateProductMediaMapping(ctx, "shopify-main", "33333333-0000-4000-8000-0000000000ff", mapping); err == nil {
+		t.Fatal("mapping for an unprojected product accepted")
+	}
+	var sameStore bool
+	if err := f.pool.QueryRow(ctx, `SELECT m.store_id = p.store_id FROM commerce_media_mappings m
+		JOIN catalog_products p ON p.product_id = m.product_id WHERE m.product_id = $1`, product).Scan(&sameStore); err != nil || !sameStore {
+		t.Fatalf("mapping store is not the product store: %v", err)
+	}
+	if err := store.DeleteProductMediaMapping(ctx, "shopify-main", product, other); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := store.ListProductMediaMappings(ctx, "shopify-main", product); err != nil || len(rows) != 1 || rows[0] != mapping {
+		t.Fatalf("compare-and-delete removed the wrong row: %+v %v", rows, err)
+	}
+	if err := store.DeleteProductMediaMapping(ctx, "shopify-main", product, mapping); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := store.ListProductMediaMappings(ctx, "shopify-main", product); err != nil || len(rows) != 0 {
+		t.Fatalf("after delete: %+v %v", rows, err)
 	}
 }

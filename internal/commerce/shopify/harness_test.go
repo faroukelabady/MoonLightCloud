@@ -91,6 +91,8 @@ type shopifyHarness struct {
 	// beforeOp fires before applying any operation (tests simulate a
 	// concurrent operation completing mid-flight by mutating state here).
 	beforeOp func(operation string, h *shopifyHarness)
+	// media is the ADR-0056 file and product media state (media_harness_test.go).
+	media *fakeMediaStore
 }
 
 func newHarness(t *testing.T) *shopifyHarness {
@@ -120,6 +122,7 @@ func newHarnessWithHandler(t *testing.T, build func(*shopifyHarness) http.Handle
 	if build != nil {
 		handler = build(h)
 	}
+	h.media = newFakeMediaStore()
 	h.server = httptest.NewTLSServer(handler)
 	t.Cleanup(h.server.Close)
 	return h
@@ -182,6 +185,11 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	if strings.HasPrefix(r.URL.Path, stagedUploadPath) {
+		h.serveStagedUpload(w, r, raw)
+		return
+	}
+
 	if h.redirectTo != "" {
 		// One-shot redirect response: the client must refuse to follow.
 		target := h.redirectTo
@@ -229,6 +237,8 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 		h.beforeOp(operation, h)
 	}
 	switch {
+	case strings.Contains(body.Query, "MoonlightMedia"):
+		payload = h.opMedia(operation, body.Variables)
 	case strings.Contains(body.Query, "MoonlightShopCurrency"):
 		payload = map[string]any{"data": map[string]any{"shop": map[string]any{"currencyCode": h.shopCurrency}}}
 	case strings.Contains(body.Query, "MoonlightVariantSet"):
@@ -342,6 +352,8 @@ func (h *shopifyHarness) serve(w http.ResponseWriter, r *http.Request) {
 
 func operationName(query string) string {
 	for _, name := range []string{
+		"MoonlightMediaProduct", "MoonlightMediaFiles", "MoonlightMediaStage", "MoonlightMediaCreate",
+		"MoonlightMediaAttach", "MoonlightMediaDelete", "MoonlightMediaReorder", "MoonlightMediaVariants",
 		"MoonlightShopCurrency", "MoonlightProductCreate", "MoonlightProductUpdate",
 		"MoonlightManagedVariantUpdate", "MoonlightMetafieldsSet", "MoonlightPublish",
 		"MoonlightUnpublish", "MoonlightInventoryActivate", "MoonlightInventorySet",

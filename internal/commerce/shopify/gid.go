@@ -32,6 +32,7 @@ const (
 	ResourceLineItem       = "LineItem"
 	ResourceLocation       = "Location"
 	ResourcePublication    = "Publication"
+	ResourceMediaImage     = "MediaImage"
 )
 
 var gidPattern = regexp.MustCompile(`^gid://shopify/([A-Za-z]+)/([0-9]+)$`)

@@ -194,8 +194,85 @@ func validateWireContract(document string, vars map[string]any) error {
 		if !strings.Contains(compact, "available: 0") {
 			return fail()
 		}
+	case "MoonlightMediaStage":
+		if !strings.Contains(compact, "$input: [StagedUploadInput!]!") {
+			return fail()
+		}
+		for _, entry := range mediaInputs(vars, "input") {
+			if entry["resource"] != "IMAGE" || entry["httpMethod"] != "POST" || str(entry["filename"]) == "" ||
+				(entry["mimeType"] != "image/jpeg" && entry["mimeType"] != "image/png") {
+				return fail()
+			}
+			if _, ok := entry["fileSize"].(string); !ok {
+				return fail()
+			}
+		}
+	case "MoonlightMediaCreate":
+		if !strings.Contains(compact, "$files: [FileCreateInput!]!") {
+			return fail()
+		}
+		for _, entry := range mediaInputs(vars, "files") {
+			if str(entry["originalSource"]) == "" || entry["contentType"] != "IMAGE" {
+				return fail()
+			}
+			for key := range entry {
+				switch key {
+				case "originalSource", "contentType", "filename", "alt", "duplicateResolutionMode":
+				default:
+					return fail()
+				}
+			}
+		}
+	case "MoonlightMediaAttach":
+		if !strings.Contains(compact, "$files: [FileUpdateInput!]!") {
+			return fail()
+		}
+		for _, entry := range mediaInputs(vars, "files") {
+			refs, ok := entry["referencesToAdd"].([]any)
+			if str(entry["id"]) == "" || !ok || len(refs) == 0 || entry["referencesToRemove"] != nil {
+				return fail()
+			}
+		}
+	case "MoonlightMediaDelete":
+		ids, ok := vars["fileIds"].([]any)
+		if !strings.Contains(compact, "$fileIds: [ID!]!") || !ok || len(ids) == 0 {
+			return fail()
+		}
+	case "MoonlightMediaReorder":
+		if !strings.Contains(compact, "$moves: [MoveInput!]!") || !strings.Contains(compact, "userErrors: mediaUserErrors") {
+			return fail()
+		}
+		for _, entry := range mediaInputs(vars, "moves") {
+			if _, ok := entry["newPosition"].(string); !ok || str(entry["id"]) == "" {
+				return fail()
+			}
+		}
+	case "MoonlightMediaVariants":
+		if !strings.Contains(compact, "$variants: [ProductVariantsBulkInput!]!") {
+			return fail()
+		}
+		for _, entry := range mediaInputs(vars, "variants") {
+			if len(entry) != 2 || str(entry["id"]) == "" || str(entry["mediaId"]) == "" {
+				return fail()
+			}
+		}
 	}
 	return nil
+}
+
+// mediaInputs returns a list variable of objects; a missing or empty list
+// yields one empty object so the caller's field checks fail.
+func mediaInputs(vars map[string]any, name string) []map[string]any {
+	values, _ := vars[name].([]any)
+	out := []map[string]any{}
+	for _, raw := range values {
+		entry, _ := raw.(map[string]any)
+		out = append(out, entry)
+	}
+	if len(out) == 0 {
+		out = append(out, map[string]any{})
+	}
+	return out
 }
 
 func TestR1RejectOriginalContracts(t *testing.T) {

@@ -18,6 +18,7 @@ var (
 	_ commerce.ProductMappingRepository           = CommercePersistence{}
 	_ commerce.VariantMappingTransitionRepository = CommercePersistence{}
 	_ commerce.ProductReevaluationStore           = CommercePersistence{}
+	_ commerce.MediaMappingRepository             = CommercePersistence{}
 	_ commerce.ProductSyncCoordinator             = CommercePersistence{}
 )
 

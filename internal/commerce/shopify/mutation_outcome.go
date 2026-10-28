@@ -41,6 +41,19 @@ func mutationOutcomeComplete(document string, data json.RawMessage) bool {
 		root, primary = "productBundleCreate", "productBundleOperation"
 	case docVariantPrices:
 		root, primary = "productVariantsBulkUpdate", "productVariants"
+	// ADR-0056 step 2: image mutations settle under the same rule.
+	case docMediaStage:
+		root, primary = "stagedUploadsCreate", "stagedTargets"
+	case docMediaCreate:
+		root, primary = "fileCreate", "files"
+	case docMediaAttach:
+		root, primary = "fileUpdate", "files"
+	case docMediaDelete:
+		root, primary = "fileDelete", "deletedFileIds"
+	case docMediaReorder:
+		root, primary = "productReorderMedia", "job"
+	case docMediaVariants:
+		root, primary = "productVariantsBulkUpdate", "productVariants"
 	default:
 		return false
 	}
@@ -72,7 +85,8 @@ func mutationOutcomeComplete(document string, data json.RawMessage) bool {
 	if !ok || string(raw) == "null" {
 		return false
 	}
-	if primary == "productVariants" || primary == "metafields" {
+	switch primary {
+	case "productVariants", "metafields", "stagedTargets", "files", "deletedFileIds":
 		var rows []json.RawMessage
 		return json.Unmarshal(raw, &rows) == nil
 	}

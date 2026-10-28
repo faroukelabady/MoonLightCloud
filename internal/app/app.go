@@ -230,7 +230,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		// the exact same CommerceService the manual CLI uses. The store
 		// doubles as the durable queue; no provider I/O runs in any
 		// projection transaction.
-		a.CommerceService = NewCommerceService(commerceStore, catalogStore, a.CommerceRegistry, log)
+		a.CommerceService = NewCommerceService(commerceStore, catalogStore, postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout), a.CommerceRegistry, log)
 		a.ReevaluationWorker = commerce.NewReevaluationWorker(commerceStore, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),

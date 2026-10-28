@@ -41,9 +41,11 @@ func NewCommerceRegistry(cfg config.Config, coordinator commerce.ProductSyncCoor
 	return registry, nil
 }
 
-// NewCommerceService wires orchestration over live catalog reads and the
-// durable mapping repository.
-func NewCommerceService(mappings commerce.ProductMappingRepository, catalogRepo catalog.Repository, registry *commerce.Registry, log *slog.Logger) *commerce.CommerceService {
-	return commerce.NewCommerceService(registry, mappings,
+// NewCommerceService wires orchestration over live catalog reads, the
+// durable mapping repository and the stored image files (ADR-0056).
+func NewCommerceService(mappings commerce.ProductMappingRepository, catalogRepo catalog.Repository, media commerce.MediaContentReader, registry *commerce.Registry, log *slog.Logger) *commerce.CommerceService {
+	service := commerce.NewCommerceService(registry, mappings,
 		commerce.NewCatalogCommerceSource(catalog.NewService(catalogRepo)), log)
+	service.SetMediaContent(media)
+	return service
 }

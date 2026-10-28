@@ -445,3 +445,148 @@ const docInventoryVariant = `query MoonlightInventoryVariant($id: ID!) {
  productVariant(id: $id) { id sku inventoryItem { id tracked inventoryLevels(first: 20) { nodes { updatedAt
               location { id } quantities(names: ["available"]) { name quantity } } } } }
 }`
+
+// ADR-0056 step 2: Product image documents (Admin API 2026-10 file model).
+// userErrors on productReorderMedia is an alias of mediaUserErrors so every
+// mutation settles under the same outcome rule.
+const (
+	docMediaProduct = `query MoonlightMediaProduct($id: ID!) {
+  product(id: $id) {
+    id
+    metafields(first: 20, namespace: "moonlight") { nodes { namespace key value } }
+    media(first: 250) { pageInfo { hasNextPage } nodes { id status } }
+    variants(first: 100) { nodes { id media(first: 1) { nodes { id } } } }
+  }
+}`
+
+	docMediaFiles = `query MoonlightMediaFiles($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on MediaImage { id fileStatus } }
+}`
+
+	docMediaStage = `mutation MoonlightMediaStage($input: [StagedUploadInput!]!) {
+  stagedUploadsCreate(input: $input) {
+    stagedTargets { url resourceUrl parameters { name value } }
+    userErrors { field message }
+  }
+}`
+
+	docMediaCreate = `mutation MoonlightMediaCreate($files: [FileCreateInput!]!) {
+  fileCreate(files: $files) {
+    files { id fileStatus }
+    userErrors { code field message }
+  }
+}`
+
+	docMediaAttach = `mutation MoonlightMediaAttach($files: [FileUpdateInput!]!) {
+  fileUpdate(files: $files) {
+    files { id }
+    userErrors { code field message }
+  }
+}`
+
+	docMediaDelete = `mutation MoonlightMediaDelete($fileIds: [ID!]!) {
+  fileDelete(fileIds: $fileIds) {
+    deletedFileIds
+    userErrors { code field message }
+  }
+}`
+
+	docMediaReorder = `mutation MoonlightMediaReorder($id: ID!, $moves: [MoveInput!]!) {
+  productReorderMedia(id: $id, moves: $moves) {
+    job { id }
+    userErrors: mediaUserErrors { code field message }
+  }
+}`
+
+	docMediaVariants = `mutation MoonlightMediaVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariants { id }
+    userErrors { field message }
+  }
+}`
+)
+
+type mediaProductResponse struct {
+	Product *struct {
+		ID         string `json:"id"`
+		Metafields struct {
+			Nodes []gqlMetafield `json:"nodes"`
+		} `json:"metafields"`
+		Media struct {
+			PageInfo struct {
+				HasNextPage bool `json:"hasNextPage"`
+			} `json:"pageInfo"`
+			Nodes []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"nodes"`
+		} `json:"media"`
+		Variants struct {
+			Nodes []struct {
+				ID    string `json:"id"`
+				Media struct {
+					Nodes []struct {
+						ID string `json:"id"`
+					} `json:"nodes"`
+				} `json:"media"`
+			} `json:"nodes"`
+		} `json:"variants"`
+	} `json:"product"`
+}
+
+type mediaFilesResponse struct {
+	Nodes []*struct {
+		ID         string `json:"id"`
+		FileStatus string `json:"fileStatus"`
+	} `json:"nodes"`
+}
+
+type stagedTarget struct {
+	URL         string `json:"url"`
+	ResourceURL string `json:"resourceUrl"`
+	Parameters  []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"parameters"`
+}
+
+type stagedUploadResponse struct {
+	StagedUploadsCreate struct {
+		StagedTargets []stagedTarget `json:"stagedTargets"`
+		UserErrors    []userError    `json:"userErrors"`
+	} `json:"stagedUploadsCreate"`
+}
+
+type fileCreateResponse struct {
+	FileCreate struct {
+		Files []struct {
+			ID         string `json:"id"`
+			FileStatus string `json:"fileStatus"`
+		} `json:"files"`
+		UserErrors []userError `json:"userErrors"`
+	} `json:"fileCreate"`
+}
+
+type fileUpdateResponse struct {
+	FileUpdate struct {
+		UserErrors []userError `json:"userErrors"`
+	} `json:"fileUpdate"`
+}
+
+type fileDeleteResponse struct {
+	FileDelete struct {
+		UserErrors []userError `json:"userErrors"`
+	} `json:"fileDelete"`
+}
+
+type reorderMediaResponse struct {
+	ProductReorderMedia struct {
+		UserErrors []userError `json:"userErrors"`
+	} `json:"productReorderMedia"`
+}
+
+type variantMediaResponse struct {
+	ProductVariantsBulkUpdate struct {
+		UserErrors []userError `json:"userErrors"`
+	} `json:"productVariantsBulkUpdate"`
+}

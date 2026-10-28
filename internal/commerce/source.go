@@ -70,6 +70,9 @@ type DesiredProduct struct {
 	// disable→enable transitions can never reuse a stale idempotency key.
 	CategoryPolicyFingerprint string
 	CategoryPolicyVersion     string
+	// Media is the Product and Variant galleries with file presence
+	// (ADR-0056), empty when the reader has no media capability.
+	Media []ProductImage
 }
 
 // CommerceProductSource assembles desired provider-neutral state from
@@ -266,6 +269,9 @@ func (s *CatalogCommerceSource) GetDesiredCommerceProduct(ctx context.Context, p
 		if len(desired.Product.Variants) > 0 {
 			desired.Product.SKU = desired.Product.Variants[0].SKU
 		}
+	}
+	if desired.Media, err = loadMedia(ctx, s.reader, productID); err != nil {
+		return DesiredProduct{}, err
 	}
 	if !desired.Published {
 		// Provider-facing quantity follows existing disabled-product

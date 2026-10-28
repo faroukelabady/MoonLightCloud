@@ -2313,6 +2313,25 @@ CREATE TABLE media_blobs (
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ==== 00048_commerce_media_mappings ====
+-- ADR-0056 step 2: provider media that MoonLight created, one row per
+-- provider, Product and image file. Only media named here is ever reordered,
+-- attached to variants or deleted on the provider; media added by hand in
+-- the shop never appears in this table and is never touched.
+CREATE TABLE commerce_media_mappings (
+    provider_key        TEXT NOT NULL CHECK (provider_key ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
+    product_id          UUID NOT NULL,
+    sha256              TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    store_id            UUID NOT NULL REFERENCES stores (id) ON DELETE RESTRICT,
+    external_product_id TEXT NOT NULL CHECK (char_length(external_product_id) BETWEEN 1 AND 200),
+    external_media_id   TEXT NOT NULL CHECK (char_length(external_media_id) BETWEEN 1 AND 200),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (provider_key, product_id, sha256)
+);
+CREATE UNIQUE INDEX idx_commerce_media_mappings_external
+    ON commerce_media_mappings (provider_key, external_media_id);
+CREATE INDEX idx_commerce_media_mappings_store ON commerce_media_mappings (store_id);
+
 -- Product stock is a read-only aggregate. Independent Variant revisions are
 -- never collapsed into an invented Product inventory revision. Incomplete or
 -- contradictory inventory cannot expose partial positive availability.
@@ -2333,6 +2352,7 @@ LEFT JOIN catalog_product_variant_inventory i
 GROUP BY p.product_id, p.store_id;
 
 -- +goose Down
+DROP TABLE IF EXISTS commerce_media_mappings CASCADE;
 DROP TABLE IF EXISTS media_blobs CASCADE;
 DROP TABLE IF EXISTS catalog_product_media CASCADE;
 DROP TABLE IF EXISTS exchange_rates CASCADE;

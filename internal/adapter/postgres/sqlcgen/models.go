@@ -434,6 +434,16 @@ type CatalogTag struct {
 	StoreID           pgtype.UUID        `json:"store_id"`
 }
 
+type CommerceMediaMapping struct {
+	ProviderKey       string             `json:"provider_key"`
+	ProductID         pgtype.UUID        `json:"product_id"`
+	Sha256            string             `json:"sha256"`
+	StoreID           pgtype.UUID        `json:"store_id"`
+	ExternalProductID string             `json:"external_product_id"`
+	ExternalMediaID   string             `json:"external_media_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type CommerceOnlineOrder struct {
 	ProviderKey        string             `json:"provider_key"`
 	ExternalOrderID    string             `json:"external_order_id"`

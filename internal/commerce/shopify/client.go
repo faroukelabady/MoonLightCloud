@@ -30,6 +30,8 @@ const (
 	maxResponseBytes = 1024 * 1024
 	// maxRetryAfter bounds accepted Retry-After metadata.
 	maxRetryAfter = time.Hour
+	// minUploadTimeout bounds one staged image upload.
+	minUploadTimeout = 2 * time.Minute
 )
 
 // Client is the minimal Shopify GraphQL Admin transport: HTTPS only,
@@ -40,7 +42,11 @@ const (
 //
 // No retry loop lives here: failures return classified to the caller.
 type Client struct {
-	http      *http.Client
+	http *http.Client
+	// upload carries staged image uploads (ADR-0056): same transport and
+	// redirect refusal, a longer timeout for files up to 5 MiB, and never
+	// the access token.
+	upload    *http.Client
 	endpoint  string
 	token     string
 	userAgent string
@@ -60,8 +66,13 @@ func newClient(endpoint, accessToken, clientSecret string, timeout time.Duration
 	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
+	uploadClient := *httpClient
+	if uploadClient.Timeout < minUploadTimeout {
+		uploadClient.Timeout = minUploadTimeout
+	}
 	return &Client{
 		http: httpClient, endpoint: endpoint, token: accessToken,
+		upload:    &uploadClient,
 		userAgent: "moonlight-cloud-commerce/1.0",
 		version:   strings.Split(strings.TrimSuffix(endpoint, "/graphql.json"), "/")[len(strings.Split(strings.TrimSuffix(endpoint, "/graphql.json"), "/"))-1],
 		scrub:     newSecretScrubber(accessToken, clientSecret),

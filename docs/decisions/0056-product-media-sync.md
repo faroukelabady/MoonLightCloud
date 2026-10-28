@@ -1,6 +1,6 @@
 # ADR-0056: Product media sync (Retail images in Cloud)
 
-- Status: Accepted (2026-10-28)
+- Status: Accepted (2026-10-28); step 2 (Shopify media) implemented 2026-10-28
 - Relates to: ADR-0016 (async projection), ADR-0025 / Retail ADR-025 (catalog
   snapshots and bootstrap), ADR-0044 (Shopify adapter), ADR-0049 (physical
   variants), ADR-0055 / Retail ADR-049 (pre-production baseline).
@@ -70,31 +70,47 @@ uploads).
    automatically. A full re-sync (Admin PIN) also clears the ledger, so a
    restored Cloud gets every file again.
 
-## Not in this decision (next step)
+## Shopify media (step 2, 2026-10-28)
 
-Pushing the images into Shopify. The intended design, so that this stream's
-shape does not need to change:
+The images reach Shopify through an optional provider capability
+(`commerce.MediaCommerceProvider`) that runs after product, variant and
+stock convergence in `CommerceService.SyncProduct`, so stock never waits for
+a file. Shopify Admin API 2026-10 deprecates `productCreateMedia`; the
+adapter uses the file model instead:
 
-- The media projector enqueues the existing commerce re-evaluation intent for
-  the Product (reason `product_media`) once the Shopify media writer exists.
-- The Shopify adapter uploads each blob through `stagedUploadsCreate` and
-  attaches it with `productCreateMedia` (Variant images through
-  `productVariantAppendMedia`). Cloud never needs to be publicly reachable.
-- `commerce_media_mappings(provider_key, product_id, image_id, sha256,
-  external_media_id)` records what MoonLight created. Only media in that table
-  is reordered or deleted; media added by hand in Shopify stays untouched, as
-  ADR-0044 requires today. A changed `sha256` for the same `image_id` replaces
-  that one media item.
-- A product whose blobs have not all arrived is published without the missing
-  images and re-evaluated when they arrive.
+- The media projector and every newly stored blob enqueue the commerce
+  re-evaluation (reason `product_media`) in their own transaction.
+- Desired order: the Product gallery (main image first, then position), then
+  each Variant gallery in Variant order; a file shown twice is sent once;
+  files that have not arrived are skipped until they do.
+- A new file goes through `stagedUploadsCreate` (resource `IMAGE`, POST), a
+  multipart upload to the returned HTTPS target without the access token,
+  and `fileCreate`. It is recorded in
+  `commerce_media_mappings(provider_key, product_id, sha256, store_id,
+  external_product_id, external_media_id)` before anything else can fail,
+  then attached to the sellable product with `fileUpdate(referencesToAdd)`
+  once its status is `READY`. At most 10 uploads per sync; anything still
+  processing returns retryable `MEDIA_PENDING`.
+- Only recorded media is reordered (`productReorderMedia`, MoonLight images
+  first), set on variants (`productVariantsBulkUpdate` `mediaId`, the main
+  image of each Variant gallery when the product has several variants) or
+  deleted (`fileDelete`, when no gallery shows the file or the sellable
+  product changed). Media added by hand is never touched. A file Shopify
+  fails to process stays recorded and unattached until the image changes,
+  so it is not uploaded in a loop.
+- The adapter re-checks the product's `moonlight` ownership metafields and
+  the SHA-256 of the stored bytes before uploading.
+- Every image mutation goes through the existing mutation barrier and
+  settles under the same definitive-outcome rule.
 
 ## Consequences
 
 - One more catalog stream and processor (`allProjectionProcessors`, the
   pending-projection count and the projection CLI list it).
-- Both baselines change before the first install (Cloud section
-  `00047_product_media` in `00111_baseline`; Retail `100000_baseline` edited in
-  place): every development database is recreated.
+- Both baselines change before the first install (Cloud sections
+  `00047_product_media` and `00048_commerce_media_mappings` in
+  `00112_baseline`; Retail `100001_baseline`, renamed per Retail ADR-049):
+  every development database is recreated.
 - Blobs that no snapshot references any more stay in `media_blobs` until a
   later clean-up job; they are never served to anyone but Cloud itself.
 - Threat model: a device can store at most 5 MiB per request and only files

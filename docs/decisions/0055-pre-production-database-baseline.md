@@ -149,7 +149,10 @@ on all money-bearing documents.
   `catalog_products.media_revision` and `media_blobs` (ADR-0056: Retail
   product images in Cloud). Development databases built from 00110 must be
   recreated.
-- Phase 3: `00111_baseline.sql` is the current baseline (TargetVersion 111);
+- Baseline 00112 (2026-10-28) adds `commerce_media_mappings` (ADR-0056 step
+  2: Shopify media MoonLight created). Development databases built from 00111
+  must be recreated.
+- Phase 3: `00112_baseline.sql` is the current baseline (TargetVersion 112);
   `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
   constraints, indexes, views, functions, triggers) and
   `TestSchemaMatchesReviewedTarget` fails on any drift.

@@ -6,6 +6,7 @@ package catalog
 // arrive before or after it.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -177,4 +178,34 @@ func NormalizeProductMedia(entries []ProductMediaEntry) []ProductMediaEntry {
 	out := append([]ProductMediaEntry{}, entries...)
 	sortProductMedia(out)
 	return out
+}
+
+// ProductMedia is one projected gallery image of a Product and whether its
+// file has reached Cloud (ADR-0056). VariantID nil is the Product gallery.
+type ProductMedia struct {
+	ImageID     string
+	VariantID   *string
+	Position    int
+	IsPrimary   bool
+	SHA256      string
+	ContentType string
+	ByteSize    int
+	Width       int
+	Height      int
+	Available   bool
+}
+
+// MediaRepository is the optional media read capability of a Repository.
+type MediaRepository interface {
+	CatalogProductMedia(ctx context.Context, productID string) ([]ProductMedia, error)
+}
+
+// GetProductMedia returns one Product's galleries, Product gallery first.
+// A repository without the media capability has no images.
+func (s Service) GetProductMedia(ctx context.Context, productID string) ([]ProductMedia, error) {
+	repo, ok := s.repo.(MediaRepository)
+	if !ok {
+		return nil, nil
+	}
+	return repo.CatalogProductMedia(ctx, productID)
 }

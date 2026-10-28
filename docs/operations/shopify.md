@@ -37,6 +37,7 @@ database, logs, metrics, CLI output, or any response.
 | `write_inventory` | `inventoryActivate` + `inventorySetQuantities` at the configured location |
 | `write_publications` | `publishablePublish` / `publishableUnpublish` on the configured publication |
 | `read_orders` | `GetOrder` (webhook-driven order reconciliation) |
+| `write_files` / `read_files` | product images: `stagedUploadsCreate`, `fileCreate`, `fileUpdate`, `fileDelete` and file status reads (ADR-0056) |
 
 Do not request customer, theme, discount, or other unrelated scopes.
 
@@ -91,16 +92,42 @@ Arabic → English → empty. Unicode is preserved exactly. Cost is never
 sent.
 
 Manually managed Shopify state is preserved: tags, collections,
-images/media, SEO, vendor, product type, unrelated metafields, manual
+media added by hand, SEO, vendor, product type, unrelated metafields, manual
 variants, and unrelated publications are never written or cleared
 (`productSet` list-replacement semantics are used ONLY for create; all
 updates use targeted mutations).
 
-Retail product images now reach Cloud (`catalog_product_media` +
-`media_blobs`, ADR-0056), but this adapter does not push them yet. The
-planned media writer (staged uploads, `productCreateMedia`, ownership in
-`commerce_media_mappings`) is described in ADR-0056 and will only touch
-media MoonLight created.
+### Product images (ADR-0056)
+
+Retail gallery images reach Cloud (`catalog_product_media` + `media_blobs`)
+and the adapter publishes them after product, variant and stock updates, so
+stock never waits for an image:
+
+- Each new file goes through `stagedUploadsCreate`, a multipart POST to the
+  returned HTTPS target (the access token is never sent there) and
+  `fileCreate` (file name `moonlight-<first 16 hash characters>.jpg|.png`,
+  alt text = the product title). The file is recorded in
+  `commerce_media_mappings` at once, then attached to the product with
+  `fileUpdate` when Shopify reports it `READY`.
+- MoonLight images come first, in Retail order (the Product gallery main
+  image is the Shopify main image), then each Variant gallery. Media added
+  by hand keeps its order after them. On products with several variants,
+  each Shopify variant shows its Variant gallery main image.
+- An image removed in Retail is deleted from Shopify (`fileDelete`); a
+  MoonLight image deleted by hand in Shopify is uploaded again on the next
+  sync. To remove a picture for good, remove it in Retail.
+- At most 10 uploads per sync. Files still processing, or not uploaded yet,
+  make the re-evaluation retry later (`MEDIA_PENDING`). A file Shopify
+  cannot process stays in the Files list unattached and is not retried until
+  the image changes.
+- Images whose bytes have not reached Cloud are skipped; storing the file
+  re-evaluates the product.
+- Framed products show their images on the bundle product shoppers buy.
+- If a `fileCreate` response is lost after Shopify created the file, the
+  mutation barrier stays uncertain like every other mutation. If recording
+  the file fails afterwards, the next sync uploads it again and the first
+  copy stays unattached in Shopify Files.
+- The WooCommerce adapter does not publish images.
 
 ### Ownership metadata (namespace `moonlight`)
 

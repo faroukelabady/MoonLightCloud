@@ -41,3 +41,30 @@ FROM media_blobs WHERE sha256 = $1;
 
 -- name: MediaBlobsPresent :many
 SELECT sha256 FROM media_blobs WHERE sha256 = ANY(sqlc.arg(hashes)::text[]);
+
+-- name: CatalogProductMediaForCommerce :many
+-- Commerce desired state: every gallery entry and whether its file has
+-- arrived. media_blobs is joined by key only; its content is not read here.
+SELECT m.image_id, m.variant_id, m.position, m.is_primary, m.sha256,
+       m.content_type, m.byte_size, m.width, m.height,
+       (b.sha256 IS NOT NULL)::boolean AS available
+FROM catalog_product_media m
+LEFT JOIN media_blobs b ON b.sha256 = m.sha256
+WHERE m.product_id = $1
+ORDER BY m.variant_id NULLS FIRST, m.position;
+
+-- name: EnqueueMediaBlobReevaluations :execrows
+-- A newly stored file re-evaluates every Product whose gallery names it, so
+-- online channels pick up images whose bytes arrived after the snapshot.
+INSERT INTO commerce_product_reevaluations (product_id, store_id, reason, requested_at, next_attempt_at)
+SELECT DISTINCT p.product_id, p.store_id, 'product_media', now(), now()
+FROM catalog_product_media m
+JOIN catalog_products p ON p.product_id = m.product_id
+WHERE m.sha256 = $1
+ON CONFLICT (product_id) DO UPDATE SET
+    requested_at = now(),
+    requested_generation = commerce_product_reevaluations.requested_generation + 1,
+    reason = EXCLUDED.reason,
+    next_attempt_at = now(),
+    attempts = 0,
+    last_error_code = NULL;

@@ -156,6 +156,14 @@ func (d CatalogProjection) ProjectProductMedia(ctx context.Context, event catalo
 		_ = tx.Rollback(ctx)
 		return d.persistCatalogRetry(ctx, processor, attempt.euid, now, ErrProjection, "media revision write failed", err)
 	}
+	// Online channels converge the new galleries through the durable
+	// commerce re-evaluation, committed with the projection.
+	if err := q.EnqueueProductReevaluation(ctx, sqlcgen.EnqueueProductReevaluationParams{
+		ProductID: puid, StoreID: productRow.StoreID, Reason: "product_media",
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return d.persistCatalogRetry(ctx, processor, attempt.euid, now, ErrProjection, "reevaluation enqueue failed", err)
+	}
 	return finishCatalogAttempt(ctx, q, tx, processor, attempt.euid, count, now, catalog.ProcProcessed, "", "")
 }
 
@@ -176,3 +184,34 @@ func storedProductMedia(rows []sqlcgen.CatalogProductMediaByProductRow) []catalo
 	}
 	return catalog.NormalizeProductMedia(entries)
 }
+
+// CatalogProductMedia reads one Product's galleries with file presence
+// (commerce desired state). Image bytes are not read here.
+func (d CatalogProjection) CatalogProductMedia(ctx context.Context, productID string) ([]catalog.ProductMedia, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	puid, err := parseUUID(productID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).CatalogProductMediaForCommerce(ctx, puid)
+	if err != nil {
+		return nil, reportErr("catalog product media", err)
+	}
+	out := make([]catalog.ProductMedia, 0, len(rows))
+	for _, row := range rows {
+		entry := catalog.ProductMedia{
+			ImageID: uuidString(row.ImageID), Position: int(row.Position), IsPrimary: row.IsPrimary,
+			SHA256: row.Sha256, ContentType: row.ContentType, ByteSize: int(row.ByteSize),
+			Width: int(row.Width), Height: int(row.Height), Available: row.Available,
+		}
+		if row.VariantID.Valid {
+			value := uuidString(row.VariantID)
+			entry.VariantID = &value
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+var _ catalog.MediaRepository = CatalogProjection{}

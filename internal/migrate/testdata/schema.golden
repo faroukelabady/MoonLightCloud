@@ -320,6 +320,13 @@ catalog_tags.source_payload_hash bytea NOT NULL
 catalog_tags.source_received_at timestamptz NOT NULL
 catalog_tags.projected_at timestamptz NOT NULL DEFAULT now()
 catalog_tags.store_id uuid NOT NULL
+commerce_media_mappings.provider_key text NOT NULL
+commerce_media_mappings.product_id uuid NOT NULL
+commerce_media_mappings.sha256 text NOT NULL
+commerce_media_mappings.store_id uuid NOT NULL
+commerce_media_mappings.external_product_id text NOT NULL
+commerce_media_mappings.external_media_id text NOT NULL
+commerce_media_mappings.created_at timestamptz NOT NULL DEFAULT now()
 commerce_online_order_addresses.provider_key text NOT NULL
 commerce_online_order_addresses.external_order_id text NOT NULL
 commerce_online_order_addresses.kind text NOT NULL
@@ -1346,6 +1353,19 @@ catalog_tags catalog_tags_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores
 catalog_tags catalog_tags_store_id_not_null NOT NULL store_id
 catalog_tags catalog_tags_store_slug_unique UNIQUE (store_id, slug)
 catalog_tags catalog_tags_tag_id_not_null NOT NULL tag_id
+commerce_media_mappings commerce_media_mappings_created_at_not_null NOT NULL created_at
+commerce_media_mappings commerce_media_mappings_external_media_id_check CHECK (((char_length(external_media_id) >= 1) AND (char_length(external_media_id) <= 200)))
+commerce_media_mappings commerce_media_mappings_external_media_id_not_null NOT NULL external_media_id
+commerce_media_mappings commerce_media_mappings_external_product_id_check CHECK (((char_length(external_product_id) >= 1) AND (char_length(external_product_id) <= 200)))
+commerce_media_mappings commerce_media_mappings_external_product_id_not_null NOT NULL external_product_id
+commerce_media_mappings commerce_media_mappings_pkey PRIMARY KEY (provider_key, product_id, sha256)
+commerce_media_mappings commerce_media_mappings_product_id_not_null NOT NULL product_id
+commerce_media_mappings commerce_media_mappings_provider_key_check CHECK ((provider_key ~ '^[a-z0-9][a-z0-9_-]{0,63}$'::text))
+commerce_media_mappings commerce_media_mappings_provider_key_not_null NOT NULL provider_key
+commerce_media_mappings commerce_media_mappings_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+commerce_media_mappings commerce_media_mappings_sha256_not_null NOT NULL sha256
+commerce_media_mappings commerce_media_mappings_store_id_fkey FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE RESTRICT
+commerce_media_mappings commerce_media_mappings_store_id_not_null NOT NULL store_id
 commerce_online_order_addresses commerce_online_order_addresses_address_1_not_null NOT NULL address_1
 commerce_online_order_addresses commerce_online_order_addresses_address_2_not_null NOT NULL address_2
 commerce_online_order_addresses commerce_online_order_addresses_city_not_null NOT NULL city
@@ -2192,6 +2212,9 @@ CREATE INDEX idx_catalog_products_type ON public.catalog_products USING btree (p
 CREATE UNIQUE INDEX catalog_tags_pkey ON public.catalog_tags USING btree (tag_id)
 CREATE UNIQUE INDEX catalog_tags_store_slug_unique ON public.catalog_tags USING btree (store_id, slug)
 CREATE INDEX idx_catalog_tags_store ON public.catalog_tags USING btree (store_id)
+CREATE UNIQUE INDEX commerce_media_mappings_pkey ON public.commerce_media_mappings USING btree (provider_key, product_id, sha256)
+CREATE UNIQUE INDEX idx_commerce_media_mappings_external ON public.commerce_media_mappings USING btree (provider_key, external_media_id)
+CREATE INDEX idx_commerce_media_mappings_store ON public.commerce_media_mappings USING btree (store_id)
 CREATE UNIQUE INDEX commerce_online_order_addresses_pkey ON public.commerce_online_order_addresses USING btree (provider_key, external_order_id, kind)
 CREATE UNIQUE INDEX commerce_online_order_lines_pkey ON public.commerce_online_order_lines USING btree (provider_key, external_order_id, external_line_id)
 CREATE INDEX idx_commerce_online_order_lines_configuration ON public.commerce_online_order_lines USING btree (provider_key, external_order_id, configuration_id)

@@ -34,6 +34,13 @@ type SyncResult struct {
 	VariantMappingsCreated  int
 	VariantInventoryUpdated int
 	VariantOperationKey     string
+	// ADR-0056 media outcome (zero without the media capability).
+	MediaCreated  int
+	MediaAttached int
+	MediaDeleted  int
+	MediaPending  int
+	MediaFailed   int
+	MediaMissing  int
 }
 
 // CommerceService is the synchronous orchestration seam Phase 6B
@@ -44,6 +51,7 @@ type CommerceService struct {
 	providers *Registry
 	mappings  ProductMappingRepository
 	source    CommerceProductSource
+	media     MediaContentReader
 	log       *slog.Logger
 }
 
@@ -199,6 +207,9 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 		s.logInfo("commerce sync variants", "provider", string(key), "product", productID,
 			"external", upserted.ExternalProductID, "variants", result.VariantsSynced,
 			"published", desired.Published, "mapped", mapped)
+		if err := s.syncMedia(ctx, provider, key, productID, desired, upserted.ExternalProductID, &result); err != nil {
+			return SyncResult{}, err
+		}
 		return result, nil
 	}
 
@@ -221,6 +232,10 @@ func (s *CommerceService) SyncProduct(ctx context.Context, providerKey, productI
 	s.logInfo("commerce sync", "provider", string(key), "product", productID,
 		"external", upserted.ExternalProductID, "published", desired.Published,
 		"quantity", quantity, "mapped", mapped)
+	// Images run last: stock and publication never wait for files.
+	if err := s.syncMedia(ctx, provider, key, productID, desired, upserted.ExternalProductID, &result); err != nil {
+		return SyncResult{}, err
+	}
 	return result, nil
 }
 
