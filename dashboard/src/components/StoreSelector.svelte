@@ -46,18 +46,24 @@
 </div>
 
 <style>
+	/* Wraps instead of overflowing: the error and Retry move under the
+	   selector rather than sliding beneath the account controls. */
 	.storeselect {
 		display: inline-flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
+		min-width: 0;
+		max-width: 100%;
 	}
 	.storelabel {
 		font-size: 0.85rem;
 		opacity: 0.85;
 	}
 	.picker {
-		width: 16rem;
-		max-width: 100%;
+		flex: 1 1 12rem;
+		min-width: 10rem;
+		max-width: 16rem;
 	}
 	.storeerror {
 		font-size: 0.78rem;
