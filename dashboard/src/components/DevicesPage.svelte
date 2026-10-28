@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { tb } from '../lib/i18n.svelte.js';
+	import { lang, tb } from '../lib/i18n.svelte.js';
+	import { absoluteTime } from '../lib/time.js';
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { DeviceRow, DeviceCommandWire, StoreRow } from '../lib/api';
@@ -104,74 +105,118 @@
 	}
 </script>
 
-<section class="card" aria-label="Devices">
-	<h2>Devices</h2>
-	<p class="hint">online means Cloud heard from the Retail app recently (a sync upload or a control poll). It does not prove data is current; "last data" shows when sync data last arrived.</p>
+<section class="card devices" aria-label="Devices">
+	<h2>{tb('الأجهزة', 'Devices')}</h2>
+	<p class="hint">{tb('متصل يعني أن السحابة سمعت من تطبيق المتجر مؤخرًا. لا يثبت ذلك أن البيانات محدّثة؛ عمود آخر بيانات يوضح متى وصلت آخر بيانات مزامنة.', 'Online means Cloud heard from the Retail app recently (a sync upload or a control poll). It does not prove data is current; Last data shows when sync data last arrived.')}</p>
 	{#if loading}<p>Loading…</p>
 	{:else if error}<p role="alert">Failed: {error}</p>
 	{:else if devices.length === 0}<p>No devices registered.</p>
 	{:else}
-		<ul>
-			{#each devices as d (d.device_id)}
-				{@const active = d.active_command ?? null}
-				{@const terminal = lastTerminal(d)}
-				{@const past = history(d)}
-				<li data-testid="device-row" data-device={d.device_id}>
-					<strong>{d.name || d.device_id}</strong>
-					<span data-testid="connectivity">{d.connectivity}</span>
-					{#if d.store_id}
-						<span data-testid="device-store" title={d.store_id}>{d.store_name || d.store_id}</span>
-					{:else}
-						<span data-testid="device-store-unbound" title="no Store binding">unbound</span>
-					{/if}
-					{#if incidentSummary[d.device_id]}
-						<span data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
-					{/if}
-					<span title="last seen">{d.last_seen_at ?? 'never'}</span>
-					<span data-testid="last-data" title="newest sync data received">last data: {d.last_data_at ?? 'none yet'}</span>
-					{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
-						<span class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
-							{d.control === 'never_polled'
-								? tb('متصل بالمزامنة ولم يستعلم بعد', 'Syncing, not polled yet — Sync Now waits for its first poll')
-								: tb('متصل بالمزامنة وقناة التحكم متأخرة', 'Syncing, control poll stale — Sync Now may be delayed')}
-						</span>
-					{/if}
-					{#if active}
-						<span data-testid="command-status">{userFacing(active.status)}</span>
-						<button class="btn-secondary btn-sm" disabled title="A sync request is already active">Sync Now</button>
-					{:else}
-						{#if terminal}
-							<span data-testid="last-sync">Last sync: {userFacing(terminal.status)}</span>
-						{:else}
-							<span data-testid="command-status">idle</span>
-						{/if}
-						<button class="btn-secondary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
-						{#if past.length > 0}
-							<ul data-testid="sync-history">
-								{#each past as c (c.id)}
-									<li>{userFacing(c.status)} — {c.requested_at}</li>
-								{/each}
-							</ul>
-						{/if}
-					{/if}
-				</li>
-			{/each}
-		</ul>
+		<div class="table-wrap">
+			<table class="grid-table" data-testid="devices-table">
+				<thead>
+					<tr>
+						<th scope="col">{tb('الجهاز', 'Device')}</th>
+						<th scope="col">{tb('المتجر', 'Store')}</th>
+						<th scope="col">{tb('الاتصال', 'Connection')}</th>
+						<th scope="col">{tb('آخر ظهور', 'Last seen')}</th>
+						<th scope="col">{tb('آخر بيانات', 'Last data')}</th>
+						<th scope="col">{tb('الحوادث', 'Incidents')}</th>
+						<th scope="col">{tb('المزامنة', 'Sync')}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each devices as d (d.device_id)}
+						{@const active = d.active_command ?? null}
+						{@const terminal = lastTerminal(d)}
+						{@const past = history(d)}
+						<tr data-testid="device-row" data-device={d.device_id}>
+							<th scope="row">
+								<div class="name">{d.name || d.device_id}</div>
+								{#if d.name}<div class="mono sub" dir="ltr">{d.device_id}</div>{/if}
+							</th>
+							<td>
+								{#if d.store_id}
+									<span data-testid="device-store" title={d.store_id}>{d.store_name || d.store_id}</span>
+								{:else}
+									<span class="muted" data-testid="device-store-unbound" title="no Store binding">unbound</span>
+								{/if}
+							</td>
+							<td>
+								<span class="pill" class:ok={d.connectivity === 'online'} data-testid="connectivity">{d.connectivity}</span>
+								{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
+									<div class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
+										{d.control === 'never_polled'
+											? tb('متصل بالمزامنة ولم يستعلم بعد', 'Syncing, not polled yet — Sync Now waits for its first poll')
+											: tb('متصل بالمزامنة وقناة التحكم متأخرة', 'Syncing, control poll stale — Sync Now may be delayed')}
+									</div>
+								{/if}
+							</td>
+							<td>{#if d.last_seen_at}<time datetime={d.last_seen_at} title={d.last_seen_at}>{absoluteTime(d.last_seen_at, lang())}</time>{:else}<span class="muted">never</span>{/if}</td>
+							<td data-testid="last-data">{#if d.last_data_at}<time datetime={d.last_data_at} title={d.last_data_at}>{absoluteTime(d.last_data_at, lang())}</time>{:else}<span class="muted">none yet</span>{/if}</td>
+							<td>
+								{#if incidentSummary[d.device_id]}
+									<span class="pill warn-pill" data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
+								{:else}<span class="muted">—</span>{/if}
+							</td>
+							<td><div class="sync">
+								{#if active}
+									<span data-testid="command-status">{userFacing(active.status)}</span>
+									<button class="btn-secondary btn-sm" disabled title="A sync request is already active">Sync Now</button>
+								{:else}
+									{#if terminal}
+										<span data-testid="last-sync">Last sync: {userFacing(terminal.status)}</span>
+									{:else}
+										<span class="muted" data-testid="command-status">idle</span>
+									{/if}
+									<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
+									{#if past.length > 0}
+										<details>
+											<summary>{tb('السجل', 'History')} ({past.length})</summary>
+											<ul data-testid="sync-history">
+												{#each past as c (c.id)}
+													<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time></li>
+												{/each}
+											</ul>
+										</details>
+									{/if}
+								{/if}
+							</div></td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
 	{#if stores !== null}
-		<h3>Stores</h3>
+		<h3>{tb('المتاجر', 'Stores')}</h3>
 		{#if stores.length === 0}<p>No stores registered.</p>
 		{:else}
-			<ul>
-				{#each stores as st (st.store_id)}
-					<li data-testid="store-row" data-store={st.store_id}>
-						<strong>{st.display_name}</strong>
-						<span class="mono">{st.store_id}</span>
-						<span>{st.device_count} device(s)</span>
-					</li>
-				{/each}
-			</ul>
+			<div class="table-wrap">
+				<table class="grid-table" data-testid="stores-table">
+					<thead>
+						<tr>
+							<th scope="col">{tb('المتجر', 'Store')}</th>
+							<th scope="col">{tb('المعرّف', 'Store ID')}</th>
+							<th scope="col">{tb('الأجهزة', 'Devices')}</th>
+							<th scope="col">{tb('المنطقة الزمنية', 'Time zone')}</th>
+							<th scope="col">{tb('الحالة', 'Status')}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each stores as st (st.store_id)}
+							<tr data-testid="store-row" data-store={st.store_id}>
+								<th scope="row">{st.display_name}</th>
+								<td class="mono" dir="ltr">{st.store_id}</td>
+								<td>{st.device_count} device(s)</td>
+								<td dir="ltr">{st.timezone}</td>
+								<td>{st.status}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		{/if}
 	{/if}
 </section>
@@ -179,8 +224,83 @@
 <style>
 	.hint {
 		color: var(--muted, #666);
+		font-size: 0.82rem;
+	}
+	.table-wrap {
+		overflow-x: auto;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-control);
+		margin-block: 8px 16px;
+	}
+	.grid-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.82rem;
+	}
+	.grid-table th,
+	.grid-table td {
+		padding: 8px 10px;
+		text-align: start;
+		vertical-align: top;
+		border-bottom: 1px solid var(--border);
+	}
+	.grid-table tbody tr:last-child > * {
+		border-bottom: 0;
+	}
+	.grid-table thead th {
+		background: var(--surface-muted);
+		font-size: 0.76rem;
+		font-weight: 700;
+		white-space: nowrap;
+	}
+	.grid-table tbody th {
+		font-weight: 600;
+	}
+	.grid-table tbody tr:hover {
+		background: #f8fafd;
+	}
+	.name {
+		font-weight: 700;
+	}
+	.sub {
+		font-size: 0.7rem;
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+	.mono {
+		font-family: ui-monospace, monospace;
+	}
+	.pill {
+		display: inline-block;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: var(--surface-muted);
+		font-size: 0.76rem;
+		font-weight: 600;
+	}
+	.pill.ok {
+		background: #e8f6ee;
+		color: #15803d;
+	}
+	.warn-pill {
+		background: #fdf4e7;
+		color: #92400e;
 	}
 	.warn {
 		color: var(--warning, #a15c00);
+		font-size: 0.74rem;
+		margin-top: 4px;
+	}
+	.sync {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 4px;
+		min-width: 140px;
+	}
+	.sync ul {
+		margin: 4px 0 0;
+		padding-inline-start: 16px;
+		font-size: 0.74rem;
 	}
 </style>

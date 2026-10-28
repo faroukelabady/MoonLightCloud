@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/svelte';
 import App from '../App.svelte';
 import Sidebar from './Sidebar.svelte';
-import ActivityTotalsCard from './ActivityTotalsCard.svelte';
+import CountsTable from './CountsTable.svelte';
 import BranchCard from './BranchCard.svelte';
 import SyncHealthCard from './SyncHealthCard.svelte';
 import { dashboardApi } from '../lib/api.js';
@@ -26,10 +26,10 @@ const overview = {
 	}
 } as unknown as OverviewResponse;
 
-describe('Transactions and units card', () => {
+describe('Transactions and units table', () => {
 	it('puts sale and return transactions and units in one table', () => {
 		setLang('en');
-		render(ActivityTotalsCard, { props: { data: overview, mode: 'all', status: 'loaded', errStatus: null, onretry: () => {} } });
+		render(CountsTable, { props: { data: overview, mode: 'all' } });
 		const table = screen.getByTestId('activity-totals');
 		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Sales', 'Returns']);
 		expect(within(table).getByRole('row', { name: /Transactions/ }).textContent).toMatch(/Transactions\s*482\s*7/);
@@ -39,7 +39,7 @@ describe('Transactions and units card', () => {
 
 	it('scopes sales to the currency mode and keeps returns whole-period', () => {
 		setLang('en');
-		render(ActivityTotalsCard, { props: { data: overview, mode: 'USD', status: 'loaded', errStatus: null, onretry: () => {} } });
+		render(CountsTable, { props: { data: overview, mode: 'USD' } });
 		const table = screen.getByTestId('activity-totals');
 		expect(within(table).getByRole('row', { name: /Transactions/ }).textContent).toMatch(/82\s*7/);
 		expect(screen.getByText('Scope: USD')).toBeTruthy();
@@ -52,20 +52,35 @@ describe('Branch card', () => {
 		return_transactions: 1, units_returned: 1, subtotal_minor: sales, sales_total_minor: sales, refund_total_minor: '0', returned_cost_minor: '0'
 	});
 
-	it('shows one row per branch with EGP and USD columns for every metric', async () => {
+	it('shows one row per branch: sales per currency, then transactions and units, with no bars', () => {
 		setLang('en');
 		const rows = [row('EGP', '1245800', 12), row('USD', '25000', 3), { ...row('EGP', '9900', 1), shop_name_ar: 'أسوان', shop_name_en: 'Aswan' }];
-		render(BranchCard, { props: { rows, status: 'loaded', errStatus: null, onretry: () => {} } });
+		const { container } = render(BranchCard, { props: { rows, status: 'loaded', errStatus: null, onretry: () => {} } });
 		const table = screen.getByTestId('branch-table');
-		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Branch / Channel', 'EGP', 'USD']);
+		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Branch / Channel', 'Sales EGP', 'Sales USD', 'Transactions', 'Units']);
 		const bodyRows = within(table).getAllByRole('row').slice(1);
 		expect(bodyRows).toHaveLength(2);
-		expect(bodyRows[0].textContent).toMatch(/Luxor.*12,458 EGP.*\$250\.00/);
+		// Counts add up across the currencies: 12 + 3 transactions, 24 + 6 units.
+		expect(bodyRows[0].textContent).toMatch(/Luxor.*12,458 EGP.*\$250\.00.*15.*30/);
 		// A branch without USD sales says so instead of showing zero.
 		expect(within(bodyRows[1]).getAllByRole('cell')[1].textContent?.trim()).toBe('—');
+		expect(container.querySelector('.fill, .track')).toBeNull();
+	});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Transactions' }));
-		expect(bodyRows[0].textContent).toMatch(/Luxor.*12\s*.*Returned 1.*3/);
+	it('follows the currency mode from the top bar', () => {
+		setLang('en');
+		render(BranchCard, { props: { rows: [row('EGP', '1245800', 12), row('USD', '25000', 3)], status: 'loaded', errStatus: null, onretry: () => {}, mode: 'USD' } });
+		const table = screen.getByTestId('branch-table');
+		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Branch / Channel', 'Sales USD', 'Transactions', 'Units']);
+		expect(within(table).getAllByRole('row')[1].textContent).toMatch(/\$250\.00\s*3\s*6/);
+	});
+
+	it('holds the online comparison in the same card', () => {
+		setLang('en');
+		const online = { generated_at: '', store_id: null, provider_key: '', active_statuses: [], currency_totals: [{ currency: 'EGP', orders: 2, value_minor: '4400', active_orders: 1, active_value_minor: '2200' }], status_counts: [], provider_totals: [] };
+		render(BranchCard, { props: { rows: [row('EGP', '100', 1)], status: 'loaded', errStatus: null, onretry: () => {}, online: online as never, onlineStatus: 'loaded' } });
+		expect(screen.getByRole('heading', { name: /Finalized sales vs online orders/ })).toBeTruthy();
+		expect(screen.getByLabelText('Online Orders').textContent).toContain('order value EGP');
 	});
 });
 
@@ -90,6 +105,27 @@ describe('Sync health headline', () => {
 	});
 });
 
+describe('Sync health card', () => {
+	it('shows no shop configured yet on a yellow headline when no Store exists', () => {
+		setLang('en');
+		render(SyncHealthCard, { props: { health: null, status: 'loaded', errStatus: null, onretry: () => {}, onrefresh: () => {}, noShop: true } });
+		const hero = screen.getByTestId('sync-hero');
+		expect(hero.dataset.level).toBe('noshop');
+		expect(hero.textContent).toContain('No shop configured yet');
+		expect(screen.queryByTestId('sync-table')).toBeNull();
+	});
+
+	it('lays the sync figures out as a table of sales and returns', () => {
+		setLang('en');
+		const health = { freshness: { projection_backlog_count: 2, blocked_sale_event_count: 0, cloud_projection_complete: false, return_backlog_count: 0, return_blocked_count: 0, return_projection_complete: true }, pending_count: 1, retry_count: 1, return_pending_count: 0, return_retry_count: 0 } as unknown as SyncHealth;
+		render(SyncHealthCard, { props: { health, status: 'loaded', errStatus: null, onretry: () => {}, onrefresh: () => {} } });
+		const table = screen.getByTestId('sync-table');
+		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Sales', 'Returns']);
+		expect(within(table).getAllByRole('rowheader').map((h) => h.textContent?.trim())).toEqual(['Latest event', 'Backlog', 'Blocked', 'Status']);
+		expect(within(table).getByRole('row', { name: /Backlog/ }).textContent).toMatch(/2\s*1 pending · 1 retry/);
+	});
+});
+
 describe('Overview', () => {
 	it('drops the Sales Summary and Categories & Tags pages from the sidebar', () => {
 		setLang('en');
@@ -99,7 +135,7 @@ describe('Overview', () => {
 		expect(screen.getByRole('button', { name: 'Reports' })).toBeTruthy();
 	});
 
-	it('opens a former page as the overview, sync health first, with tags and the online comparison', async () => {
+	it('opens a former page as the overview, sync health first, with the currency switch in the top bar', async () => {
 		setLang('en');
 		window.history.replaceState({}, '', '/dashboard/categories?currency=all');
 		for (const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi, k as any).mockImplementation((async () => ({})) as any);
@@ -122,7 +158,10 @@ describe('Overview', () => {
 		expect(window.location.search).toBe('?currency=all');
 		const cells = [...container.querySelectorAll('.dash.ov > .cell')].map((c) => [...c.classList].find((k) => k.startsWith('a-')));
 		expect(cells[0]).toBe('a-sync');
-		for (const area of ['a-sales', 'a-kpis', 'a-trend', 'a-products', 'a-cat', 'a-tags', 'a-branch', 'a-online', 'a-latest', 'a-act', 'a-orders']) expect(cells).toContain(area);
+		for (const area of ['a-sales', 'a-trend', 'a-products', 'a-cat', 'a-tags', 'a-branch', 'a-latest', 'a-act', 'a-orders']) expect(cells).toContain(area);
+		// One currency switch, in the top bar.
+		expect(container.querySelector('.topbar [data-testid="currency-mode"]')).toBeTruthy();
+		expect(container.querySelectorAll('.dash [aria-pressed]').length).toBe(container.querySelectorAll('.dash .cell:not(.a-sales) [aria-pressed]').length);
 		await waitFor(() => expect(dashboardApi.tags).toHaveBeenCalled());
 		expect(dashboardApi.orderSummary).toHaveBeenCalled();
 	});

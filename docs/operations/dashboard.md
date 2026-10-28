@@ -112,21 +112,39 @@ Categories & Tags pages are part of it and have no sidebar entries
 (`/dashboard/sales`, `/daily`, `/products` and `/categories` open Overview
 and the address bar is rewritten to `/dashboard/`).
 
+- Top bar: the period's dates (and time zone) sit under the period
+  buttons; the Store selector lists Store names (a short ID is added only
+  when two Stores share a name); one All / EGP / USD switch drives every
+  Overview card; the signed-in user is a chip with a person icon; the
+  language button is blue and Logout red, in the same shape.
 - Sync health opens the grid at the reading-order start (top right in
-  Arabic, top left in English) with a raised border. Its headline states
-  the real condition: "Needs attention" when any sale or return event is
-  blocked, "catching up" while either projection is incomplete, and "up
-  to date" only when both are complete with nothing blocked.
-- Net sales keeps money (net, gross, refunds, average transaction value,
-  FX line). One "Transactions and units" table holds sale and return
-  transactions and units: sales and returned units follow the currency
-  mode; return transactions have no per-currency count and say so in a
-  currency mode.
-- Sales by branch shows one row per branch with EGP and USD columns for
-  sales value, transactions and units (no FX conversion; bars compare
-  within a currency column only).
-- Top tags and the online-orders comparison sit on Overview beside the
-  category and branch cards.
+  Arabic, top left in English) with a raised border and Refresh in its
+  header. Its headline states the real condition: "No shop configured
+  yet" (yellow) when no Store is registered, "Needs attention" when any
+  sale or return event is blocked, "catching up" while either projection
+  is incomplete, and "up to date" only when both are complete with
+  nothing blocked. Latest event, backlog, blocked and status are a table
+  of sales and returns.
+- Sales and profit is one card: a money table (EGP, USD and the total in
+  EGP; sales, refunds, net sales, tax when used, cost of goods, net
+  profit, average sale) beside the transactions-and-units table, with net
+  sales and net profit in the header. `overview.profit` supplies the
+  profit: net sales - net tax - net cost (cost of sold lines minus cost of
+  returned lines; lines without a cost add nothing), per recorded
+  currency and in EGP with every sale and refund converted at its own FX
+  snapshot. Sales and returned units follow the currency mode; return
+  transactions have no per-currency count and say so in a currency mode.
+- Sales by branch and online store is one card: a table with one row per
+  branch (sales per currency, refunds, transactions, units; nothing
+  converted, no bars), then the finalized-sales vs online-orders
+  comparison, which never sums the two.
+- Daily trend, top products, categories, top tags, latest sales,
+  activity and online orders follow.
+
+Devices lists devices and Stores as tables. Catalog Admin shows each
+tab's list beside the selected item's editor (closable), with state
+pills, names instead of IDs for the current type and top category, and
+prices labelled in piasters / cents.
 
 ## Reports page (printable sales report, stocktaking & zakat)
 

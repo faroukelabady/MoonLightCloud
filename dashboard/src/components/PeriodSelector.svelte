@@ -5,11 +5,14 @@
 	let {
 		params,
 		timezone,
-		onchange
+		onchange,
+		showTimezone = true
 	}: {
 		params: PeriodParams;
 		timezone: string;
 		onchange: (p: PeriodParams) => void;
+		// The top bar shows the time zone with the period's dates instead.
+		showTimezone?: boolean;
 	} = $props();
 
 	// Neutral initial state: the L01 effect below is the single source that
@@ -90,7 +93,7 @@
 		</div>
 		{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{/if}
-	<div class="tz muted" dir="ltr">{timezone}</div>
+	{#if showTimezone}<div class="tz muted" dir="ltr">{timezone}</div>{/if}
 </div>
 
 <style>

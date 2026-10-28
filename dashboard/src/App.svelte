@@ -3,7 +3,7 @@
 	import Sidebar from './components/Sidebar.svelte';
 	import PeriodSelector from './components/PeriodSelector.svelte';
 	import SalesCard from './components/SalesCard.svelte';
-	import ActivityTotalsCard from './components/ActivityTotalsCard.svelte';
+	import Segmented from './components/Segmented.svelte';
 import TrendChart from './components/TrendChart.svelte';
 	import TopProducts from './components/TopProducts.svelte';
 	import type { ProductDisplayRow } from './components/TopProducts.svelte';
@@ -11,8 +11,7 @@ import TrendChart from './components/TrendChart.svelte';
 	import type { CategoryDisplayRow } from './components/CategoryCard.svelte';
 	import BranchCard from './components/BranchCard.svelte';
 	import TagCard from './components/TagCard.svelte';
-	import OnlineComparison from './components/OnlineComparison.svelte';
-	import CatalogHealthCard from './components/CatalogHealthCard.svelte';
+import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	import type { TagListResponse, OrderAnalyticsResponse, CatalogHealthResponse } from './lib/api.js';
 	import SyncHealthCard from './components/SyncHealthCard.svelte';
 	import ActivityCard from './components/ActivityCard.svelte';
@@ -602,18 +601,43 @@ let branchContext = $derived.by(() => {
 					<div class="muted brandsub">Your business insights in one place</div>
 				</div>
 				<div class="periodblock">
-					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} />
+					<div class="periodcol">
+						<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} />
+						{#if periodRange}<div class="range num" dir="ltr" data-testid="period-range">{periodRange} <span class="tzname">· {overview?.timezone ?? 'Africa/Cairo'}</span></div>{/if}
+					</div>
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
-					{#if periodRange}<div class="muted range num" dir="ltr">{periodRange}</div>{/if}
+					{#if route === 'overview'}
+						<!-- One currency choice for every Overview card. -->
+						<div class="currencyctl" data-testid="currency-mode" role="group" aria-label={tb('العملة', 'Currency')} title={tb('العملة', 'Currency')}>
+							<Segmented
+								size="sm"
+								options={[
+									{ value: 'all', ar: 'الكل', en: 'All' },
+									{ value: 'EGP', ar: 'EGP' },
+									{ value: 'USD', ar: 'USD' }
+								]}
+								value={currency}
+								onchange={(v) => setMode(v as 'all' | 'EGP' | 'USD')}
+							/>
+						</div>
+					{/if}
 				</div>
 				<div class="actorblock">
 					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
-					{#if operatorName}<div class="muted op">{operatorName}</div>{/if}
+					{#if operatorName}
+						<div class="userchip" data-testid="current-user">
+							<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+							<span>{operatorName}</span>
+						</div>
+					{/if}
 					<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={t('Switch to English', 'التبديل إلى العربية')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
 						{arabic() ? 'English' : 'العربية'}
 					</button>
-					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>{tb('خروج', 'Logout')}</button>
+					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
+						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
+						{tb('خروج', 'Logout')}
+					</button>
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
@@ -622,15 +646,12 @@ let branchContext = $derived.by(() => {
 					<!-- First in the grid: the reading-order start, so top right in
 					     Arabic and top left in English. -->
 					<div class="cell a-sync">
-						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
+						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} noShop={storesState === 'loaded' && stores.length === 0} />
 					</div>
 				{/if}
 				{#if route === 'overview'}
 					<div class="cell a-sales">
-						<SalesCard data={overview} mode={currency} onmode={setMode} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
-					</div>
-					<div class="cell a-kpis">
-						<ActivityTotalsCard data={overview} mode={currency} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
+						<SalesCard data={overview} mode={currency} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
 					</div>
 				{/if}
 				{#if route === 'sync'}
@@ -669,19 +690,22 @@ let branchContext = $derived.by(() => {
 							status={dailyState}
 							errStatus={dailyErr}
 							onretry={retryAll}
-							mode={currency}
-							onmode={setMode}
 						/>
 					</div>
 				{/if}
 				{#if route === 'overview'}
 					<div class="cell a-branch">
-						<BranchCard rows={branches} status={branchesState} errStatus={branchesErr} onretry={retryAll} />
-					</div>
-				{/if}
-				{#if route === 'overview'}
-					<div class="cell a-online">
-						<OnlineComparison online={online} retail={overview} status={overviewState === 'error' || onlineState === 'error' ? 'error' : overviewState === 'loading' || onlineState === 'loading' ? 'loading' : onlineState} errStatus={overviewState === 'error' ? overviewErr : onlineErr} {currency} onretry={retryAll} />
+						<BranchCard
+							rows={branches}
+							status={branchesState}
+							errStatus={branchesErr}
+							onretry={retryAll}
+							mode={currency}
+							{online}
+							retail={overview}
+							onlineStatus={overviewState === 'error' || onlineState === 'error' ? 'error' : overviewState === 'loading' || onlineState === 'loading' ? 'loading' : onlineState}
+							onlineErr={overviewState === 'error' ? overviewErr : onlineErr}
+						/>
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'sync'}
@@ -819,9 +843,27 @@ let branchContext = $derived.by(() => {
 		align-items: center;
 		gap: 6px 12px;
 	}
+	.periodcol {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 3px;
+	}
+	/* The period's dates sit under the period buttons, in body text colour. */
 	.range {
-		font-size: 0.75rem;
-		margin-top: 2px;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--text);
+		padding-inline-start: 2px;
+	}
+	.currencyctl {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.tzname {
+		font-weight: 400;
+		color: var(--text-muted);
 	}
 	.actorblock {
 		display: flex;
@@ -832,36 +874,61 @@ let branchContext = $derived.by(() => {
 	.branchctx {
 		font-size: 0.82rem;
 		font-weight: 600;
-		max-width: 180px;
+		max-width: 150px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.op {
-		font-size: 0.78rem;
+	.userchip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 10px;
+		border-radius: 999px;
+		background: var(--primary-soft);
+		color: var(--text);
+		font-size: 0.82rem;
+		font-weight: 700;
+		max-width: 200px;
 	}
-	.langswitch {
+	.userchip span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.userchip svg {
+		flex-shrink: 0;
+		color: var(--primary);
+	}
+	/* Language and logout share one button shape: blue and red. */
+	.langswitch,
+	.logout {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
 		font-size: 0.8rem;
-		color: var(--text);
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		padding: 5px 10px;
-		cursor: pointer;
-	}
-	.langswitch:hover {
-		border-color: var(--primary);
-		color: var(--primary);
-	}
-	.logout {
-		background: transparent;
-		border: 1px solid var(--border);
+		font-weight: 600;
+		color: #fff;
+		border: 0;
 		border-radius: var(--radius-control);
 		padding: 6px 12px;
-		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.langswitch {
+		background: var(--primary);
+	}
+	.langswitch:hover {
+		background: var(--color-primary-dark);
+	}
+	.logout {
+		background: var(--danger);
+	}
+	.logout:hover {
+		background: #991b1b;
+	}
+	.logout:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 	/* Every row of the 12-column grid is filled and its cards stretch to the
 	same height, so no card leaves an empty band beside or below it. The
@@ -890,6 +957,11 @@ let branchContext = $derived.by(() => {
 	.dash.ov .a-orders {
 		max-height: 560px;
 	}
+	/* The branch card also holds the online comparison. */
+	.dash.ov .a-branch,
+	.dash.ov .a-tags {
+		max-height: 640px;
+	}
 	.cell { grid-column: span 6; }
 	.a-orders { grid-column: span 12; }
 	/* Sync health opens the overview at the reading-order start (top right
@@ -900,29 +972,25 @@ let branchContext = $derived.by(() => {
 		box-shadow: 0 8px 22px rgba(29, 91, 215, 0.14);
 	}
 	.dash.ov .a-sync { order: 1; grid-column: span 4; }
-	.dash.ov .a-sales { order: 2; grid-column: span 5; }
-	.dash.ov .a-kpis { order: 3; grid-column: span 3; }
-	.dash.ov .a-trend { order: 4; grid-column: span 6; }
-	.dash.ov .a-products { order: 5; grid-column: span 3; }
-	.dash.ov .a-cat { order: 6; grid-column: span 3; }
-	.dash.ov .a-branch { order: 7; grid-column: span 5; }
-	.dash.ov .a-tags { order: 8; grid-column: span 3; }
-	.dash.ov .a-online { order: 9; grid-column: span 4; }
-	.dash.ov .a-latest { order: 10; grid-column: span 6; }
-	.dash.ov .a-act { order: 11; grid-column: span 6; }
-	.dash.ov .a-orders { order: 12; }
+	.dash.ov .a-sales { order: 2; grid-column: span 8; }
+	.dash.ov .a-trend { order: 3; grid-column: span 6; }
+	.dash.ov .a-products { order: 4; grid-column: span 3; }
+	.dash.ov .a-cat { order: 5; grid-column: span 3; }
+	.dash.ov .a-branch { order: 6; grid-column: span 7; }
+	.dash.ov .a-tags { order: 7; grid-column: span 5; }
+	.dash.ov .a-latest { order: 8; grid-column: span 6; }
+	.dash.ov .a-act { order: 9; grid-column: span 6; }
+	.dash.ov .a-orders { order: 10; }
 	@media (max-width: 1280px) {
 		.dash.ov .a-sync { order: 1; grid-column: span 5; }
 		.dash.ov .a-sales { order: 2; grid-column: span 7; }
-		.dash.ov .a-kpis { order: 3; grid-column: span 5; }
-		.dash.ov .a-trend { order: 4; grid-column: span 7; }
+		.dash.ov .a-trend { order: 3; grid-column: span 7; }
+		.dash.ov .a-products { order: 4; grid-column: span 5; }
 		.dash.ov .a-cat { order: 5; grid-column: span 5; }
-		.dash.ov .a-products { order: 6; grid-column: span 7; }
+		.dash.ov .a-branch { order: 6; grid-column: span 7; }
 		.dash.ov .a-tags { order: 7; grid-column: span 5; }
-		.dash.ov .a-branch { order: 8; grid-column: span 7; }
-		.dash.ov .a-act { order: 9; grid-column: span 5; }
-		.dash.ov .a-latest { order: 10; grid-column: span 7; }
-		.dash.ov .a-online { order: 11; grid-column: span 12; }
+		.dash.ov .a-latest { order: 8; grid-column: span 7; }
+		.dash.ov .a-act { order: 9; grid-column: span 12; }
 	}
 	@media (max-width: 900px) {
 		.shell {

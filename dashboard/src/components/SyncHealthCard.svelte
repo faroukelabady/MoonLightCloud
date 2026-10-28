@@ -7,13 +7,28 @@
 	import { absoluteTime } from '../lib/time.js';
 	import type { SyncHealth } from '../lib/api.js';
 
-	let { health, status, errStatus, onretry, onrefresh }: { health: SyncHealth | null; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void; onrefresh: () => void } =
-		$props();
+	let {
+		health,
+		status,
+		errStatus,
+		onretry,
+		onrefresh,
+		noShop = false
+	}: {
+		health: SyncHealth | null;
+		status: 'loading' | 'loaded' | 'empty' | 'error';
+		errStatus: number | null;
+		onretry: () => void;
+		onrefresh: () => void;
+		// No Store is registered yet, so nothing can sync.
+		noShop?: boolean;
+	} = $props();
 
 	// The headline states the real condition: blocked events need someone,
 	// a backlog is still catching up, and only a complete projection with
 	// nothing blocked reads as up to date.
-	let level = $derived.by((): 'ok' | 'catching' | 'blocked' => {
+	let level = $derived.by((): 'ok' | 'catching' | 'blocked' | 'noshop' => {
+		if (noShop) return 'noshop';
 		const f = health?.freshness;
 		if (!f) return 'catching';
 		if (f.blocked_sale_event_count > 0 || f.return_blocked_count > 0) return 'blocked';
@@ -22,12 +37,14 @@
 	const headlines = {
 		ok: ['متصل · المبيعات والمرتجعات محدّثة', 'Connected · sales & returns up to date'],
 		catching: ['متصل · جارٍ اللحاق بالأحداث', 'Connected · catching up'],
-		blocked: ['يحتاج انتباه · أحداث محظورة', 'Needs attention · blocked events']
+		blocked: ['يحتاج انتباه · أحداث محظورة', 'Needs attention · blocked events'],
+		noshop: ['لا يوجد متجر مُعدّ بعد', 'No shop configured yet']
 	} as const;
 	const icons = {
 		ok: 'M4 12.5l5 5L20 6.5',
 		catching: 'M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-		blocked: 'M12 8v5M12 16.5v.5M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'
+		blocked: 'M12 8v5M12 16.5v.5M10.3 3.9 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+		noshop: 'M4 10l1.5-5h13L20 10M4 10v9h16v-9M4 10h16M9 19v-5h6v5'
 	} as const;
 </script>
 
@@ -44,10 +61,9 @@
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
-	{:else if !health}
+	{:else if !health && !noShop}
 		<EmptyState ar="لا توجد بيانات مزامنة" en="No sync data" />
 	{:else}
-		{@const f = health.freshness}
 		<div class="hero level-{level}" role="status" data-testid="sync-hero" data-level={level}>
 			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={icons[level]} /></svg></span>
 			<div>
@@ -55,39 +71,41 @@
 				{#if arabic()}<div class="sub">{headlines[level][1]}</div>{/if}
 			</div>
 		</div>
-		<div class="grid">
-			<div class="ghead" aria-hidden="true"></div>
-			<div class="ghead">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</div>
-			<div class="ghead">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</div>
-			<div class="gl">{t('آخر حدث', 'Latest event')}{#if arabic()}<br /><span class="muted sub-en">Latest event</span>{/if}</div>
-			<div class="gv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</div>
-			<div class="gv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</div>
-			<div class="gl">{t('متأخر', 'Backlog')}{#if arabic()}<br /><span class="muted sub-en">Backlog</span>{/if}</div>
-			<div class="gv num">{f.projection_backlog_count}<span class="muted det"> · {health.pending_count} pending · {health.retry_count} retry</span></div>
-			<div class="gv num">{f.return_backlog_count}<span class="muted det"> · {health.return_pending_count} pending · {health.return_retry_count} retry</span></div>
-			<div class="gl">{t('محظور', 'Blocked')}{#if arabic()}<br /><span class="muted sub-en">Blocked</span>{/if}</div>
-			<div class="gv num">{f.blocked_sale_event_count}</div>
-			<div class="gv num">{f.return_blocked_count}</div>
-			<div class="gl">{t('الحالة', 'Status')}{#if arabic()}<br /><span class="muted sub-en">Status</span>{/if}</div>
-			<div class="gv">
-				{#if f.blocked_sale_event_count > 0}
-					<span class="badge warn">{tb('محظورة', 'Blocked')}</span>
-				{:else if f.cloud_projection_complete}
-					<span class="badge ok">{tb('مكتمل', 'Complete')}</span>
-				{:else}
-					<span class="badge">{tb('يلحق', 'Catching up')}</span>
-				{/if}
-			</div>
-			<div class="gv">
-				{#if f.return_blocked_count > 0}
-					<span class="badge warn">{tb('محظورة', 'Blocked')}</span>
-				{:else if f.return_projection_complete}
-					<span class="badge ok">{tb('مكتمل', 'Complete')}</span>
-				{:else}
-					<span class="badge">{tb('يلحق', 'Catching up')}</span>
-				{/if}
-			</div>
-		</div>
+		{#if noShop || !health}
+			<p class="muted noshop-hint">{t('سجّل جهاز متجر من صفحة الأجهزة لتبدأ المزامنة.', "Register a shop's device on the Devices page to start syncing.")}</p>
+		{:else}
+		{@const f = health.freshness}
+		<table class="health" data-testid="sync-table" aria-label={t('حالة المزامنة', 'Sync status')}>
+			<thead>
+				<tr>
+					<td></td>
+					<th scope="col">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
+					<th scope="col">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<th scope="row">{t('آخر حدث', 'Latest event')}{#if arabic()}<span class="sub-en"> · Latest event</span>{/if}</th>
+					<td class="num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</td>
+					<td class="num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</td>
+				</tr>
+				<tr>
+					<th scope="row">{t('متأخر', 'Backlog')}{#if arabic()}<span class="sub-en"> · Backlog</span>{/if}</th>
+					<td class="num"><strong>{f.projection_backlog_count}</strong><span class="muted det">{health.pending_count} pending · {health.retry_count} retry</span></td>
+					<td class="num"><strong>{f.return_backlog_count}</strong><span class="muted det">{health.return_pending_count} pending · {health.return_retry_count} retry</span></td>
+				</tr>
+				<tr>
+					<th scope="row">{t('محظور', 'Blocked')}{#if arabic()}<span class="sub-en"> · Blocked</span>{/if}</th>
+					<td class="num"><strong>{f.blocked_sale_event_count}</strong></td>
+					<td class="num"><strong>{f.return_blocked_count}</strong></td>
+				</tr>
+				<tr>
+					<th scope="row">{t('الحالة', 'Status')}{#if arabic()}<span class="sub-en"> · Status</span>{/if}</th>
+					<td>{#if f.blocked_sale_event_count > 0}<span class="badge warn">{tb('محظورة', 'Blocked')}</span>{:else if f.cloud_projection_complete}<span class="badge ok">{tb('مكتمل', 'Complete')}</span>{:else}<span class="badge">{tb('يلحق', 'Catching up')}</span>{/if}</td>
+					<td>{#if f.return_blocked_count > 0}<span class="badge warn">{tb('محظورة', 'Blocked')}</span>{:else if f.return_projection_complete}<span class="badge ok">{tb('مكتمل', 'Complete')}</span>{:else}<span class="badge">{tb('يلحق', 'Catching up')}</span>{/if}</td>
+				</tr>
+			</tbody>
+		</table>
 		{#if health.last_error_code}
 			<div class="muted errmsg">{t('آخر خطأ', 'Last error')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic() && health.last_error_label_en}<span class="sub-en"> · {health.last_error_label_en}</span>{/if}</div>
 		{/if}
@@ -98,6 +116,7 @@
 			{t('التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.', 'Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.')}{#if arabic()}
 			<span class="sub-en note-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
 		</div>
+		{/if}
 	{/if}
 </Card>
 
@@ -147,32 +166,53 @@
 		line-height: 1.25;
 		color: var(--text-muted);
 	}
-	.grid {
-		display: grid;
-		grid-template-columns: auto 1fr 1fr;
-		gap: 2px 8px;
-		align-items: center;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		padding: 2px 8px;
+	.health {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
 		font-size: 0.76rem;
 	}
-	.ghead {
-		font-weight: 700;
-		font-size: 0.72rem;
+	.health th,
+	.health td {
+		padding: 3px 4px;
+		border-bottom: 1px solid var(--border);
 		text-align: center;
+		vertical-align: middle;
+		line-height: 1.2;
+		overflow-wrap: anywhere;
+	}
+	.health tbody tr:last-child > * {
+		border-bottom: 0;
+	}
+	.health thead th {
+		font-size: 0.72rem;
+		font-weight: 700;
 		white-space: nowrap;
 	}
-	.gl {
+	.health tbody th {
+		text-align: start;
+		font-weight: 600;
 		font-size: 0.74rem;
-		line-height: 1.15;
+		width: 30%;
 	}
-	.gv {
-		font-weight: 700;
+	.health .sub-en {
+		font-weight: 400;
+		color: var(--text-muted);
+	}
+	.health strong {
+		font-size: 0.82rem;
+	}
+	.health .det {
+		display: block;
+	}
+	.hero.level-noshop {
+		--tone: #ca8a04;
+		--tone-soft: #fef3c7;
+		--tone-text: #854d0e;
+	}
+	.noshop-hint {
+		margin: 4px 0 0;
 		font-size: 0.8rem;
-		text-align: center;
-		min-width: 0;
-		overflow-wrap: anywhere;
 	}
 	.det {
 		font-weight: 400;

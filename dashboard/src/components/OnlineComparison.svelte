@@ -13,7 +13,8 @@
 		status,
 		errStatus,
 		onretry,
-		currency = 'all'
+		currency = 'all',
+		bare = false
 	}: {
 		online: OrderAnalyticsResponse | null;
 		retail: OverviewResponse | null;
@@ -21,6 +22,8 @@
 		errStatus: number | null;
 		onretry: () => void;
 		currency?: 'all' | 'EGP' | 'USD';
+		// bare renders the comparison inside another card (no frame).
+		bare?: boolean;
 	} = $props();
 
 	function cur(c: string): 'EGP' | 'USD' {
@@ -28,7 +31,7 @@
 	}
 </script>
 
-<Card ar="البيعات النهائية مقابل الطلبات عبر الإنترنت" en="Finalized Retail Sales vs Online Orders">
+{#snippet body()}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -105,9 +108,24 @@
 			<span class="th-en">Online orders are operational provider orders and may not represent additional recognized revenue beyond finalized Retail Sales. The two sources are shown separately and never summed.</span>{/if}
 		</p>
 	{/if}
-</Card>
+{/snippet}
+
+{#if bare}
+	<section class="bare" aria-labelledby="online-compare-heading">
+		<h3 id="online-compare-heading" class="bare-title">{t('المبيعات النهائية مقابل الطلبات عبر الإنترنت', 'Finalized sales vs online orders')}{#if arabic()}<span class="th-en"> · Finalized sales vs online orders</span>{/if}</h3>
+		{@render body()}
+	</section>
+{:else}
+	<Card ar="المبيعات النهائية مقابل الطلبات عبر الإنترنت" en="Finalized Retail Sales vs Online Orders">
+		{@render body()}
+	</Card>
+{/if}
 
 <style>
+	.bare-title {
+		font-size: 0.9rem;
+		margin: 0 0 0.4rem;
+	}
 	.compare {
 		display: grid;
 		grid-template-columns: 1fr 1fr;

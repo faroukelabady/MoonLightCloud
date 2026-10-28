@@ -67,6 +67,19 @@ export interface OverviewResponse {
 		max_rate_microrate?: string;
 		multiple_rates_used: boolean;
 	};
+	// Gross profit after refunds (net sales - net tax - net cost), per
+	// recorded currency and in EGP with each event converted at its own rate.
+	profit?: {
+		by_currency: (ProfitFigures & { currency: string })[];
+		egp: ProfitFigures;
+	};
+}
+
+export interface ProfitFigures {
+	net_sales_minor: string;
+	net_tax_minor: string;
+	net_cost_minor: string;
+	profit_minor: string;
 }
 
 export interface DailyRow {

@@ -52,7 +52,7 @@ describe('DevicesPage', () => {
 		render(DevicesPage);
 		const rows = await screen.findAllByTestId('device-row');
 		expect(within(rows[0]).getByTestId('control-indicator').textContent).toMatch(/not polled yet/);
-		expect(within(rows[0]).getByTestId('last-data').textContent).toMatch(/2026-09-29T09:58:00Z/);
+		expect(within(rows[0]).getByTestId('last-data').querySelector('time')?.getAttribute('datetime')).toBe('2026-09-29T09:58:00Z');
 		expect(within(rows[1]).getByTestId('control-indicator').textContent).toMatch(/control poll stale/);
 		expect(within(rows[2]).queryByTestId('control-indicator')).toBeNull();
 	});

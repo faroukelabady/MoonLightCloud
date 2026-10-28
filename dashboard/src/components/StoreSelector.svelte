@@ -26,14 +26,22 @@
 	function shortID(id: string): string {
 		return id.length > 13 ? `${id.slice(0, 8)}…` : id;
 	}
-	let options = $derived([
-		{ value: '', label: tb('كل المتاجر', 'All Stores') },
-		...stores.map((s) => ({ value: s.store_id, label: `${s.display_name} (${shortID(s.store_id)})`, dir: 'ltr' as const }))
-	]);
+	// Store names only; a short ID is added just when two Stores share a
+	// name, so the choices stay distinguishable.
+	let options = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const s of stores) counts.set(s.display_name, (counts.get(s.display_name) ?? 0) + 1);
+		return [
+			{ value: '', label: tb('كل المتاجر', 'All Stores') },
+			...stores.map((s) => ({
+				value: s.store_id,
+				label: (counts.get(s.display_name) ?? 0) > 1 ? `${s.display_name} (${shortID(s.store_id)})` : s.display_name
+			}))
+		];
+	});
 </script>
 
 <div class="storeselect" aria-busy={state === 'loading'}>
-	<span class="storelabel" aria-hidden="true">{tb('المتجر', 'Store')}</span>
 	<div class="picker">
 		<SingleSelect id="store-scope" label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'} hideLabel testid="store-selector" {value} {options} {onchange} />
 	</div>
@@ -56,14 +64,10 @@
 		min-width: 0;
 		max-width: 100%;
 	}
-	.storelabel {
-		font-size: 0.85rem;
-		opacity: 0.85;
-	}
 	.picker {
 		flex: 1 1 12rem;
 		min-width: 10rem;
-		max-width: 16rem;
+		max-width: 13rem;
 	}
 	.storeerror {
 		font-size: 0.78rem;

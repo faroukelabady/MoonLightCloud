@@ -509,7 +509,25 @@
 			void loadCommands();
 		});
 	});
+	// Names, not truncated IDs, for the current type and top category.
+	function typeName(id: string | null | undefined): string {
+		const t = productTypes.find((x) => x.type_id === id);
+		return t ? `${t.name_ar} (${t.code})` : id ? `${id.slice(0, 8)}…` : '—';
+	}
+	function categoryName(id: string | null | undefined): string {
+		return categories.find((x) => x.category_id === id)?.name_ar ?? (id ? `${id.slice(0, 8)}…` : '—');
+	}
 </script>
+
+{#snippet yesNo(on: boolean)}
+	<span class="pill" class:on>{on ? tb('نعم', 'Yes') : tb('لا', 'No')}</span>
+{/snippet}
+{#snippet pending(on: boolean)}
+	{#if on}<span class="pill pending">{tb('تغيير معلق', 'Pending change')}</span>{:else}<span class="muted">—</span>{/if}
+{/snippet}
+{#snippet closeButton(onclose: () => void)}
+	<button type="button" class="close" aria-label={tb('إغلاق', 'Close')} onclick={onclose}>×</button>
+{/snippet}
 
 <div class="admin card">
 	{#if !store}
@@ -523,10 +541,12 @@
 		</div>
 
 		{#if tab === 'products'}
-			<div class="row">
+			<form class="row search" onsubmit={(e) => { e.preventDefault(); void loadProducts(true); }}>
 				<input id="admin-search" type="search" placeholder={tb('SKU أو الاسم', 'SKU or name')} bind:value={search} aria-label="Search products" />
-				<button class="btn-secondary btn-sm" type="button" onclick={() => void loadProducts(true)}>{tb('بحث', 'Search')}</button>
-			</div>
+				<button class="btn-secondary btn-sm" type="submit">{tb('بحث', 'Search')}</button>
+			</form>
+			<div class="split" class:has-detail={!!selectedProduct || productState !== 'idle'}>
+			<div class="list">
 			{#if productsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
 			{:else if productsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button class="btn-secondary btn-sm" type="button" onclick={() => void loadProducts(true)}>{tb('إعادة', 'Retry')}</button></p>
 			{:else if productsState === 'empty'}<p class="muted">{tb('لا توجد منتجات.', 'No products.')}</p>
@@ -535,17 +555,18 @@
 					<thead><tr><th>{tb('المتغيرات', 'Variants')}</th><th>{tb('الاسم', 'Name')}</th><th>{tb('أونلاين', 'Online')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each products as p (p.product_id)}
-							<tr>
+							<tr class:selected={selectedProduct?.product_id === p.product_id}>
 								<td class="num" dir="ltr">{variantSummary(p)}</td>
 								<td><button type="button" class="link" onclick={() => void openProduct(p.product_id)}>{p.name_ar}</button></td>
-								<td>{p.sell_online ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
-								<td>{p.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
+								<td>{@render yesNo(p.sell_online)}</td>
+								<td>{@render pending(p.has_pending)}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 				{#if productCursor}<button class="btn-secondary btn-sm" type="button" onclick={() => void loadProducts(false)}>{tb('المزيد', 'More')}</button>{/if}
 			{/if}
+			</div>
 			{#if productState === 'loading'}
 			<p role="status">{tb('جارٍ تحميل المنتج…', 'Loading Product…')}</p>
 		{:else if productState === 'error'}
@@ -554,8 +575,16 @@
 		{#if selectedProduct}
 				{@const p = selectedProduct}
 				<section class="detail" aria-label="Product editor">
-					<h3>{p.name_ar} <span class="muted num" dir="ltr">{variantSummary(p)}</span></h3>
-					<p class="muted">{arabic() ? 'مراجعة الكتالوج' : 'Catalog revision'} <span class="num" dir="ltr">{p.catalog_revision}</span> · {arabic() ? 'سياسة البيع' : 'Sales policy'} <span class="num" dir="ltr">{p.sales_policy_revision}</span> · {arabic() ? 'التكوينات' : 'Configurations'} <span class="num" dir="ltr">{p.configuration_revision}</span> · {arabic() ? 'المخزون المشتق (قراءة فقط)' : 'Derived stock (read-only)'} <span class="num" dir="ltr">{p.derived_stock}</span></p>
+					<header class="detail-head">
+						<h3>{p.name_ar} <span class="muted num" dir="ltr">{variantSummary(p)}</span></h3>
+						{@render closeButton(() => (selectedProduct = null))}
+					</header>
+					<dl class="facts">
+						<div><dt>{arabic() ? 'مراجعة الكتالوج' : 'Catalog revision'}</dt><dd class="num" dir="ltr">{p.catalog_revision}</dd></div>
+						<div><dt>{arabic() ? 'سياسة البيع' : 'Sales policy'}</dt><dd class="num" dir="ltr">{p.sales_policy_revision}</dd></div>
+						<div><dt>{arabic() ? 'التكوينات' : 'Configurations'}</dt><dd class="num" dir="ltr">{p.configuration_revision}</dd></div>
+						<div><dt>{arabic() ? 'المخزون المشتق (قراءة فقط)' : 'Derived stock (read-only)'}</dt><dd class="num" dir="ltr">{p.derived_stock}</dd></div>
+					</dl>
 					{#if p.variants && p.variants.length > 0}
 						<h4>{tb('المتغيرات', 'Variants')}</h4>
 						<table class="data">
@@ -566,24 +595,24 @@
 										<td class="num" dir="ltr">{v.sku}</td>
 										<td>{v.attributes.map((a) => `${a.definition_name_ar}: ${a.name_ar}`).join(' · ') || '—'}</td>
 										<td class="num" dir="ltr">{v.stock_quantity}</td>
-										<td>{v.deleted ? tb('محذوف', 'Deleted') : v.is_active ? tb('نشط', 'Active') : tb('معطّل', 'Inactive')}</td>
+										<td><span class="pill" class:on={!v.deleted && v.is_active}>{v.deleted ? tb('محذوف', 'Deleted') : v.is_active ? tb('نشط', 'Active') : tb('معطّل', 'Inactive')}</span></td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					{/if}
-					{#if p.has_pending}<p class="notice ok" role="status">{tb('يوجد تغيير معلق — القيم الحالية أدناه هي المعروضة من السحابة، وليست نجاحًا بعد.', 'Pending change exists — values below are current projections, not success.')}</p>{/if}
-					<h4>{tb('البيانات والأسعار', 'Details &amp; prices')}</h4>
+					{#if p.has_pending}<p class="notice pending-note" role="status">{tb('يوجد تغيير معلق — القيم الحالية أدناه هي المعروضة من السحابة، وليست نجاحًا بعد.', 'Pending change exists — values below are current projections, not success.')}</p>{/if}
+					<h4>{tb('البيانات والأسعار', 'Details & prices')}</h4>
 					<div class="grid">
 						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="pd-ar" type="text" value={p.name_ar} /></label>
 						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="pd-en" type="text" value={p.name_en ?? ''} dir="ltr" /></label>
-						<label class="field">{tb('سعر الجنيه (وحدات صغرى)', 'EGP minor')} <input id="pd-egp" type="text" inputmode="numeric" value={p.egp_price_minor} dir="ltr" /></label>
-						<label class="field">{tb('سعر الدولار (وحدات صغرى)', 'USD minor')} <input id="pd-usd" type="text" inputmode="numeric" value={p.usd_price_minor ?? '0'} dir="ltr" /></label>
-						<label class="field">{tb('التكلفة (وحدات صغرى)', 'Cost minor')} <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
+						<label class="field">{tb('سعر الجنيه (بالقروش)', 'EGP price (piasters)')} <input id="pd-egp" type="text" inputmode="numeric" value={p.egp_price_minor} dir="ltr" /></label>
+						<label class="field">{tb('سعر الدولار (بالسنتات)', 'USD price (cents)')} <input id="pd-usd" type="text" inputmode="numeric" value={p.usd_price_minor ?? '0'} dir="ltr" /></label>
+						<label class="field">{tb('التكلفة (بالقروش)', 'Cost (piasters)')} <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
 					</div>
-					<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveProductDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
+					<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveProductDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
 					<h4>{tb('النوع', 'Product type')}</h4>
-					<p class="muted">{arabic() ? 'النوع الحالي:' : 'Current type:'} <span dir="ltr">{p.product_type_id?.slice(0, 8) ?? '—'}…</span> {tb('— التغيير يخضع لتحقق التوافق في الكاشير.', 'Assignment is compatibility-checked by Retail.')}</p>
+					<p class="muted">{arabic() ? 'النوع الحالي:' : 'Current type:'} <strong>{typeName(p.product_type_id)}</strong> {tb('— التغيير يخضع لتحقق التوافق في الكاشير.', 'Assignment is compatibility-checked by Retail.')}</p>
 					<div class="row">
 						<SingleSelect
 							id="pt-assign"
@@ -593,13 +622,13 @@
 							options={productTypes.map((t) => ({ value: t.type_id, label: `${t.name_ar} (${t.code})` }))}
 							onchange={(v) => (picks['pt:' + p.product_id] = v)}
 						/>
-						<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void assignProductType()}>{tb('إدراج تغيير النوع', 'Queue type change')}</button>
+						<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void assignProductType()}>{tb('إدراج تغيير النوع', 'Queue type change')}</button>
 					</div>
 					<h4>{tb('التوفر أونلاين', 'Online availability')}</h4>
-					<p class="muted">{arabic() ? 'القيمة الحالية:' : 'Current value:'} {p.sell_online ? tb('مفعّل', 'On') : tb('معطّل', 'Off')} — {arabic() ? 'التبديل لا يغيّر sell_offline.' : 'Switching does not change sell_offline.'}</p>
+					<p class="muted">{arabic() ? 'القيمة الحالية:' : 'Current value:'} <span class="pill" class:on={p.sell_online}>{p.sell_online ? tb('مفعّل', 'On') : tb('معطّل', 'Off')}</span> — {arabic() ? 'التبديل لا يغيّر sell_offline.' : 'Switching does not change sell_offline.'}</p>
 					<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveProductOnline(!p.sell_online)}>{p.sell_online ? tb('تعطيل البيع أونلاين', 'Disable online') : tb('تفعيل البيع أونلاين', 'Enable online')}</button>
 					<h4>{tb('التصنيف', 'Classification')}</h4>
-					<p class="muted">{arabic() ? 'الفئة العليا الحالية:' : 'Current top category:'} <span dir="ltr">{p.top_category_id.slice(0, 8)}…</span> {tb('— يستخدم الكاشير نفس مدققات العمل.', 'Retail reuses canonical validators.')}</p>
+					<p class="muted">{arabic() ? 'الفئة العليا الحالية:' : 'Current top category:'} <strong>{categoryName(p.top_category_id)}</strong> {tb('— يستخدم الكاشير نفس مدققات العمل.', 'Retail reuses canonical validators.')}</p>
 					<SingleSelect
 						id="pc-top"
 						label={tb('الفئة العليا', 'Top category')}
@@ -619,7 +648,7 @@
 							<label class="check"><input type="checkbox" class="pc-tag-check" value={t.tag_id} checked={p.tag_ids.includes(t.tag_id)} /> {t.name_ar}</label>
 						{/each}
 					</fieldset>
-					<div><button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveProductClassification()}>{tb('إدراج تعديل التصنيف', 'Queue classification change')}</button></div>
+					<div><button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveProductClassification()}>{tb('إدراج تعديل التصنيف', 'Queue classification change')}</button></div>
 					<h4>{tb('خيارات الإطار', 'Frame options')}</h4>
 					<p class="muted">{tb('تُدار خيارات الإطار في تطبيق الكاشير وتظهر هنا للعرض فقط.', 'Frame choices are managed in the Retail app and shown here read-only.')}</p>
 					{#if configurations.length === 0}<p class="muted">{tb('لا توجد خيارات.', 'No frame choices.')}</p>
@@ -632,9 +661,12 @@
 					{/if}
 				</section>
 			{/if}
+			</div>
 		{/if}
 
 		{#if tab === 'types'}
+			<div class="split" class:has-detail={!!selectedType}>
+			<div class="list">
 			{#if typesState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
 			{:else if typesState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button class="btn-secondary btn-sm" type="button" onclick={() => void loadTypes()}>{tb('إعادة', 'Retry')}</button></p>
 			{:else if typesState === 'empty'}<p class="muted">{tb('لا توجد أنواع.', 'No types.')}</p>
@@ -643,43 +675,50 @@
 					<thead><tr><th>{tb('النوع', 'Type')}</th><th>{tb('الرمز', 'Code')}</th><th>{tb('نشط', 'Active')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each productTypes as t (t.type_id)}
-							<tr>
+							<tr class:selected={selectedType?.type_id === t.type_id}>
 								<td><button type="button" class="link" onclick={() => (selectedType = t)}>{t.name_ar}</button></td>
 								<td class="num" dir="ltr">{t.code}</td>
-								<td>{t.is_active ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
-								<td>{t.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
+								<td>{@render yesNo(t.is_active)}</td>
+								<td>{@render pending(!!t.has_pending)}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			{/if}
-			{#if selectedType}
-				{@const t = selectedType}
-				<section class="detail" aria-label="Type editor">
-					<h3>{t.name_ar} <span class="muted num" dir="ltr">{t.code} · rev {t.type_revision}</span></h3>
-					<p class="muted">{arabic() ? 'الأبعاد' : 'Dimensions'}: {t.dimensions.join(', ') || '—'} · {arabic() ? 'القدرات' : 'Capabilities'}: {t.capabilities.join(', ') || '—'}</p>
-					<div class="grid">
-						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="tt-ar" type="text" value={t.name_ar} /></label>
-						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="tt-en" type="text" value={t.name_en} dir="ltr" /></label>
-					</div>
-					<div class="row">
-						<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveTypeDetails()}>{tb('إدراج تعديل النوع', 'Queue type change')}</button>
-						<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveTypeStatus(!t.is_active)}>{t.is_active ? tb('تعطيل', 'Deactivate') : tb('تفعيل', 'Activate')}</button>
-					</div>
-				</section>
-			{/if}
-			<section class="detail" aria-label="Create type">
+			<section class="detail create" aria-label="Create type">
 				<h3>{tb('نوع جديد', 'New type')}</h3>
 				<div class="grid">
 					<label class="field">{tb('الرمز', 'Code')} <input id="nt-code" type="text" dir="ltr" placeholder="book" /></label>
 					<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="nt-ar" type="text" /></label>
 					<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="nt-en" type="text" dir="ltr" /></label>
 				</div>
-				<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void createType()}>{tb('إدراج إنشاء النوع', 'Queue type creation')}</button>
+				<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void createType()}>{tb('إدراج إنشاء النوع', 'Queue type creation')}</button>
 			</section>
+			</div>
+			{#if selectedType}
+				{@const t = selectedType}
+				<section class="detail" aria-label="Type editor">
+					<header class="detail-head">
+						<h3>{t.name_ar} <span class="muted num" dir="ltr">{t.code} · rev {t.type_revision}</span></h3>
+						{@render closeButton(() => (selectedType = null))}
+					</header>
+					<p class="muted">{arabic() ? 'الأبعاد' : 'Dimensions'}: {t.dimensions.join(', ') || '—'} · {arabic() ? 'القدرات' : 'Capabilities'}: {t.capabilities.join(', ') || '—'}</p>
+					<div class="grid">
+						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="tt-ar" type="text" value={t.name_ar} /></label>
+						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="tt-en" type="text" value={t.name_en} dir="ltr" /></label>
+					</div>
+					<div class="row">
+						<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveTypeDetails()}>{tb('إدراج تعديل النوع', 'Queue type change')}</button>
+						<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveTypeStatus(!t.is_active)}>{t.is_active ? tb('تعطيل', 'Deactivate') : tb('تفعيل', 'Activate')}</button>
+					</div>
+				</section>
+			{/if}
+			</div>
 		{/if}
 
 		{#if tab === 'categories'}
+			<div class="split" class:has-detail={!!selectedCategory}>
+			<div class="list">
 			{#if categoriesState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
 			{:else if categoriesState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button class="btn-secondary btn-sm" type="button" onclick={() => void loadCategories()}>{tb('إعادة', 'Retry')}</button></p>
 			{:else if categoriesState === 'empty'}<p class="muted">{tb('لا توجد فئات.', 'No categories.')}</p>
@@ -688,21 +727,25 @@
 					<thead><tr><th>{tb('الاسم', 'Name')}</th><th>{tb('الحالة', 'Status')}</th><th>{tb('أونلاين', 'Online')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each categories as c (c.category_id)}
-							<tr>
+							<tr class:selected={selectedCategory?.category_id === c.category_id}>
 								<td><button type="button" class="link" onclick={() => (selectedCategory = c)}>{c.name_ar}</button></td>
-								<td>{c.status}</td>
-								<td>{c.online_enabled ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
-								<td>{c.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
+								<td><span class="pill" class:on={c.status === 'active'}>{c.status}</span></td>
+								<td>{@render yesNo(c.online_enabled)}</td>
+								<td>{@render pending(c.has_pending)}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			{/if}
+			</div>
 			{#if selectedCategory}
 				{@const c = selectedCategory}
 				<section class="detail" aria-label="Category editor">
-					<h3>{c.name_ar} <span class="muted num" dir="ltr">rev {c.catalog_revision}</span></h3>
-					{#if c.has_pending}<p class="notice ok" role="status">{tb('يوجد تغيير معلق.', 'Pending change exists.')}</p>{/if}
+					<header class="detail-head">
+						<h3>{c.name_ar} <span class="muted num" dir="ltr">rev {c.catalog_revision}</span></h3>
+						{@render closeButton(() => (selectedCategory = null))}
+					</header>
+					{#if c.has_pending}<p class="notice pending-note" role="status">{tb('يوجد تغيير معلق.', 'Pending change exists.')}</p>{/if}
 					<div class="grid">
 						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="cd-ar" type="text" value={c.name_ar} /></label>
 						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="cd-en" type="text" value={c.name_en ?? ''} dir="ltr" /></label>
@@ -714,21 +757,26 @@
 							onchange={(v) => (picks['cs:' + c.category_id] = v)}
 						/>
 					</div>
-					<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveCategoryDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
+					<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveCategoryDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
 					<h4>{tb('التوفر أونلاين للفئة', 'Category online availability')}</h4>
 					<p class="muted">{arabic() ? 'تعطيل الفئة يزيل المنتجات المتأثرة من القنوات الإلكترونية دون تغيير قيمة sell_online لكل منتج.' : 'Disabling the category removes affected products from online channels without changing each product’s sell_online.'}</p>
 					<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveCategoryOnline(!c.online_enabled)}>{c.online_enabled ? tb('تعطيل أونلاين', 'Disable online') : tb('تفعيل أونلاين', 'Enable online')}</button>
 					<h4>{tb('الآباء', 'Parents')}</h4>
 					<p class="muted">{tb('الكاشير يتحقق نهائيًا من عدم وجود دورات وحدود العمق.', 'Retail is the final DAG validator.')}</p>
-					{#each categories.filter((x) => x.category_id !== c.category_id) as other (other.category_id)}
-						<label class="check"><input type="checkbox" class="cat-parent-check" value={other.category_id} checked={c.parent_ids.includes(other.category_id)} /> {other.name_ar}</label>
-					{/each}
-					<div><button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveCategoryParents()}>{tb('إدراج تعديل الآباء', 'Queue parents change')}</button></div>
+					<div class="checks">
+						{#each categories.filter((x) => x.category_id !== c.category_id) as other (other.category_id)}
+							<label class="check"><input type="checkbox" class="cat-parent-check" value={other.category_id} checked={c.parent_ids.includes(other.category_id)} /> {other.name_ar}</label>
+						{/each}
+					</div>
+					<div><button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveCategoryParents()}>{tb('إدراج تعديل الآباء', 'Queue parents change')}</button></div>
 				</section>
 			{/if}
+			</div>
 		{/if}
 
 		{#if tab === 'tags'}
+			<div class="split" class:has-detail={!!selectedTag}>
+			<div class="list">
 			{#if tagsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
 			{:else if tagsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button class="btn-secondary btn-sm" type="button" onclick={() => void loadTags()}>{tb('إعادة', 'Retry')}</button></p>
 			{:else if tagsState === 'empty'}<p class="muted">{tb('لا توجد وسوم.', 'No tags.')}</p>
@@ -737,31 +785,38 @@
 					<thead><tr><th>{tb('الاسم', 'Name')}</th><th>slug</th><th>{tb('نشط', 'Active')}</th><th>{tb('الحالة', 'State')}</th></tr></thead>
 					<tbody>
 						{#each tags as t (t.tag_id)}
-							<tr>
+							<tr class:selected={selectedTag?.tag_id === t.tag_id}>
 								<td><button type="button" class="link" onclick={() => (selectedTag = t)}>{t.name_ar}</button></td>
 								<td class="num" dir="ltr">{t.slug}</td>
-								<td>{t.is_active ? tb('نعم', 'Yes') : tb('لا', 'No')}</td>
-								<td>{t.has_pending ? tb('تغيير معلق', 'Pending change') : '—'}</td>
+								<td>{@render yesNo(t.is_active)}</td>
+								<td>{@render pending(t.has_pending)}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			{/if}
+			</div>
 			{#if selectedTag}
 				{@const t = selectedTag}
 				<section class="detail" aria-label="Tag editor">
-					<h3>{t.name_ar} <span class="muted num" dir="ltr">rev {t.catalog_revision}</span></h3>
+					<header class="detail-head">
+						<h3>{t.name_ar} <span class="muted num" dir="ltr">rev {t.catalog_revision}</span></h3>
+						{@render closeButton(() => (selectedTag = null))}
+					</header>
 					<div class="grid">
 						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="td-ar" type="text" value={t.name_ar} /></label>
 						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="td-en" type="text" value={t.name_en ?? ''} dir="ltr" /></label>
 						<label class="check"><input id="td-active" type="checkbox" checked={t.is_active} /> {tb('نشط', 'Active')}</label>
 					</div>
-					<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void saveTagDetails()}>{tb('إدراج تعديل الوسم', 'Queue tag change')}</button>
+					<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveTagDetails()}>{tb('إدراج تعديل الوسم', 'Queue tag change')}</button>
 				</section>
 			{/if}
+			</div>
 		{/if}
 
 		{#if tab === 'commands'}
+			<div class="split" class:has-detail={!!selectedCommand}>
+			<div class="list">
 			{#if commandsState === 'loading'}<p class="muted">{tb('جارٍ التحميل…', 'Loading…')}</p>
 			{:else if commandsState === 'error'}<p class="muted">{arabic() ? 'فشل التحميل.' : 'Loading failed.'} <button class="btn-secondary btn-sm" type="button" onclick={() => void loadCommands()}>{tb('إعادة', 'Retry')}</button></p>
 			{:else if commandsState === 'empty'}<p class="muted">{tb('لا توجد أوامر.', 'No commands.')}</p>
@@ -770,7 +825,7 @@
 					<thead><tr><th>{tb('النوع', 'Type')}</th><th>{tb('الحالة', 'Aggregate')}</th><th>{tb('الفاعل', 'Actor')}</th></tr></thead>
 					<tbody>
 						{#each commands as cmd (cmd.id)}
-							<tr>
+							<tr class:selected={selectedCommand?.id === cmd.id}>
 								<td><button type="button" class="link" onclick={() => void openCommand(cmd.id)}><span dir="ltr">{cmd.type}</span></button></td>
 								<td><span class="chip">{aggregateLabel(cmd.aggregate)}</span></td>
 								<td>{cmd.actor}</td>
@@ -779,10 +834,14 @@
 					</tbody>
 				</table>
 			{/if}
+			</div>
 			{#if selectedCommand}
 				{@const cmd = selectedCommand}
 				<section class="detail" aria-label="Command detail">
-					<h3 dir="ltr">{cmd.type}</h3>
+					<header class="detail-head">
+						<h3 dir="ltr">{cmd.type}</h3>
+						{@render closeButton(() => (selectedCommand = null))}
+					</header>
 					<p><span class="chip">{aggregateLabel(cmd.aggregate)}</span> <span class="muted num" dir="ltr">rev {cmd.expected_revision}</span></p>
 					{#if cmd.target_kind === 'create'}
 						<p class="muted">
@@ -808,27 +867,58 @@
 						</table>
 					{/if}
 					{#if cmd.status === 'pending' && !cmd.targets?.some(t => t.status === 'delivered' || t.status === 'applied')}
-						<button class="btn-secondary btn-sm" type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>{tb('إلغاء الأمر المعلق', 'Cancel pending command')}</button>
+						<button class="btn-danger btn-sm" type="button" disabled={saving} onclick={() => void cancelCommand(cmd.id)}>{tb('إلغاء الأمر المعلق', 'Cancel pending command')}</button>
 					{/if}
 				</section>
 			{/if}
+			</div>
 		{/if}
 	{/if}
 </div>
 
 <style>
 	.admin { display: flex; flex-direction: column; gap: 0.75rem; }
-	.tabs { display: flex; gap: 0.5rem; }
-	.row { display: flex; gap: 0.5rem; align-items: center; }
-	.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; margin: 0.5rem 0; }
-	.detail { border-top: 1px solid currentColor; padding-top: 0.5rem; }
-	.notice.ok { color: inherit; font-weight: bold; }
-	.notice.err { color: inherit; font-weight: bold; }
+	.tabs { display: flex; gap: 1.25rem; border-bottom: 1px solid var(--border); }
+	.tab { border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 0.6rem 0.15rem; color: var(--text-muted); font-weight: 600; border-radius: 0; cursor: pointer; }
+	.tab.active { border-bottom-color: var(--primary); color: var(--primary); }
+	.row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+	.search input { flex: 0 1 22rem; min-width: 12rem; padding: 6px 10px; border: 1px solid var(--field-border); border-radius: var(--radius-control); }
+	/* List and editor side by side once something is open. */
+	.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+	.split.has-detail { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+	.list { min-width: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+	.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.6rem; margin: 0.5rem 0; align-items: end; }
+	.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; font-weight: 600; }
+	.field input { width: 100%; box-sizing: border-box; }
+	.detail { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0.75rem 1rem; background: #fbfcfe; }
+	.detail.create { background: transparent; }
+	.detail h3 { margin: 0; font-size: 1rem; }
+	.detail h4 { margin: 1rem 0 0.35rem; font-size: 0.86rem; padding-top: 0.6rem; border-top: 1px solid var(--border); }
+	.detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem; }
+	.close { border: 0; background: transparent; font-size: 1.3rem; line-height: 1; cursor: pointer; color: var(--text-muted); padding: 0 0.25rem; }
+	.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.4rem; margin: 0 0 0.5rem; }
+	.facts div { background: var(--surface-muted); border-radius: var(--radius-control); padding: 0.35rem 0.5rem; }
+	.facts dt { font-size: 0.7rem; color: var(--text-muted); }
+	.facts dd { margin: 0; font-weight: 700; }
+	.notice { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--radius-control); font-weight: 600; }
+	.notice.ok { background: #e8f6ee; color: #15803d; }
+	.notice.err { background: #fdeeee; color: #991b1b; }
+	.notice.pending-note { background: #fdf4e7; color: #92400e; }
 	.chip { border: 1px solid currentColor; border-radius: 0.4rem; padding: 0.1rem 0.5rem; }
-	.link { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; color: inherit; font: inherit; }
+	.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--text-muted); font-size: 0.74rem; font-weight: 600; }
+	.pill.on { background: #e8f6ee; color: #15803d; }
+	.pill.pending { background: #fdf4e7; color: #92400e; }
+	.link { background: none; border: none; padding: 0; cursor: pointer; color: var(--primary); font: inherit; font-weight: 600; text-align: start; }
+	.link:hover { text-decoration: underline; }
+	.checks { display: flex; flex-wrap: wrap; gap: 0.25rem 0.8rem; }
 	.check { display: inline-flex; gap: 0.3rem; align-items: center; margin-inline-end: 0.8rem; }
+	fieldset { border: 1px solid var(--border); border-radius: var(--radius-control); margin: 0.5rem 0; padding: 0.4rem 0.75rem; }
 	.muted { opacity: 0.75; }
 	.num { font-variant-numeric: tabular-nums; }
-	table.data { width: 100%; border-collapse: collapse; }
-	table.data th, table.data td { text-align: start; padding: 0.3rem 0.5rem; }
+	table.data { width: 100%; border-collapse: collapse; border: 1px solid var(--border); border-radius: var(--radius-control); font-size: 0.84rem; }
+	table.data th, table.data td { text-align: start; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); }
+	table.data thead th { background: var(--surface-muted); font-size: 0.76rem; font-weight: 700; }
+	table.data tbody tr:hover { background: #f6f9fe; }
+	table.data tbody tr.selected { background: var(--primary-soft); }
+	@media (max-width: 1100px) { .split.has-detail { grid-template-columns: minmax(0, 1fr); } }
 </style>
