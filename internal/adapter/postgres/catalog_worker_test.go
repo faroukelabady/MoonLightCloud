@@ -48,6 +48,8 @@ func catalogWorkerAttempt(d CatalogProjection, id, typ string) catalogWorkerResu
 		res, err = d.ProjectProductVariantInventory(ctx, rec, time.Now())
 	case catalog.EventProductTypeSnapshotV1:
 		res, err = d.ProjectProductType(ctx, rec, time.Now())
+	case catalog.EventProductMediaSnapshotV1:
+		res, err = d.ProjectProductMedia(ctx, rec, time.Now())
 	default:
 		err = fmt.Errorf("unexpected projector %s", rec.EventType)
 	}

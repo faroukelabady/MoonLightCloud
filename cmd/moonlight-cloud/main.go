@@ -163,6 +163,9 @@ func serve(args []string) error {
 	if a.ProductTypeProjector != nil {
 		go a.ProductTypeProjector.Run(projCtx)
 	}
+	if a.ProductMediaProjector != nil {
+		go a.ProductMediaProjector.Run(projCtx)
+	}
 	if a.OrderProcessor != nil {
 		go a.OrderProcessor.Run(projCtx)
 	}
@@ -273,6 +276,7 @@ func allProjectionProcessors() []string {
 		catalog.ProcessorProductVariantProjectionV1,
 		catalog.ProcessorProductVariantInventoryProjectionV1,
 		catalog.ProcessorProductTypeProjectionV1,
+		catalog.ProcessorProductMediaProjectionV1,
 	}
 }
 

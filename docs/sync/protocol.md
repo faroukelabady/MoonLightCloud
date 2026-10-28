@@ -60,7 +60,9 @@ Field rules:
   `catalog.product.sales_policy.snapshot.v1`,
   `catalog.product.configuration.snapshot.v1`,
   `catalog.product_variant.snapshot.v1`, `catalog.product_type.snapshot.v1`,
-  and `inventory.product_variant.snapshot.v1`.
+  `inventory.product_variant.snapshot.v1` and
+  `catalog.product.media.snapshot.v1` (ADR-0056; image bytes use the media
+  upload below, never a batch).
   Retired Sale v1/v2, Category/Product v1 and Product-level inventory events
   are rejected before ACK. Product stock is the sum of active Variant stock;
   there is no independent Product inventory revision or event.
@@ -196,6 +198,31 @@ Payload mismatch:
 ```
 same event ID + different contents ──▶ 409 EVENT_ID_REUSE
 ```
+
+## Product images (ADR-0056)
+
+Gallery state and image bytes travel separately and may arrive in any order.
+
+- `catalog.product.media.snapshot.v1` (through the outbox, like every catalog
+  snapshot) is the complete media state of one Product at `media_revision`:
+  `images[]` with `image_id`, `variant_id` (null = Product gallery),
+  `position`, `is_primary`, `sha256`, `content_type`, `byte_size`, `width`,
+  `height`. At most 200 images; one primary per gallery.
+- `PUT /api/v1/sync/media/{sha256}` uploads the bytes of one image
+  (`Content-Type: image/jpeg` or `image/png`, at most `max_media_bytes` =
+  5 MiB). The body must hash to the path and decode as the declared type.
+
+| Status | Meaning | Retry? |
+|---|---|---|
+| 201 `stored` / 200 `already_stored` | durable | no |
+| 400 | path is not 64 lower-case hex characters | no — client bug |
+| 413 / 415 | too large / not JPEG or PNG | no |
+| 422 `MEDIA_HASH_MISMATCH` / `INVALID_MEDIA` (message) | wrong bytes | no — mark the file failed |
+| 429 / 5xx | throttling / transient | yes |
+
+Capabilities advertise `media_upload: true` and `max_media_bytes`. Retail
+uploads after a successful outbox drain and keeps a local ledger of confirmed
+hashes; a full re-sync clears it so a restored Cloud receives every file again.
 
 ## Examples (`system.test.v1` — diagnostic, safe to send)
 

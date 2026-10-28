@@ -40,6 +40,8 @@ const (
 	// Phase 17-R2: independent structural-type stream (type_revision)
 	// with its own processing identity.
 	ProcessorProductTypeProjectionV1 = "catalog_product_type_projection.v1"
+	// ADR-0056: independent Product media stream (media_revision gated).
+	ProcessorProductMediaProjectionV1 = "catalog_product_media_projection.v1"
 )
 
 // Outcome of one projection attempt.
@@ -96,6 +98,7 @@ type Store interface {
 	ProjectProductVariant(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductVariantInventory(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	ProjectProductType(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
+	ProjectProductMedia(ctx context.Context, event EventRecord, now time.Time) (ProjectResult, error)
 	LoadCatalogEvent(ctx context.Context, eventID string) (EventRecord, bool, error)
 	ProcessingStats(ctx context.Context, processor string) (Stats, error)
 	ResetProcessing(ctx context.Context, processor, eventID string) error
@@ -197,6 +200,12 @@ func NewProductVariantInventoryProjector(s Store, c clock.Clock, log *slog.Logge
 // (no product dependency); no re-arm hook.
 func NewProductTypeProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
 	return newProjector(s, ProcessorProductTypeProjectionV1, EventProductTypeSnapshotV1, s.ProjectProductType, c, log)
+}
+
+// NewProductMediaProjector projects the ADR-0056 media stream
+// (media_revision gated). The Product and its Variants are the only waits.
+func NewProductMediaProjector(s Store, c clock.Clock, log *slog.Logger) *Projector {
+	return newProjector(s, ProcessorProductMediaProjectionV1, EventProductMediaSnapshotV1, s.ProjectProductMedia, c, log)
 }
 
 func newProjector(s Store, processor, eventType string,

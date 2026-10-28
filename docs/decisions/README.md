@@ -57,6 +57,7 @@ Concise, irreversible-or-important choices only.
 - [0053](0053-human-authentication-authorization.md) — human authentication & authorization: OWNER/ADMIN, MFA, Store memberships (18 R1)
 - [0054](0054-cloud-restore-divergence-recovery-state.md) — Cloud restore divergence, durable recovery state & reconciliation protocol (20)
 - [0055](0055-pre-production-database-baseline.md) — pre-production database baseline and schema conventions (Accepted 2026-10-17; with MoonLightRetail ADR-049)
+- [0056](0056-product-media-sync.md) — product media sync: Retail images in Cloud (gallery snapshot stream + content-addressed uploads)
 
 ## Phase numbering gaps
 

@@ -1136,6 +1136,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/sync/media/{sha256}:
+    put:
+      summary: Upload one Retail product image by its SHA-256
+      description: ADR-0056. Content-addressed and idempotent - the first upload stores the file, a repeat answers already_stored. The body must hash to the path, decode as the declared format and stay within 20,000,000 pixels. Gallery state travels separately as catalog.product.media.snapshot.v1.
+      operationId: syncMediaUpload
+      security:
+        - deviceAuth: []
+      parameters:
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: The file was already stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadResult'
+        '201':
+          description: The file was stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadResult'
+        '400':
+          description: The path is not 64 lower-case hex characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing, unknown, revoked, or invalid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '413':
+          description: The body is larger than 5 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '415':
+          description: Content-Type is not image/jpeg or image/png.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: The body does not match the hash (message MEDIA_HASH_MISMATCH) or is not a valid image of the declared type (message INVALID_MEDIA). Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/sync/batches:
     post:
       summary: Durably ingest a batch of sync events (all-or-nothing)
@@ -4395,7 +4463,7 @@ components:
           type: array
           items:
             type: string
-          example: [system.test.v1, sale.finalized.v3, sale.return_refund.finalized.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1]
+          example: [system.test.v1, sale.finalized.v3, sale.return_refund.finalized.v1, catalog.category.snapshot.v2, catalog.tag.snapshot.v1, catalog.product.snapshot.v2, catalog.product.sales_policy.snapshot.v1, catalog.product.configuration.snapshot.v1, catalog.product_variant.snapshot.v1, inventory.product_variant.snapshot.v1, catalog.product.media.snapshot.v1]
         max_batch_events:
           type: integer
           example: 100
@@ -4411,6 +4479,21 @@ components:
         store_registration:
           type: boolean
           description: Phase 9A store binding support. Absent/false on older clouds.
+        media_upload:
+          type: boolean
+          description: ADR-0056 content-addressed product image uploads (PUT /api/v1/sync/media/{sha256}).
+        max_media_bytes:
+          type: integer
+          example: 5242880
+    MediaUploadResult:
+      type: object
+      required: [sha256, status]
+      properties:
+        sha256:
+          type: string
+        status:
+          type: string
+          enum: [stored, already_stored]
     SyncBatch:
       type: object
       required: [events]

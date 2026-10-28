@@ -27,6 +27,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
+	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/telegram"
@@ -78,6 +79,7 @@ type App struct {
 	ProductVariantProjector       *catalog.Projector
 	VariantInventoryProjector     *catalog.Projector
 	ProductTypeProjector          *catalog.Projector
+	ProductMediaProjector         *catalog.Projector
 	Catalog                       catalog.Service
 	CommerceRegistry              *commerce.Registry
 	CommerceService               *commerce.CommerceService
@@ -152,6 +154,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.ProductConfigurationProjector = catalog.NewProductConfigurationsProjector(catalogStore, clock.System{}, log)
 	a.ProductVariantProjector = catalog.NewProductVariantProjector(catalogStore, clock.System{}, log)
 	a.ProductTypeProjector = catalog.NewProductTypeProjector(catalogStore, clock.System{}, log)
+	a.ProductMediaProjector = catalog.NewProductMediaProjector(catalogStore, clock.System{}, log)
 	a.VariantInventoryProjector = catalog.NewProductVariantInventoryProjector(catalogStore, clock.System{}, log)
 	// Catalog streams depend on each other (Type/Category → Product →
 	// Variant → inventory). A projector that lands work wakes the others
@@ -378,7 +381,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, settingsHandlers, cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, settingsHandlers, media.NewService(postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout)), cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -532,11 +535,12 @@ func (a *App) notifyProjectors() {
 
 // catalogProjectors lists the configured catalog stream projectors.
 func (a *App) catalogProjectors() []*catalog.Projector {
-	out := make([]*catalog.Projector, 0, 9)
+	out := make([]*catalog.Projector, 0, 10)
 	for _, p := range []*catalog.Projector{
 		a.CategoryProjector, a.TagProjector, a.ProductProjector,
 		a.PolicyProjector, a.ProductConfigurationProjector,
 		a.ProductVariantProjector, a.VariantInventoryProjector, a.ProductTypeProjector,
+		a.ProductMediaProjector,
 	} {
 		if p != nil {
 			out = append(out, p)

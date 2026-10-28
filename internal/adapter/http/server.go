@@ -8,6 +8,7 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
+	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/sync"
 )
 
@@ -30,7 +31,7 @@ const (
 
 // Router builds the mux with middleware. CORS stays disabled: no browser
 // client exists yet. Future rate limiting belongs here as middleware.
-func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, humanAuth *HumanAuth, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, syncRecovery *SyncRecoveryHandlers, settingsH *SettingsHandlers, assetsDir string) http.Handler {
+func Router(log *slog.Logger, health Health, version Version, devices auth.Service, syncSvc sync.Service, onSyncIngest func(), reports ReportHandlers, reportingToken string, humanAuth *HumanAuth, dashData DashboardDataHandlers, dashOrders DashboardOrderHandlers, commerceWebhooks *CommerceWebhookHandlers, shopifyWebhooks *ShopifyWebhookHandlers, notificationWebhooks *WhatsAppWebhookHandlers, ctl *DeviceControlHandlers, dashDevices *DashboardDeviceHandlers, ops *OperationsHandlers, storeReg StoreRegistrar, catalogAdmin *CatalogAdminHandlers, updates *UpdateHandlers, syncRecovery *SyncRecoveryHandlers, settingsH *SettingsHandlers, mediaSvc media.Service, assetsDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.ServeLive)
 	mux.HandleFunc("GET /health/ready", health.ServeReady)
@@ -43,6 +44,9 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		DeviceAuth(devices)(SyncBatch(syncSvc, onSyncIngest)))
 	mux.Handle("POST /api/v1/sync/store-registration",
 		DeviceAuth(devices)(StoreRegistration(storeReg)))
+	// ADR-0056: content-addressed product image bytes.
+	mux.Handle("PUT /api/v1/sync/media/{sha256}",
+		DeviceAuth(devices)(MediaUpload(mediaSvc)))
 	// Phase 7C device control plane (Retail-initiated polling only).
 	// Registered only when the control plane is enabled; otherwise 404.
 	if ctl != nil {

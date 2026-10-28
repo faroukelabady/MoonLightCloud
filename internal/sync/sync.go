@@ -18,13 +18,16 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/clock"
 )
 
-// Protocol limits (conservative; sales/returns/product/inventory shaped,
-// never media transfer). Mirrored in capabilities + OpenAPI + docs.
+// Protocol limits (conservative; sales/returns/product/inventory shaped).
+// Image bytes never travel in batches: they use the separate media upload
+// (ADR-0056), one file of at most MaxMediaBytes per request. Mirrored in
+// capabilities + OpenAPI + docs.
 const (
 	APIVersion       = "v1"
 	MaxBatchEvents   = 100
 	MaxPayloadBytes  = 256 * 1024
 	MaxSyncBodyBytes = 8 * 1024 * 1024
+	MaxMediaBytes    = 5 * 1024 * 1024
 )
 
 // Per-event acceptance statuses. Batches never mix partial commits:
@@ -100,6 +103,10 @@ type Capabilities struct {
 	// StoreRegistration advertises Phase 9A store binding support.
 	// Older clients ignore it; new clients skip registration when false.
 	StoreRegistration bool `json:"store_registration"`
+	// MediaUpload advertises ADR-0056 content-addressed image uploads
+	// (PUT /api/v1/sync/media/{sha256}) up to MaxMediaBytes each.
+	MediaUpload   bool `json:"media_upload"`
+	MaxMediaBytes int  `json:"max_media_bytes"`
 }
 
 // Capabilities builds the capabilities response.
@@ -110,6 +117,7 @@ func (s Service) Capabilities() Capabilities {
 		MaxBatchEvents: MaxBatchEvents, MaxPayloadBytes: MaxPayloadBytes,
 		MaxBodyBytes: MaxSyncBodyBytes, ServerTime: s.clock.Now().Format(time.RFC3339Nano),
 		StoreRegistration: true,
+		MediaUpload:       true, MaxMediaBytes: MaxMediaBytes,
 	}
 }
 

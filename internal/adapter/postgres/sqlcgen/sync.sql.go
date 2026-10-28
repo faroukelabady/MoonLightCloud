@@ -55,7 +55,8 @@ WITH required_processor(event_type, processor) AS (VALUES
     ('catalog.product.configuration.snapshot.v1', 'catalog_product_configuration_projection.v1'),
     ('catalog.product_variant.snapshot.v1', 'catalog_product_variant_projection.v1'),
     ('catalog.product_type.snapshot.v1', 'catalog_product_type_projection.v1'),
-    ('inventory.product_variant.snapshot.v1', 'inventory_product_variant_projection.v1')
+    ('inventory.product_variant.snapshot.v1', 'inventory_product_variant_projection.v1'),
+    ('catalog.product.media.snapshot.v1', 'catalog_product_media_projection.v1')
 )
 SELECT count(*)::bigint
 FROM sync_events e

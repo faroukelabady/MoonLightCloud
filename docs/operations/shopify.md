@@ -96,6 +96,12 @@ variants, and unrelated publications are never written or cleared
 (`productSet` list-replacement semantics are used ONLY for create; all
 updates use targeted mutations).
 
+Retail product images now reach Cloud (`catalog_product_media` +
+`media_blobs`, ADR-0056), but this adapter does not push them yet. The
+planned media writer (staged uploads, `productCreateMedia`, ownership in
+`commerce_media_mappings`) is described in ADR-0056 and will only touch
+media MoonLight created.
+
 ### Ownership metadata (namespace `moonlight`)
 
 | Key | Meaning |

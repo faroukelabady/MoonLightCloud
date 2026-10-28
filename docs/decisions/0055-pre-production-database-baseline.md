@@ -145,7 +145,11 @@ on all money-bearing documents.
   business-wide Cloud-only state for the dashboard Settings and Reports
   pages. Development databases built from 00109 must be recreated
   (`./scripts/dev-up.sh --reset`).
-- Phase 3: `00110_baseline.sql` is the current baseline (TargetVersion 110);
+- Baseline 00111 (2026-10-28) adds `catalog_product_media`,
+  `catalog_products.media_revision` and `media_blobs` (ADR-0056: Retail
+  product images in Cloud). Development databases built from 00110 must be
+  recreated.
+- Phase 3: `00111_baseline.sql` is the current baseline (TargetVersion 111);
   `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
   constraints, indexes, views, functions, triggers) and
   `TestSchemaMatchesReviewedTarget` fails on any drift.

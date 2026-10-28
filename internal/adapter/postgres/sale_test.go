@@ -103,6 +103,14 @@ func testEventRegistry() isync.Registry {
 			_, err = catalog.ValidateProductTypeSnapshot(p)
 			return err
 		},
+		catalog.EventProductMediaSnapshotV1: func(raw json.RawMessage) error {
+			p, err := catalog.DecodeProductMediaSnapshot(raw)
+			if err != nil {
+				return err
+			}
+			_, err = catalog.ValidateProductMediaSnapshot(p)
+			return err
+		},
 	})
 }
 

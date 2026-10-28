@@ -243,6 +243,7 @@ type CatalogProduct struct {
 	StoreID               pgtype.UUID        `json:"store_id"`
 	ConfigurationRevision int64              `json:"configuration_revision"`
 	ProductTypeID         pgtype.UUID        `json:"product_type_id"`
+	MediaRevision         int64              `json:"media_revision"`
 }
 
 type CatalogProductConfiguration struct {
@@ -266,6 +267,24 @@ type CatalogProductConfiguration struct {
 	SourcePayloadHash     []byte             `json:"source_payload_hash"`
 	SourceReceivedAt      pgtype.Timestamptz `json:"source_received_at"`
 	ProjectedAt           pgtype.Timestamptz `json:"projected_at"`
+}
+
+type CatalogProductMedium struct {
+	ImageID          pgtype.UUID        `json:"image_id"`
+	ProductID        pgtype.UUID        `json:"product_id"`
+	VariantID        pgtype.UUID        `json:"variant_id"`
+	Position         int32              `json:"position"`
+	IsPrimary        bool               `json:"is_primary"`
+	Sha256           string             `json:"sha256"`
+	ContentType      string             `json:"content_type"`
+	ByteSize         int32              `json:"byte_size"`
+	Width            int32              `json:"width"`
+	Height           int32              `json:"height"`
+	SourceRevision   int64              `json:"source_revision"`
+	SourceEventID    pgtype.UUID        `json:"source_event_id"`
+	SourceDeviceID   pgtype.UUID        `json:"source_device_id"`
+	SourceReceivedAt pgtype.Timestamptz `json:"source_received_at"`
+	ProjectedAt      pgtype.Timestamptz `json:"projected_at"`
 }
 
 type CatalogProductOnlineState struct {
@@ -682,6 +701,17 @@ type ExchangeRate struct {
 	Note          pgtype.Text        `json:"note"`
 	CreatedBy     pgtype.UUID        `json:"created_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type MediaBlob struct {
+	Sha256           string             `json:"sha256"`
+	ContentType      string             `json:"content_type"`
+	ByteSize         int32              `json:"byte_size"`
+	Width            int32              `json:"width"`
+	Height           int32              `json:"height"`
+	Content          []byte             `json:"content"`
+	UploadedByDevice pgtype.UUID        `json:"uploaded_by_device"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type NotificationDeliveryStatusHistory struct {

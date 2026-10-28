@@ -2266,6 +2266,53 @@ CREATE TABLE exchange_rates (
     UNIQUE (base, quote, effective_at)
 );
 
+-- ==== 00047_product_media ====
+-- ADR-0056: Retail Product and Variant gallery images. The gallery state is
+-- a rebuildable catalog projection (catalog.product.media.snapshot.v1); the
+-- bytes are content-addressed uploads that arrive independently, so
+-- catalog_product_media.sha256 is deliberately not a foreign key.
+ALTER TABLE catalog_products ADD COLUMN media_revision BIGINT NOT NULL DEFAULT 0
+    CHECK (media_revision >= 0);
+
+CREATE TABLE catalog_product_media (
+    image_id            UUID PRIMARY KEY,
+    product_id          UUID NOT NULL REFERENCES catalog_products (product_id) ON DELETE CASCADE,
+    -- NULL is the Product gallery. Logical reference to
+    -- catalog_product_variants (no FK: rebuildable projection).
+    variant_id          UUID,
+    position            INT NOT NULL CHECK (position >= 0),
+    is_primary          BOOLEAN NOT NULL,
+    sha256              TEXT NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    content_type        TEXT NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
+    byte_size           INT NOT NULL CHECK (byte_size BETWEEN 1 AND 5242880),
+    width               INT NOT NULL CHECK (width > 0),
+    height              INT NOT NULL CHECK (height > 0),
+    source_revision     BIGINT NOT NULL CHECK (source_revision >= 1),
+    source_event_id     UUID NOT NULL REFERENCES sync_events (event_id),
+    source_device_id    UUID NOT NULL REFERENCES devices (id),
+    source_received_at  TIMESTAMPTZ NOT NULL,
+    projected_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX catalog_product_media_gallery_position
+    ON catalog_product_media (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid), position);
+CREATE UNIQUE INDEX catalog_product_media_one_primary
+    ON catalog_product_media (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid))
+    WHERE is_primary;
+CREATE INDEX idx_catalog_product_media_sha256 ON catalog_product_media (sha256);
+
+-- Uploaded image bytes, keyed by their SHA-256. Durable Cloud state (not a
+-- projection): a rebuild keeps it, and only Cloud itself reads it.
+CREATE TABLE media_blobs (
+    sha256             TEXT PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    content_type       TEXT NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
+    byte_size          INT NOT NULL CHECK (byte_size BETWEEN 1 AND 5242880),
+    width              INT NOT NULL CHECK (width > 0),
+    height             INT NOT NULL CHECK (height > 0),
+    content            BYTEA NOT NULL CHECK (octet_length(content) = byte_size),
+    uploaded_by_device UUID NOT NULL REFERENCES devices (id),
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Product stock is a read-only aggregate. Independent Variant revisions are
 -- never collapsed into an invented Product inventory revision. Incomplete or
 -- contradictory inventory cannot expose partial positive availability.
@@ -2286,6 +2333,8 @@ LEFT JOIN catalog_product_variant_inventory i
 GROUP BY p.product_id, p.store_id;
 
 -- +goose Down
+DROP TABLE IF EXISTS media_blobs CASCADE;
+DROP TABLE IF EXISTS catalog_product_media CASCADE;
 DROP TABLE IF EXISTS exchange_rates CASCADE;
 DROP TABLE IF EXISTS business_settings CASCADE;
 DROP VIEW IF EXISTS catalog_product_stock;

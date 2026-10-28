@@ -181,6 +181,21 @@ catalog_product_configurations.source_device_id uuid NOT NULL
 catalog_product_configurations.source_payload_hash bytea NOT NULL
 catalog_product_configurations.source_received_at timestamptz NOT NULL
 catalog_product_configurations.projected_at timestamptz NOT NULL DEFAULT now()
+catalog_product_media.image_id uuid NOT NULL
+catalog_product_media.product_id uuid NOT NULL
+catalog_product_media.variant_id uuid
+catalog_product_media.position int4 NOT NULL
+catalog_product_media.is_primary bool NOT NULL
+catalog_product_media.sha256 text NOT NULL
+catalog_product_media.content_type text NOT NULL
+catalog_product_media.byte_size int4 NOT NULL
+catalog_product_media.width int4 NOT NULL
+catalog_product_media.height int4 NOT NULL
+catalog_product_media.source_revision int8 NOT NULL
+catalog_product_media.source_event_id uuid NOT NULL
+catalog_product_media.source_device_id uuid NOT NULL
+catalog_product_media.source_received_at timestamptz NOT NULL
+catalog_product_media.projected_at timestamptz NOT NULL DEFAULT now()
 catalog_product_online_state.product_id uuid
 catalog_product_online_state.store_id uuid
 catalog_product_online_state.category_allows_online bool
@@ -292,6 +307,7 @@ catalog_products.projected_at timestamptz NOT NULL DEFAULT now()
 catalog_products.store_id uuid NOT NULL
 catalog_products.configuration_revision int8 NOT NULL DEFAULT 0
 catalog_products.product_type_id uuid
+catalog_products.media_revision int8 NOT NULL DEFAULT 0
 catalog_tags.tag_id uuid NOT NULL
 catalog_tags.slug text NOT NULL
 catalog_tags.is_active bool NOT NULL
@@ -516,6 +532,14 @@ exchange_rates.effective_at timestamptz NOT NULL
 exchange_rates.note text
 exchange_rates.created_by uuid
 exchange_rates.created_at timestamptz NOT NULL DEFAULT now()
+media_blobs.sha256 text NOT NULL
+media_blobs.content_type text NOT NULL
+media_blobs.byte_size int4 NOT NULL
+media_blobs.width int4 NOT NULL
+media_blobs.height int4 NOT NULL
+media_blobs.content bytea NOT NULL
+media_blobs.uploaded_by_device uuid NOT NULL
+media_blobs.created_at timestamptz NOT NULL DEFAULT now()
 notification_delivery_status_history.notification_id uuid NOT NULL
 notification_delivery_status_history.provider_key text NOT NULL
 notification_delivery_status_history.provider_message_id text NOT NULL
@@ -1116,6 +1140,31 @@ catalog_product_configurations catalog_product_configurations_style_code_not_nul
 catalog_product_configurations catalog_product_configurations_style_name_ar_check CHECK (((length(btrim(style_name_ar)) >= 1) AND (length(btrim(style_name_ar)) <= 100)))
 catalog_product_configurations catalog_product_configurations_style_name_ar_not_null NOT NULL style_name_ar
 catalog_product_configurations catalog_product_configurations_style_name_en_check CHECK (((style_name_en IS NULL) OR ((length(btrim(style_name_en)) >= 1) AND (length(btrim(style_name_en)) <= 100))))
+catalog_product_media catalog_product_media_byte_size_check CHECK (((byte_size >= 1) AND (byte_size <= 5242880)))
+catalog_product_media catalog_product_media_byte_size_not_null NOT NULL byte_size
+catalog_product_media catalog_product_media_content_type_check CHECK ((content_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text])))
+catalog_product_media catalog_product_media_content_type_not_null NOT NULL content_type
+catalog_product_media catalog_product_media_height_check CHECK ((height > 0))
+catalog_product_media catalog_product_media_height_not_null NOT NULL height
+catalog_product_media catalog_product_media_image_id_not_null NOT NULL image_id
+catalog_product_media catalog_product_media_is_primary_not_null NOT NULL is_primary
+catalog_product_media catalog_product_media_pkey PRIMARY KEY (image_id)
+catalog_product_media catalog_product_media_position_check CHECK (("position" >= 0))
+catalog_product_media catalog_product_media_position_not_null NOT NULL "position"
+catalog_product_media catalog_product_media_product_id_fkey FOREIGN KEY (product_id) REFERENCES catalog_products(product_id) ON DELETE CASCADE
+catalog_product_media catalog_product_media_product_id_not_null NOT NULL product_id
+catalog_product_media catalog_product_media_projected_at_not_null NOT NULL projected_at
+catalog_product_media catalog_product_media_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+catalog_product_media catalog_product_media_sha256_not_null NOT NULL sha256
+catalog_product_media catalog_product_media_source_device_id_fkey FOREIGN KEY (source_device_id) REFERENCES devices(id)
+catalog_product_media catalog_product_media_source_device_id_not_null NOT NULL source_device_id
+catalog_product_media catalog_product_media_source_event_id_fkey FOREIGN KEY (source_event_id) REFERENCES sync_events(event_id)
+catalog_product_media catalog_product_media_source_event_id_not_null NOT NULL source_event_id
+catalog_product_media catalog_product_media_source_received_at_not_null NOT NULL source_received_at
+catalog_product_media catalog_product_media_source_revision_check CHECK ((source_revision >= 1))
+catalog_product_media catalog_product_media_source_revision_not_null NOT NULL source_revision
+catalog_product_media catalog_product_media_width_check CHECK ((width > 0))
+catalog_product_media catalog_product_media_width_not_null NOT NULL width
 catalog_product_prices catalog_product_prices_cost_minor_check CHECK (((cost_minor IS NULL) OR (cost_minor >= 0)))
 catalog_product_prices catalog_product_prices_currency_check CHECK ((currency = ANY (ARRAY['EGP'::text, 'USD'::text])))
 catalog_product_prices catalog_product_prices_currency_not_null NOT NULL currency
@@ -1128,6 +1177,8 @@ catalog_products catalog_products_configuration_revision_check CHECK ((configura
 catalog_products catalog_products_configuration_revision_not_null NOT NULL configuration_revision
 catalog_products catalog_products_height_cm_check CHECK (((height_cm IS NULL) OR (height_cm > 0)))
 catalog_products catalog_products_is_active_not_null NOT NULL is_active
+catalog_products catalog_products_media_revision_check CHECK ((media_revision >= 0))
+catalog_products catalog_products_media_revision_not_null NOT NULL media_revision
 catalog_products catalog_products_name_ar_not_null NOT NULL name_ar
 catalog_products catalog_products_pkey PRIMARY KEY (product_id)
 catalog_products catalog_products_product_id_not_null NOT NULL product_id
@@ -1571,6 +1622,22 @@ exchange_rates exchange_rates_quote_check CHECK ((quote = 'EGP'::text))
 exchange_rates exchange_rates_quote_not_null NOT NULL quote
 exchange_rates exchange_rates_rate_microrate_check CHECK ((rate_microrate > 0))
 exchange_rates exchange_rates_rate_microrate_not_null NOT NULL rate_microrate
+media_blobs media_blobs_byte_size_check CHECK (((byte_size >= 1) AND (byte_size <= 5242880)))
+media_blobs media_blobs_byte_size_not_null NOT NULL byte_size
+media_blobs media_blobs_check CHECK ((octet_length(content) = byte_size))
+media_blobs media_blobs_content_not_null NOT NULL content
+media_blobs media_blobs_content_type_check CHECK ((content_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text])))
+media_blobs media_blobs_content_type_not_null NOT NULL content_type
+media_blobs media_blobs_created_at_not_null NOT NULL created_at
+media_blobs media_blobs_height_check CHECK ((height > 0))
+media_blobs media_blobs_height_not_null NOT NULL height
+media_blobs media_blobs_pkey PRIMARY KEY (sha256)
+media_blobs media_blobs_sha256_check CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+media_blobs media_blobs_sha256_not_null NOT NULL sha256
+media_blobs media_blobs_uploaded_by_device_fkey FOREIGN KEY (uploaded_by_device) REFERENCES devices(id)
+media_blobs media_blobs_uploaded_by_device_not_null NOT NULL uploaded_by_device
+media_blobs media_blobs_width_check CHECK ((width > 0))
+media_blobs media_blobs_width_not_null NOT NULL width
 notification_delivery_status_history notification_delivery_status_histo_provider_message_id_not_null NOT NULL provider_message_id
 notification_delivery_status_history notification_delivery_status_histo_provider_status_raw_not_null NOT NULL provider_status_raw
 notification_delivery_status_history notification_delivery_status_history_canonical_status_check CHECK ((canonical_status = ANY (ARRAY['unknown'::text, 'accepted'::text, 'sent'::text, 'delivered'::text, 'read'::text, 'failed'::text])))
@@ -2090,6 +2157,10 @@ CREATE INDEX idx_catalog_category_edges_child ON public.catalog_category_edges U
 CREATE UNIQUE INDEX catalog_product_configuration_product_id_style_code_color_c_key ON public.catalog_product_configurations USING btree (product_id, style_code, color_code)
 CREATE UNIQUE INDEX catalog_product_configurations_pkey ON public.catalog_product_configurations USING btree (configuration_id)
 CREATE INDEX idx_catalog_product_configurations_product ON public.catalog_product_configurations USING btree (product_id, "position", configuration_id)
+CREATE UNIQUE INDEX catalog_product_media_gallery_position ON public.catalog_product_media USING btree (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid), "position")
+CREATE UNIQUE INDEX catalog_product_media_one_primary ON public.catalog_product_media USING btree (product_id, COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid)) WHERE is_primary
+CREATE UNIQUE INDEX catalog_product_media_pkey ON public.catalog_product_media USING btree (image_id)
+CREATE INDEX idx_catalog_product_media_sha256 ON public.catalog_product_media USING btree (sha256)
 CREATE UNIQUE INDEX catalog_product_prices_pkey ON public.catalog_product_prices USING btree (product_id, currency)
 CREATE UNIQUE INDEX catalog_product_sales_policies_pkey ON public.catalog_product_sales_policies USING btree (product_id)
 CREATE INDEX idx_catalog_policies_online ON public.catalog_product_sales_policies USING btree (sell_online) WHERE sell_online
@@ -2174,6 +2245,7 @@ CREATE UNIQUE INDEX devices_pkey ON public.devices USING btree (id)
 CREATE INDEX idx_devices_status ON public.devices USING btree (status)
 CREATE UNIQUE INDEX exchange_rates_base_quote_effective_at_key ON public.exchange_rates USING btree (base, quote, effective_at)
 CREATE UNIQUE INDEX exchange_rates_pkey ON public.exchange_rates USING btree (id)
+CREATE UNIQUE INDEX media_blobs_pkey ON public.media_blobs USING btree (sha256)
 CREATE INDEX idx_notification_history_lookup ON public.notification_delivery_status_history USING btree (provider_key, provider_message_id)
 CREATE UNIQUE INDEX notification_delivery_status_history_pkey ON public.notification_delivery_status_history USING btree (notification_id, event_fingerprint)
 CREATE INDEX idx_notification_due ON public.notification_messages USING btree (dispatch_status, next_attempt_at, created_at)

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+
 	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/returnrefund"
 	"github.com/faroukelabady/MoonLightCloud/internal/sale"
@@ -22,5 +24,17 @@ func syncEventRegistry() sync.Registry {
 		catalog.EventProductVariantSnapshotV1:          ValidateCatalogProductVariantPayload,
 		catalog.EventProductTypeSnapshotV1:             ValidateCatalogProductTypePayload,
 		catalog.EventInventoryProductVariantSnapshotV1: ValidateCatalogProductVariantInventoryPayload,
+		catalog.EventProductMediaSnapshotV1:            ValidateCatalogProductMediaPayload,
 	})
+}
+
+// ValidateCatalogProductMediaPayload is the catalog.product.media.snapshot.v1
+// gate (ADR-0056): event-local validation only, before durable ACK.
+func ValidateCatalogProductMediaPayload(raw json.RawMessage) error {
+	p, err := catalog.DecodeProductMediaSnapshot(raw)
+	if err != nil {
+		return err
+	}
+	_, err = catalog.ValidateProductMediaSnapshot(p)
+	return err
 }

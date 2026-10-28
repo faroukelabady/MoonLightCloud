@@ -27,6 +27,7 @@ is solved for features that do not exist yet.
 | Lost ACK | Retry returns already_accepted; ACK only after commit |
 | DB outage during ingestion | No ACK before commit; all-or-nothing batches; 503 retryable |
 | Report-delivery misuse from the dashboard (sending business totals to an attacker-chosen number) | Settings mutations need `settings.manage`, an all-Stores principal, a FULL (MFA) session and CSRF; recipients are read back masked (last four characters); provider credentials stay in the server environment and never reach the database or the dashboard |
+| Product image upload abuse (a device filling storage or planting a non-image) | Device auth on every upload; one file of at most 5 MiB per request; the body must hash to its path and decode as JPEG or PNG within 20,000,000 pixels; blobs are only read by Cloud itself (never served publicly) and bytes are never logged. Limitation: an authenticated device can still store many distinct valid images; orphaned blobs are kept until a later clean-up job (ADR-0056) |
 
 ## Future (documented, not yet mitigated)
 
