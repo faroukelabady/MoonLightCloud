@@ -159,31 +159,35 @@
 </script>
 
 <section class="users" data-testid="users-page">
-	<h2>{tb('المستخدمون والأمان', 'Users & Security')}</h2>
+	<header class="card">
+		<h2>{tb('المستخدمون والأمان', 'Users & Security')}</h2>
+	</header>
 	{#if notice}<p class="notice {notice.kind}" role="status" data-testid="users-notice">{notice.text}</p>{/if}
 
-	<fieldset>
-		<legend>{tb('حسابي', 'My account')} — {me.user.display_name} ({me.user.role})</legend>
+	<section class="card panel">
+		<h3>{tb('حسابي', 'My account')} — {me.user.display_name} ({me.user.role})</h3>
 		<form class="row" onsubmit={changePassword}>
 			<label class="field">{tb('كلمة المرور الحالية', 'Current password')}<input type="password" autocomplete="current-password" bind:value={current} required /></label>
-			<label
-				>{tb('كلمة المرور الجديدة', 'New password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={next} required /></label
-			>
+			<label class="field">{tb('كلمة المرور الجديدة', 'New password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={next} required /></label>
 			<button class="btn-primary" type="submit" disabled={busy}>{tb('تغيير', 'Change')}</button>
 		</form>
-		<button class="btn-secondary btn-sm" type="button" onclick={regenerateCodes} disabled={busy} data-testid="regenerate-codes">
-			{tb('إعادة إنشاء رموز الاسترداد', 'Regenerate recovery codes')}
-		</button>
+		<div class="btn-row">
+			<button class="btn-secondary" type="button" onclick={regenerateCodes} disabled={busy} data-testid="regenerate-codes">
+				{tb('إعادة إنشاء رموز الاسترداد', 'Regenerate recovery codes')}
+			</button>
+		</div>
 		{#if codes.length}
 			<p class="muted">{t('تظهر مرة واحدة — احفظها في مكان آمن:', 'Shown once — store them safely:')}</p>
 			<ol class="codes" dir="ltr">{#each codes as c (c)}<li><code>{c}</code></li>{/each}</ol>
-			<button class="btn-secondary btn-sm" type="button" data-testid="download-codes" onclick={() => downloadRecoveryCodes(me.user.login, codes)}>{tb('تنزيل الرموز', 'Download codes')}</button>
+			<div class="btn-row">
+				<button class="btn-secondary" type="button" data-testid="download-codes" onclick={() => downloadRecoveryCodes(me.user.login, codes)}>{tb('تنزيل الرموز', 'Download codes')}</button>
+			</div>
 		{/if}
-	</fieldset>
+	</section>
 
 	{#if canManage}
-		<fieldset>
-			<legend>{tb('إضافة مستخدم', 'Add user')}</legend>
+		<section class="card panel">
+			<h3>{tb('إضافة مستخدم', 'Add user')}</h3>
 			<form class="row" onsubmit={createUser} data-testid="create-user">
 				<label class="field">{tb('البريد أو اسم الدخول', 'Login')}<input bind:value={form.login} required /></label>
 				<label class="field">{tb('الاسم', 'Display name')}<input bind:value={form.display_name} required /></label>
@@ -220,10 +224,13 @@
 					<input readonly value={activation.link} dir="ltr" onfocus={(e) => (e.currentTarget as HTMLInputElement).select()} />
 				</div>
 			{/if}
-		</fieldset>
+		</section>
 	{/if}
 
 	{#if canRead}
+		<section class="card panel">
+		<h3>{tb('الحسابات', 'Accounts')}</h3>
+		<div class="table-wrap">
 		<table class="data">
 			<thead><tr><th>Login</th><th>Name</th><th>Role</th><th>Status</th><th>Stores</th><th>MFA</th><th></th></tr></thead>
 			<tbody>
@@ -250,31 +257,41 @@
 				{/each}
 			</tbody>
 		</table>
-		{#if cursor}<button class="btn-secondary btn-sm" onclick={() => loadUsers(false)} disabled={busy}>{tb('المزيد', 'More')}</button>{/if}
+		</div>
+		{#if cursor}<div class="btn-row"><button class="btn-secondary btn-sm" onclick={() => loadUsers(false)} disabled={busy}>{tb('المزيد', 'More')}</button></div>{/if}
+		</section>
 	{/if}
 
 	{#if audit.length}
-		<h3>{tb('سجل الأمان', 'Security audit (latest 50)')}</h3>
-		<ul class="audit">
-			{#each audit as a (a.id)}
-				<li><span class="muted" dir="ltr">{new Date(a.occurred_at).toLocaleString()}</span> {a.action} · {a.outcome}{a.reason ? ` · ${a.reason}` : ''}</li>
-			{/each}
-		</ul>
+		<section class="card panel">
+			<h3>{tb('سجل الأمان', 'Security audit (latest 50)')}</h3>
+			<ul class="audit">
+				{#each audit as a (a.id)}
+					<li><span class="muted" dir="ltr">{new Date(a.occurred_at).toLocaleString()}</span> {a.action} · {a.outcome}{a.reason ? ` · ${a.reason}` : ''}</li>
+				{/each}
+			</ul>
+		</section>
 	{/if}
 </section>
 
 <style>
-	.users { display: flex; flex-direction: column; gap: 0.75rem; }
-	fieldset { display: flex; flex-direction: column; gap: 0.5rem; }
-	.row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
-	.row label { display: flex; flex-direction: column; gap: 4px; }
-	.check { flex-direction: row !important; align-items: center; }
-	.notice { font-weight: bold; }
-	.codes { columns: 2; font-family: monospace; }
+	.users { display: flex; flex-direction: column; gap: 12px; }
+	h2, h3 { margin: 0; }
+	h2 { font-size: 1.1rem; }
+	h3 { font-size: 1rem; }
+	.panel { display: flex; flex-direction: column; gap: 12px; }
+	.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+	.row .check { min-height: 38px; }
+	.row button { justify-self: start; }
+	.notice { margin: 0; padding: 10px 14px; border-radius: var(--radius-card); font-weight: 600; }
+	.notice.ok { border: 1px solid #bbf7d0; background: #f0fdf4; color: var(--success); }
+	.notice.err { border: 1px solid #fecaca; background: #fef2f2; color: var(--danger); }
+	.codes { columns: 2; margin: 0; font-family: monospace; }
+	.activation { display: grid; gap: 8px; }
+	.activation p { margin: 0; }
 	.activation input { width: 100%; font-family: monospace; }
-	.actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+	.actions { display: flex; flex-wrap: wrap; gap: 6px; }
 	.muted { opacity: 0.75; }
-	.audit { font-size: 0.85rem; max-height: 320px; overflow: auto; }
-	table.data { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
-	table.data th, table.data td { text-align: start; padding: 0.3rem 0.5rem; }
+	.audit { margin: 0; padding-inline-start: 18px; font-size: 0.85rem; max-height: 320px; overflow: auto; line-height: 1.7; }
+	.table-wrap { overflow-x: auto; }
 </style>

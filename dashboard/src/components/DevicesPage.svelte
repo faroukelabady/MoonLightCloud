@@ -104,7 +104,7 @@
 	}
 </script>
 
-<section aria-label="Devices">
+<section class="card" aria-label="Devices">
 	<h2>Devices</h2>
 	<p class="hint">online means Cloud heard from the Retail app recently (a sync upload or a control poll). It does not prove data is current; "last data" shows when sync data last arrived.</p>
 	{#if loading}<p>Loading…</p>

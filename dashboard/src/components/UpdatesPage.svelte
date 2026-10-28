@@ -255,7 +255,7 @@
 	let activeReleases = $derived(releases.filter((r) => r.status === 'active'));
 </script>
 
-<section class="updates" data-testid="updates-page">
+<section class="updates card" data-testid="updates-page">
 	<h2>{tb('التحديثات', 'Updates')}</h2>
 	<p class="muted">
 		{tb('يتم توقيع الإصدارات خارج السحابة؛ السحابة تتحقق فقط وتوزع.', 'Releases are signed offline; Cloud only verifies and distributes. Store-scoped views follow the Store selector.')}

@@ -511,7 +511,7 @@
 	});
 </script>
 
-<div class="admin">
+<div class="admin card">
 	{#if !store}
 		<p class="muted">{tb('اختر المتجر أولًا من منتقي المتجر.', 'Select a Store first.')}</p>
 	{:else}

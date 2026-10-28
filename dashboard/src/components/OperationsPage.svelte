@@ -75,7 +75,7 @@
 	}
 </script>
 
-<section aria-label="Operations">
+<section class="card" aria-label="Operations">
 	<h2>Operations</h2>
 	<p class="hint">Open and acknowledged incidents need operator attention. Acknowledge suppresses the unacknowledged state only — it never claims recovery.</p>
 	<div class="filters">
