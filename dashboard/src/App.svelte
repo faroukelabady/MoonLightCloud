@@ -3,8 +3,8 @@
 	import Sidebar from './components/Sidebar.svelte';
 	import PeriodSelector from './components/PeriodSelector.svelte';
 	import SalesCard from './components/SalesCard.svelte';
-	import MetricCard from './components/MetricCard.svelte';
-	import TrendChart from './components/TrendChart.svelte';
+	import ActivityTotalsCard from './components/ActivityTotalsCard.svelte';
+import TrendChart from './components/TrendChart.svelte';
 	import TopProducts from './components/TopProducts.svelte';
 	import type { ProductDisplayRow } from './components/TopProducts.svelte';
 	import CategoryCard from './components/CategoryCard.svelte';
@@ -30,7 +30,7 @@
 	import { dashboardApi, ApiError, isStoreID, setCSRFToken } from './lib/api.js';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
-	import { toChartNumber, formatInt, subMinor } from './lib/money.js';
+	import { toChartNumber, subMinor } from './lib/money.js';
 	import { arabic, lang, setLang, t, tb } from './lib/i18n.svelte.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
@@ -65,15 +65,14 @@
 			users: 'users',
 			updates: 'updates',
 			admin: 'admin',
-			sales: 'sales',
 			reports: 'reports',
 			settings: 'settings',
-			// Former pages whose content now lives in Sales Summary and Overview.
-			daily: 'sales',
-			products: 'overview',
-			categories: 'categories',
 			sync: 'sync'
 		};
+		// Former pages whose content now lives in Overview: their links
+		// keep working and the address bar shows the page they land on.
+		const merged = ['sales', 'daily', 'products', 'categories'];
+		if (merged.includes(path)) window.history.replaceState({}, '', '/dashboard/' + window.location.search);
 		route = map[path] ?? 'overview';
 		const q = new URLSearchParams(window.location.search);
 		const p = q.get('period');
@@ -555,33 +554,7 @@
 		}
 	}
 
-	// KPI cards follow the same active-currency scoping as the reporting
-	// service: All uses the whole-period summary, EGP/USD use their own
-	// per-mode averages (own transaction counts — never mixed).
-	// Transaction counts never conflate sales with returns.
-	let metricTxn = $derived.by(() => {
-		if (!overview) return '—';
-		if (currency === 'all') return formatInt(overview.summary.transaction_count);
-		const avg = currency === 'EGP' ? overview.averages.egp : overview.averages.usd;
-		return formatInt(avg.transactions);
-	});
-	let metricRetTxn = $derived.by(() => {
-		if (!overview) return '—';
-		return formatInt(overview.summary.return_transaction_count);
-	});
-	let metricUnits = $derived.by(() => {
-		if (!overview) return '—';
-		if (currency === 'all') return formatInt(overview.summary.units_sold);
-		const avg = currency === 'EGP' ? overview.averages.egp : overview.averages.usd;
-		return formatInt(avg.units);
-	});
-	let metricRetUnits = $derived.by(() => {
-		if (!overview) return '—';
-		return formatInt(overview.summary.units_returned);
-	});
-	let scopeLabel = $derived(currency === 'all' ? t('النطاق: الكل', 'Scope: all') : `${t('النطاق', 'Scope')}: ${currency}`);
-
-	let branchContext = $derived.by(() => {
+let branchContext = $derived.by(() => {
 		if (branchesState === 'loading') return '…';
 		if (branches.length === 0) return t('لا توجد فروع في هذه الفترة', 'No branches in this period');
 		const first = branches[0];
@@ -645,20 +618,19 @@
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
 			<div class="dash" class:ov={route === 'overview'}>
-				{#if route === 'overview' || route === 'sales'}
-					<div class="cell a-kpis">
-						<MetricCard ar="معاملات البيع" en="Sale Transactions" value={metricTxn} context={scopeLabel} status={overviewState} icon="M4 7h13l-3-3M20 17H7l3 3" />
-						<MetricCard ar="معاملات المرتجعات" en="Return Transactions" value={metricRetTxn} context={scopeLabel} status={overviewState} icon="M4 9h13l-3-3M20 15H7l3 3" />
-						<MetricCard ar="الوحدات المباعة" en="Units Sold" value={metricUnits} context={scopeLabel} status={overviewState} icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" />
-						<MetricCard ar="الوحدات المرتجعة" en="Units Returned" value={metricRetUnits} context={scopeLabel} status={overviewState} icon="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12L4 7.5M12 12v9" />
+				{#if route === 'overview' || route === 'sync'}
+					<!-- First in the grid: the reading-order start, so top right in
+					     Arabic and top left in English. -->
+					<div class="cell a-sync">
+						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
 					</div>
+				{/if}
+				{#if route === 'overview'}
 					<div class="cell a-sales">
 						<SalesCard data={overview} mode={currency} onmode={setMode} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
 					</div>
-				{/if}
-				{#if route === 'overview' || route === 'sync'}
-					<div class="cell a-sync">
-						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} />
+					<div class="cell a-kpis">
+						<ActivityTotalsCard data={overview} mode={currency} status={overviewState} errStatus={overviewErr} onretry={retryAll} />
 					</div>
 				{/if}
 				{#if route === 'sync'}
@@ -666,13 +638,13 @@
 						<CatalogHealthCard data={health} status={healthState} errStatus={healthErr} onretry={retryAll} provider={healthProvider} onprovider={setHealthProvider} />
 					</div>
 				{/if}
-				{#if route === 'overview' || route === 'categories'}
+				{#if route === 'overview'}
 					<div class="cell a-cat">
 						<CategoryCard rows={categories} kind={catKind} onkind={setCatKind} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
 					</div>
 				{/if}
-				{#if route === 'categories'}
-					<div class="cell a-cat">
+				{#if route === 'overview'}
+					<div class="cell a-tags">
 						<TagCard data={tagList} status={tagState} errStatus={tagErr} onretry={retryAll} currency={currency} />
 					</div>
 				{/if}
@@ -681,7 +653,7 @@
 						<TopProducts rows={products} money={currency === 'all' ? 'EGP' : currency} unit={currency === 'all' ? 'EGP normalized' : currency} status={productsState} errStatus={productsErr} onretry={retryAll} />
 					</div>
 				{/if}
-				{#if route === 'overview' || route === 'sales'}
+				{#if route === 'overview'}
 					<div class="cell a-trend">
 						<TrendChart
 							titleAr="الاتجاه اليومي (إجمالي / مرتجعات / صافي)"
@@ -702,13 +674,13 @@
 						/>
 					</div>
 				{/if}
-				{#if route === 'overview' || route === 'sales'}
+				{#if route === 'overview'}
 					<div class="cell a-branch">
 						<BranchCard rows={branches} status={branchesState} errStatus={branchesErr} onretry={retryAll} />
 					</div>
 				{/if}
-				{#if route === 'sales'}
-					<div class="cell a-branch">
+				{#if route === 'overview'}
+					<div class="cell a-online">
 						<OnlineComparison online={online} retail={overview} status={overviewState === 'error' || onlineState === 'error' ? 'error' : overviewState === 'loading' || onlineState === 'loading' ? 'loading' : onlineState} errStatus={overviewState === 'error' ? overviewErr : onlineErr} {currency} onretry={retryAll} />
 					</div>
 				{/if}
@@ -912,42 +884,45 @@
 	}
 	/* Overview cards keep one readable height per row; longer lists and
 	   tables scroll inside their card instead of stretching the page. */
-	.dash.ov .cell:not(.a-kpis) {
+	.dash.ov .cell {
 		max-height: 440px;
 	}
 	.dash.ov .a-orders {
 		max-height: 560px;
 	}
 	.cell { grid-column: span 6; }
-	.a-kpis {
-		grid-column: span 12;
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 12px;
-	}
 	.a-orders { grid-column: span 12; }
-	.dash.ov .a-kpis { order: 1; }
-	.dash.ov .a-sales { order: 2; grid-column: span 6; }
-	.dash.ov .a-sync { order: 3; grid-column: span 3; }
-	.dash.ov .a-cat { order: 4; grid-column: span 3; }
-	.dash.ov .a-trend { order: 5; grid-column: span 6; }
-	.dash.ov .a-products { order: 6; grid-column: span 3; }
-	.dash.ov .a-branch { order: 7; grid-column: span 3; }
-	.dash.ov .a-latest { order: 8; grid-column: span 6; }
-	.dash.ov .a-act { order: 9; grid-column: span 6; }
-	.dash.ov .a-orders { order: 10; }
-	@media (max-width: 1280px) {
-		.dash.ov .a-sales { grid-column: span 7; }
-		.dash.ov .a-sync { order: 3; grid-column: span 5; }
-		.dash.ov .a-trend { order: 4; grid-column: span 7; }
-		.dash.ov .a-products { order: 5; grid-column: span 5; }
-		.dash.ov .a-cat { order: 6; grid-column: span 5; }
-		.dash.ov .a-branch { order: 7; grid-column: span 7; }
-		.dash.ov .a-latest { order: 8; grid-column: span 7; }
-		.dash.ov .a-act { order: 9; grid-column: span 5; }
+	/* Sync health opens the overview at the reading-order start (top right
+	   in Arabic, top left in English) and is raised so it is seen first. */
+	.dash.ov .a-sync > :global(.card) {
+		border: 1px solid #b9cdf3;
+		border-top: 4px solid var(--primary);
+		box-shadow: 0 8px 22px rgba(29, 91, 215, 0.14);
 	}
-	@media (max-width: 1100px) {
-		.a-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.dash.ov .a-sync { order: 1; grid-column: span 4; }
+	.dash.ov .a-sales { order: 2; grid-column: span 5; }
+	.dash.ov .a-kpis { order: 3; grid-column: span 3; }
+	.dash.ov .a-trend { order: 4; grid-column: span 6; }
+	.dash.ov .a-products { order: 5; grid-column: span 3; }
+	.dash.ov .a-cat { order: 6; grid-column: span 3; }
+	.dash.ov .a-branch { order: 7; grid-column: span 5; }
+	.dash.ov .a-tags { order: 8; grid-column: span 3; }
+	.dash.ov .a-online { order: 9; grid-column: span 4; }
+	.dash.ov .a-latest { order: 10; grid-column: span 6; }
+	.dash.ov .a-act { order: 11; grid-column: span 6; }
+	.dash.ov .a-orders { order: 12; }
+	@media (max-width: 1280px) {
+		.dash.ov .a-sync { order: 1; grid-column: span 5; }
+		.dash.ov .a-sales { order: 2; grid-column: span 7; }
+		.dash.ov .a-kpis { order: 3; grid-column: span 5; }
+		.dash.ov .a-trend { order: 4; grid-column: span 7; }
+		.dash.ov .a-cat { order: 5; grid-column: span 5; }
+		.dash.ov .a-products { order: 6; grid-column: span 7; }
+		.dash.ov .a-tags { order: 7; grid-column: span 5; }
+		.dash.ov .a-branch { order: 8; grid-column: span 7; }
+		.dash.ov .a-act { order: 9; grid-column: span 5; }
+		.dash.ov .a-latest { order: 10; grid-column: span 7; }
+		.dash.ov .a-online { order: 11; grid-column: span 12; }
 	}
 	@media (max-width: 900px) {
 		.shell {
@@ -966,9 +941,6 @@
 		.dash > .cell,
 		.dash.ov > .cell {
 			grid-column: span 12;
-		}
-		.a-kpis {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 	}
 </style>

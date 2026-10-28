@@ -105,6 +105,29 @@ and average come from the mode's server-computed bucket (truncating
 division, documented). There is no all-currency fallback while a native
 mode is selected.
 
+## Overview layout
+
+Overview is the one business page: the former Sales Summary and
+Categories & Tags pages are part of it and have no sidebar entries
+(`/dashboard/sales`, `/daily`, `/products` and `/categories` open Overview
+and the address bar is rewritten to `/dashboard/`).
+
+- Sync health opens the grid at the reading-order start (top right in
+  Arabic, top left in English) with a raised border. Its headline states
+  the real condition: "Needs attention" when any sale or return event is
+  blocked, "catching up" while either projection is incomplete, and "up
+  to date" only when both are complete with nothing blocked.
+- Net sales keeps money (net, gross, refunds, average transaction value,
+  FX line). One "Transactions and units" table holds sale and return
+  transactions and units: sales and returned units follow the currency
+  mode; return transactions have no per-currency count and say so in a
+  currency mode.
+- Sales by branch shows one row per branch with EGP and USD columns for
+  sales value, transactions and units (no FX conversion; bars compare
+  within a currency column only).
+- Top tags and the online-orders comparison sit on Overview beside the
+  category and branch cards.
+
 ## Reports page (printable sales report, stocktaking & zakat)
 
 The sidebar's Reports page prints the same sales report as

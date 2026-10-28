@@ -9,12 +9,11 @@
 		allStores = false
 	}: { route: string; navigate: (r: string) => void; permissions?: string[]; allStores?: boolean } = $props();
 
-	// Business views first, then administration. Overview already carries the
-	// daily trend and product table, so they have no entries of their own.
+	// Business views first, then administration. Overview carries the sales
+	// summary, daily trend, products, categories, tags and the online
+	// comparison, so those have no entries of their own.
 	const entries: { r: string; ar: string; en: string; icon: string; perm?: string; all?: boolean }[] = [
 		{ r: 'overview', ar: 'نظرة عامة', en: 'Overview', icon: 'home' },
-		{ r: 'sales', ar: 'ملخص المبيعات', en: 'Sales Summary', icon: 'chart' },
-		{ r: 'categories', ar: 'الفئات والوسوم', en: 'Categories & Tags', icon: 'layers' },
 		{ r: 'reports', ar: 'التقارير', en: 'Reports', icon: 'print' },
 		{ r: 'orders', ar: 'الطلبات عبر الإنترنت', en: 'Online Orders', icon: 'clip' },
 		{ r: 'sync', ar: 'حالة المزامنة', en: 'Sync Health', icon: 'sync' },
@@ -28,8 +27,6 @@
 
 	const icons: Record<string, string> = {
 		home: 'M3 11.5 12 4l9 7.5M5.5 10.5V20h13v-9.5',
-		chart: 'M4 20V10M10 20V4M16 20v-8M21 20H3',
-		layers: 'M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5',
 		print: 'M7 9V3h10v6M7 18H4v-8h16v8h-3M7 14h10v7H7z',
 		clip: 'M9 4h6v4H9zM7 6H5v15h14V6h-2M9 12h6M9 16h6',
 		sync: 'M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4',

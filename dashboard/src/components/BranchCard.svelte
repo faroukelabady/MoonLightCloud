@@ -10,7 +10,32 @@
 
 	let { rows, status, errStatus, onretry }: { rows: BranchRow[]; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } = $props();
 
-	let metric: 'value' | 'transactions' | 'units' = $state('value');
+	type Currency = 'EGP' | 'USD';
+	type Metric = 'value' | 'transactions' | 'units';
+	let metric: Metric = $state('value');
+
+	// The API returns one row per branch and currency; the card shows one
+	// row per branch with an EGP and a USD column (no FX conversion).
+	type Branch = { key: string; first: BranchRow; byCurrency: Partial<Record<Currency, BranchRow>> };
+	let branches = $derived.by(() => {
+		const out: Branch[] = [];
+		const index = new Map<string, Branch>();
+		for (const r of rows) {
+			const key = [r.shop_name_ar, r.shop_name_en, r.shop_phone, r.channel].join('\u0000');
+			let branch = index.get(key);
+			if (!branch) {
+				branch = { key, first: r, byCurrency: {} };
+				index.set(key, branch);
+				out.push(branch);
+			}
+			branch.byCurrency[currencyOf(r)] = r;
+		}
+		return out;
+	});
+
+	function currencyOf(r: BranchRow): Currency {
+		return r.currency === 'USD' ? 'USD' : 'EGP';
+	}
 
 	function valueOf(r: BranchRow): string {
 		if (metric === 'transactions') return formatInt(r.transactions);
@@ -18,39 +43,37 @@
 		return formatMinor(r.sales_total_minor, currencyOf(r));
 	}
 
-	function currencyOf(r: BranchRow): 'EGP' | 'USD' {
-		return r.currency === 'USD' ? 'USD' : 'EGP';
-	}
-
 	function refundOf(r: BranchRow): string {
+		if (metric === 'transactions') return formatInt(r.return_transactions);
+		if (metric === 'units') return formatInt(r.units_returned);
 		return formatMinor(r.refund_total_minor, currencyOf(r));
 	}
 
 	// Exact bar ratios: amount and maximum stay BigInt so unsafe magnitudes
 	// (>2^53) never collapse to zero. Only the bounded 0..10000 basis-point
 	// result becomes a Number for the discrete width class. Maxima are
-	// per-currency (raw EGP minor units are never compared to USD ones;
-	// no FX conversion for bar width).
+	// per-currency column (raw EGP minor units are never compared to USD).
 	function amountOf(r: BranchRow): bigint {
 		if (metric === 'transactions') return BigInt(r.transactions);
 		if (metric === 'units') return BigInt(r.units);
 		return BigInt(r.sales_total_minor);
 	}
 
-	function maxOf(currency: string): bigint {
-		let m = 1n;
+	let maxima = $derived.by(() => {
+		const m: Record<Currency, bigint> = { EGP: 1n, USD: 1n };
 		for (const r of rows) {
-			if (r.currency !== currency) continue;
 			const v = amountOf(r);
-			if (v > m) m = v;
+			if (v > m[currencyOf(r)]) m[currencyOf(r)] = v;
 		}
 		return m;
-	}
+	});
 
 	function bucketOf(r: BranchRow): number {
-		const bp = (amountOf(r) * 10000n) / maxOf(r.currency);
+		const bp = (amountOf(r) * 10000n) / maxima[currencyOf(r)];
 		return Math.min(10, Math.round(Number(bp) / 1000));
 	}
+
+	let refundLabel = $derived(metric === 'value' ? t('مرتجعات', 'Refunds') : t('مرتجع', 'Returned'));
 </script>
 
 <Card ar="مبيعات الفروع والمتجر الإلكتروني" en="Sales by Branches and Online Store">
@@ -61,20 +84,37 @@
 	{:else if rows.length === 0}
 		<EmptyState ar="لا توجد فروع في هذه الفترة" en="No branches in this period" />
 	{:else}
-		<div class="cols muted"><span>{t('الفرع / القناة', 'Branch / Channel')}{#if arabic()}<br /><span class="sub-en">Branch / Channel</span>{/if}</span><span class="num">{t('قيمة المبيعات', 'Sales Value')}{#if arabic()}<br /><span class="sub-en">Sales Value</span>{/if}</span></div>
-		<div class="bars">
-			{#each rows as r}
-				{@const bucket = bucketOf(r)}
-				<div class="row">
-					<div class="label">
-						<div class="lname">{t(r.shop_name_ar, r.shop_name_en || r.shop_name_ar)}</div>
-						<div class="muted lsub">{arabic() ? `${r.shop_name_en} · ${r.channel}` : r.channel}</div>
-					</div>
-					<div class="track" role="img" aria-label={`${r.shop_name_en}: ${valueOf(r)}`}><div class="fill w{bucket}"></div></div>
-					<div class="num val">{valueOf(r)}<br /><span class="muted refund">{t('مرتجعات', 'Refunds')} {refundOf(r)}</span></div>
-				</div>
-			{/each}
-		</div>
+		<table class="branches" data-testid="branch-table">
+			<thead>
+				<tr>
+					<th scope="col">{t('الفرع / القناة', 'Branch / Channel')}{#if arabic()}<span class="sub-en">Branch / Channel</span>{/if}</th>
+					<th scope="col" class="num">EGP</th>
+					<th scope="col" class="num">USD</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each branches as b (b.key)}
+					<tr>
+						<th scope="row">
+							<div class="lname">{t(b.first.shop_name_ar, b.first.shop_name_en || b.first.shop_name_ar)}</div>
+							<div class="muted lsub">{arabic() ? `${b.first.shop_name_en} · ${b.first.channel}` : b.first.channel}</div>
+						</th>
+						{#each ['EGP', 'USD'] as const as cur}
+							{@const r = b.byCurrency[cur]}
+							<td class="num">
+								{#if r}
+									<div class="val">{valueOf(r)}</div>
+									<div class="track" role="img" aria-label={`${b.first.shop_name_en} ${cur}: ${valueOf(r)}`}><div class="fill w{bucketOf(r)}"></div></div>
+									<div class="muted refund">{refundLabel} {refundOf(r)}</div>
+								{:else}
+									<span class="muted">—</span>
+								{/if}
+							</td>
+						{/each}
+					</tr>
+				{/each}
+			</tbody>
+		</table>
 		<Segmented
 			options={[
 				{ value: 'value', ar: 'قيمة المبيعات', en: 'Sales value' },
@@ -82,36 +122,47 @@
 				{ value: 'units', ar: 'الوحدات', en: 'Units' }
 			]}
 			value={metric}
-			onchange={(v) => (metric = v as 'value' | 'transactions' | 'units')}
+			onchange={(v) => (metric = v as Metric)}
 		/>
 	{/if}
 </Card>
 
 <style>
-	.cols {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.72rem;
-		margin-bottom: 2px;
+	.branches {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+		margin-bottom: 10px;
 	}
-	.cols .num {
+	.branches th,
+	.branches td {
+		padding: 6px 4px;
+		border-bottom: 1px solid var(--border);
+		vertical-align: top;
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.branches thead th {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		text-align: start;
+		vertical-align: bottom;
+	}
+	.branches thead th:first-child {
+		width: 38%;
+	}
+	.branches .num {
 		text-align: end;
 	}
-	.bars {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		margin: 6px 0 10px;
+	.sub-en {
+		display: block;
+		font-size: 0.66rem;
+		font-weight: 400;
 	}
-	.row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px 8px;
-		align-items: center;
-	}
-	.label {
-		flex: 1 1 96px;
-		min-width: 0;
+	.branches tbody th {
+		text-align: start;
+		font-weight: 400;
 	}
 	.lname {
 		font-size: 0.82rem;
@@ -120,10 +171,14 @@
 	.lsub {
 		font-size: 0.7rem;
 	}
+	.val {
+		font-weight: 700;
+		font-size: 0.8rem;
+		font-variant-numeric: tabular-nums;
+	}
 	.track {
-		flex: 2 1 48px;
-		min-width: 48px;
-		height: 9px;
+		height: 6px;
+		margin: 4px 0 3px;
 		background: #eef1f5;
 		border-radius: 6px;
 		overflow: hidden;
@@ -131,18 +186,9 @@
 	.fill {
 		height: 100%;
 		background: var(--primary);
-	}
-	.val {
-		flex: 1 1 64px;
-		min-width: 0;
-		max-width: 100%;
-		overflow-wrap: anywhere;
-		text-align: end;
-		font-weight: 700;
-		font-size: 0.8rem;
+		margin-inline-start: auto;
 	}
 	.refund {
-		font-weight: 400;
-		font-size: 0.7rem;
+		font-size: 0.68rem;
 	}
 </style>

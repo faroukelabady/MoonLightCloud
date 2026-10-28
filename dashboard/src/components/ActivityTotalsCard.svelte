@@ -1,0 +1,119 @@
+<script lang="ts">
+	import { arabic, t } from '../lib/i18n.svelte.js';
+	import Card from './Card.svelte';
+	import Skeleton from './Skeleton.svelte';
+	import WidgetError from './WidgetError.svelte';
+	import { formatInt } from '../lib/money.js';
+	import type { OverviewResponse } from '../lib/api.js';
+
+	// Sale and return transactions and units in one table. Sales and
+	// returned units follow the active currency mode (each mode's own
+	// counts, never mixed). Return transactions have no per-currency count,
+	// so they stay whole-period and say so in a currency mode.
+	let {
+		data,
+		mode,
+		status,
+		errStatus,
+		onretry
+	}: {
+		data: OverviewResponse | null;
+		mode: 'all' | 'EGP' | 'USD';
+		status: 'loading' | 'loaded' | 'empty' | 'error';
+		errStatus: number | null;
+		onretry: () => void;
+	} = $props();
+
+	let sales = $derived.by(() => {
+		if (!data) return { transactions: '—', units: '—' };
+		if (mode === 'all') return { transactions: formatInt(data.summary.transaction_count), units: formatInt(data.summary.units_sold) };
+		const avg = mode === 'EGP' ? data.averages.egp : data.averages.usd;
+		return { transactions: formatInt(avg.transactions), units: formatInt(avg.units) };
+	});
+	let returns = $derived.by(() => {
+		if (!data) return { transactions: '—', units: '—' };
+		const units = mode === 'all' ? data.summary.units_returned : (data.summary.currency_totals.find((b) => b.currency === mode)?.returned_units ?? 0);
+		return { transactions: formatInt(data.summary.return_transaction_count), units: formatInt(units) };
+	});
+	let scope = $derived(mode === 'all' ? t('النطاق: الكل', 'Scope: all') : `${t('النطاق', 'Scope')}: ${mode}`);
+</script>
+
+<Card ar="المعاملات والوحدات" en="Transactions and units">
+	{#if status === 'loading'}
+		<Skeleton lines={3} />
+	{:else if status === 'error'}
+		<WidgetError status={errStatus} {onretry} />
+	{:else}
+		<table class="totals" data-testid="activity-totals">
+			<thead>
+				<tr>
+					<td></td>
+					<th scope="col">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en">Sales</span>{/if}</th>
+					<th scope="col">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en">Returns</span>{/if}</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<th scope="row">{t('المعاملات', 'Transactions')}{#if arabic()}<span class="sub-en">Transactions</span>{/if}</th>
+					<td class="num">{sales.transactions}</td>
+					<td class="num ret">{returns.transactions}{#if mode !== 'all'}<sup class="note-mark" aria-hidden="true">*</sup>{/if}</td>
+				</tr>
+				<tr>
+					<th scope="row">{t('الوحدات', 'Units')}{#if arabic()}<span class="sub-en">Units</span>{/if}</th>
+					<td class="num">{sales.units}</td>
+					<td class="num ret">{returns.units}</td>
+				</tr>
+			</tbody>
+		</table>
+		<div class="muted ctx">{scope}</div>
+		{#if mode !== 'all'}<div class="muted ctx" role="note">* {t('معاملات المرتجعات تشمل كل العملات', 'Return transactions count every currency')}</div>{/if}
+	{/if}
+</Card>
+
+<style>
+	.totals {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+	.totals th,
+	.totals td {
+		padding: 8px 6px;
+		text-align: center;
+		border-bottom: 1px solid var(--border);
+	}
+	.totals tbody tr:last-child > * {
+		border-bottom: 0;
+	}
+	.totals thead th {
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text-muted);
+	}
+	.totals tbody th {
+		text-align: start;
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+	.totals td {
+		font-size: 1.35rem;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+	}
+	.totals td.ret {
+		color: var(--text-muted);
+	}
+	.sub-en {
+		display: block;
+		font-size: 0.68rem;
+		font-weight: 400;
+		color: var(--text-muted);
+	}
+	.note-mark {
+		font-size: 0.7rem;
+	}
+	.ctx {
+		font-size: 0.76rem;
+		margin-top: 4px;
+	}
+</style>

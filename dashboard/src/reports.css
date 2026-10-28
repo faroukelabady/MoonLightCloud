@@ -107,7 +107,8 @@
 	gap: 12px;
 	align-items: start;
 }
-.report-money-grid > :only-child {
+.report-money-grid > :only-child,
+.report-money-grid > :nth-child(odd):last-child {
 	grid-column: 1 / -1;
 }
 .report-money-grid:empty {

@@ -59,20 +59,18 @@ describe('SalesCard KPI scope (R08)', () => {
 		return text;
 	}
 
-	it('All shows all-currency transactions and units', async () => {
+	it('All shows the all-currency average and leaves counts to the totals card', async () => {
 		const text = await kpis('all');
-		expect(text).toContain('3');
-		expect(text).toContain('7');
+		expect(text).toContain('1,287.50');
+		expect(text).not.toContain('عدد المعاملات');
 	});
 
-	it('EGP shows EGP-scoped transactions and units', async () => {
+	it('EGP shows the EGP-scoped average', async () => {
 		const { container } = render(SalesCard, {
 			props: { data: loaded, mode: 'EGP', onmode: () => {}, status: 'loaded', errStatus: null, onretry: () => {} }
 		});
-		const values = Array.from(container.querySelectorAll('.kpi-value')).map((e) => e.textContent);
-		// transactions KPI = 1, units KPI = 2 (never the all-currency 3/7).
-		expect(values[0]).toBe('1');
-		expect(values[2]).toBe('2');
+		// 200000 minor = 2,000 EGP (never the all-currency 1,287.50).
+		expect(within(container as HTMLElement).getByTestId('average-value').textContent).toBe('2,000 ج.م');
 	});
 
 	it('renders negative net with a real minus sign, never clamped', () => {
