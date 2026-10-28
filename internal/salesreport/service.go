@@ -115,7 +115,7 @@ func (s Service) Sales(ctx context.Context, req report.Request, display string, 
 	if err != nil {
 		return SalesReport{}, apperr.Wrap(apperr.Internal, "report timezone", err)
 	}
-	facts, err := s.repo.SalesReportFacts(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, display == DisplayUSD)
+	facts, err := s.repo.SalesReportFacts(ctx, req.ScopeStoreID(), req.Period.StartUTC, req.Period.EndUTC, req.GeneratedAt(), display == DisplayUSD)
 	if err != nil {
 		return SalesReport{}, err
 	}
@@ -136,6 +136,9 @@ func (s Service) Sales(ctx context.Context, req report.Request, display string, 
 		}
 	}
 	sections.Base = baseOf(egp)
+	if r := facts.LatestUSDRate; r != nil {
+		sections.ExchangeRate.Latest = &RateView{Microrate: Money(r.Microrate), EffectiveAt: r.EffectiveAt, Source: r.Source}
+	}
 	return SalesReport{
 		GeneratedAt: req.GeneratedAt(),
 		Period: Period{

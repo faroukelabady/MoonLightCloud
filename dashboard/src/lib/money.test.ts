@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMinor, formatInt, toChartNumber, subMinor } from './money.js';
+import { formatMinor, formatInt, formatMicrorate, toChartNumber, subMinor } from './money.js';
 
 describe('formatMinor', () => {
 	it('formats EGP without decimals when exact', () => {
@@ -58,5 +58,14 @@ describe('subMinor', () => {
 	});
 	it('stays exact beyond float precision', () => {
 		expect(subMinor('9007199254740993', '1')).toBe('9007199254740992');
+	});
+});
+
+describe('formatMicrorate', () => {
+	it('renders exact rates with at least two decimals', () => {
+		expect(formatMicrorate('52000000')).toBe('52.00');
+		expect(formatMicrorate('52500000')).toBe('52.50');
+		expect(formatMicrorate('49875500')).toBe('49.8755');
+		expect(formatMicrorate('1234000001')).toBe('1,234.000001');
 	});
 });

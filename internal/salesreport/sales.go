@@ -117,6 +117,40 @@ type SaleRow struct {
 	Cost             Money     `json:"cost_minor"`
 	MissingCostItems int64     `json:"missing_cost_items"`
 	Total            Money     `json:"total_minor"`
+	// OriginalCurrency and OriginalTotal are the Sale as recorded;
+	// RateMicrorate is the USD->EGP rate that converted it into the report
+	// currency, null when it is shown in its own currency.
+	OriginalCurrency string `json:"original_currency"`
+	OriginalTotal    Money  `json:"original_total_minor"`
+	RateMicrorate    *Money `json:"rate_microrate"`
+}
+
+// CurrencyMixRow totals the Sales recorded in one currency: as recorded,
+// and in the report currency.
+type CurrencyMixRow struct {
+	Currency       string `json:"currency"`
+	SalesCount     int64  `json:"sales_count"`
+	Total          Money  `json:"total_minor"`
+	ReportCurrency string `json:"report_currency"`
+	ReportTotal    Money  `json:"report_total_minor"`
+}
+
+// RateView is one USD->EGP rate and when it took effect. Source is
+// "cloud" for a rate set in Cloud settings and "sale" for the snapshot a
+// synced USD Sale carries.
+type RateView struct {
+	Microrate   Money     `json:"rate_microrate"`
+	EffectiveAt time.Time `json:"effective_at"`
+	Source      string    `json:"source"`
+}
+
+// ExchangeRate explains the USD rates behind a report: the rate in effect
+// when it was made (rates change daily, so older Sales may differ), and
+// the lowest and highest rate its Sales used. Each is null when unknown.
+type ExchangeRate struct {
+	Latest    *RateView `json:"latest"`
+	PeriodMin *Money    `json:"period_min_microrate"`
+	PeriodMax *Money    `json:"period_max_microrate"`
 }
 
 // BaseSummary is the whole period in EGP, whatever the display currency:
@@ -130,25 +164,29 @@ type BaseSummary struct {
 
 // Sections is the computed body of a sales report.
 type Sections struct {
-	Summary           []SummaryRow  `json:"summary"`
-	Base              BaseSummary   `json:"base"`
-	Daily             []DailyRow    `json:"daily"`
-	Categories        []GroupRow    `json:"categories"`
-	Subcategories     []GroupRow    `json:"subcategories"`
-	Tags              []GroupRow    `json:"tags"`
-	Products          []GroupRow    `json:"products"`
-	Payments          []PaymentRow  `json:"payments"`
-	Sales             []SaleRow     `json:"sales"`
-	SalesTotalCount   int           `json:"sales_total_count"`
-	UnclassifiedItems int64         `json:"unclassified_items"`
-	Options           FilterOptions `json:"filter_options"`
+	Summary           []SummaryRow     `json:"summary"`
+	Base              BaseSummary      `json:"base"`
+	Daily             []DailyRow       `json:"daily"`
+	Categories        []GroupRow       `json:"categories"`
+	Subcategories     []GroupRow       `json:"subcategories"`
+	Tags              []GroupRow       `json:"tags"`
+	Products          []GroupRow       `json:"products"`
+	Payments          []PaymentRow     `json:"payments"`
+	Sales             []SaleRow        `json:"sales"`
+	SalesTotalCount   int              `json:"sales_total_count"`
+	UnclassifiedItems int64            `json:"unclassified_items"`
+	Options           FilterOptions    `json:"filter_options"`
+	CurrencyMix       []CurrencyMixRow `json:"currency_mix"`
+	ExchangeRate      ExchangeRate     `json:"exchange_rate"`
 }
 
 // conversion turns one Sale's amounts into the report currency:
-// amount * num / den, rounded half away from zero.
+// amount * num / den, rounded half away from zero. rate is the USD->EGP
+// microrate behind it (0 when the Sale keeps its own currency).
 type conversion struct {
 	num, den int64
 	currency string
+	rate     int64
 }
 
 func conversionFor(display string, s Sale) (conversion, error) {
@@ -157,12 +195,12 @@ func conversionFor(display string, s Sale) (conversion, error) {
 		if s.FxMicrorate <= 0 {
 			return conversion{}, apperr.New(apperr.Internal, "projection integrity: USD sale without FX snapshot")
 		}
-		return conversion{num: s.FxMicrorate, den: microrateScale, currency: DisplayEGP}, nil
+		return conversion{num: s.FxMicrorate, den: microrateScale, currency: DisplayEGP, rate: s.FxMicrorate}, nil
 	case display == DisplayUSD && s.Currency == DisplayEGP:
 		if s.USDRateMicrorate <= 0 {
 			return conversion{}, apperr.New(apperr.Conflict, ErrRateRequired)
 		}
-		return conversion{num: microrateScale, den: s.USDRateMicrorate, currency: DisplayUSD}, nil
+		return conversion{num: microrateScale, den: s.USDRateMicrorate, currency: DisplayUSD, rate: s.USDRateMicrorate}, nil
 	default:
 		return conversion{num: 1, den: 1, currency: s.Currency}, nil
 	}
@@ -369,11 +407,30 @@ func Build(f Facts, o Options) (Sections, error) {
 	// Sale headers.
 	details := []SaleRow{}
 	detailIndex := map[string]int{}
+	mix := map[string]*CurrencyMixRow{}
+	var rates ExchangeRate
 	for _, s := range f.Sales {
 		if !s.InPeriod || !keep[s.ID] {
 			continue
 		}
 		c := conv[s.ID]
+		native := withoutTax(s.Total, s.Tax)
+		m, ok := mix[s.Currency]
+		if !ok {
+			m = &CurrencyMixRow{Currency: s.Currency, ReportCurrency: c.currency}
+			mix[s.Currency] = m
+		}
+		m.SalesCount++
+		b.add(&m.Total, native)
+		// A USD Sale always used its own snapshot; an EGP Sale used a
+		// rate only when it is shown in USD.
+		used := c.rate
+		if used == 0 && s.Currency == DisplayUSD {
+			used = s.FxMicrorate
+		}
+		if used > 0 {
+			rates.widen(used)
+		}
 		row := sum(c.currency)
 		row.SalesCount++
 		b.add(&row.Gross, b.convert(c, s.Subtotal))
@@ -381,14 +438,21 @@ func Build(f Facts, o Options) (Sections, error) {
 		if !o.ExcludeTax {
 			b.add(&row.Tax, b.convert(c, s.Tax))
 		}
-		total := b.convert(c, withoutTax(s.Total, s.Tax))
+		total := b.convert(c, native)
 		b.add(&row.Sales, total)
+		b.add(&m.ReportTotal, total)
 		d := day(s.OccurredAt, c.currency)
 		d.SalesCount++
 		b.add(&d.Sales, total)
 		detailIndex[s.ID] = len(details)
-		details = append(details, SaleRow{SaleID: s.ID, SaleNumber: s.Number, OccurredAt: s.OccurredAt,
-			Currency: c.currency, Total: Money(total), PaymentMethods: []string{}})
+		detail := SaleRow{SaleID: s.ID, SaleNumber: s.Number, OccurredAt: s.OccurredAt,
+			Currency: c.currency, Total: Money(total), PaymentMethods: []string{},
+			OriginalCurrency: s.Currency, OriginalTotal: Money(native)}
+		if c.rate > 0 {
+			rate := Money(c.rate)
+			detail.RateMicrorate = &rate
+		}
+		details = append(details, detail)
 	}
 
 	// Sale lines: every line is kept for returns; only in-period lines count as sold.
@@ -538,6 +602,13 @@ func Build(f Facts, o Options) (Sections, error) {
 		Tags: tagRows.sorted(), Products: products.sorted(),
 		UnclassifiedItems: unclassified,
 		Options:           filterOptions(f),
+		CurrencyMix:       []CurrencyMixRow{},
+		ExchangeRate:      rates,
+	}
+	for _, currency := range []string{DisplayEGP, DisplayUSD} {
+		if row, ok := mix[currency]; ok {
+			out.CurrencyMix = append(out.CurrencyMix, *row)
+		}
 	}
 	for _, currency := range []string{DisplayEGP, DisplayUSD} {
 		row, ok := summary[currency]
@@ -593,6 +664,18 @@ func Build(f Facts, o Options) (Sections, error) {
 		return Sections{}, errOverflow()
 	}
 	return out, nil
+}
+
+// widen extends the period's rate range to include microrate.
+func (e *ExchangeRate) widen(microrate int64) {
+	if e.PeriodMin == nil || Money(microrate) < *e.PeriodMin {
+		v := Money(microrate)
+		e.PeriodMin = &v
+	}
+	if e.PeriodMax == nil || Money(microrate) > *e.PeriodMax {
+		v := Money(microrate)
+		e.PeriodMax = &v
+	}
 }
 
 // baseOf summarizes the period in EGP from the EGP-display sections.

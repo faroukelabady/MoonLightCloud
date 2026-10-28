@@ -6810,7 +6810,7 @@ components:
         net_sales_minor: {type: string, description: Exact minor units as a decimal string.}
     DashboardSalesReport:
       type: object
-      required: [generated_at, period, store_id, display_currency, shop, settings, filter, filter_options, summary, base, daily, categories, subcategories, tags, products, payments, sales, sales_total_count, unclassified_items, detail_offset, detail_limit]
+      required: [generated_at, period, store_id, display_currency, shop, settings, filter, filter_options, summary, base, daily, categories, subcategories, tags, products, payments, sales, sales_total_count, unclassified_items, detail_offset, detail_limit, currency_mix, exchange_rate]
       properties:
         generated_at: {type: string, format: date-time}
         period:
@@ -6913,7 +6913,7 @@ components:
           description: One page of Sales, newest first.
           items:
             type: object
-            required: [sale_id, sale_number, occurred_at, currency, products, skus, root_names_ar, root_names_en, subcategory_names_ar, subcategory_names_en, items_sold, payment_methods, cost_minor, missing_cost_items, total_minor]
+            required: [sale_id, sale_number, occurred_at, currency, products, skus, root_names_ar, root_names_en, subcategory_names_ar, subcategory_names_en, items_sold, payment_methods, cost_minor, missing_cost_items, total_minor, original_currency, original_total_minor, rate_microrate]
             properties:
               sale_id: {type: string, format: uuid}
               sale_number: {type: string}
@@ -6930,10 +6930,41 @@ components:
               cost_minor: {type: string, description: Exact minor units as a decimal string.}
               missing_cost_items: {type: integer}
               total_minor: {type: string, description: Exact minor units as a decimal string.}
+              original_currency: {type: string, enum: [EGP, USD], description: The currency the Sale was recorded in.}
+              original_total_minor: {type: string, description: The Sale total as recorded (exact minor units).}
+              rate_microrate: {type: string, nullable: true, description: 'USD->EGP rate x 1,000,000 that converted the Sale into the report currency; null when it is shown in its own currency.'}
         sales_total_count: {type: integer}
         unclassified_items: {type: integer}
         detail_offset: {type: integer}
         detail_limit: {type: integer}
+        currency_mix:
+          type: array
+          description: The filtered Sales of the period per recorded currency (EGP first), as recorded and in the report currency.
+          items:
+            type: object
+            required: [currency, sales_count, total_minor, report_currency, report_total_minor]
+            properties:
+              currency: {type: string, enum: [EGP, USD]}
+              sales_count: {type: integer}
+              total_minor: {type: string, description: As recorded (exact minor units).}
+              report_currency: {type: string, enum: [EGP, USD]}
+              report_total_minor: {type: string, description: In the report currency (exact minor units).}
+        exchange_rate:
+          type: object
+          description: The USD->EGP rates behind the report. Rates change daily, so older Sales may use a different rate from the latest one.
+          required: [latest, period_min_microrate, period_max_microrate]
+          properties:
+            latest:
+              type: object
+              nullable: true
+              description: The rate in effect when the report was made; null when none is known.
+              required: [rate_microrate, effective_at, source]
+              properties:
+                rate_microrate: {type: string, description: 'Rate x 1,000,000.'}
+                effective_at: {type: string, format: date-time}
+                source: {type: string, enum: [cloud, sale], description: 'cloud = set in Cloud settings; sale = the snapshot on the newest synced USD Sale.'}
+            period_min_microrate: {type: string, nullable: true, description: Lowest rate the period's Sales used (a USD Sale's own snapshot always counts).}
+            period_max_microrate: {type: string, nullable: true, description: Highest rate the period's Sales used.}
     DashboardStocktaking:
       type: object
       required: [generated_at, store_id, shop, totals, categories, items]

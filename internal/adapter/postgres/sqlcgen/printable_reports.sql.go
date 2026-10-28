@@ -11,6 +11,59 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const printableReportLatestUSDRate = `-- name: PrintableReportLatestUSDRate :many
+SELECT rate_microrate, effective_at, source FROM (
+    (SELECT x.rate_microrate, x.effective_at, 'cloud'::text AS source, 1 AS priority
+     FROM exchange_rates x
+     WHERE x.base = 'USD' AND x.quote = 'EGP' AND x.effective_at <= $1
+     ORDER BY x.effective_at DESC, x.id
+     LIMIT 1)
+    UNION ALL
+    (SELECT s.fx_rate_microrate::bigint, s.occurred_at, 'sale'::text, 2
+     FROM sales_projection s
+     WHERE s.currency = 'USD' AND s.fx_rate_microrate IS NOT NULL AND s.occurred_at <= $1
+       AND ($2::uuid IS NULL OR s.store_id = $2::uuid)
+     ORDER BY s.occurred_at DESC, s.sale_id DESC
+     LIMIT 1)
+) rates
+ORDER BY priority
+LIMIT 1
+`
+
+type PrintableReportLatestUSDRateParams struct {
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+	StoreID pgtype.UUID        `json:"store_id"`
+}
+
+type PrintableReportLatestUSDRateRow struct {
+	RateMicrorate int64              `json:"rate_microrate"`
+	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
+	Source        string             `json:"source"`
+}
+
+// The USD->EGP rate in effect at @as_of, for the report's rate note: the
+// newest Cloud rate effective by then, else the newest USD Sale snapshot
+// in scope paid by then. No row when neither exists.
+func (q *Queries) PrintableReportLatestUSDRate(ctx context.Context, arg PrintableReportLatestUSDRateParams) ([]PrintableReportLatestUSDRateRow, error) {
+	rows, err := q.db.Query(ctx, printableReportLatestUSDRate, arg.AsOf, arg.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PrintableReportLatestUSDRateRow{}
+	for rows.Next() {
+		var i PrintableReportLatestUSDRateRow
+		if err := rows.Scan(&i.RateMicrorate, &i.EffectiveAt, &i.Source); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const printableReportLineClassifications = `-- name: PrintableReportLineClassifications :many
 WITH sale_set AS (
     SELECT s.sale_id FROM sales_projection s

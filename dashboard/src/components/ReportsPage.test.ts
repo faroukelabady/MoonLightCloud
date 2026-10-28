@@ -36,7 +36,9 @@ function salesReport(rows: SalesReport['summary']): SalesReport {
 		shop: { name_ar: 'متجر الأقصر', name_en: 'Luxor Papyrus', address_ar: 'الأقصر', address_en: 'Luxor', phone: '+20100' },
 		summary: rows, base: { sales_minor: '114000', net_sales_minor: '114000', profit_minor: '62000', missing_cost_items: 0 },
 		daily: [], categories: [], subcategories: [], tags: [], products: [], payments: [], sales: [],
-		sales_total_count: 0, unclassified_items: 0, detail_offset: 0, detail_limit: 50
+		sales_total_count: 0, unclassified_items: 0, detail_offset: 0, detail_limit: 50,
+		currency_mix: [{ currency: 'EGP', sales_count: 2, total_minor: '114000', report_currency: 'EGP', report_total_minor: '114000' }],
+		exchange_rate: { latest: null, period_min_microrate: null, period_max_microrate: null }
 	};
 }
 
@@ -98,6 +100,55 @@ describe('ReportsPage', () => {
 		api.sales.mockRejectedValue(new ApiError(409, 'CONFLICT', 'request failed (409)', 'EXCHANGE_RATE_REQUIRED'));
 		render(ReportsPage, { params, store: store.store_id, stores: [store] });
 		expect((await screen.findByRole('alert')).textContent).toMatch(/no USD exchange rate/);
+	});
+
+	it('explains the currencies and USD rates behind the report', async () => {
+		const report = salesReport([summary('EGP', '114000')]);
+		report.currency_mix = [
+			{ currency: 'EGP', sales_count: 1, total_minor: '10000', report_currency: 'EGP', report_total_minor: '10000' },
+			{ currency: 'USD', sales_count: 2, total_minor: '200', report_currency: 'EGP', report_total_minor: '10400' }
+		];
+		report.exchange_rate = {
+			latest: { rate_microrate: '52500000', effective_at: '2026-10-25T08:00:00Z', source: 'cloud' },
+			period_min_microrate: '50000000',
+			period_max_microrate: '52000000'
+		};
+		report.sales = [
+			{ sale_id: 's1', sale_number: 'R-0001', occurred_at: '2026-10-20T10:00:00Z', currency: 'EGP', products: 'Scarab', skus: 'PAP-1', root_names_ar: '', root_names_en: '',
+				subcategory_names_ar: '', subcategory_names_en: '', items_sold: 1, payment_methods: ['card'], cost_minor: '0', missing_cost_items: 0, total_minor: '10400',
+				original_currency: 'USD', original_total_minor: '200', rate_microrate: '52000000' },
+			{ sale_id: 's2', sale_number: 'R-0002', occurred_at: '2026-10-20T09:00:00Z', currency: 'EGP', products: 'Papyrus', skus: 'PAP-2', root_names_ar: '', root_names_en: '',
+				subcategory_names_ar: '', subcategory_names_en: '', items_sold: 1, payment_methods: ['cash'], cost_minor: '0', missing_cost_items: 0, total_minor: '10000',
+				original_currency: 'EGP', original_total_minor: '10000', rate_microrate: null }
+		];
+		report.sales_total_count = 2;
+		api.sales.mockResolvedValue(report);
+		render(ReportsPage, { params, store: store.store_id, stores: [store] });
+		const card = await screen.findByTestId('report-currency-mix');
+		expect(card.textContent).toMatch(/Sales recorded in EGP\s*100 EGP\s*Sales: 1/);
+		expect(card.textContent).toMatch(/Sales recorded in USD\s*\$2\.00\s*Sales: 2\s*In this report: 104 EGP/);
+		expect(card.textContent).toMatch(/Latest USD rate\s*1 USD = 52\.50 EGP/);
+		expect(card.textContent).toMatch(/From Cloud settings/);
+		expect(card.textContent).toMatch(/50\.00 – 52\.00 EGP per USD/);
+		expect(card.textContent).toMatch(/past sales can use a different rate/);
+
+		await fireEvent.click(screen.getByRole('tab', { name: 'Sales details' }));
+		expect(screen.getByRole('columnheader', { name: 'Recorded as' })).toBeTruthy();
+		const usdRow = screen.getByText('R-0001').closest('tr')!;
+		expect(usdRow.textContent).toMatch(/\$2\.00\s*at 52\.00/);
+		expect(screen.getByText('R-0002').closest('tr')!.textContent).toMatch(/—$/);
+		// The reference stays in the cell's direction: only the code is LTR.
+		expect(screen.getByText('R-0001').tagName).toBe('BDI');
+		expect(screen.getByText('R-0001').closest('td')!.hasAttribute('dir')).toBe(false);
+	});
+
+	it('says when no USD rate is known and lists USD even without USD sales', async () => {
+		api.sales.mockResolvedValue(salesReport([summary('EGP', '114000')]));
+		render(ReportsPage, { params, store: store.store_id, stores: [store] });
+		const card = await screen.findByTestId('report-currency-mix');
+		expect(card.textContent).toMatch(/Sales recorded in USD\s*\$0\.00\s*Sales: 0/);
+		expect(card.textContent).toMatch(/No USD rate recorded yet/);
+		expect(card.textContent).not.toMatch(/USD rates used in this period/);
 	});
 
 	it('calculates zakat from the stock value and the typed gold price', async () => {

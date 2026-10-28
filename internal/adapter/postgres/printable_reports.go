@@ -30,7 +30,7 @@ func int8Ptr(v pgtype.Int8) *int64 {
 
 // SalesReportFacts reads every fact of one sales report in a single
 // read-only snapshot, so the sections always agree with each other.
-func (d Reporting) SalesReportFacts(ctx context.Context, storeID string, startUTC, endUTC time.Time, withUSDRates bool) (salesreport.Facts, error) {
+func (d Reporting) SalesReportFacts(ctx context.Context, storeID string, startUTC, endUTC, asOf time.Time, withUSDRates bool) (salesreport.Facts, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	store, err := printableScope(storeID)
@@ -56,6 +56,13 @@ func (d Reporting) SalesReportFacts(ctx context.Context, storeID string, startUT
 			Subtotal: r.SubtotalMinor, Discount: r.DiscountMinor, Tax: r.TaxMinor, Total: r.TotalMinor,
 			FxMicrorate: r.FxRateMicrorate.Int64, InPeriod: r.InPeriod, USDRateMicrorate: r.UsdRateMicrorate,
 		})
+	}
+	latest, err := q.PrintableReportLatestUSDRate(ctx, sqlcgen.PrintableReportLatestUSDRateParams{AsOf: pgTime(asOf), StoreID: store})
+	if err != nil {
+		return f, reportErr("sales report usd rate", err)
+	}
+	if len(latest) == 1 {
+		f.LatestUSDRate = &salesreport.Rate{Microrate: latest[0].RateMicrorate, EffectiveAt: latest[0].EffectiveAt.Time, Source: latest[0].Source}
 	}
 	lines, err := q.PrintableReportSaleLines(ctx, sqlcgen.PrintableReportSaleLinesParams{StartUtc: start, EndUtc: end, StoreID: store})
 	if err != nil {

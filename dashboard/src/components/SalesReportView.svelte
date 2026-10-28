@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { ApiError, type PeriodParams } from '../lib/http.js';
-	import { emptyFilter, reportsApi, type FilterOption, type ReportDisplay, type ReportFilter, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
-	import { formatInt, formatMinor } from '../lib/money.js';
+	import { emptyFilter, reportsApi, type CurrencyMixRow, type FilterOption, type ReportDisplay, type ReportFilter, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
+		import { formatInt, formatMicrorate, formatMinor } from '../lib/money.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { lang, t } from '../lib/i18n.svelte.js';
 	import { parseMajor } from '../lib/zakat.js';
@@ -102,6 +102,26 @@
 	let hasActivity = $derived(summary.some((r) => r.sales_count > 0 || r.return_count > 0));
 	let extraTotal = $derived(costs.reduce((sum, c) => sum + c.minor, 0n));
 	let adjustedProfit = $derived(report ? (BigInt(report.base.profit_minor) - extraTotal).toString() : '0');
+
+	// Both currencies always appear, so "no USD sales" is stated, not implied.
+	let currencyRows = $derived<CurrencyMixRow[]>(
+		(['EGP', 'USD'] as const).map(
+			(cur) =>
+				report?.currency_mix.find((row) => row.currency === cur) ?? {
+					currency: cur,
+					sales_count: 0,
+					total_minor: '0',
+					report_currency: report && report.display_currency !== 'all' ? report.display_currency : cur,
+					report_total_minor: '0'
+				}
+		)
+	);
+	let rates = $derived(report?.exchange_rate);
+	// The column appears only when some Sale on the page was converted.
+	let showRecorded = $derived((report?.sales ?? []).some((row) => row.rate_microrate !== null));
+	function rateText(microrate: string) {
+		return t(`الدولار = ${formatMicrorate(microrate)} جنيه`, `1 USD = ${formatMicrorate(microrate)} EGP`);
+	}
 
 	function money(minor: string, cur: 'EGP' | 'USD') {
 		return formatMinor(minor, cur);
@@ -210,7 +230,7 @@
 				{#each rows as row (row.id + row.currency)}
 					<tr>
 						<th scope="row">{name(row)}</th>
-						{#if products}<td class="mono" dir="ltr">{row.sku}</td>{/if}
+						{#if products}<td class="mono"><bdi dir="ltr">{row.sku}</bdi></td>{/if}
 						<td><bdi class="num">{formatInt(row.items_sold)}</bdi></td>
 						{#if showRefunds}<td><bdi class="num">{formatInt(row.returned_items)}</bdi></td>{/if}
 						<td><bdi class="num">{money(row.sales_minor, row.currency)}</bdi></td>
@@ -420,6 +440,47 @@
 								<p class="report-note">{t('تُحوّل مبالغ الدولار بسعر الصرف المحفوظ مع كل بيع أو استرداد.', 'USD amounts use the exchange rate saved with each sale or refund.')}</p>
 							</div>
 						{/if}
+						<div class="card report-money-detail report-currency-mix" data-testid="report-currency-mix">
+							<h3>{t('العملات وسعر الدولار', 'Currencies and USD rate')}</h3>
+							<table aria-label={t('العملات وسعر الدولار', 'Currencies and USD rate')}>
+								<tbody>
+									{#each currencyRows as row (row.currency)}
+										<tr>
+											<th scope="row">{t(`المبيعات المسجلة بـ ${row.currency}`, `Sales recorded in ${row.currency}`)}</th>
+											<td>
+												<bdi class="num">{money(row.total_minor, row.currency)}</bdi>
+												<small>{t(`عدد عمليات البيع: ${formatInt(row.sales_count)}`, `Sales: ${formatInt(row.sales_count)}`)}</small>
+												{#if row.report_currency !== row.currency && row.sales_count > 0}<small>{t('في هذا التقرير', 'In this report')}: <bdi class="num">{money(row.report_total_minor, row.report_currency)}</bdi></small>{/if}
+											</td>
+										</tr>
+									{/each}
+									<tr>
+										<th scope="row">{t('آخر سعر للدولار', 'Latest USD rate')}</th>
+										<td>
+											{#if rates?.latest}
+												<bdi class="num">{rateText(rates.latest.rate_microrate)}</bdi>
+												<small>{t('سارٍ منذ', 'In effect since')} {absoluteTime(rates.latest.effective_at, lang())}</small>
+												<small>{rates.latest.source === 'cloud' ? t('من إعدادات السحابة', 'From Cloud settings') : t('من آخر بيع بالدولار', 'From the latest USD sale')}</small>
+											{:else}
+												{t('لم يُسجل سعر للدولار بعد', 'No USD rate recorded yet')}
+											{/if}
+										</td>
+									</tr>
+									{#if rates?.period_min_microrate != null && rates.period_max_microrate != null}
+										<tr>
+											<th scope="row">{t('أسعار الدولار المستخدمة في هذه الفترة', 'USD rates used in this period')}</th>
+											<td><bdi class="num">{rates.period_min_microrate === rates.period_max_microrate
+												? rateText(rates.period_min_microrate)
+												: t(`${formatMicrorate(rates.period_min_microrate)} – ${formatMicrorate(rates.period_max_microrate)} جنيه لكل دولار`, `${formatMicrorate(rates.period_min_microrate)} – ${formatMicrorate(rates.period_max_microrate)} EGP per USD`)}</bdi></td>
+										</tr>
+									{/if}
+								</tbody>
+							</table>
+							<p class="report-note">{t(
+								'يُحوَّل كل بيع بسعر الدولار المحفوظ معه، أو بالسعر الساري يوم البيع. يتغير السعر من يوم لآخر، لذا قد تستخدم المبيعات السابقة سعراً مختلفاً عن آخر سعر.',
+								'Each sale converts at the USD rate saved on it, or the rate in effect on the day it was made. The rate changes from day to day, so past sales can use a different rate from the latest one.'
+							)}</p>
+						</div>
 					</div>
 					{#if showRefunds}
 						<section class="report-reconciliation" aria-labelledby="report-reconciliation-heading">
@@ -550,12 +611,13 @@
 									<th>{t('المرجع', 'Reference')}</th><th>{t('التاريخ', 'Date')}</th><th>{t('المنتج', 'Product')}</th>
 									<th>{t('التصنيف الرئيسي', 'Category')}</th><th>{t('التصنيف الفرعي', 'Subcategory')}</th><th>{t('القطع', 'Items')}</th>
 									<th>{t('الدفع', 'Payment')}</th><th>{t('التكلفة الأصلية', 'Original cost')}</th><th>{t('إجمالي المبيعات', 'Sales')}</th>
+									{#if showRecorded}<th>{t('المسجّل', 'Recorded as')}</th>{/if}
 								</tr>
 							</thead>
 							<tbody>
 								{#each report.sales as row (row.sale_id)}
 									<tr>
-										<td class="mono" dir="ltr">{row.sale_number}</td>
+										<td class="mono"><bdi dir="ltr">{row.sale_number}</bdi></td>
 										<td>{absoluteTime(row.occurred_at, lang())}</td>
 										<td>{row.products}<small class="mono" dir="ltr">{row.skus}</small></td>
 										<td>{(lang() === 'ar' ? row.root_names_ar : row.root_names_en) || t('التصنيف غير متاح', 'Classification unavailable')}</td>
@@ -564,6 +626,9 @@
 										<td>{row.payment_methods.map(method).join(t('، ', ', '))}</td>
 										{@render cost(row)}
 										<td><bdi class="num">{money(row.total_minor, row.currency)}</bdi></td>
+										{#if showRecorded}
+											<td>{#if row.rate_microrate !== null}<bdi class="num">{money(row.original_total_minor, row.original_currency)}</bdi><small>{t('بسعر', 'at')} <bdi class="num">{formatMicrorate(row.rate_microrate)}</bdi></small>{:else}—{/if}</td>
+										{/if}
 									</tr>
 								{/each}
 							</tbody>

@@ -252,3 +252,82 @@ func TestBuildExcludesTaxWhenTheBusinessDoesNotUseIt(t *testing.T) {
 		t.Fatalf("tax kept: %+v", got.Summary[0])
 	}
 }
+
+// Each Sale keeps how it was recorded and the rate that converted it; the
+// currency mix adds up to the summary; the rate range covers every rate
+// the period's Sales used (a USD Sale's own snapshot always counts).
+func TestBuildExplainsCurrenciesAndRates(t *testing.T) {
+	facts := fixture()
+	facts.Sales[1].USDRateMicrorate = 50_000_000
+	type mixWant struct{ count, total, report int64 }
+	cases := []struct {
+		display      string
+		egp, usd     mixWant
+		egpRate      int64 // 0 when the EGP Sale keeps its own currency
+		usdRate      int64
+		minRate, max int64
+	}{
+		{display: DisplayEGP, egp: mixWant{1, 1000, 1000}, usd: mixWant{1, 200, 10_400}, usdRate: 52_000_000, minRate: 52_000_000, max: 52_000_000},
+		// 1000/50 = 20.
+		{display: DisplayUSD, egp: mixWant{1, 1000, 20}, usd: mixWant{1, 200, 200}, egpRate: 50_000_000, minRate: 50_000_000, max: 52_000_000},
+		{display: DisplayAll, egp: mixWant{1, 1000, 1000}, usd: mixWant{1, 200, 200}, minRate: 52_000_000, max: 52_000_000},
+	}
+	for _, tc := range cases {
+		got, err := Build(facts, Options{Display: tc.display, Loc: cairo, Offset: 0, Limit: 50})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.display, err)
+		}
+		if len(got.CurrencyMix) != 2 || got.CurrencyMix[0].Currency != "EGP" || got.CurrencyMix[1].Currency != "USD" {
+			t.Fatalf("%s: mix %+v", tc.display, got.CurrencyMix)
+		}
+		var mixed int64
+		for i, want := range []mixWant{tc.egp, tc.usd} {
+			row := got.CurrencyMix[i]
+			if row.SalesCount != want.count || int64(row.Total) != want.total || int64(row.ReportTotal) != want.report {
+				t.Fatalf("%s: mix row %+v, want %+v", tc.display, row, want)
+			}
+			if tc.display != DisplayAll && row.ReportCurrency != tc.display || tc.display == DisplayAll && row.ReportCurrency != row.Currency {
+				t.Fatalf("%s: report currency %+v", tc.display, row)
+			}
+			mixed += int64(row.ReportTotal)
+		}
+		if tc.display != DisplayAll && mixed != int64(got.Summary[0].Sales) {
+			t.Fatalf("%s: mix %d does not add up to the summary %d", tc.display, mixed, got.Summary[0].Sales)
+		}
+		for _, row := range got.Sales {
+			want, original := tc.egpRate, int64(1000)
+			if row.SaleID == "usd" {
+				want, original = tc.usdRate, 200
+			}
+			if int64(row.OriginalTotal) != original || row.OriginalCurrency != map[string]string{"usd": "USD", "egp": "EGP"}[row.SaleID] {
+				t.Fatalf("%s: recorded as %+v", tc.display, row)
+			}
+			if (want == 0) != (row.RateMicrorate == nil) || want != 0 && int64(*row.RateMicrorate) != want {
+				t.Fatalf("%s: sale %s rate %v, want %d", tc.display, row.SaleID, row.RateMicrorate, want)
+			}
+		}
+		r := got.ExchangeRate
+		if r.PeriodMin == nil || r.PeriodMax == nil || int64(*r.PeriodMin) != tc.minRate || int64(*r.PeriodMax) != tc.max {
+			t.Fatalf("%s: rate range %v..%v", tc.display, r.PeriodMin, r.PeriodMax)
+		}
+	}
+
+	// Without a USD Sale and without conversion no rate was used.
+	egpOnly := fixture()
+	egpOnly.Sales = egpOnly.Sales[1:]
+	got, err := Build(egpOnly, Options{Display: DisplayEGP, Loc: cairo, Offset: 0, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExchangeRate.PeriodMin != nil || got.ExchangeRate.PeriodMax != nil || len(got.CurrencyMix) != 1 {
+		t.Fatalf("egp only: %+v %+v", got.ExchangeRate, got.CurrencyMix)
+	}
+	body, err := json.Marshal(got.Sales[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil || wire["rate_microrate"] != nil || wire["original_total_minor"] != "1000" {
+		t.Fatalf("wire %s", body)
+	}
+}

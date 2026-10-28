@@ -123,6 +123,19 @@ accessible Store is chosen automatically.
   Settings). With no rate at all the request
   fails with `EXCHANGE_RATE_REQUIRED` (409). `all` keeps currencies
   apart. Returns use their Sale's conversion.
+- The report explains its currencies, as MoonLightRetail's does.
+  `currency_mix` totals the filtered Sales per recorded currency, as
+  recorded and in the report currency (the dashboard always lists EGP and
+  USD). `exchange_rate.latest` is the USD rate in effect when the report
+  is made: the newest Cloud rate, else the newest synced USD Sale's
+  snapshot in scope (`source` says which). `period_min_microrate` and
+  `period_max_microrate` span the rates the period's Sales used; a USD
+  Sale's own snapshot always counts, an EGP Sale's rate only when it is
+  shown in USD. Each Sales-details row carries `original_currency`,
+  `original_total_minor` and the `rate_microrate` that converted it (null
+  when shown in its own currency); the page adds a "Recorded as" column
+  when any row was converted. Rates change daily, so the page notes that
+  older Sales can use a different rate from the latest one.
 - Each Sale, line, payment and refund converts on its own and rounds half
   away from zero, so sections can differ by one minor unit. Category, tag
   and product amounts are line totals before sale-level discount and tax.

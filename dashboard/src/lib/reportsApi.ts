@@ -90,6 +90,25 @@ export interface ReportSaleRow {
 	cost_minor: string;
 	missing_cost_items: number;
 	total_minor: string;
+	// The Sale as recorded, and the USD->EGP rate (x 1,000,000) that
+	// converted it into the report currency; null when not converted.
+	original_currency: Currency;
+	original_total_minor: string;
+	rate_microrate: string | null;
+}
+
+export interface CurrencyMixRow {
+	currency: Currency;
+	sales_count: number;
+	total_minor: string;
+	report_currency: Currency;
+	report_total_minor: string;
+}
+
+export interface ExchangeRateContext {
+	latest: { rate_microrate: string; effective_at: string; source: 'cloud' | 'sale' } | null;
+	period_min_microrate: string | null;
+	period_max_microrate: string | null;
 }
 
 export interface BusinessSettings {
@@ -135,6 +154,8 @@ export interface SalesReport {
 	unclassified_items: number;
 	detail_offset: number;
 	detail_limit: number;
+	currency_mix: CurrencyMixRow[];
+	exchange_rate: ExchangeRateContext;
 }
 
 export interface StockRow {

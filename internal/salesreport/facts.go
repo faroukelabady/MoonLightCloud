@@ -106,6 +106,14 @@ type Shop struct {
 	Phone     string `json:"phone"`
 }
 
+// Rate is one USD->EGP rate and when it took effect; Source is "cloud"
+// (Cloud settings) or "sale" (a synced USD Sale's snapshot).
+type Rate struct {
+	Microrate   int64
+	EffectiveAt time.Time
+	Source      string
+}
+
 // Facts is everything one sales report reads.
 type Facts struct {
 	Sales           []Sale
@@ -117,6 +125,9 @@ type Facts struct {
 	ReturnLines     []ReturnLine
 	ReturnPayments  []ReturnPayment
 	Shop            *Shop
+	// LatestUSDRate is the rate in effect when the report is made; nil
+	// when no rate is known for the scope.
+	LatestUSDRate *Rate
 }
 
 // StockItem is one Variant on the stocktaking sheet, valued in EGP.
@@ -137,8 +148,9 @@ type StockItem struct {
 	UnitPrice      *int64
 }
 
-// Repository reads report facts. An empty storeID means every Store.
+// Repository reads report facts. An empty storeID means every Store;
+// asOf is the moment the latest USD rate is read for.
 type Repository interface {
-	SalesReportFacts(ctx context.Context, storeID string, startUTC, endUTC time.Time, withUSDRates bool) (Facts, error)
+	SalesReportFacts(ctx context.Context, storeID string, startUTC, endUTC, asOf time.Time, withUSDRates bool) (Facts, error)
 	StockItems(ctx context.Context, storeID string) ([]StockItem, *Shop, error)
 }

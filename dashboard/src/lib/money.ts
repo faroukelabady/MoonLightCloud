@@ -23,6 +23,14 @@ function groupDigits(s: string): string {
 	return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// formatMicrorate renders a rate x 1,000,000 exactly ("52.5" -> "52.50"):
+// at least two decimals, trailing zeros dropped beyond them.
+export function formatMicrorate(microrate: string): string {
+	const v = BigInt(microrate.replace(/[^0-9]/g, '') || '0');
+	const frac = (v % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '').padEnd(2, '0');
+	return `${groupDigits((v / 1_000_000n).toString())}.${frac}`;
+}
+
 export function formatInt(n: number | string): string {
 	return groupDigits(String(n));
 }

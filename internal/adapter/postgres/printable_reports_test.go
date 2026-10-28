@@ -162,6 +162,10 @@ func TestPrintableSalesReportUsesBusinessSettingsAndCloudRates(t *testing.T) {
 	if got.Summary[0].Sales != 262_400 || got.Summary[0].Tax != 0 || got.Settings.TaxEnabled {
 		t.Fatalf("tax off: %+v %+v", got.Summary[0], got.Settings)
 	}
+	// No Cloud rate yet: the latest rate is the USD Sale's own snapshot.
+	if l := got.ExchangeRate.Latest; l == nil || l.Source != "sale" || l.Microrate != 52_000_000 || !l.EffectiveAt.Equal(time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("latest from the sale: %+v", l)
+	}
 
 	rates := settings.NewService(NewBusinessSettings(env.pool, 5*time.Second), uuid.NewString, time.Now)
 	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -183,6 +187,19 @@ func TestPrintableSalesReportUsesBusinessSettingsAndCloudRates(t *testing.T) {
 	// 200000/50 = 4000, plus the USD Sale's 1250 - 50 tax.
 	if usd.Summary[0].Sales != 5_200 {
 		t.Fatalf("cloud rate: %+v", usd.Summary[0])
+	}
+	// The latest Cloud rate (60, already in effect) explains the report,
+	// while the period's Sales used 50 (the EGP Sale) and 52 (the USD one).
+	if l := usd.ExchangeRate.Latest; l == nil || l.Source != "cloud" || l.Microrate != 60_000_000 {
+		t.Fatalf("latest cloud rate: %+v", l)
+	}
+	if r := usd.ExchangeRate; r.PeriodMin == nil || *r.PeriodMin != 50_000_000 || *r.PeriodMax != 52_000_000 {
+		t.Fatalf("period range: %+v", r)
+	}
+	for _, row := range usd.Sales {
+		if row.OriginalCurrency == "EGP" && (row.RateMicrorate == nil || *row.RateMicrorate != 50_000_000 || row.OriginalTotal != 200_000) {
+			t.Fatalf("EGP sale recorded as: %+v", row)
+		}
 	}
 	list, err := rates.Rates(ctx)
 	if err != nil || len(list) != 2 || list[0].Rate != "60" || list[1].Note != "bank" {
