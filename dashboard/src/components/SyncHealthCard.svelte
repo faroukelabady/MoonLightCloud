@@ -75,7 +75,7 @@
 			<p class="muted noshop-hint">{t('سجّل جهاز متجر من صفحة الأجهزة لتبدأ المزامنة.', "Register a shop's device on the Devices page to start syncing.")}</p>
 		{:else}
 		{@const f = health.freshness}
-		<table class="health" data-testid="sync-table" aria-label={t('حالة المزامنة', 'Sync status')}>
+		<table class="health" data-testid="sync-table">
 			<thead>
 				<tr>
 					<td></td>

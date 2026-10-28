@@ -139,7 +139,8 @@ function assertCleanNetwork(seen: { bad: string[] }) {
 }
 
 // Phase 4B net-primary KPI label (was إجمالي المبيعات in Phase 3B).
-const NET = 'صافي المبيعات';
+// The Sales and profit card's title: shown in every state of the card.
+const NET = 'المبيعات والربح';
 
 test('full dashboard flow', async ({ page }) => {
 	const gates = { csp: [] as string[], errors: [] as string[] };
@@ -148,9 +149,10 @@ test('full dashboard flow', async ({ page }) => {
 	armNetwork(page, net);
 	await mockDashboard(page);
 	await login(page);
-	// Net-primary KPI card present with gross/refund context (no skeleton forever).
+	// Sales card present with net sales and refund context (no skeleton forever).
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	await expect(page.getByText(/المرتجعات \/ Refunds/)).toBeVisible({ timeout: 15000 });
+	await expect(page.getByTestId('net-sales')).toBeVisible({ timeout: 15000 });
+	await expect(page.getByRole('rowheader', { name: /المرتجعات/ }).first()).toBeVisible({ timeout: 15000 });
 	await expect
 		.poll(async () => (await page.locator('main').textContent())?.includes('ج.م'), { timeout: 15000 })
 		.toBe(true);

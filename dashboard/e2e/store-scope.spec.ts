@@ -305,7 +305,7 @@ test('dashboard layout stays within budget across reference viewports', async ({
 	for (const vp of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1536, height: 1024 }, { width: 1920, height: 1080 }]) {
 		await page.setViewportSize(vp);
 		await page.goto(`?store_id=${STORE_A}`);
-		await expect(page.getByText('صافي المبيعات', { exact: true })).toBeVisible({ timeout: 15000 });
+		await expect(page.getByText('المبيعات والربح', { exact: true })).toBeVisible({ timeout: 15000 });
 		await page.waitForTimeout(400);
 		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 		expect(overflow, `no horizontal overflow at ${vp.width}`).toBeLessThanOrEqual(1);
