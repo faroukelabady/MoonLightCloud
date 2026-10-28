@@ -43,12 +43,18 @@ func TestProductMediaSnapshotRejectsBrokenGalleries(t *testing.T) {
 		}}
 	}
 	cases := map[string]func(*ProductMediaSnapshot){
-		"revision":       func(s *ProductMediaSnapshot) { s.MediaRevision = 0 },
-		"nil images":     func(s *ProductMediaSnapshot) { s.Images = nil },
-		"product id":     func(s *ProductMediaSnapshot) { s.ProductID = "nope" },
-		"duplicate id":   func(s *ProductMediaSnapshot) { s.Images = append(s.Images, mediaEntry(s.Images[0].ImageID, &variant, 0, true)) },
-		"same position":  func(s *ProductMediaSnapshot) { s.Images = append(s.Images, mediaEntry("aaaaaaaa-0000-4000-8000-000000000009", nil, 0, false)) },
-		"two primaries":  func(s *ProductMediaSnapshot) { s.Images = append(s.Images, mediaEntry("aaaaaaaa-0000-4000-8000-000000000009", nil, 1, true)) },
+		"revision":   func(s *ProductMediaSnapshot) { s.MediaRevision = 0 },
+		"nil images": func(s *ProductMediaSnapshot) { s.Images = nil },
+		"product id": func(s *ProductMediaSnapshot) { s.ProductID = "nope" },
+		"duplicate id": func(s *ProductMediaSnapshot) {
+			s.Images = append(s.Images, mediaEntry(s.Images[0].ImageID, &variant, 0, true))
+		},
+		"same position": func(s *ProductMediaSnapshot) {
+			s.Images = append(s.Images, mediaEntry("aaaaaaaa-0000-4000-8000-000000000009", nil, 0, false))
+		},
+		"two primaries": func(s *ProductMediaSnapshot) {
+			s.Images = append(s.Images, mediaEntry("aaaaaaaa-0000-4000-8000-000000000009", nil, 1, true))
+		},
 		"upper hash":     func(s *ProductMediaSnapshot) { s.Images[0].SHA256 = strings.Repeat("AB", 32) },
 		"gif":            func(s *ProductMediaSnapshot) { s.Images[0].ContentType = "image/gif" },
 		"too big":        func(s *ProductMediaSnapshot) { s.Images[0].ByteSize = MaxMediaBytes + 1 },
