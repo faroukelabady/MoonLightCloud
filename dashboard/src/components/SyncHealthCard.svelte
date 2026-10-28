@@ -32,6 +32,14 @@
 </script>
 
 <Card ar="حالة المزامنة مع المتجر" en="Sync Health Status">
+	{#snippet actions()}
+		{#if status !== 'loading'}
+			<button type="button" class="refresh" aria-label={tb('تحديث الحالة', 'Refresh status')} onclick={onrefresh}>
+				<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4" /></svg>
+				{t('تحديث', 'Refresh')}
+			</button>
+		{/if}
+	{/snippet}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -41,7 +49,7 @@
 	{:else}
 		{@const f = health.freshness}
 		<div class="hero level-{level}" role="status" data-testid="sync-hero" data-level={level}>
-			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={icons[level]} /></svg></span>
+			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={icons[level]} /></svg></span>
 			<div>
 				<div class="headline">{t(headlines[level][0], headlines[level][1])}</div>
 				{#if arabic()}<div class="sub">{headlines[level][1]}</div>{/if}
@@ -90,7 +98,6 @@
 			{t('التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.', 'Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.')}{#if arabic()}
 			<br /><span class="sub-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
 		</div>
-		<button type="button" class="refresh" aria-label={tb('تحديث الحالة', 'Refresh status')} onclick={onrefresh}><span class="rb-ar">{t('تحديث الحالة', 'Refresh status')}</span>{#if arabic()}<span class="rb-en">Refresh status</span>{/if}</button>
 	{/if}
 </Card>
 
@@ -101,9 +108,9 @@
 		--tone-text: #15803d;
 		display: flex;
 		align-items: center;
-		gap: 12px;
-		margin-bottom: 10px;
-		padding: 12px 14px;
+		gap: 10px;
+		margin-bottom: 6px;
+		padding: 8px 12px;
 		border-radius: var(--radius-control);
 		background: var(--tone-soft);
 		border-inline-start: 4px solid var(--tone);
@@ -119,8 +126,8 @@
 		--tone-text: #991b1b;
 	}
 	.okic {
-		width: 44px;
-		height: 44px;
+		width: 34px;
+		height: 34px;
 		flex-shrink: 0;
 		display: inline-flex;
 		align-items: center;
@@ -131,7 +138,7 @@
 	}
 	.headline {
 		font-weight: 800;
-		font-size: 1.02rem;
+		font-size: 0.95rem;
 		color: var(--tone-text);
 	}
 	.sub {
@@ -145,7 +152,7 @@
 		align-items: center;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
-		padding: 4px 8px;
+		padding: 2px 8px;
 		font-size: 0.76rem;
 	}
 	.ghead {
@@ -155,7 +162,7 @@
 	}
 	.gl {
 		font-size: 0.74rem;
-		line-height: 1.25;
+		line-height: 1.15;
 	}
 	.gv {
 		font-weight: 700;
@@ -176,25 +183,19 @@
 		margin-top: 6px;
 		font-size: 0.74rem;
 	}
+	/* In the card header, so the first overview row stays within its
+	   height budget (e2e first-row density gate). */
 	.refresh {
-		margin-top: 8px;
-		width: 100%;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
 		background: var(--primary);
 		color: #fff;
 		border: 0;
 		border-radius: var(--radius-control);
-		padding: 7px 10px;
+		padding: 5px 10px;
+		font-size: 0.8rem;
 		font-weight: 600;
-		line-height: 1.35;
-	}
-	.rb-ar {
-		display: block;
-		font-size: 0.86rem;
-	}
-	.rb-en {
-		display: block;
-		font-size: 0.7rem;
-		font-weight: 400;
-		opacity: 0.9;
+		white-space: nowrap;
 	}
 </style>

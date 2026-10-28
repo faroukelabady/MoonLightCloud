@@ -240,7 +240,9 @@ test('503 shows retry and reloads', async ({ page }) => {
 		await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"code":"UNAVAILABLE","message":"x"}}' });
 	}, { times: 1 });
 	await page.getByRole('button', { name: 'اليوم', exact: true }).click();
-	await expect(page.getByText(/غير متاحة مؤقتًا/)).toBeVisible({ timeout: 15000 });
+	// Every Overview card that reads the overview (Net sales, Transactions
+	// and units, the online comparison) shows its own error and retry.
+	await expect(page.getByText(/غير متاحة مؤقتًا/).first()).toBeVisible({ timeout: 15000 });
 	await page.unroute('**/api/v1/dashboard/overview*');
 	await page.getByRole('button', { name: /إعادة المحاولة/ }).first().click();
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
