@@ -111,3 +111,27 @@ func TestWireParityProductVariantInventoryV1(t *testing.T) {
 		t.Fatalf("variant inventory context parity broken: policy=%d catalog=%d", valid.PolicyRevision, valid.CatalogRevision)
 	}
 }
+
+// TestWireParityProductMediaV1 decodes the Retail-generated media snapshot
+// (MoonLightRetail internal/domain/sync/testdata/product_media_snapshot_v1.json).
+func TestWireParityProductMediaV1(t *testing.T) {
+	raw := loadWireFixture(t, "wire_product_media_v1.json")
+	decoded, err := DecodeProductMediaSnapshot(raw)
+	if err != nil {
+		t.Fatalf("decode media fixture: %v", err)
+	}
+	valid, err := ValidateProductMediaSnapshot(decoded)
+	if err != nil {
+		t.Fatalf("validate media fixture: %v", err)
+	}
+	if valid.ProductID != "77777777-0000-4000-8000-000000000001" || valid.MediaRevision != 2 || len(valid.Images) != 2 {
+		t.Fatalf("media identity parity broken: %+v", valid)
+	}
+	product, variant := valid.Images[0], valid.Images[1]
+	if product.VariantID != nil || product.ContentType != "image/jpeg" || product.ByteSize != 482113 || product.Width != 1600 {
+		t.Fatalf("product gallery parity broken: %+v", product)
+	}
+	if variant.VariantID == nil || *variant.VariantID != "77777777-0000-4000-8000-000000000002" || !variant.IsPrimary || variant.ContentType != "image/png" {
+		t.Fatalf("variant gallery parity broken: %+v", variant)
+	}
+}
