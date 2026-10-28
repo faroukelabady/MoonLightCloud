@@ -57,8 +57,8 @@
 		</div>
 		<div class="grid">
 			<div class="ghead" aria-hidden="true"></div>
-			<div class="ghead">{t('مبيعات', 'Sales')}{#if arabic()}<br /><span class="sub-en">Sales</span>{/if}</div>
-			<div class="ghead">{t('مرتجعات', 'Returns')}{#if arabic()}<br /><span class="sub-en">Returns</span>{/if}</div>
+			<div class="ghead">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</div>
+			<div class="ghead">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</div>
 			<div class="gl">{t('آخر حدث', 'Latest event')}{#if arabic()}<br /><span class="muted sub-en">Latest event</span>{/if}</div>
 			<div class="gv num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</div>
 			<div class="gv num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</div>
@@ -89,14 +89,14 @@
 			</div>
 		</div>
 		{#if health.last_error_code}
-			<div class="muted errmsg">{t('آخر خطأ', 'Last error')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic()}<br /><span class="sub-en">{health.last_error_label_en ?? ''}</span>{/if}</div>
+			<div class="muted errmsg">{t('آخر خطأ', 'Last error')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic() && health.last_error_label_en}<span class="sub-en"> · {health.last_error_label_en}</span>{/if}</div>
 		{/if}
 		{#if health.return_last_error_code}
-			<div class="muted errmsg">{t('آخر خطأ مرتجعات', 'Last return error')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic()}<br /><span class="sub-en">{health.return_last_error_label_en ?? ''}</span>{/if}</div>
+			<div class="muted errmsg">{t('آخر خطأ مرتجعات', 'Last return error')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic() && health.return_last_error_label_en}<span class="sub-en"> · {health.return_last_error_label_en}</span>{/if}</div>
 		{/if}
 		<div class="muted note">
 			{t('التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.', 'Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.')}{#if arabic()}
-			<br /><span class="sub-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
+			<span class="sub-en note-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
 		</div>
 	{/if}
 </Card>
@@ -110,7 +110,7 @@
 		align-items: center;
 		gap: 10px;
 		margin-bottom: 6px;
-		padding: 8px 12px;
+		padding: 6px 10px;
 		border-radius: var(--radius-control);
 		background: var(--tone-soft);
 		border-inline-start: 4px solid var(--tone);
@@ -126,8 +126,8 @@
 		--tone-text: #991b1b;
 	}
 	.okic {
-		width: 34px;
-		height: 34px;
+		width: 30px;
+		height: 30px;
 		flex-shrink: 0;
 		display: inline-flex;
 		align-items: center;
@@ -139,10 +139,12 @@
 	.headline {
 		font-weight: 800;
 		font-size: 0.95rem;
+		line-height: 1.25;
 		color: var(--tone-text);
 	}
 	.sub {
 		font-size: 0.74rem;
+		line-height: 1.25;
 		color: var(--text-muted);
 	}
 	.grid {
@@ -159,6 +161,7 @@
 		font-weight: 700;
 		font-size: 0.72rem;
 		text-align: center;
+		white-space: nowrap;
 	}
 	.gl {
 		font-size: 0.74rem;
@@ -175,16 +178,23 @@
 		font-weight: 400;
 		font-size: 0.68rem;
 	}
+	/* English sublabels sit inline here, and line heights are tight, so
+	   the worst sync state still fits the first overview row (the E2E
+	   first-row density gate measures it in headless Chromium). */
 	.errmsg {
-		margin-top: 6px;
+		margin-top: 4px;
 		font-size: 0.82rem;
+		line-height: 1.35;
 	}
 	.note {
-		margin-top: 6px;
-		font-size: 0.74rem;
+		margin-top: 4px;
+		font-size: 0.7rem;
+		line-height: 1.35;
 	}
-	/* In the card header, so the first overview row stays within its
-	   height budget (e2e first-row density gate). */
+	.note-en {
+		display: block;
+	}
+	/* In the card header, which saves a row of height in the card body. */
 	.refresh {
 		display: inline-flex;
 		align-items: center;
