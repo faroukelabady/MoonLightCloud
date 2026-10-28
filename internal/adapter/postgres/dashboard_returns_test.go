@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -370,5 +371,75 @@ func TestDashboardDualErrorChannels(t *testing.T) {
 	}
 	if health.BlockedCount != 1 || health.ReturnBlockedCount != 1 {
 		t.Fatalf("blocked split: %+v", health)
+	}
+}
+
+// Overview profit = net sales - net tax - net cost, per recorded currency
+// and in EGP with each sale and refund converted at its own snapshot. The
+// USD sale (12.50, tax 0.50, cost 4.00 at 52) is partly returned.
+func TestDashboardOverviewProfit(t *testing.T) {
+	env := openDashEnv(t)
+	usd := fixture(t, "sale_usd.json")
+	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaab", "2026-09-20T09:00:00Z", fixture(t, "sale_egp.json"))
+	projectDashSale(t, env, "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaac", "2026-09-20T10:00:00Z", usd)
+	// The line lists at 13.00 but the sale was discounted to 12.50, so the
+	// return refunds 6.00 of it (13.00 gross less 7.00 discount).
+	var ret map[string]any
+	if err := json.Unmarshal([]byte(dashReturnPayload(t, usd, "cccccccc-cccc-7ccc-8ccc-cccccccccccd", "RET-USD", "2026-09-20T12:00:00Z", 1)), &ret); err != nil {
+		t.Fatal(err)
+	}
+	usdMoney := func(a int) map[string]any { return map[string]any{"amount_minor": a, "currency": "USD"} }
+	ret["totals"].(map[string]any)["discount"], ret["totals"].(map[string]any)["refund_total"] = usdMoney(700), usdMoney(600)
+	retLine := ret["lines"].([]any)[0].(map[string]any)
+	retLine["discount"], retLine["refund"] = usdMoney(700), usdMoney(600)
+	ret["refunds"].([]any)[0].(map[string]any)["amount"] = usdMoney(600)
+	retPayload, err := json.Marshal(ret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDashReturn(t, env, "bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbd", "2026-09-20T12:00:00Z", string(retPayload))
+	over, err := env.dash.Overview(context.Background(), dashReq(t, env, "custom", "2026-09-20", "2026-09-20"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if over.Summary.ReturnTransactionCount != 1 {
+		t.Fatalf("the USD return was not projected: %+v", over.Summary)
+	}
+	native := map[string]dashboard.SummaryBucket{}
+	for _, b := range over.Summary.CurrencyTotals {
+		native[b.Currency] = b
+	}
+	sub := func(a string, bs ...string) string {
+		v, _ := strconv.ParseInt(a, 10, 64)
+		for _, b := range bs {
+			n, _ := strconv.ParseInt(b, 10, 64)
+			v -= n
+		}
+		return strconv.FormatInt(v, 10)
+	}
+	profit := over.Profit
+	if len(profit.ByCurrency) != 2 || profit.ByCurrency[0].Currency != "EGP" || profit.ByCurrency[1].Currency != "USD" {
+		t.Fatalf("by currency: %+v", profit.ByCurrency)
+	}
+	// The EGP fixture has no cost recorded and no tax.
+	egp := profit.ByCurrency[0]
+	if egp.NetSalesMinor != "200000" || egp.NetTaxMinor != "0" || egp.NetCostMinor != "0" || egp.ProfitMinor != "200000" {
+		t.Fatalf("EGP profit: %+v", egp)
+	}
+	// The return refunds no tax and carries no cost, so it only lowers sales.
+	u := profit.ByCurrency[1]
+	if u.NetSalesMinor != native["USD"].NetSalesMinor || u.NetTaxMinor != "50" || u.NetCostMinor != "400" ||
+		u.ProfitMinor != sub(u.NetSalesMinor, "50", "400") {
+		t.Fatalf("USD profit: %+v (native %+v)", u, native["USD"])
+	}
+	// In EGP: the same converted net as the normalized KPI, tax 0.50*52,
+	// cost 4.00*52.
+	e := profit.EGP
+	if e.NetSalesMinor != over.Normalized.NormalizedNetMinor || e.NetTaxMinor != "2600" || e.NetCostMinor != "20800" ||
+		e.ProfitMinor != sub(e.NetSalesMinor, "2600", "20800") {
+		t.Fatalf("EGP total profit: %+v (normalized net %s)", e, over.Normalized.NormalizedNetMinor)
+	}
+	if _, err := NewReporting(env.pool, 5*time.Second).DashboardProfitForStore(context.Background(), "", time.Now(), time.Now()); err == nil {
+		t.Fatal("the scoped read must not widen to every Store")
 	}
 }

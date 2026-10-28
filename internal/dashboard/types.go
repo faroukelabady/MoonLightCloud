@@ -178,6 +178,31 @@ type Overview struct {
 	// (truncating integer division; identical rule in every mode).
 	Averages OverviewAverages `json:"averages"`
 	Fx       FxInfo           `json:"fx"`
+	Profit   ProfitView       `json:"profit"`
+}
+
+// ProfitFigures is gross profit after refunds: net sales, less net tax,
+// less the net cost of goods (sold lines minus returned lines). Lines
+// without a cost add nothing, so profit is an upper bound when costs are
+// missing.
+type ProfitFigures struct {
+	NetSalesMinor string `json:"net_sales_minor"`
+	NetTaxMinor   string `json:"net_tax_minor"`
+	NetCostMinor  string `json:"net_cost_minor"`
+	ProfitMinor   string `json:"profit_minor"`
+}
+
+// CurrencyProfit is one recorded currency's profit, as recorded.
+type CurrencyProfit struct {
+	Currency string `json:"currency"`
+	ProfitFigures
+}
+
+// ProfitView is the overview's profit: per recorded currency, and the whole
+// period in EGP with every sale and refund converted at its own snapshot.
+type ProfitView struct {
+	ByCurrency []CurrencyProfit `json:"by_currency"`
+	EGP        ProfitFigures    `json:"egp"`
 }
 
 // OverviewAverages holds one average per currency mode. Absent currencies
@@ -244,6 +269,7 @@ type Repository interface {
 	DashboardProductsNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
 	DashboardCategoriesNormalizedRefundsForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
 	DashboardReturnBranchesForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
+	DashboardProfitForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]ProfitRowRaw, error)
 	// Phase 12 operational analytics + catalog health (read-only, durable
 	// state only). storeID "" = global (ALL + legacy); providerKey "" =
 	// all durable providers. Never contacts a provider, never mutates.
@@ -254,6 +280,14 @@ type Repository interface {
 }
 
 type (
+	// ProfitRowRaw is one recorded currency's net sales, net tax and net
+	// cost, as recorded and converted to EGP per event (see DashboardProfit).
+	ProfitRowRaw struct {
+		Currency                           string
+		NetSales, NetTax, NetCost          int64
+		EGPNetSales, EGPNetTax, EGPNetCost int64
+		MissingFx                          int64
+	}
 	NormalizedSummaryRow struct {
 		Transactions int64
 		Units        int64

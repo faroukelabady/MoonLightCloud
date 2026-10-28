@@ -671,3 +671,38 @@ func (d Reporting) DashboardReturnBranchesForStore(ctx context.Context, storeID 
 func formatMicrorate(v int64) string {
 	return fmt.Sprintf("%d.%06d", v/1_000_000, v%1_000_000)
 }
+
+// DashboardProfit reads per-currency profit inputs for every Store.
+func (d Reporting) DashboardProfit(ctx context.Context, startUTC, endUTC time.Time) ([]dashboard.ProfitRowRaw, error) {
+	return d.dashboardProfit(ctx, "", startUTC, endUTC)
+}
+
+// DashboardProfitForStore reads per-currency profit inputs for one Store.
+func (d Reporting) DashboardProfitForStore(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.ProfitRowRaw, error) {
+	// The scoped variant never widens to every Store.
+	if _, err := scopedStoreUUID(storeID); err != nil {
+		return nil, err
+	}
+	return d.dashboardProfit(ctx, storeID, startUTC, endUTC)
+}
+
+func (d Reporting) dashboardProfit(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.ProfitRowRaw, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	store, err := printableScope(storeID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := sqlcgen.New(d.pool).DashboardProfit(ctx, sqlcgen.DashboardProfitParams{StartUtc: pgTime(startUTC), EndUtc: pgTime(endUTC), StoreID: store})
+	if err != nil {
+		return nil, reportErr("dashboard profit", err)
+	}
+	out := make([]dashboard.ProfitRowRaw, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.ProfitRowRaw{
+			Currency: r.Currency, NetSales: r.NetSales, NetTax: r.NetTax, NetCost: r.NetCost,
+			EGPNetSales: r.EgpNetSales, EGPNetTax: r.EgpNetTax, EGPNetCost: r.EgpNetCost, MissingFx: r.MissingFx,
+		})
+	}
+	return out, nil
+}

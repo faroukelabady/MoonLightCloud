@@ -1371,6 +1371,98 @@ func (q *Queries) DashboardProductsNormalizedRefundsForStore(ctx context.Context
 	return items, nil
 }
 
+const dashboardProfit = `-- name: DashboardProfit :many
+WITH sale_cost AS (
+    SELECT sale_id, SUM(cost_minor::numeric * quantity) AS cost
+    FROM sale_lines_projection
+    GROUP BY sale_id
+), return_cost AS (
+    SELECT return_refund_id, SUM(cost_minor::numeric) AS cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+), events AS (
+    SELECT s.currency, s.total_minor::numeric AS net_sales, s.tax_minor::numeric AS net_tax,
+        COALESCE(c.cost, 0) AS net_cost,
+        CASE WHEN s.currency = 'EGP' THEN 1000000::numeric ELSE s.fx_rate_microrate::numeric END AS fx
+    FROM sales_projection s
+    LEFT JOIN sale_cost c ON c.sale_id = s.sale_id
+    WHERE s.occurred_at >= $1 AND s.occurred_at < $2
+      AND ($3::uuid IS NULL OR s.store_id = $3::uuid)
+    UNION ALL
+    SELECT r.currency, -r.refund_total_minor::numeric, -r.tax_refunded_minor::numeric,
+        -COALESCE(c.cost, 0),
+        CASE WHEN r.currency = 'EGP' THEN 1000000::numeric ELSE r.fx_rate_microrate::numeric END
+    FROM return_refund_projection r
+    LEFT JOIN return_cost c ON c.return_refund_id = r.return_refund_id
+    WHERE r.occurred_at >= $1 AND r.occurred_at < $2
+      AND ($3::uuid IS NULL OR r.store_id = $3::uuid)
+)
+SELECT currency,
+    COALESCE(SUM(net_sales), 0)::bigint AS net_sales,
+    COALESCE(SUM(net_tax), 0)::bigint AS net_tax,
+    round(COALESCE(SUM(net_cost), 0))::bigint AS net_cost,
+    COALESCE(SUM(round(net_sales * fx / 1000000)), 0)::bigint AS egp_net_sales,
+    COALESCE(SUM(round(net_tax * fx / 1000000)), 0)::bigint AS egp_net_tax,
+    COALESCE(SUM(round(net_cost * fx / 1000000)), 0)::bigint AS egp_net_cost,
+    COUNT(*) FILTER (WHERE fx IS NULL)::bigint AS missing_fx
+FROM events
+GROUP BY currency
+ORDER BY currency
+`
+
+type DashboardProfitParams struct {
+	StartUtc pgtype.Timestamptz `json:"start_utc"`
+	EndUtc   pgtype.Timestamptz `json:"end_utc"`
+	StoreID  pgtype.UUID        `json:"store_id"`
+}
+
+type DashboardProfitRow struct {
+	Currency    string `json:"currency"`
+	NetSales    int64  `json:"net_sales"`
+	NetTax      int64  `json:"net_tax"`
+	NetCost     int64  `json:"net_cost"`
+	EgpNetSales int64  `json:"egp_net_sales"`
+	EgpNetTax   int64  `json:"egp_net_tax"`
+	EgpNetCost  int64  `json:"egp_net_cost"`
+	MissingFx   int64  `json:"missing_fx"`
+}
+
+// Gross profit after refunds per recorded currency: net sales (sales minus
+// refunds), net tax (tax charged minus tax refunded) and net cost (cost of
+// sold lines minus cost of returned lines), as recorded and converted to
+// EGP. Each sale and refund converts at ITS OWN fx snapshot and rounds once
+// (half away from zero) before aggregation, like every normalized read.
+// missing_fx counts USD events without a snapshot (left out of EGP sums).
+// sqlc.narg('store_id') NULL means every Store.
+func (q *Queries) DashboardProfit(ctx context.Context, arg DashboardProfitParams) ([]DashboardProfitRow, error) {
+	rows, err := q.db.Query(ctx, dashboardProfit, arg.StartUtc, arg.EndUtc, arg.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardProfitRow{}
+	for rows.Next() {
+		var i DashboardProfitRow
+		if err := rows.Scan(
+			&i.Currency,
+			&i.NetSales,
+			&i.NetTax,
+			&i.NetCost,
+			&i.EgpNetSales,
+			&i.EgpNetTax,
+			&i.EgpNetCost,
+			&i.MissingFx,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardRecentActivity = `-- name: DashboardRecentActivity :many
 SELECT kind, event_id, event_type, ts, device_name, detail FROM (
     (SELECT 'accepted'::text AS kind, e.event_id, e.event_type, e.received_at AS ts,

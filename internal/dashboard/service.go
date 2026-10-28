@@ -33,6 +33,15 @@ func subCheckedI64(a, b int64) (int64, error) {
 	return a - b, nil
 }
 
+// addCheckedI64 adds with an explicit overflow failure.
+func addCheckedI64(a, b int64) (int64, error) {
+	sum := a + b
+	if (b > 0 && sum < a) || (b < 0 && sum > a) {
+		return 0, apperr.New(apperr.Internal, "net arithmetic overflow")
+	}
+	return sum, nil
+}
+
 // ProcessingReader exposes diagnostics without granting projection mutation.
 type ProcessingReader interface {
 	ProcessingStats(context.Context, string) (projection.Stats, error)
@@ -89,6 +98,14 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 	if err != nil {
 		return Overview{}, err
 	}
+	profitRows, err := reader.DashboardProfit(ctx, req.Period.StartUTC, req.Period.EndUTC)
+	if err != nil {
+		return Overview{}, err
+	}
+	profit, err := profitView(profitRows)
+	if err != nil {
+		return Overview{}, err
+	}
 	return Overview{
 		GeneratedAt: req.GeneratedAt(), Timezone: req.Period.Timezone,
 		Period:  sum.Period,
@@ -106,7 +123,49 @@ func (s Service) Overview(ctx context.Context, req report.Request) (Overview, er
 		},
 		Averages: overviewAverages(nativeRows, norm),
 		Fx:       fx,
+		Profit:   profit,
 	}, nil
+}
+
+// profitView turns per-currency profit rows into the overview's figures:
+// profit = net sales - net tax - net cost, per currency as recorded, and
+// the EGP total of every currency's converted figures. Checked arithmetic;
+// a USD event without an FX snapshot is a projection-integrity error.
+func profitView(rows []ProfitRowRaw) (ProfitView, error) {
+	out := ProfitView{ByCurrency: []CurrencyProfit{}}
+	var egpSales, egpTax, egpCost int64
+	figures := func(sales, tax, cost int64) (ProfitFigures, error) {
+		p, err := subCheckedI64(sales, tax)
+		if err == nil {
+			p, err = subCheckedI64(p, cost)
+		}
+		return ProfitFigures{NetSalesMinor: minorString(sales), NetTaxMinor: minorString(tax),
+			NetCostMinor: minorString(cost), ProfitMinor: minorString(p)}, err
+	}
+	for _, r := range rows {
+		if r.MissingFx > 0 {
+			return ProfitView{}, apperr.New(apperr.Internal, "projection integrity: USD event without FX snapshot")
+		}
+		f, err := figures(r.NetSales, r.NetTax, r.NetCost)
+		if err != nil {
+			return ProfitView{}, err
+		}
+		out.ByCurrency = append(out.ByCurrency, CurrencyProfit{Currency: r.Currency, ProfitFigures: f})
+		for _, sum := range []struct {
+			dst *int64
+			v   int64
+		}{{&egpSales, r.EGPNetSales}, {&egpTax, r.EGPNetTax}, {&egpCost, r.EGPNetCost}} {
+			if *sum.dst, err = addCheckedI64(*sum.dst, sum.v); err != nil {
+				return ProfitView{}, err
+			}
+		}
+	}
+	egp, err := figures(egpSales, egpTax, egpCost)
+	if err != nil {
+		return ProfitView{}, err
+	}
+	out.EGP = egp
+	return out, nil
 }
 
 // overviewAverages computes per-mode averages server-side: All from the

@@ -564,3 +564,48 @@ GROUP BY s.channel,
     s.shop_name_ar, s.shop_name_en, s.shop_address_ar, s.shop_address_en,
     s.shop_phone, s.shop_receipt_footer_ar, s.shop_receipt_footer_en,
     r.currency;
+
+-- name: DashboardProfit :many
+-- Gross profit after refunds per recorded currency: net sales (sales minus
+-- refunds), net tax (tax charged minus tax refunded) and net cost (cost of
+-- sold lines minus cost of returned lines), as recorded and converted to
+-- EGP. Each sale and refund converts at ITS OWN fx snapshot and rounds once
+-- (half away from zero) before aggregation, like every normalized read.
+-- missing_fx counts USD events without a snapshot (left out of EGP sums).
+-- sqlc.narg('store_id') NULL means every Store.
+WITH sale_cost AS (
+    SELECT sale_id, SUM(cost_minor::numeric * quantity) AS cost
+    FROM sale_lines_projection
+    GROUP BY sale_id
+), return_cost AS (
+    SELECT return_refund_id, SUM(cost_minor::numeric) AS cost
+    FROM return_refund_lines_projection
+    GROUP BY return_refund_id
+), events AS (
+    SELECT s.currency, s.total_minor::numeric AS net_sales, s.tax_minor::numeric AS net_tax,
+        COALESCE(c.cost, 0) AS net_cost,
+        CASE WHEN s.currency = 'EGP' THEN 1000000::numeric ELSE s.fx_rate_microrate::numeric END AS fx
+    FROM sales_projection s
+    LEFT JOIN sale_cost c ON c.sale_id = s.sale_id
+    WHERE s.occurred_at >= @start_utc AND s.occurred_at < @end_utc
+      AND (sqlc.narg('store_id')::uuid IS NULL OR s.store_id = sqlc.narg('store_id')::uuid)
+    UNION ALL
+    SELECT r.currency, -r.refund_total_minor::numeric, -r.tax_refunded_minor::numeric,
+        -COALESCE(c.cost, 0),
+        CASE WHEN r.currency = 'EGP' THEN 1000000::numeric ELSE r.fx_rate_microrate::numeric END
+    FROM return_refund_projection r
+    LEFT JOIN return_cost c ON c.return_refund_id = r.return_refund_id
+    WHERE r.occurred_at >= @start_utc AND r.occurred_at < @end_utc
+      AND (sqlc.narg('store_id')::uuid IS NULL OR r.store_id = sqlc.narg('store_id')::uuid)
+)
+SELECT currency,
+    COALESCE(SUM(net_sales), 0)::bigint AS net_sales,
+    COALESCE(SUM(net_tax), 0)::bigint AS net_tax,
+    round(COALESCE(SUM(net_cost), 0))::bigint AS net_cost,
+    COALESCE(SUM(round(net_sales * fx / 1000000)), 0)::bigint AS egp_net_sales,
+    COALESCE(SUM(round(net_tax * fx / 1000000)), 0)::bigint AS egp_net_tax,
+    COALESCE(SUM(round(net_cost * fx / 1000000)), 0)::bigint AS egp_net_cost,
+    COUNT(*) FILTER (WHERE fx IS NULL)::bigint AS missing_fx
+FROM events
+GROUP BY currency
+ORDER BY currency;

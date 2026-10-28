@@ -23,6 +23,7 @@ type Reader interface {
 	DashboardProductsNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time) ([]NormalizedRefundProductRowRaw, error)
 	DashboardCategoriesNormalizedRefunds(ctx context.Context, startUTC, endUTC time.Time, kind string) ([]NormalizedRefundCategoryRowRaw, error)
 	DashboardReturnBranches(ctx context.Context, startUTC, endUTC time.Time, currency string) ([]ReturnBranchRowRaw, error)
+	DashboardProfit(ctx context.Context, startUTC, endUTC time.Time) ([]ProfitRowRaw, error)
 }
 
 // ReaderFor selects the scope already authorized by the HTTP boundary. It does
@@ -38,6 +39,10 @@ type storeReader struct {
 	report.Reader
 	repo    Repository
 	storeID string
+}
+
+func (r storeReader) DashboardProfit(ctx context.Context, startUTC, endUTC time.Time) ([]ProfitRowRaw, error) {
+	return r.repo.DashboardProfitForStore(ctx, r.storeID, startUTC, endUTC)
 }
 
 func (r storeReader) DashboardNormalizedSummary(ctx context.Context, startUTC, endUTC time.Time) (NormalizedSummaryRow, error) {

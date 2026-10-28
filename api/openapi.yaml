@@ -6171,7 +6171,7 @@ components:
         average_minor: {type: string, description: Server-computed truncating integer division of the mode total by the mode count.}
     DashboardOverview:
       type: object
-      required: [generated_at, timezone, period, summary, normalized, averages, fx]
+      required: [generated_at, timezone, period, summary, normalized, averages, fx, profit]
       properties:
         generated_at: {type: string, format: date-time}
         timezone: {type: string, example: Africa/Cairo}
@@ -6205,6 +6205,29 @@ components:
             usd: {$ref: '#/components/schemas/DashboardModeAverage'}
           description: Per-mode server averages (truncating division). Absent currencies report zero transactions with zero average.
         fx: {$ref: '#/components/schemas/DashboardFx'}
+        profit:
+          type: object
+          description: 'Gross profit after refunds: net sales - net tax - net cost (cost of sold lines minus cost of returned lines; lines without a cost add nothing). Per recorded currency, and the whole period in EGP with every sale and refund converted at its own FX snapshot.'
+          required: [by_currency, egp]
+          properties:
+            by_currency:
+              type: array
+              items:
+                allOf:
+                  - {$ref: '#/components/schemas/DashboardProfitFigures'}
+                  - type: object
+                    required: [currency]
+                    properties:
+                      currency: {type: string, enum: [EGP, USD]}
+            egp: {$ref: '#/components/schemas/DashboardProfitFigures'}
+    DashboardProfitFigures:
+      type: object
+      required: [net_sales_minor, net_tax_minor, net_cost_minor, profit_minor]
+      properties:
+        net_sales_minor: {type: string, description: Exact minor units as a decimal string.}
+        net_tax_minor: {type: string, description: Exact minor units as a decimal string.}
+        net_cost_minor: {type: string, description: Exact minor units as a decimal string.}
+        profit_minor: {type: string, description: 'net_sales_minor - net_tax_minor - net_cost_minor.'}
     DashboardDaily:
       type: object
       required: [timezone, period, mode, display_currency, normalized, days]
