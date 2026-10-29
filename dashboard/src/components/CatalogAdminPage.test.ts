@@ -84,7 +84,7 @@ it('shows shared frame choices read-only (edited in Retail)', async()=>{
  api.adminConfigurations.mockResolvedValue({configurations:[{id:'cfg-1',style_code:'classic',style_name_ar:'كلاسيكي',style_name_en:'Classic',color_code:'black',color_name_ar:'أسود',color_name_en:'Black',egp_delta_minor:'30000',usd_delta_minor:'600',enabled:true,position:0}]});
  render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
  const list=await screen.findByTestId('frame-configurations');
- expect(list.textContent).toContain('كلاسيكي / أسود');expect(list.textContent).toContain('+30000 EGP · +600 USD');
+ expect(list.textContent).toContain('كلاسيكي / أسود');expect(list.textContent).toContain('+300 ج.م · +$6.00');
  expect(screen.queryByText(/Queue options change/)).toBeNull();expect(api.adminCreateCommand).not.toHaveBeenCalled();
 });
 
@@ -124,7 +124,7 @@ it('keeps category disable confirmation before catalog-revision command submissi
 });
 
 
-it('submits Product detail strings and preserved metadata without numeric conversion', async()=>{
+it('shows prices in pounds and submits them as exact minor units', async()=>{
  defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
  const detail={...productDetail('ready'),catalog_revision:17,sales_policy_revision:29,description_ar:null,description_en:'Description',width_cm:null,height_cm:7};
  api.adminProduct.mockResolvedValue(detail);api.adminConfigurations.mockResolvedValue({configurations:[]});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
@@ -132,10 +132,11 @@ it('submits Product detail strings and preserved metadata without numeric conver
  await screen.findByRole('button',{name:/Queue details change/});
  await fireEvent.input(document.querySelector('#pd-ar')!,{target:{value:'  كتاب  '}});
  await fireEvent.input(document.querySelector('#pd-en')!,{target:{value:' Book '}});
- await fireEvent.input(document.querySelector('#pd-egp')!,{target:{value:'9007199254740993'}});
- await fireEvent.input(document.querySelector('#pd-usd')!,{target:{value:'0'}});
+ expect((document.querySelector('#pd-egp') as HTMLInputElement).value).toBe('0.00');
+ await fireEvent.input(document.querySelector('#pd-egp')!,{target:{value:'90071992547409.93'}});
+ await fireEvent.input(document.querySelector('#pd-usd')!,{target:{value:'12.5'}});
  await fireEvent.click(screen.getByRole('button',{name:/Queue details change/}));
- await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.details.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',arabic_name:'كتاب',arabic_description:null,english_name:'Book',english_description:'Description',width_cm:1,height_cm:7,egp_price_cents:'9007199254740993',usd_price_cents:'0',cost_cents:'0',top_category_id:'c-ready',subcategory_ids:[],tag_ids:[],expected_catalog_revision:17}}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.details.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',arabic_name:'كتاب',arabic_description:null,english_name:'Book',english_description:'Description',width_cm:1,height_cm:7,egp_price_cents:'9007199254740993',usd_price_cents:'1250',cost_cents:'0',top_category_id:'c-ready',subcategory_ids:[],tag_ids:[],expected_catalog_revision:17}}));
 });
 
 it('submits ProductType creation as key intent with no fabricated entity identity', async()=>{

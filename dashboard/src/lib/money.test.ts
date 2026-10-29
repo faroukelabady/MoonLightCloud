@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMinor, formatInt, formatMicrorate, toChartNumber, subMinor } from './money.js';
+import { formatMinor, formatInt, formatMicrorate, toChartNumber, subMinor, minorToDecimal, decimalToMinor } from './money.js';
 
 describe('formatMinor', () => {
 	it('formats EGP without decimals when exact', () => {
@@ -67,5 +67,29 @@ describe('formatMicrorate', () => {
 		expect(formatMicrorate('52500000')).toBe('52.50');
 		expect(formatMicrorate('49875500')).toBe('49.8755');
 		expect(formatMicrorate('1234000001')).toBe('1,234.000001');
+	});
+});
+
+describe('price fields in pounds', () => {
+	it('shows minor units as a plain two-decimal amount', () => {
+		expect(minorToDecimal('56000')).toBe('560.00');
+		expect(minorToDecimal('5')).toBe('0.05');
+		expect(minorToDecimal('0')).toBe('0.00');
+		expect(minorToDecimal(null)).toBe('0.00');
+		expect(minorToDecimal('9007199254740993')).toBe('90071992547409.93');
+	});
+	it('reads pounds back into exact minor units', () => {
+		expect(decimalToMinor('560')).toBe('56000');
+		expect(decimalToMinor('560.5')).toBe('56050');
+		expect(decimalToMinor('560.50')).toBe('56050');
+		expect(decimalToMinor(' 1,200.05 ')).toBe('120005');
+		expect(decimalToMinor('٥٦٠٫٢٥')).toBe('56025');
+		expect(decimalToMinor('0')).toBe('0');
+		expect(decimalToMinor('90071992547409.93')).toBe('9007199254740993');
+	});
+	it('rejects anything that is not a plain non-negative amount', () => {
+		for (const bad of ['', '.', '-5', '1.234', '12a', '1e3', '١.٢.٣']) {
+			expect(decimalToMinor(bad)).toBeNull();
+		}
 	});
 });

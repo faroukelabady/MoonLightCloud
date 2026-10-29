@@ -50,3 +50,26 @@ export function toChartNumber(minor: string): number {
 	}
 	return n / 100;
 }
+
+// minorToDecimal shows an exact minor-unit string as a plain decimal for an
+// input field ("56000" -> "560.00"): no grouping and no currency sign.
+export function minorToDecimal(minor: string | null | undefined): string {
+	const negative = (minor ?? '').startsWith('-');
+	const v = BigInt((minor ?? '').replace(/[^0-9]/g, '') || '0');
+	return `${negative && v !== 0n ? '-' : ''}${v / 100n}.${(v % 100n).toString().padStart(2, '0')}`;
+}
+
+// decimalToMinor parses a non-negative amount typed in pounds or dollars
+// ("560", "560.5", "1,200.50", Arabic-Indic digits) into exact minor units
+// ("56000"). It returns null for anything else, including a third decimal.
+export function decimalToMinor(text: string): string | null {
+	const ascii = text
+		.trim()
+		.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+		.replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+		.replace(/٫/g, '.')
+		.replace(/[,٬\s]/g, '');
+	const m = /^(\d+)(?:\.(\d{0,2}))?$/.exec(ascii);
+	if (!m) return null;
+	return (BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0') || '0')).toString();
+}

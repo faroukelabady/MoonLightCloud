@@ -9,6 +9,7 @@
 	import { productClassificationCommand, productOnlinePolicyCommand, categoryOnlinePolicyCommand, productDetailsCommand, categoryDetailsCommand, categoryParentsCommand, tagDetailsCommand, productTypeDetailsCommand, productTypeStatusCommand, productTypeCreateCommand, productTypeAssignmentCommand } from '../lib/catalogCommands.js';
 	import { dashboardApi, ApiError } from '../lib/api.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
+	import { decimalToMinor, formatMinor, minorToDecimal } from '../lib/money.js';
 	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration } from '../lib/api.js';
 
 	// CatalogAdminPage: the Cloud command/control surface for catalog
@@ -105,12 +106,13 @@
 		const p = selectedProduct;
 		const ar = (document.getElementById('pd-ar') as HTMLInputElement)?.value.trim() ?? '';
 		const en = (document.getElementById('pd-en') as HTMLInputElement)?.value.trim() ?? '';
-		const egp = (document.getElementById('pd-egp') as HTMLInputElement)?.value.trim() ?? '';
-		const usd = (document.getElementById('pd-usd') as HTMLInputElement)?.value.trim() ?? '';
-		const cost = (document.getElementById('pd-cost') as HTMLInputElement)?.value.trim() ?? '';
+		// Prices are typed in pounds/dollars; the command carries exact minor units.
+		const egp = decimalToMinor((document.getElementById('pd-egp') as HTMLInputElement)?.value ?? '');
+		const usd = decimalToMinor((document.getElementById('pd-usd') as HTMLInputElement)?.value ?? '');
+		const cost = decimalToMinor((document.getElementById('pd-cost') as HTMLInputElement)?.value ?? '');
 		if (!ar) return say('err', tb('الاسم العربي مطلوب.', 'Arabic name required.'));
-		for (const [label, v] of [['EGP', egp], ['USD', usd], ['cost', cost]] as const) {
-			if (!/^\d+$/.test(v)) return say('err', arabic() ? `قيمة ${label} يجب أن تكون أرقامًا صحيحة (وحدات صغرى). / ${label} must be integer minor units.` : `${label} must be integer minor units.`);
+		if (egp === null || usd === null || cost === null) {
+			return say('err', tb('أدخل الأسعار بالجنيه أو الدولار بحد أقصى رقمين عشريين، مثل 560.00.', 'Enter prices in pounds or dollars with at most two decimals, like 560.00.'));
 		}
 		const actionEpoch = epoch;
 		saving = true;
@@ -606,9 +608,9 @@
 					<div class="grid">
 						<label class="field">{tb('الاسم العربي', 'Arabic name')} <input id="pd-ar" type="text" value={p.name_ar} /></label>
 						<label class="field">{tb('الاسم الإنجليزي', 'English name')} <input id="pd-en" type="text" value={p.name_en ?? ''} dir="ltr" /></label>
-						<label class="field">{tb('سعر الجنيه (بالقروش)', 'EGP price (piasters)')} <input id="pd-egp" type="text" inputmode="numeric" value={p.egp_price_minor} dir="ltr" /></label>
-						<label class="field">{tb('سعر الدولار (بالسنتات)', 'USD price (cents)')} <input id="pd-usd" type="text" inputmode="numeric" value={p.usd_price_minor ?? '0'} dir="ltr" /></label>
-						<label class="field">{tb('التكلفة (بالقروش)', 'Cost (piasters)')} <input id="pd-cost" type="text" inputmode="numeric" value={p.cost_minor} dir="ltr" /></label>
+						<label class="field">{tb('سعر البيع (ج.م)', 'Price (EGP)')} <input id="pd-egp" type="text" inputmode="decimal" value={minorToDecimal(p.egp_price_minor)} dir="ltr" /></label>
+						<label class="field">{tb('سعر البيع (دولار)', 'Price (USD)')} <input id="pd-usd" type="text" inputmode="decimal" value={minorToDecimal(p.usd_price_minor ?? '0')} dir="ltr" /></label>
+						<label class="field">{tb('التكلفة (ج.م)', 'Cost (EGP)')} <input id="pd-cost" type="text" inputmode="decimal" value={minorToDecimal(p.cost_minor)} dir="ltr" /></label>
 					</div>
 					<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={() => void saveProductDetails()}>{tb('إدراج تعديل البيانات', 'Queue details change')}</button>
 					<h4>{tb('النوع', 'Product type')}</h4>
@@ -655,7 +657,7 @@
 					{:else}
 						<ul data-testid="frame-configurations">
 							{#each configurations as c (c.id)}
-								<li>{c.style_name_ar} / {c.color_name_ar} <span class="num" dir="ltr">+{c.egp_delta_minor} EGP{c.usd_delta_minor !== null ? ` · +${c.usd_delta_minor} USD` : ''}</span>{c.enabled ? '' : tb('· معطّل', 'disabled')}</li>
+								<li>{c.style_name_ar} / {c.color_name_ar} <span class="num" dir="ltr">+{formatMinor(c.egp_delta_minor, 'EGP')}{c.usd_delta_minor !== null ? ` · +${formatMinor(c.usd_delta_minor, 'USD')}` : ''}</span>{c.enabled ? '' : tb('· معطّل', 'disabled')}</li>
 							{/each}
 						</ul>
 					{/if}
