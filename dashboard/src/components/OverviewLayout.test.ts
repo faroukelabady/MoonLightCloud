@@ -191,4 +191,20 @@ describe('Overview', () => {
 		expect(vi.mocked(dashboardApi.overview).mock.calls.every((c) => c[1] === '')).toBe(true);
 		expect(window.location.search).not.toContain(stale);
 	});
+
+	it('clears the Store from the address on logout', async () => {
+		setLang('en');
+		const live = 'cc035b12-8456-4d18-ad8c-3010b4460450';
+		window.history.replaceState({}, '', `/dashboard/?period=today&store_id=${live}`);
+		for (const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi, k as any).mockImplementation((async () => ({})) as any);
+		vi.mocked(dashboardApi.me).mockResolvedValue({ authenticated: true, stage: 'full', csrf_token: 't', user: { id: 'u', login: 'o@test', display_name: 'Owner', role: 'owner', mfa_enabled: true }, permissions: ['reports.read'], all_stores: true, store_ids: [], session: { expires_at: '', idle_timeout_seconds: 1800 } } as never);
+		vi.mocked(dashboardApi.stores).mockResolvedValue({ stores: [{ store_id: live, display_name: 'MoonLight Store', timezone: 'Africa/Cairo', status: 'active', device_count: 1, created_at: '', updated_at: '' }] });
+		vi.mocked(dashboardApi.logout).mockResolvedValue(undefined as never);
+		const { getByRole } = render(App);
+		await waitFor(() => expect(dashboardApi.overview).toHaveBeenCalled());
+		expect(window.location.search).toContain(live);
+		getByRole('button', { name: /Logout/ }).click();
+		await waitFor(() => expect(window.location.search).not.toContain('store_id'));
+		expect(window.location.search).toContain('period=today');
+	});
 });

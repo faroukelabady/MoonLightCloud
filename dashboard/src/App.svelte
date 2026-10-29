@@ -555,23 +555,31 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 			stores = [];
 			storesState = 'idle';
 			resetScopeState();
+			// The next login starts from all Stores (or the user's own
+			// Store): the address no longer carries this session's choice.
+			store = '';
+			const q = new URLSearchParams(window.location.search);
+			q.delete('store_id');
+			window.history.replaceState({}, '', window.location.pathname + (q.size ? `?${q}` : ''));
 			loggingOut = false;
 		}
 	}
 
 let branchContext = $derived.by(() => {
 		if (branchesState === 'loading') return '…';
-		if (branches.length === 0) return t('لا توجد فروع في هذه الفترة', 'No branches in this period');
+		if (branches.length === 0) return '';
 		const first = branches[0];
 		const extra = branches.length > 1 ? ` +${branches.length - 1}` : '';
 		return `${t(first.shop_name_ar, first.shop_name_en || first.shop_name_ar)}${extra}`;
 	});
 
-	let periodRange = $derived.by(() => {
-		if (!overview) return '';
-		const from = overview.period.start_local.slice(0, 10);
-		const to = overview.period.end_local_exclusive.slice(0, 10);
-		return `${from} → ${to}`;
+	// The applied period's first and last local dates (the end is
+	// exclusive on the wire), shown in the period's date fields.
+	let periodDates = $derived.by(() => {
+		if (!overview) return null;
+		const end = new Date(`${overview.period.end_local_exclusive.slice(0, 10)}T00:00:00Z`);
+		end.setUTCDate(end.getUTCDate() - 1);
+		return { from: overview.period.start_local.slice(0, 10), to: end.toISOString().slice(0, 10) };
 	});
 
 	onMount(() => {
@@ -607,10 +615,9 @@ let branchContext = $derived.by(() => {
 					<div class="muted brandsub">Your business insights in one place</div>
 				</div>
 				<div class="periodblock">
-					<div class="periodcol">
-						<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} />
-						{#if periodRange}<div class="range num" dir="ltr" data-testid="period-range">{periodRange} <span class="tzname">· {overview?.timezone ?? 'Africa/Cairo'}</span></div>{/if}
-					</div>
+					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} range={periodDates} />
+					<!-- Store above currency, beside the period and its dates. -->
+					<div class="scopecol">
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if route === 'overview'}
 						<!-- One currency choice for every Overview card. -->
@@ -627,6 +634,7 @@ let branchContext = $derived.by(() => {
 							/>
 						</div>
 					{/if}
+					</div>
 				</div>
 				<div class="actorblock">
 					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
@@ -849,27 +857,16 @@ let branchContext = $derived.by(() => {
 		align-items: center;
 		gap: 6px 12px;
 	}
-	.periodcol {
+	.scopecol {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		gap: 3px;
-	}
-	/* The period's dates sit under the period buttons, in body text colour. */
-	.range {
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: var(--text);
-		padding-inline-start: 2px;
+		gap: 4px;
 	}
 	.currencyctl {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-	}
-	.tzname {
-		font-weight: 400;
-		color: var(--text-muted);
 	}
 	.actorblock {
 		display: flex;
@@ -880,7 +877,7 @@ let branchContext = $derived.by(() => {
 	.branchctx {
 		font-size: 0.82rem;
 		font-weight: 600;
-		max-width: 150px;
+		max-width: 120px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -895,7 +892,7 @@ let branchContext = $derived.by(() => {
 		color: var(--text);
 		font-size: 0.82rem;
 		font-weight: 700;
-		max-width: 200px;
+		max-width: 160px;
 	}
 	.userchip span {
 		overflow: hidden;
@@ -905,6 +902,41 @@ let branchContext = $derived.by(() => {
 	.userchip svg {
 		flex-shrink: 0;
 		color: var(--primary);
+	}
+	/* Every top-bar control shares the language button's height, in both
+	   languages (Arabic glyphs would otherwise make some controls taller). */
+	.topbar :global(.modes),
+	.topbar :global(.segmented),
+	.topbar :global(.periodbar input),
+	.topbar :global(.periodbar .apply),
+	.topbar :global(.single-select .trigger),
+	.userchip,
+	.branchctx,
+	.langswitch,
+	.logout {
+		height: var(--topbar-control-h);
+		min-height: 0;
+		box-sizing: border-box;
+	}
+	.topbar :global(.modes),
+	.topbar :global(.segmented) {
+		align-items: stretch;
+	}
+	.topbar :global(.modes button),
+	.topbar :global(.segmented button),
+	.topbar :global(.periodbar .apply),
+	.topbar :global(.single-select .trigger) {
+		display: inline-flex;
+		align-items: center;
+		padding-block: 0;
+		line-height: 1;
+	}
+	.topbar :global(.periodbar input) {
+		padding-block: 0;
+	}
+	.branchctx {
+		display: inline-flex;
+		align-items: center;
 	}
 	/* Language and logout share one button shape: blue and red. */
 	.langswitch,

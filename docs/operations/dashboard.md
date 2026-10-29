@@ -112,11 +112,16 @@ Categories & Tags pages are part of it and have no sidebar entries
 (`/dashboard/sales`, `/daily`, `/products` and `/categories` open Overview
 and the address bar is rewritten to `/dashboard/`).
 
-- Top bar: the period's dates (and time zone) sit under the period
-  buttons; the Store selector lists Store names (a short ID is added only
-  when two Stores share a name); one All / EGP / USD switch drives every
-  Overview card; the signed-in user is a chip with a person icon; the
-  language button is blue and Logout red, in the same shape.
+- Top bar: two rows. The period buttons sit above From/To date fields,
+  which always show the applied period's dates and are editable (with
+  Show) only for a custom range. The Store selector (Store names; a short
+  ID only when two Stores share a name) sits above one All / EGP / USD
+  switch that drives every Overview card. The signed-in user is a chip
+  with a person icon; Language is blue and Logout red. Every top-bar
+  control is one height (`--topbar-control-h`) in both languages.
+- Logging out removes `store_id` from the address, so the next login
+  starts from all Stores (or the user's own Store). A `store_id` the
+  loaded registry does not list also falls back to all Stores.
 - Sync health opens the grid at the reading-order start (top right in
   Arabic, top left in English) with a raised border and Refresh in its
   header. Its headline states the real condition: "No shop configured

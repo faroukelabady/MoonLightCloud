@@ -1,4 +1,5 @@
 :root {
+	--topbar-control-h: 34px;
 	--color-primary: #1d4ed8;
 	--color-primary-dark: #1e40af;
 	--color-sidebar: #101c38;

@@ -23,15 +23,31 @@ describe('PeriodSelector', () => {
 		expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ period: 'yesterday' }));
 	});
 
-	it('shows custom date inputs only in custom mode', async () => {
+	it('always shows the date fields, editable only for a custom range', async () => {
 		const onchange = vi.fn();
+		const range = { from: '2026-10-18', to: '2026-10-27' };
 		const { rerender } = render(PeriodSelector, {
-			props: { params: { period: 'today' }, timezone: 'Africa/Cairo', onchange }
+			props: { params: { period: 'last_10_completed_days' }, timezone: 'Africa/Cairo', onchange, range }
 		});
-		expect(screen.queryByLabelText(/من/)).toBeNull();
-		await rerender({ params: { period: 'custom' }, timezone: 'Africa/Cairo', onchange });
-		expect(screen.getByLabelText(/من/)).toBeTruthy();
-		expect(screen.getByLabelText(/إلى/)).toBeTruthy();
+		// A preset shows its own dates, disabled, with Show disabled too.
+		const from = screen.getByLabelText(/من/) as HTMLInputElement;
+		expect(from.disabled).toBe(true);
+		expect(from.value).toBe('2026-10-18');
+		expect((screen.getByLabelText(/إلى/) as HTMLInputElement).value).toBe('2026-10-27');
+		expect((screen.getByText(/عرض/).closest('button') as HTMLButtonElement).disabled).toBe(true);
+		await rerender({ params: { period: 'custom' }, timezone: 'Africa/Cairo', onchange, range });
+		expect((screen.getByLabelText(/من/) as HTMLInputElement).disabled).toBe(false);
+		expect((screen.getByText(/عرض/).closest('button') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('starts a custom range from the dates on screen', async () => {
+		const onchange = vi.fn();
+		render(PeriodSelector, {
+			props: { params: { period: 'today' }, timezone: 'Africa/Cairo', onchange, range: { from: '2026-10-29', to: '2026-10-29' } }
+		});
+		await fireEvent.click(screen.getByText('نطاق مخصص'));
+		expect((screen.getByLabelText(/من/) as HTMLInputElement).value).toBe('2026-10-29');
+		expect(onchange).not.toHaveBeenCalled();
 	});
 });
 

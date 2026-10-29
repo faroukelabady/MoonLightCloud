@@ -1,18 +1,21 @@
 <script lang="ts">
-	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { t, tb } from '../lib/i18n.svelte.js';
 	import type { PeriodParams } from '../lib/api.js';
 
 	let {
 		params,
 		timezone,
 		onchange,
-		showTimezone = true
+		showTimezone = true,
+		range = null
 	}: {
 		params: PeriodParams;
 		timezone: string;
 		onchange: (p: PeriodParams) => void;
-		// The top bar shows the time zone with the period's dates instead.
 		showTimezone?: boolean;
+		// The applied period's first and last local dates, shown in the
+		// (disabled) date fields while a preset period is selected.
+		range?: { from: string; to: string } | null;
 	} = $props();
 
 	// Neutral initial state: the L01 effect below is the single source that
@@ -26,6 +29,7 @@
 	// so selecting Custom never fires transient 400s.
 	let draftPeriod = $state('last_10_completed_days');
 	let customError: string | null = $state(null);
+	let custom = $derived(draftPeriod === 'custom');
 
 	// L01: keep visible inputs synchronized with authoritative URL/filter
 	// state on history navigation. Syncs only when the params themselves
@@ -52,6 +56,11 @@
 
 	function pick(v: string) {
 		draftPeriod = v;
+		// Custom starts from the dates on screen, ready to adjust.
+		if (v === 'custom' && range) {
+			if (!customFrom) customFrom = range.from;
+			if (!customTo) customTo = range.to;
+		}
 		if (v !== 'custom') {
 			onchange({ period: v });
 		}
@@ -85,23 +94,29 @@
 			</button>
 		{/each}
 	</div>
-	{#if draftPeriod === 'custom'}
-		<div class="custom">
-			<label>{t('من', 'From')}{#if arabic()} <span class="muted">from</span>{/if}<input type="date" bind:value={customFrom} /></label>
-			<label>{t('إلى', 'To')}{#if arabic()} <span class="muted">to</span>{/if}<input type="date" bind:value={customTo} /></label>
-			<button type="button" class="apply" onclick={applyCustom}>{tb('عرض', 'Show')}</button>
-		</div>
-		{#if customError}<div class="err" role="alert">{customError}</div>{/if}
-	{/if}
+	<!-- Always visible: a preset period shows its dates here, disabled;
+	     Custom range makes them editable. -->
+	<div class="custom" class:locked={!custom} title={timezone}>
+		{#if custom}
+			<label>{t('من', 'From')}<input type="date" bind:value={customFrom} /></label>
+			<label>{t('إلى', 'To')}<input type="date" bind:value={customTo} /></label>
+		{:else}
+			<label>{t('من', 'From')}<input type="date" value={range?.from ?? ''} disabled /></label>
+			<label>{t('إلى', 'To')}<input type="date" value={range?.to ?? ''} disabled /></label>
+		{/if}
+		<button type="button" class="apply" disabled={!custom} onclick={applyCustom}>{t('عرض', 'Show')}</button>
+	</div>
+	{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{#if showTimezone}<div class="tz muted" dir="ltr">{timezone}</div>{/if}
 </div>
 
 <style>
+	/* The period buttons with their date fields underneath. */
 	.periodbar {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 8px 12px;
-		align-items: center;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 4px;
 	}
 	.modes {
 		display: inline-flex;
@@ -137,7 +152,13 @@
 		align-items: center;
 		font-size: 0.82rem;
 	}
+	.custom input:disabled,
+	.apply:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
 	.custom input {
+		width: 8rem;
 		padding: 5px 8px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);
@@ -153,6 +174,8 @@
 		border: 0;
 		border-radius: var(--radius-control);
 		padding: 6px 14px;
+		font-size: 0.8rem;
+		font-weight: 600;
 	}
 	.tz {
 		margin-inline-start: auto;
