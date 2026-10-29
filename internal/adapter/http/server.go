@@ -125,6 +125,7 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 			DeviceAuth(devices)(http.HandlerFunc(catalogAdmin.ReportCapabilities)))
 		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands", g(humanauth.PermCatalogManage, ScopeHandler, catalogAdmin.CreateCommand))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.ListCommands))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/permissions", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.Permissions))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/commands/{id}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.GetCommand))
 		mux.Handle("POST /api/v1/dashboard/catalog-admin/commands/{id}/cancel", g(humanauth.PermCatalogManage, ScopeQuery, catalogAdmin.CancelCommand))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/products", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProducts))

@@ -8,7 +8,7 @@ source "$(dirname "$0")/lib.sh"
 cd "$REPO_ROOT"
 
 required=(
-  db/migrations/00112_baseline.sql
+  db/migrations/00113_baseline.sql
   db/queries/sale_ownership.sql
   db/queries/sale_projection.sql
   db/queries/sync_events.sql

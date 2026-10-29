@@ -72,7 +72,7 @@ func remediationCloudSetup(t *testing.T) remediationCloud {
 	}
 	dir := remediationDirectory{NewStoreRegistry(p, 5*time.Second), a}
 	s := catalogadmin.NewService(d, dir)
-	if _, e = s.ReportCapabilities(ctx, did, []string{catalogadmin.CapabilityV1}); e != nil {
+	if _, e = s.ReportCapabilities(ctx, did, catalogadmin.KnownCapabilities()); e != nil {
 		t.Fatal(e)
 	}
 	return remediationCloud{p, d, dir, s, sid, pid, did}

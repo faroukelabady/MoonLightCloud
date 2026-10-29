@@ -52,6 +52,9 @@ func (h *HumanAuth) clearCookie(w http.ResponseWriter) {
 		HttpOnly: true, Secure: h.Secure, SameSite: http.SameSiteStrictMode})
 }
 
+// ClientIP is the caller address as the auth throttle sees it.
+func (h *HumanAuth) ClientIP(r *http.Request) string { return h.clientIP(r) }
+
 func (h *HumanAuth) clientIP(r *http.Request) string {
 	return dashboard.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), h.Trusted)
 }

@@ -74,12 +74,12 @@ func TestSharedProductTypeIndependentStores(t *testing.T) {
 		// Commands carry the source ID and only converge after that Store's
 		// normal projection advances; an internal storage alias is not intent.
 		svc := catalogadmin.NewService(d, &stubAdminDevices{storeID: actor.store, active: map[string]bool{actor.dev: true}})
+		if _, err := svc.ReportCapabilities(ctx, actor.dev, catalogadmin.KnownCapabilities()); err != nil {
+			t.Fatal(err)
+		}
 		commandPayload, _ := json.Marshal(map[string]any{"product_type_id": sharedProductTypeID, "name_en": actor.name + " updated"})
 		view, err := svc.Create(ctx, "op", actor.store, catalogadmin.TypeProductTypeDetailsUpdateV1, sharedProductTypeID, 2, commandPayload)
 		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := svc.ReportCapabilities(ctx, actor.dev, []string{catalogadmin.CapabilityV1}); err != nil {
 			t.Fatal(err)
 		}
 		wire, err := svc.Poll(ctx, actor.dev, 10)

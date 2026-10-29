@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
 	"testing"
 	"time"
 
@@ -66,14 +67,14 @@ func TestDeviceCapabilityRows(t *testing.T) {
 		t.Fatal("no announcement means incapable")
 	}
 	for i := 0; i < 2; i++ {
-		if err := d.UpsertCatalogAdminCapability(ctx, p.Device.ID, true); err != nil {
+		if err := d.ReplaceCatalogAdminCapabilities(ctx, p.Device.ID, []string{catalogadmin.CapabilityV1}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if !read() {
 		t.Fatal("announced capability must read back")
 	}
-	if err := d.UpsertCatalogAdminCapability(ctx, p.Device.ID, false); err != nil {
+	if err := d.ReplaceCatalogAdminCapabilities(ctx, p.Device.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if read() {
@@ -130,5 +131,51 @@ func TestPresenceReportsLastDataAt(t *testing.T) {
 	presence, _, err = NewDeviceControl(d.pool, d.timeout).GetPresence(ctx, p.Device.ID)
 	if err != nil || presence.LastDataAt == nil || !presence.LastDataAt.Equal(received) {
 		t.Fatalf("last data: %+v %v", presence, err)
+	}
+}
+
+// The Store allows a scope when any active, bound, command-capable device
+// advertises it; scopes without the command channel count for nothing.
+func TestStoreCatalogAdminPermissions(t *testing.T) {
+	pool, authSvc := openTestRepo(t)
+	ctx := context.Background()
+	d := NewCatalogAdmin(pool, 5*time.Second)
+	devices := NewDevices(pool, 5*time.Second)
+	first, err := authSvc.Create(ctx, "permissions-dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeID := bindTestStore(t, devices, first.Device.ID)
+	read := func() catalogadmin.StorePermissions {
+		t.Helper()
+		p, err := d.CatalogAdminStorePermissions(ctx, storeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if got := read(); got != (catalogadmin.StorePermissions{}) {
+		t.Fatalf("no announcement allows nothing: %+v", got)
+	}
+	if err := d.ReplaceCatalogAdminCapabilities(ctx, first.Device.ID, []string{catalogadmin.CapabilityV1, catalogadmin.CapabilityScopeOnlineSelling}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != (catalogadmin.StorePermissions{OnlineSelling: true, Devices: 1}) {
+		t.Fatalf("shop defaults: %+v", got)
+	}
+	if err := d.ReplaceCatalogAdminCapabilities(ctx, first.Device.ID, []string{catalogadmin.CapabilityV1, catalogadmin.CapabilityScopeProducts, catalogadmin.CapabilityScopeCatalog}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != (catalogadmin.StorePermissions{Products: true, Catalog: true, Devices: 1}) {
+		t.Fatalf("a new announcement replaces the old one: %+v", got)
+	}
+	if err := d.ReplaceCatalogAdminCapabilities(ctx, first.Device.ID, []string{catalogadmin.CapabilityScopeProducts}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != (catalogadmin.StorePermissions{}) {
+		t.Fatalf("scopes without the command channel allow nothing: %+v", got)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO device_capabilities (device_id, capability) VALUES ($1, 'catalog_admin_scope_everything_v1')`, first.Device.ID); err == nil {
+		t.Fatal("unknown capability names must be refused by the schema")
 	}
 }

@@ -3,6 +3,8 @@ package catalogadmin
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,14 +18,16 @@ func errFakeNotFoundValue() error {
 }
 
 type fakeStore struct {
-	devices   *fakeDevices
-	commands  map[string]CommandView
-	targets   map[string][]TargetView
-	owner     map[string]string
-	rev       map[string]int64
-	bound     map[string][]BoundDevice
-	capable   map[string]bool
-	resultSet [][2]string
+	devices     *fakeDevices
+	commands    map[string]CommandView
+	targets     map[string][]TargetView
+	owner       map[string]string
+	rev         map[string]int64
+	bound       map[string][]BoundDevice
+	capable     map[string]bool
+	permissions map[string]StorePermissions
+	announced   map[string][]string
+	resultSet   [][2]string
 }
 
 func (s *fakeStore) CreateCatalogAdminCommand(_ context.Context, cmd NewCommand) (CommandView, error) {
@@ -136,9 +140,27 @@ func (s *fakeStore) CancelCatalogAdminCommand(_ context.Context, commandID strin
 	return true, nil
 }
 
-func (s *fakeStore) UpsertCatalogAdminCapability(_ context.Context, deviceID string, capable bool) error {
-	s.capable[deviceID] = capable
+func (s *fakeStore) ReplaceCatalogAdminCapabilities(_ context.Context, deviceID string, capabilities []string) error {
+	if s.announced == nil {
+		s.announced = map[string][]string{}
+	}
+	s.announced[deviceID] = capabilities
+	s.capable[deviceID] = false
+	for _, c := range capabilities {
+		if c == CapabilityV1 {
+			s.capable[deviceID] = true
+		}
+	}
 	return nil
+}
+
+// CatalogAdminStorePermissions allows every scope unless a test sets the
+// Store's permissions explicitly.
+func (s *fakeStore) CatalogAdminStorePermissions(_ context.Context, storeID string) (StorePermissions, error) {
+	if p, ok := s.permissions[storeID]; ok {
+		return p, nil
+	}
+	return StorePermissions{OnlineSelling: true, Products: true, Catalog: true, Devices: len(s.bound[storeID])}, nil
 }
 
 func (s *fakeStore) GetCatalogAdminCapability(_ context.Context, deviceID string) (bool, error) {
@@ -586,6 +608,49 @@ func TestAnnotateCapabilitiesIsBatched(t *testing.T) {
 	for _, target := range targets {
 		if target.Capable == nil || !*target.Capable {
 			t.Fatalf("capable device must be labelled capable: %+v", target)
+		}
+	}
+}
+
+// Only known capabilities are recorded, and permission scopes only next to
+// the command channel itself.
+func TestReportCapabilitiesRecordsKnownScopes(t *testing.T) {
+	svc, store, devices, _, _ := testService()
+	ctx := context.Background()
+	dev := uuid.NewString()
+	devices.active[dev] = true
+	capable, err := svc.ReportCapabilities(ctx, dev, []string{CapabilityV1, CapabilityScopeProducts, "catalog_admin_scope_everything_v1"})
+	if err != nil || !capable {
+		t.Fatalf("report: %v %v", capable, err)
+	}
+	if got := store.announced[dev]; !slices.Equal(got, []string{CapabilityV1, CapabilityScopeProducts}) {
+		t.Fatalf("recorded %v", got)
+	}
+	if capable, err = svc.ReportCapabilities(ctx, dev, []string{CapabilityScopeProducts}); err != nil || capable {
+		t.Fatalf("scopes alone: %v %v", capable, err)
+	}
+	if got := store.announced[dev]; len(got) != 0 {
+		t.Fatalf("scopes without the command channel are dropped: %v", got)
+	}
+}
+
+// Create refuses a kind of change no Store device allows and writes nothing.
+func TestServiceCreateRespectsStorePermissions(t *testing.T) {
+	svc, store, _, storeID, entityID := testService()
+	store.permissions = map[string]StorePermissions{storeID: {OnlineSelling: true, Devices: 1}}
+	_, err := svc.Create(context.Background(), "owner", storeID, TypeProductDetailsUpdateV1, entityID, 5, validPayload(entityID))
+	if err == nil || !strings.Contains(err.Error(), CodePermissionDisabled) {
+		t.Fatalf("expected %s, got %v", CodePermissionDisabled, err)
+	}
+	if len(store.commands) != 0 {
+		t.Fatal("a refused change must not be stored")
+	}
+	for _, typ := range KnownTypes() {
+		if ScopeOf(typ) == "" {
+			t.Errorf("%s has no permission scope", typ)
+		}
+		if RequiresMFA(typ) == (ScopeOf(typ) == ScopeOnlineSelling) {
+			t.Errorf("%s: MFA is required exactly for product and catalog changes", typ)
 		}
 	}
 }

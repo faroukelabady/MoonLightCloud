@@ -497,6 +497,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL), CSRF_REJECTED (mutations), or for a product, price or catalog change MFA_REQUIRED (no mfa_code) / MFA_INVALID (wrong or reused code).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: CLOUD_PERMISSION_DISABLED — no device of the Store allows this kind of change (Retail Settings → Cloud sync → What Cloud may change).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: RATE_LIMITED — too many wrong authenticator codes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/permissions:
+    get:
+      summary: What the shop lets Cloud change for this Store
+      operationId: catalogAdminPermissions
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Allowed change scopes advertised by the Store's devices.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogAdminPermissions'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
           description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL) or CSRF_REJECTED (mutations).
           content:
             application/json:
@@ -4960,6 +4999,34 @@ components:
         payload:
           type: object
           description: Typed command fields. SKU, stock, Sales and Returns are never writable here.
+        mfa_code:
+          type: string
+          description: >-
+            Fresh authenticator (TOTP) code approving a product, price or
+            catalog change (every type except the two online-policy types).
+            Checked and consumed before the command is created; never stored.
+            Recovery codes are not accepted.
+    CatalogAdminPermissions:
+      type: object
+      required: [online_selling, products, catalog, devices]
+      description: >-
+        What the shop lets Cloud change, as advertised by the Store's active,
+        bound, command-capable devices (a scope is allowed when any of them
+        allows it). Retail checks every command again on arrival.
+      properties:
+        online_selling:
+          type: boolean
+          description: Product and Category online-policy commands.
+        products:
+          type: boolean
+          description: Product details (names, prices, cost) and Variant commands.
+        catalog:
+          type: boolean
+          description: Classification, Category, Tag and ProductType commands.
+        devices:
+          type: integer
+          minimum: 0
+          description: Active bound devices that can apply commands.
     CatalogAdminCommand:
       type: object
       required: [id, store_id, type, version, entity_id, target_kind, payload_hash, expected_revision, actor, status, aggregate, converged, created_at, updated_at]
@@ -5107,7 +5174,12 @@ components:
           maxItems: 16
           items:
             type: string
-          description: Versioned capability strings, e.g. catalog_admin_commands_v1.
+          description: >-
+            Versioned capability strings: catalog_admin_commands_v1 plus one
+            catalog_admin_scope_{online_selling,products,catalog}_v1 per shop
+            permission that is on. The announcement replaces the previous one;
+            unknown names are ignored and scopes count only with
+            catalog_admin_commands_v1.
     DeviceCapabilityResult:
       type: object
       required: [catalog_admin_commands_v1]

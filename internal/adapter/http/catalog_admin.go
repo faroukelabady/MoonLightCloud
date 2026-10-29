@@ -2,13 +2,17 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
 )
 
 // CatalogAdminHandlers serves both planes of Phase 16 catalog control:
@@ -25,6 +29,16 @@ type CatalogAdminHandlers struct {
 	Log interface {
 		Info(string, ...any)
 	}
+	// StepUp checks the operator's fresh authenticator code before a
+	// product, price or catalog change is queued. Nil refuses them all.
+	StepUp StepUpVerifier
+	// ClientIP resolves the caller address for the MFA throttle.
+	ClientIP func(*http.Request) string
+}
+
+// StepUpVerifier is the humanauth step-up check.
+type StepUpVerifier interface {
+	ConfirmStepUp(ctx context.Context, a humanauth.Authenticated, code, clientIP, action string) error
 }
 
 func (h *CatalogAdminHandlers) actorOf(r *http.Request) string { return operatorOf(r) }
@@ -48,6 +62,9 @@ func (h *CatalogAdminHandlers) CreateCommand(w http.ResponseWriter, r *http.Requ
 		EntityID         string         `json:"entity_id"`
 		ExpectedRevision int64          `json:"expected_revision"`
 		Payload          map[string]any `json:"payload"`
+		// MFACode approves product, price and catalog changes. It is
+		// checked and consumed here and never stored with the command.
+		MFACode string `json:"mfa_code"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -64,6 +81,9 @@ func (h *CatalogAdminHandlers) CreateCommand(w http.ResponseWriter, r *http.Requ
 		WriteError(w, r, apperr.New(apperr.InvalidInput, "invalid command payload"))
 		return
 	}
+	if catalogadmin.RequiresMFA(req.Type) && !h.stepUp(w, r, req.MFACode, req.Type) {
+		return
+	}
 	view, err := h.Svc.Create(r.Context(), h.actorOf(r), req.StoreID, req.Type, req.EntityID, req.ExpectedRevision, payload)
 	if err != nil {
 		WriteError(w, r, err)
@@ -71,6 +91,54 @@ func (h *CatalogAdminHandlers) CreateCommand(w http.ResponseWriter, r *http.Requ
 	}
 	h.Log.Info("catalog admin command created", "type", req.Type, "store", req.StoreID)
 	writeJSON(w, http.StatusOK, view)
+}
+
+// stepUp checks the fresh authenticator code for a sensitive command and
+// writes the refusal. Refusals are 403 (never 401): the session is still
+// valid, only this change is not approved.
+func (h *CatalogAdminHandlers) stepUp(w http.ResponseWriter, r *http.Request, code, commandType string) bool {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFARequired))
+		return false
+	}
+	a, ok := AuthOf(r)
+	if !ok || h.StepUp == nil {
+		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFARequired))
+		return false
+	}
+	ip := ""
+	if h.ClientIP != nil {
+		ip = h.ClientIP(r)
+	}
+	switch err := h.StepUp.ConfirmStepUp(r.Context(), a, code, ip, commandType); {
+	case err == nil:
+		return true
+	case errors.Is(err, humanauth.ErrThrottled):
+		w.Header().Set("Retry-After", "60")
+		WriteError(w, r, apperr.New(apperr.TooManyRequests, "RATE_LIMITED"))
+	case errors.Is(err, humanauth.ErrInvalidMFACode), errors.Is(err, humanauth.ErrStage):
+		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFAInvalid))
+	default:
+		WriteError(w, r, apperr.Wrap(apperr.Internal, "internal error", err))
+	}
+	return false
+}
+
+// Permissions serves GET /api/v1/dashboard/catalog-admin/permissions?store_id=:
+// what the Store's devices allow Cloud to change, and which changes need
+// an authenticator code.
+func (h *CatalogAdminHandlers) Permissions(w http.ResponseWriter, r *http.Request) {
+	storeID := r.URL.Query().Get("store_id")
+	if !RequireStore(w, r, storeID) {
+		return
+	}
+	p, err := h.Svc.Permissions(r.Context(), storeID)
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
 // GetCommand serves GET /api/v1/dashboard/catalog-admin/commands/{id}?store_id=.

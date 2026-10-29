@@ -11,22 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addDeviceCapability = `-- name: AddDeviceCapability :exec
-INSERT INTO device_capabilities (device_id, capability, updated_at)
-VALUES ($1::uuid, $2::text, now())
-ON CONFLICT (device_id, capability) DO UPDATE SET updated_at = now()
-`
-
-type AddDeviceCapabilityParams struct {
-	DeviceID   pgtype.UUID `json:"device_id"`
-	Capability string      `json:"capability"`
-}
-
-func (q *Queries) AddDeviceCapability(ctx context.Context, arg AddDeviceCapabilityParams) error {
-	_, err := q.db.Exec(ctx, addDeviceCapability, arg.DeviceID, arg.Capability)
-	return err
-}
-
 const adminCategoryList = `-- name: AdminCategoryList :many
 SELECT c.category_id, c.name_ar, c.name_en, c.status, c.online_enabled,
     c.source_revision AS catalog_revision,
@@ -1524,18 +1508,25 @@ func (q *Queries) MarkCatalogAdminTargetDelivered(ctx context.Context, arg MarkC
 	return i, err
 }
 
-const removeDeviceCapability = `-- name: RemoveDeviceCapability :exec
-DELETE FROM device_capabilities
-WHERE device_id = $1::uuid AND capability = $2::text
+const replaceDeviceCapabilities = `-- name: ReplaceDeviceCapabilities :exec
+WITH removed AS (
+    DELETE FROM device_capabilities
+    WHERE device_id = $1::uuid AND NOT (capability = ANY($2::text[]))
+)
+INSERT INTO device_capabilities (device_id, capability, updated_at)
+SELECT $1::uuid, c, now() FROM unnest($2::text[]) AS c
+ON CONFLICT (device_id, capability) DO UPDATE SET updated_at = now()
 `
 
-type RemoveDeviceCapabilityParams struct {
-	DeviceID   pgtype.UUID `json:"device_id"`
-	Capability string      `json:"capability"`
+type ReplaceDeviceCapabilitiesParams struct {
+	DeviceID     pgtype.UUID `json:"device_id"`
+	Capabilities []string    `json:"capabilities"`
 }
 
-func (q *Queries) RemoveDeviceCapability(ctx context.Context, arg RemoveDeviceCapabilityParams) error {
-	_, err := q.db.Exec(ctx, removeDeviceCapability, arg.DeviceID, arg.Capability)
+// ReplaceDeviceCapabilities makes the device's capability rows exactly the
+// announced set (the command channel plus the shop's permission scopes).
+func (q *Queries) ReplaceDeviceCapabilities(ctx context.Context, arg ReplaceDeviceCapabilitiesParams) error {
+	_, err := q.db.Exec(ctx, replaceDeviceCapabilities, arg.DeviceID, arg.Capabilities)
 	return err
 }
 
@@ -1562,4 +1553,40 @@ func (q *Queries) SetCommandResultEntity(ctx context.Context, arg SetCommandResu
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const storeCatalogAdminPermissions = `-- name: StoreCatalogAdminPermissions :one
+SELECT count(*)::int AS devices,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_online_selling_v1')), false)::bool AS online_selling,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_products_v1')), false)::bool AS products,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_catalog_v1')), false)::bool AS catalog
+FROM device_store_bindings b
+JOIN devices d ON d.id = b.device_id AND d.status = 'active'
+JOIN device_capabilities cap ON cap.device_id = d.id AND cap.capability = 'catalog_admin_commands_v1'
+WHERE b.store_id = $1::uuid
+`
+
+type StoreCatalogAdminPermissionsRow struct {
+	Devices       int32 `json:"devices"`
+	OnlineSelling bool  `json:"online_selling"`
+	Products      bool  `json:"products"`
+	Catalog       bool  `json:"catalog"`
+}
+
+// StoreCatalogAdminPermissions: what the Store's active, bound,
+// command-capable devices allow. A scope is allowed when any of them
+// advertises it.
+func (q *Queries) StoreCatalogAdminPermissions(ctx context.Context, storeID pgtype.UUID) (StoreCatalogAdminPermissionsRow, error) {
+	row := q.db.QueryRow(ctx, storeCatalogAdminPermissions, storeID)
+	var i StoreCatalogAdminPermissionsRow
+	err := row.Scan(
+		&i.Devices,
+		&i.OnlineSelling,
+		&i.Products,
+		&i.Catalog,
+	)
+	return i, err
 }

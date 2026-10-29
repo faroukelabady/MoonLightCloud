@@ -1548,7 +1548,7 @@ commerce_product_variant_mappings commerce_product_variant_mappings_store_id_fke
 commerce_product_variant_mappings commerce_product_variant_mappings_store_id_not_null NOT NULL store_id
 commerce_product_variant_mappings commerce_product_variant_mappings_updated_at_not_null NOT NULL updated_at
 commerce_product_variant_mappings commerce_product_variant_mappings_variant_id_not_null NOT NULL variant_id
-device_capabilities device_capabilities_capability_check CHECK ((capability = 'catalog_admin_commands_v1'::text))
+device_capabilities device_capabilities_capability_check CHECK ((capability = ANY (ARRAY['catalog_admin_commands_v1'::text, 'catalog_admin_scope_online_selling_v1'::text, 'catalog_admin_scope_products_v1'::text, 'catalog_admin_scope_catalog_v1'::text])))
 device_capabilities device_capabilities_capability_not_null NOT NULL capability
 device_capabilities device_capabilities_device_id_fkey FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 device_capabilities device_capabilities_device_id_not_null NOT NULL device_id

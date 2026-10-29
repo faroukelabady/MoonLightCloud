@@ -16,19 +16,21 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
+	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
 )
 
 // stubCatalogStore implements catalogadmin.Store in memory with strict
 // Store scoping.
 type stubCatalogStore struct {
-	devices  *stubCatalogDevices
-	commands map[string]catalogadmin.CommandView
-	targets  map[string][]catalogadmin.TargetView
-	due      map[string][]catalogadmin.DueTarget
-	capable  map[string]bool
-	bound    map[string][]catalogadmin.BoundDevice
-	owner    map[string]string // entity -> store
-	rev      map[string]int64
+	devices     *stubCatalogDevices
+	commands    map[string]catalogadmin.CommandView
+	targets     map[string][]catalogadmin.TargetView
+	due         map[string][]catalogadmin.DueTarget
+	capable     map[string]bool
+	permissions map[string]catalogadmin.StorePermissions
+	bound       map[string][]catalogadmin.BoundDevice
+	owner       map[string]string // entity -> store
+	rev         map[string]int64
 }
 
 func errNotFoundStub() error {
@@ -122,9 +124,23 @@ func (s *stubCatalogStore) CancelCatalogAdminCommand(_ context.Context, commandI
 	return true, nil
 }
 
-func (s *stubCatalogStore) UpsertCatalogAdminCapability(_ context.Context, deviceID string, capable bool) error {
-	s.capable[deviceID] = capable
+func (s *stubCatalogStore) ReplaceCatalogAdminCapabilities(_ context.Context, deviceID string, capabilities []string) error {
+	s.capable[deviceID] = false
+	for _, c := range capabilities {
+		if c == catalogadmin.CapabilityV1 {
+			s.capable[deviceID] = true
+		}
+	}
 	return nil
+}
+
+// CatalogAdminStorePermissions allows every scope unless a test sets the
+// Store's permissions explicitly.
+func (s *stubCatalogStore) CatalogAdminStorePermissions(_ context.Context, storeID string) (catalogadmin.StorePermissions, error) {
+	if p, ok := s.permissions[storeID]; ok {
+		return p, nil
+	}
+	return catalogadmin.StorePermissions{OnlineSelling: true, Products: true, Catalog: true, Devices: len(s.bound[storeID])}, nil
 }
 
 func (s *stubCatalogStore) GetCatalogAdminCapability(_ context.Context, deviceID string) (bool, error) {
@@ -213,7 +229,100 @@ func catalogAdminTestSetup() (*CatalogAdminHandlers, *stubCatalogStore, *stubCat
 	devices := &stubCatalogDevices{binding: map[string]string{}, active: map[string]bool{}}
 	stub.devices = devices
 	svc := catalogadmin.NewService(stub, devices)
-	return &CatalogAdminHandlers{Svc: svc, Log: slog.Default()}, stub, devices, storeID, entityID
+	return &CatalogAdminHandlers{Svc: svc, Log: slog.Default(), StepUp: &stubStepUp{valid: "123456"}}, stub, devices, storeID, entityID
+}
+
+// stubStepUp accepts one code; with singleUse it accepts it once, like a
+// consumed TOTP step.
+type stubStepUp struct {
+	valid     string
+	singleUse bool
+	used      bool
+	throttled bool
+	actions   []string
+}
+
+func (s *stubStepUp) ConfirmStepUp(_ context.Context, _ humanauth.Authenticated, code, _, action string) error {
+	s.actions = append(s.actions, action)
+	if s.throttled {
+		return humanauth.ErrThrottled
+	}
+	if code != s.valid || s.used {
+		return humanauth.ErrInvalidMFACode
+	}
+	s.used = s.singleUse
+	return nil
+}
+
+// Product, price and catalog changes need a fresh authenticator code;
+// switching online selling does not. Refusals never look like a lost
+// session (403/429, not 401) and create nothing.
+func TestCatalogAdminCreateRequiresMFAForEdits(t *testing.T) {
+	handlers, stub, devices, storeID, entityID := catalogAdminTestSetup()
+	deviceID := uuid.NewString()
+	stub.bound[storeID] = []catalogadmin.BoundDevice{{DeviceID: deviceID, Name: "d1"}}
+	devices.active[deviceID] = true
+	devices.binding[deviceID] = storeID
+	step := handlers.StepUp.(*stubStepUp)
+	step.singleUse = true
+	details := func(code string) string {
+		return `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"},"mfa_code":"` + code + `"}`
+	}
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		reason     string
+	}{
+		{"no code", details(""), http.StatusForbidden, catalogadmin.CodeMFARequired},
+		{"wrong code", details("999999"), http.StatusForbidden, catalogadmin.CodeMFAInvalid},
+	} {
+		rec := postCommand(t, handlers, tc.body)
+		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.reason) {
+			t.Fatalf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
+		}
+	}
+	if len(stub.commands) != 0 {
+		t.Fatal("a refused change must not be queued")
+	}
+	if rec := postCommand(t, handlers, details("123456")); rec.Code != http.StatusOK {
+		t.Fatalf("valid code: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := postCommand(t, handlers, details("123456")); rec.Code != http.StatusForbidden {
+		t.Fatalf("a used code cannot approve a second change: %d", rec.Code)
+	}
+	if got := step.actions[len(step.actions)-1]; got != "catalog.product.details.update.v1" {
+		t.Fatalf("the audit names the change: %q", got)
+	}
+	step.throttled = true
+	if rec := postCommand(t, handlers, details("123456")); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("throttled: %d", rec.Code)
+	}
+	calls := len(step.actions)
+	online := `{"store_id":"` + storeID + `","type":"catalog.product.online-policy.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `","sell_online":false}}`
+	if rec := postCommand(t, handlers, online); rec.Code != http.StatusOK {
+		t.Fatalf("online selling needs no code: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(step.actions) != calls {
+		t.Fatal("online selling must not consult the authenticator")
+	}
+}
+
+// A Store whose devices do not allow a kind of change refuses to queue it
+// (409 CLOUD_PERMISSION_DISABLED) and the permissions route reports it.
+func TestCatalogAdminRespectsShopPermissions(t *testing.T) {
+	handlers, stub, _, storeID, entityID := catalogAdminTestSetup()
+	stub.permissions = map[string]catalogadmin.StorePermissions{storeID: {OnlineSelling: true, Devices: 1}}
+	details := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"},"mfa_code":"123456"}`
+	rec := postCommand(t, handlers, details)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), catalogadmin.CodePermissionDisabled) {
+		t.Fatalf("disabled scope: %d %s", rec.Code, rec.Body.String())
+	}
+	req := ownerRequest(http.MethodGet, "/api/v1/dashboard/catalog-admin/permissions?store_id="+storeID, nil)
+	got := httptest.NewRecorder()
+	handlers.Permissions(got, req)
+	if got.Code != http.StatusOK || got.Body.String() != `{"online_selling":true,"products":false,"catalog":false,"devices":1}`+"\n" {
+		t.Fatalf("permissions: %d %q", got.Code, got.Body.String())
+	}
 }
 
 func postCommand(t *testing.T, handlers *CatalogAdminHandlers, body string) *httptest.ResponseRecorder {
@@ -238,7 +347,7 @@ func TestCatalogAdminCreateValidates(t *testing.T) {
 	devices.active[deviceID] = true
 	devices.binding[deviceID] = storeID
 
-	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"}}`
+	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"},"mfa_code":"123456"}`
 	rec := postCommand(t, handlers, valid)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid create: %d %s", rec.Code, rec.Body.String())
@@ -259,12 +368,12 @@ func TestCatalogAdminCreateValidates(t *testing.T) {
 	if rec := postCommand(t, handlers, unknown); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown type: %d", rec.Code)
 	}
-	cross := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + crossEntity + `","expected_revision":1,"payload":{}}`
+	cross := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + crossEntity + `","expected_revision":1,"payload":{},"mfa_code":"123456"}`
 	if rec := postCommand(t, handlers, cross); rec.Code != http.StatusBadRequest {
 		t.Fatalf("cross-store: %d", rec.Code)
 	}
 	missingID := uuid.NewString()
-	missing := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + missingID + `","expected_revision":1,"payload":{"product_id":"` + missingID + `"}}`
+	missing := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + missingID + `","expected_revision":1,"payload":{"product_id":"` + missingID + `"},"mfa_code":"123456"}`
 	if rec := postCommand(t, handlers, missing); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown entity: %d", rec.Code)
 	}
@@ -278,7 +387,7 @@ func TestCatalogAdminIDOR(t *testing.T) {
 	deviceID := uuid.NewString()
 	stub.bound[storeID] = []catalogadmin.BoundDevice{{DeviceID: deviceID, Name: "d1"}}
 
-	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"}}`
+	valid := `{"store_id":"` + storeID + `","type":"catalog.product.details.update.v1","entity_id":"` + entityID + `","expected_revision":5,"payload":{"product_id":"` + entityID + `"},"mfa_code":"123456"}`
 	rec := postCommand(t, handlers, valid)
 	var created struct {
 		ID string `json:"id"`

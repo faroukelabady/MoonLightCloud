@@ -62,6 +62,15 @@ func (s *Service) Create(ctx context.Context, actor, storeID, typ, entityID stri
 	if err != nil {
 		return CommandView{}, apperr.New(apperr.InvalidInput, err.Error())
 	}
+	// Shop permissions: never queue what no device of the Store allows.
+	// Retail rejects it anyway; refusing here keeps the history honest.
+	allowed, err := s.store.CatalogAdminStorePermissions(ctx, strings.TrimSpace(storeID))
+	if err != nil {
+		return CommandView{}, err
+	}
+	if !allowed.Allows(typ) {
+		return CommandView{}, apperr.New(apperr.Conflict, CodePermissionDisabled)
+	}
 	payload, err = json.Marshal(decoded)
 	if err != nil || len(payload) > 64*1024 {
 		return CommandView{}, apperr.New(apperr.InvalidInput, "invalid command payload")
@@ -364,16 +373,34 @@ func (s *Service) ReportCapabilities(ctx context.Context, deviceID string, capab
 	if !active {
 		return false, apperr.New(apperr.InvalidInput, "device not active")
 	}
-	capable := false
+	// Record only known names; a device that drops the command channel
+	// loses its permission scopes with it.
+	announced := map[string]bool{}
 	for _, c := range capabilities {
-		if c == CapabilityV1 {
-			capable = true
+		announced[c] = true
+	}
+	capable := announced[CapabilityV1]
+	known := []string{}
+	if capable {
+		for _, c := range KnownCapabilities() {
+			if announced[c] {
+				known = append(known, c)
+			}
 		}
 	}
-	if err := s.store.UpsertCatalogAdminCapability(ctx, deviceID, capable); err != nil {
+	if err := s.store.ReplaceCatalogAdminCapabilities(ctx, deviceID, known); err != nil {
 		return false, err
 	}
 	return capable, nil
+}
+
+// Permissions reports what the Store's devices currently allow Cloud to
+// change, for the dashboard to enable or disable its editors.
+func (s *Service) Permissions(ctx context.Context, storeID string) (StorePermissions, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
+		return StorePermissions{}, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	return s.store.CatalogAdminStorePermissions(ctx, strings.TrimSpace(storeID))
 }
 
 // annotateCapabilities marks PENDING targets on incapable devices so

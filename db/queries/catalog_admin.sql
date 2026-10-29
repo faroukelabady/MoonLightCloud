@@ -88,14 +88,32 @@ UPDATE catalog_admin_command_targets
 SET status = 'cancelled', updated_at = now()
 WHERE command_id = @command_id::uuid AND status IN ('pending','delivered');
 
--- name: AddDeviceCapability :exec
+-- ReplaceDeviceCapabilities makes the device's capability rows exactly the
+-- announced set (the command channel plus the shop's permission scopes).
+-- name: ReplaceDeviceCapabilities :exec
+WITH removed AS (
+    DELETE FROM device_capabilities
+    WHERE device_id = @device_id::uuid AND NOT (capability = ANY(@capabilities::text[]))
+)
 INSERT INTO device_capabilities (device_id, capability, updated_at)
-VALUES (@device_id::uuid, @capability::text, now())
+SELECT @device_id::uuid, c, now() FROM unnest(@capabilities::text[]) AS c
 ON CONFLICT (device_id, capability) DO UPDATE SET updated_at = now();
 
--- name: RemoveDeviceCapability :exec
-DELETE FROM device_capabilities
-WHERE device_id = @device_id::uuid AND capability = @capability::text;
+-- StoreCatalogAdminPermissions: what the Store's active, bound,
+-- command-capable devices allow. A scope is allowed when any of them
+-- advertises it.
+-- name: StoreCatalogAdminPermissions :one
+SELECT count(*)::int AS devices,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_online_selling_v1')), false)::bool AS online_selling,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_products_v1')), false)::bool AS products,
+       COALESCE(bool_or(EXISTS (SELECT 1 FROM device_capabilities s WHERE s.device_id = d.id
+           AND s.capability = 'catalog_admin_scope_catalog_v1')), false)::bool AS catalog
+FROM device_store_bindings b
+JOIN devices d ON d.id = b.device_id AND d.status = 'active'
+JOIN device_capabilities cap ON cap.device_id = d.id AND cap.capability = 'catalog_admin_commands_v1'
+WHERE b.store_id = @store_id::uuid;
 
 -- name: HasDeviceCapability :one
 SELECT EXISTS (

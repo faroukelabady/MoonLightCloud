@@ -342,6 +342,52 @@ func (s *Service) VerifyMFA(ctx context.Context, a Authenticated, code, recovery
 	return issued, nil
 }
 
+// ConfirmStepUp checks a fresh authenticator code from a FULL session
+// before a sensitive change (action names it in the audit log). The code
+// is consumed, so it cannot be replayed, and failures count toward the
+// same throttle as login MFA. Recovery codes are not accepted here: they
+// restore access, they do not approve changes.
+func (s *Service) ConfirmStepUp(ctx context.Context, a Authenticated, code, clientIP, action string) error {
+	if a.Session.Stage != StageFull {
+		return ErrStage
+	}
+	now := s.now()
+	userID := a.Session.UserID
+	keys := []ThrottleKey{{Kind: "account", Key: a.Session.User.Login}, {Kind: "ip", Key: boundedIP(clientIP)}}
+	if blocked, err := s.store.CheckThrottle(ctx, keys, now); err != nil {
+		return err
+	} else if blocked {
+		s.audit(ctx, AuditEvent{OccurredAt: now, ActorUserID: userID, TargetUserID: userID, Action: "auth.mfa.step_up", Outcome: "failure", Reason: "THROTTLED", ClientIP: boundedIP(clientIP), Details: map[string]any{"action": action}})
+		return ErrThrottled
+	}
+	ok := false
+	if mfa, err := s.store.GetMFA(ctx, userID); err == nil && mfa.Enabled {
+		secret, err := s.box.Open(userID, mfa.Ciphertext)
+		if err != nil {
+			s.audit(ctx, AuditEvent{OccurredAt: now, TargetUserID: userID, Action: "auth.mfa.step_up", Outcome: "failure", Reason: "SECRET_UNREADABLE"})
+			return ErrInvalidMFACode
+		}
+		if step, matched := VerifyTOTP(secret, code, now, mfa.LastUsedStep); matched {
+			if ok, err = s.store.ConsumeTOTPStep(ctx, userID, step); err != nil {
+				return err
+			}
+		}
+	}
+	if !ok {
+		if err := s.store.RecordFailure(ctx, keys, s.policy, now); err != nil {
+			return err
+		}
+		s.audit(ctx, AuditEvent{OccurredAt: now, ActorUserID: userID, TargetUserID: userID, Action: "auth.mfa.step_up", Outcome: "failure",
+			Reason: "INVALID_CODE", ClientIP: boundedIP(clientIP), Details: map[string]any{"action": action}})
+		return ErrInvalidMFACode
+	}
+	if err := s.store.ClearThrottle(ctx, keys[0]); err != nil {
+		return err
+	}
+	s.audit(ctx, AuditEvent{OccurredAt: now, ActorUserID: userID, TargetUserID: userID, Action: "auth.mfa.step_up", Outcome: "success", ClientIP: boundedIP(clientIP), Details: map[string]any{"action": action}})
+	return nil
+}
+
 // Enrollment is the TOTP provisioning material, shown to the user once.
 type Enrollment struct {
 	Secret string `json:"secret"`

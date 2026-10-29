@@ -222,7 +222,8 @@ type Store interface {
 	SetCommandResultEntity(ctx context.Context, targetID, entityID string) error
 	MarkCatalogAdminTargetDelivered(ctx context.Context, targetID, deviceID string) error
 	CancelCatalogAdminCommand(ctx context.Context, commandID string) (bool, error)
-	UpsertCatalogAdminCapability(ctx context.Context, deviceID string, capable bool) error
+	ReplaceCatalogAdminCapabilities(ctx context.Context, deviceID string, capabilities []string) error
+	CatalogAdminStorePermissions(ctx context.Context, storeID string) (StorePermissions, error)
 	GetCatalogAdminCapability(ctx context.Context, deviceID string) (bool, error)
 	ListCatalogAdminBoundDevices(ctx context.Context, storeID string) ([]BoundDevice, error)
 	// CatalogAdminOwnership verifies projection ownership and reads

@@ -1423,7 +1423,9 @@ CREATE TABLE catalog_admin_command_targets (
 -- unknown commands there and the dashboard shows update-required.
 CREATE TABLE device_capabilities (
     device_id  UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    capability TEXT NOT NULL CHECK (capability IN ('catalog_admin_commands_v1')),
+    capability TEXT NOT NULL CHECK (capability IN ('catalog_admin_commands_v1',
+        'catalog_admin_scope_online_selling_v1', 'catalog_admin_scope_products_v1',
+        'catalog_admin_scope_catalog_v1')),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (device_id, capability)
 );

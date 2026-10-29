@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,7 +75,15 @@ func TestCatalogAdminChainEndToEnd(t *testing.T) {
 	devices := &stubAdminDevices{storeID: storeID, active: map[string]bool{deviceID: true}}
 	svc := catalogadmin.NewService(store, devices)
 
+	// The shop's permissions arrive with the capability announcement; Cloud
+	// queues nothing a Store device has not allowed.
 	payload, _ := json.Marshal(map[string]any{"product_id": productID, "arabic_name": "x"})
+	if _, err := svc.Create(ctx, "op", storeID, catalogadmin.TypeProductDetailsUpdateV1, productID, 7, payload); err == nil || !strings.Contains(err.Error(), catalogadmin.CodePermissionDisabled) {
+		t.Fatalf("create before any announcement: %v", err)
+	}
+	if _, err := svc.ReportCapabilities(ctx, deviceID, catalogadmin.KnownCapabilities()); err != nil {
+		t.Fatal(err)
+	}
 	view, err := svc.Create(ctx, "op", storeID, catalogadmin.TypeProductDetailsUpdateV1, productID, 7, payload)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -87,12 +96,15 @@ func TestCatalogAdminChainEndToEnd(t *testing.T) {
 		t.Fatal("cross-store create must fail")
 	}
 
-	// Capability gating: no delivery before announcement.
+	// Capability gating: no delivery while the device does not announce.
+	if _, err := svc.ReportCapabilities(ctx, deviceID, nil); err != nil {
+		t.Fatal(err)
+	}
 	due, err := svc.Poll(ctx, deviceID, 10)
 	if err != nil || len(due) != 0 {
 		t.Fatalf("pre-capability poll: %+v %v", due, err)
 	}
-	if _, err := svc.ReportCapabilities(ctx, deviceID, []string{catalogadmin.CapabilityV1}); err != nil {
+	if _, err := svc.ReportCapabilities(ctx, deviceID, catalogadmin.KnownCapabilities()); err != nil {
 		t.Fatal(err)
 	}
 	due, err = svc.Poll(ctx, deviceID, 10)

@@ -109,6 +109,36 @@ Retail announces `catalog_admin_commands_v1` via
 (best effort). Absence means incapable. Phase 17 will provide update
 controls; Phase 16 never force-updates.
 
+## Shop permissions and authenticator approval (2026-10-29)
+
+The shop decides in MoonLightRetail (**Settings → Cloud sync → What Cloud may
+change**) which changes Cloud may send. Each poll announces the switches that
+are on next to `catalog_admin_commands_v1`, and the announcement replaces the
+previous one:
+
+| Permission | Retail default | Capability | Command types | Authenticator code |
+|---|---|---|---|---|
+| Online selling | on | `catalog_admin_scope_online_selling_v1` | Product and Category online policy | no |
+| Product details and prices | off | `catalog_admin_scope_products_v1` | Product details, Variant commands | yes |
+| Catalog structure | off | `catalog_admin_scope_catalog_v1` | Classification, Category, Tag, ProductType | yes |
+
+- `GET /api/v1/dashboard/catalog-admin/permissions?store_id=` reports what the
+  Store allows: a scope counts when any active, bound, command-capable device
+  announces it. The Catalog Admin page shows this summary and disables the
+  editors the shop has not allowed, naming where to change it.
+- Creating a command the Store does not allow fails with 409
+  `CLOUD_PERMISSION_DISABLED`; nothing is stored. Retail still checks every
+  command on arrival and rejects one outside its current permissions with
+  `CLOUD_PERMISSION_DENIED` (shown on the target as *Refused by the shop*),
+  for example when the shop switched a permission off after it was queued.
+- Product, price and catalog commands need `mfa_code`: a fresh code from the
+  operator's authenticator app, entered in a prompt before the change is
+  sent. The server checks it like login MFA (same throttle, the TOTP step is
+  consumed so a code approves one change), audits it as
+  `auth.mfa.step_up` with the command type, and never stores it. Missing or
+  wrong codes are 403 `MFA_REQUIRED` / `MFA_INVALID` (the session stays
+  valid); too many are 429. Recovery codes are not accepted here.
+
 ## Cancellation
 
 Undelivered pending commands may be cancelled. Once any target is delivered or applied,
@@ -118,7 +148,10 @@ Cancellation never implies rollback.
 ## Money
 
 All admin money editing uses int64 minor-unit strings end to end
-(>2^53 safe, no JSON Number authority). Frame USD delta preserves
+(>2^53 safe, no JSON Number authority). The editor shows and accepts
+prices in pounds and dollars (`560.00`, at most two decimals, commas and
+Arabic-Indic digits accepted) and converts exactly to minor units before
+sending. Frame USD delta preserves
 blank-vs-zero: blank means NULL/unavailable, `0` means explicit zero.
 
 ## Category online toggle
@@ -126,7 +159,7 @@ blank-vs-zero: blank means NULL/unavailable, `0` means explicit zero.
 Disabling a Category/Subcategory removes affected Products from
 online channels through Phase 13 reevaluation **without** changing
 each Product's own `sell_online`. The UI requires explicit
-confirmation with this explanation (Arabic + English) before
+confirmation with this explanation (in the chosen language) before
 queueing. Provider effects happen only after Retail apply → sync →
 projection → durable reevaluation; provider outage never rolls back
 an applied catalog change.

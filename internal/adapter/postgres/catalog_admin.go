@@ -426,23 +426,36 @@ func (d CatalogAdmin) CancelCatalogAdminCommand(ctx context.Context, commandID s
 	return true, nil
 }
 
-// UpsertCatalogAdminCapability records Retail capability.
-func (d CatalogAdmin) UpsertCatalogAdminCapability(ctx context.Context, deviceID string, capable bool) error {
+// ReplaceCatalogAdminCapabilities records exactly the announced Retail
+// capabilities (already filtered to known names by the service).
+func (d CatalogAdmin) ReplaceCatalogAdminCapabilities(ctx context.Context, deviceID string, capabilities []string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	duid, err := parseUUID(deviceID)
 	if err != nil {
 		return err
 	}
-	q := sqlcgen.New(d.pool)
-	if capable {
-		return catalogAdminErr(q.AddDeviceCapability(ctx, sqlcgen.AddDeviceCapabilityParams{
-			DeviceID: duid, Capability: catalogadmin.CapabilityV1,
-		}))
+	if capabilities == nil {
+		capabilities = []string{}
 	}
-	return catalogAdminErr(q.RemoveDeviceCapability(ctx, sqlcgen.RemoveDeviceCapabilityParams{
-		DeviceID: duid, Capability: catalogadmin.CapabilityV1,
+	return catalogAdminErr(sqlcgen.New(d.pool).ReplaceDeviceCapabilities(ctx, sqlcgen.ReplaceDeviceCapabilitiesParams{
+		DeviceID: duid, Capabilities: capabilities,
 	}))
+}
+
+// CatalogAdminStorePermissions reads what the Store's devices allow.
+func (d CatalogAdmin) CatalogAdminStorePermissions(ctx context.Context, storeID string) (catalogadmin.StorePermissions, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return catalogadmin.StorePermissions{}, err
+	}
+	row, err := sqlcgen.New(d.pool).StoreCatalogAdminPermissions(ctx, suid)
+	if err != nil {
+		return catalogadmin.StorePermissions{}, catalogAdminErr(err)
+	}
+	return catalogadmin.StorePermissions{OnlineSelling: row.OnlineSelling, Products: row.Products, Catalog: row.Catalog, Devices: int(row.Devices)}, nil
 }
 
 // GetCatalogAdminCapability reads Retail capability; missing means

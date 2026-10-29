@@ -152,7 +152,11 @@ on all money-bearing documents.
 - Baseline 00112 (2026-10-28) adds `commerce_media_mappings` (ADR-0056 step
   2: Shopify media MoonLight created). Development databases built from 00111
   must be recreated.
-- Phase 3: `00112_baseline.sql` is the current baseline (TargetVersion 112);
+- Baseline 00113 (2026-10-29) lets `device_capabilities` hold the shop's
+  Cloud permissions (`catalog_admin_scope_online_selling_v1`,
+  `catalog_admin_scope_products_v1`, `catalog_admin_scope_catalog_v1`).
+  Development databases built from 00112 must be recreated.
+- Phase 3: `00113_baseline.sql` is the current baseline (TargetVersion 113);
   `internal/migrate/testdata/schema.golden` pins the reviewed schema (columns,
   constraints, indexes, views, functions, triggers) and
   `TestSchemaMatchesReviewedTarget` fails on any drift.
