@@ -104,7 +104,8 @@
 			<label>{t('من', 'From')}<input type="date" value={range?.from ?? ''} disabled /></label>
 			<label>{t('إلى', 'To')}<input type="date" value={range?.to ?? ''} disabled /></label>
 		{/if}
-		<button type="button" class="apply" disabled={!custom} onclick={applyCustom}>{t('عرض', 'Show')}</button>
+		<!-- Short visible text to fit the row; the name stays bilingual. -->
+		<button type="button" class="apply" disabled={!custom} aria-label={tb('عرض', 'Show')} onclick={applyCustom}>{t('عرض', 'Show')}</button>
 	</div>
 	{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{#if showTimezone}<div class="tz muted" dir="ltr">{timezone}</div>{/if}
