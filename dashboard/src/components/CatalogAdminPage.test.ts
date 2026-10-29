@@ -1,13 +1,24 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import CatalogAdminPage from './CatalogAdminPage.svelte';
-import { dashboardApi } from '../lib/api.js';
+import { dashboardApi, ApiError } from '../lib/api.js';
+import { setLang } from '../lib/i18n.svelte.js';
 vi.mock('../lib/api.js', async (orig) => {
  const m = await orig() as Record<string, unknown>;
- return {...m,dashboardApi:{adminProducts:vi.fn(),adminCategories:vi.fn(),adminTags:vi.fn(),adminCommands:vi.fn(),adminProduct:vi.fn(),adminConfigurations:vi.fn(),adminProductTypes:vi.fn(),adminProductType:vi.fn(),adminCreateCommand:vi.fn(),adminCommand:vi.fn()}};
+ return {...m,dashboardApi:{adminProducts:vi.fn(),adminCategories:vi.fn(),adminTags:vi.fn(),adminCommands:vi.fn(),adminProduct:vi.fn(),adminConfigurations:vi.fn(),adminProductTypes:vi.fn(),adminProductType:vi.fn(),adminCreateCommand:vi.fn(),adminCommand:vi.fn(),adminPermissions:vi.fn()}};
 });
 const api=dashboardApi as unknown as Record<string,ReturnType<typeof vi.fn>>;
+// The editor shows one language; most tests read the English labels.
+beforeEach(()=>setLang('en'));
 afterEach(()=>{cleanup();vi.resetAllMocks()});
+const allowAll={online_selling:true,products:true,catalog:true,devices:1};
+// confirmCode answers the authenticator prompt that product, price and
+// catalog changes open before anything is sent.
+async function confirmCode(code='123456'){
+ const input=await screen.findByLabelText('Authenticator code');
+ await fireEvent.input(input,{target:{value:code}});
+ await fireEvent.click(screen.getByRole('button',{name:'Confirm and send'}));
+}
 // Phase 17-R0 (ADR-0049): product rows carry variant_count/derived_stock
 // (never sku/stock); the single variant's SKU is shown from the variant
 // rows as "1 variant / SKU: X".
@@ -21,15 +32,15 @@ function productDetail(name:string){
 function fixtures(name:string){
  return {products:[productRow(name)],categories:[{category_id:'c-'+name,name_ar:'Category '+name,parent_ids:[]}],tags:[{tag_id:'t-'+name,name_ar:'Tag '+name}],commands:[]};
 }
-function defaults(){api.adminCategories.mockResolvedValue({categories:fixtures('ready').categories});api.adminTags.mockResolvedValue({tags:fixtures('ready').tags});api.adminCommands.mockResolvedValue({commands:[],next_cursor:''});api.adminProductTypes.mockResolvedValue({product_types:[{type_id:'t-papyrus',code:'papyrus',name_ar:'برديات',name_en:'Papyrus',is_active:true,position:0,type_revision:1,dimensions:['color'],capabilities:['frame_configuration']}]})}
+function defaults(){api.adminCategories.mockResolvedValue({categories:fixtures('ready').categories});api.adminTags.mockResolvedValue({tags:fixtures('ready').tags});api.adminCommands.mockResolvedValue({commands:[],next_cursor:''});api.adminProductTypes.mockResolvedValue({product_types:[{type_id:'t-papyrus',code:'papyrus',name_ar:'برديات',name_en:'Papyrus',is_active:true,position:0,type_revision:1,dimensions:['color'],capabilities:['frame_configuration']}]});api.adminPermissions.mockResolvedValue(allowAll)}
 it('loads all sibling resources without cancelling successful responses', async()=>{
  const f=fixtures('ready');defaults();api.adminProducts.mockResolvedValue({products:f.products,next_cursor:''});
  render(CatalogAdminPage,{store:'store-A'});
  expect(await screen.findByText('Product ready')).toBeTruthy();
  expect(screen.getByText('1 variant')).toBeTruthy();
- await fireEvent.click(screen.getByRole('tab',{name:'الفئات / Categories'}));expect(await screen.findByText('Category ready')).toBeTruthy();
- await fireEvent.click(screen.getByRole('tab',{name:'الوسوم / Tags'}));expect(await screen.findByText('Tag ready')).toBeTruthy();
- expect(screen.queryByText('جارٍ التحميل… / Loading…')).toBeNull();
+ await fireEvent.click(screen.getByRole('tab',{name:'Categories'}));expect(await screen.findByText('Category ready')).toBeTruthy();
+ await fireEvent.click(screen.getByRole('tab',{name:'Tags'}));expect(await screen.findByText('Tag ready')).toBeTruthy();
+ expect(screen.queryByText('Loading…')).toBeNull();
 });
 it('discards late old-Store results while retaining the new Store', async()=>{
  defaults();let oldResolve!:(value:unknown)=>void;
@@ -53,10 +64,10 @@ it('does not let a late Product detail replace a newer selection',async()=>{
 it('shows product types with capabilities and queues type changes', async()=>{
  defaults();const f=fixtures('ready');api.adminProducts.mockResolvedValue({products:f.products,next_cursor:''});
  render(CatalogAdminPage,{store:'A'});
- await fireEvent.click(screen.getByRole('tab',{name:'الأنواع / Types'}));
- expect(await screen.findByText('برديات')).toBeTruthy();
+ await fireEvent.click(screen.getByRole('tab',{name:'Types'}));
+ expect(await screen.findByText('Papyrus')).toBeTruthy();
  expect(screen.getByText('papyrus')).toBeTruthy();
- await fireEvent.click(screen.getByRole('button',{name:'برديات'}));
+ await fireEvent.click(screen.getByRole('button',{name:'Papyrus'}));
  await vi.waitFor(() => {
    const hits = screen.queryAllByText((_, el) => el?.textContent?.includes('frame_configuration') ?? false);
    expect(hits.length).toBeGreaterThan(0);
@@ -69,7 +80,7 @@ it('distinguishes create intent from result identity', async()=>{
  api.adminCommands.mockResolvedValue({commands:[pending],next_cursor:''});
  api.adminCommand.mockResolvedValue(pending);
  render(CatalogAdminPage,{store:'A'});
- await fireEvent.click(screen.getByRole('tab',{name:'الأوامر / Commands'}));
+ await fireEvent.click(screen.getByRole('tab',{name:'Commands'}));
  await fireEvent.click(await screen.findByRole('button',{name:'catalog.product-type.create.v1'}));
  // Waiting state names the requested code, never a placeholder UUID.
  await vi.waitFor(()=>expect(screen.queryAllByText((_,el)=>(el?.textContent?.includes('waiting for Retail') ?? false)).length).toBeGreaterThan(0));
@@ -84,7 +95,7 @@ it('shows shared frame choices read-only (edited in Retail)', async()=>{
  api.adminConfigurations.mockResolvedValue({configurations:[{id:'cfg-1',style_code:'classic',style_name_ar:'كلاسيكي',style_name_en:'Classic',color_code:'black',color_name_ar:'أسود',color_name_en:'Black',egp_delta_minor:'30000',usd_delta_minor:'600',enabled:true,position:0}]});
  render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
  const list=await screen.findByTestId('frame-configurations');
- expect(list.textContent).toContain('كلاسيكي / أسود');expect(list.textContent).toContain('+300 ج.م · +$6.00');
+ expect(list.textContent).toContain('Classic / Black');expect(list.textContent).toContain('+300 EGP · +$6.00');
  expect(screen.queryByText(/Queue options change/)).toBeNull();expect(api.adminCreateCommand).not.toHaveBeenCalled();
 });
 
@@ -97,7 +108,9 @@ it('submits classification replacement arrays and the catalog revision unchanged
  await screen.findByRole('button',{name:/Queue classification change/});
  await fireEvent.click(screen.getByLabelText('Sub Z'));await fireEvent.click(screen.getByLabelText('Sub A'));await fireEvent.click(screen.getByLabelText('Tag ready'));
  await fireEvent.click(screen.getByRole('button',{name:/Queue classification change/}));
- await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.classification.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',top_category_id:'c-ready',subcategory_ids:['sub-z','sub-a'],tag_ids:['t-ready'],expected_catalog_revision:17}}));
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+ await confirmCode();
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.classification.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',top_category_id:'c-ready',subcategory_ids:['sub-z','sub-a'],tag_ids:['t-ready'],expected_catalog_revision:17}},'123456'));
 });
 
 it('submits product online intent with the separate sales policy revision', async()=>{
@@ -115,7 +128,7 @@ it('keeps category disable confirmation before catalog-revision command submissi
  api.adminCreateCommand.mockResolvedValue({id:'command-123'});
  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
  try {
-  render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'الفئات / Categories'}));
+  render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'Categories'}));
   await fireEvent.click(await screen.findByRole('button',{name:'Category One'}));
   await fireEvent.click(screen.getByRole('button',{name:/Disable online/}));expect(api.adminCreateCommand).not.toHaveBeenCalled();
   confirm.mockReturnValue(true);await fireEvent.click(screen.getByRole('button',{name:/Disable online/}));
@@ -136,15 +149,78 @@ it('shows prices in pounds and submits them as exact minor units', async()=>{
  await fireEvent.input(document.querySelector('#pd-egp')!,{target:{value:'90071992547409.93'}});
  await fireEvent.input(document.querySelector('#pd-usd')!,{target:{value:'12.5'}});
  await fireEvent.click(screen.getByRole('button',{name:/Queue details change/}));
- await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.details.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',arabic_name:'كتاب',arabic_description:null,english_name:'Book',english_description:'Description',width_cm:1,height_cm:7,egp_price_cents:'9007199254740993',usd_price_cents:'1250',cost_cents:'0',top_category_id:'c-ready',subcategory_ids:[],tag_ids:[],expected_catalog_revision:17}}));
+ await confirmCode();
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product.details.update.v1',entity_id:'p-ready',expected_revision:17,payload:{product_id:'p-ready',arabic_name:'كتاب',arabic_description:null,english_name:'Book',english_description:'Description',width_cm:1,height_cm:7,egp_price_cents:'9007199254740993',usd_price_cents:'1250',cost_cents:'0',top_category_id:'c-ready',subcategory_ids:[],tag_ids:[],expected_catalog_revision:17}},'123456'));
 });
 
 it('submits ProductType creation as key intent with no fabricated entity identity', async()=>{
  defaults();api.adminProducts.mockResolvedValue({products:[],next_cursor:''});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
- render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'الأنواع / Types'}));await screen.findByText('برديات');
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(screen.getByRole('tab',{name:'Types'}));await screen.findByText('Papyrus');
  await fireEvent.input(document.querySelector('#nt-code')!,{target:{value:' BOOK '}});
  await fireEvent.input(document.querySelector('#nt-ar')!,{target:{value:' كتاب '}});
  await fireEvent.input(document.querySelector('#nt-en')!,{target:{value:' Book '}});
  await fireEvent.click(screen.getByRole('button',{name:/Queue type creation/}));
- await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product-type.create.v1',entity_id:'',expected_revision:0,payload:{code:'book',name_ar:'كتاب',name_en:'Book',position:1,dimensions:[],capabilities:[],expected_type_revision:0}}));
+ await confirmCode();
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith({store_id:'store-A',type:'catalog.product-type.create.v1',entity_id:'',expected_revision:0,payload:{code:'book',name_ar:'كتاب',name_en:'Book',position:1,dimensions:[],capabilities:[],expected_type_revision:0}},'123456'));
+});
+
+it('shows the product editor in Arabic only when Arabic is chosen', async()=>{
+ setLang('ar');defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue({...productDetail('ready'),name_en:'Ready product'});api.adminConfigurations.mockResolvedValue({configurations:[]});
+ render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ const editor=await screen.findByRole('region',{name:'محرر المنتج'});
+ expect(editor.textContent).toContain('إدراج تعديل البيانات');expect(editor.textContent).toContain('سعر البيع (ج.م)');
+ for (const english of ['Queue','Arabic name','Price (EGP)','Online availability','Classification','variant']) expect(editor.textContent).not.toContain(english);
+ expect(screen.getByRole('tab',{name:'المنتجات'})).toBeTruthy();
+ setLang('en');
+ expect(await screen.findByRole('heading',{name:/Ready product/})).toBeTruthy();
+});
+
+it('locks what the shop has not allowed and says where to change it', async()=>{
+ defaults();api.adminPermissions.mockResolvedValue({online_selling:true,products:false,catalog:false,devices:1});
+ api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});api.adminProduct.mockResolvedValue({...productDetail('ready'),sell_online:true});
+ api.adminConfigurations.mockResolvedValue({configurations:[]});api.adminCreateCommand.mockResolvedValue({id:'command-123'});
+ render(CatalogAdminPage,{store:'store-A'});
+ const summary=await screen.findByTestId('catalog-permissions');
+ await vi.waitFor(()=>expect(summary.textContent).toMatch(/Product details and prices\s*Off/));
+ await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ expect((await screen.findByRole('button',{name:'Queue details change'})).matches(':disabled')).toBe(true);
+ expect((document.querySelector('#pd-egp') as HTMLInputElement).closest('fieldset')!.disabled).toBe(true);
+ expect(screen.getByText(/does not allow Cloud to change product details or prices/)).toBeTruthy();
+ expect((screen.getByRole('button',{name:'Queue classification change'}) as HTMLButtonElement).closest('fieldset')!.disabled).toBe(true);
+ // Online selling is allowed and needs no authenticator code.
+ await fireEvent.click(screen.getByRole('button',{name:'Disable online selling'}));
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({type:'catalog.product.online-policy.update.v1'})));
+ expect(screen.queryByLabelText('Authenticator code')).toBeNull();
+});
+
+it('keeps the prompt open on a wrong code and sends nothing more', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});api.adminProduct.mockResolvedValue(productDetail('ready'));
+ api.adminConfigurations.mockResolvedValue({configurations:[]});
+ api.adminCreateCommand.mockRejectedValueOnce(new ApiError(403,'FORBIDDEN','request failed (403)','MFA_INVALID')).mockResolvedValueOnce({id:'command-456'});
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await fireEvent.click(await screen.findByRole('button',{name:'Queue details change'}));
+ await confirmCode('12345');
+ expect(await screen.findByText('Enter the 6-digit code.')).toBeTruthy();
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+ await confirmCode('111111');
+ expect(await screen.findByText(/That code is not valid or was already used/)).toBeTruthy();
+ expect(screen.getByLabelText('Authenticator code')).toBeTruthy();
+ await confirmCode('222222');
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenLastCalledWith(expect.objectContaining({type:'catalog.product.details.update.v1'}),'222222'));
+ expect(await screen.findByText(/Change queued/)).toBeTruthy();
+ expect(screen.queryByLabelText('Authenticator code')).toBeNull();
+ await fireEvent.click(screen.getByRole('button',{name:'Queue details change'}));
+ await fireEvent.click(await screen.findByRole('button',{name:'Cancel'}));
+ expect(screen.queryByLabelText('Authenticator code')).toBeNull();
+ expect(api.adminCreateCommand).toHaveBeenCalledTimes(2);
+});
+
+it('explains a change the shop refused in Cloud', async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});api.adminProduct.mockResolvedValue({...productDetail('ready'),sell_online:true});
+ api.adminConfigurations.mockResolvedValue({configurations:[]});
+ api.adminCreateCommand.mockRejectedValue(new ApiError(409,'CONFLICT','request failed (409)','CLOUD_PERMISSION_DISABLED'));
+ render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await fireEvent.click(await screen.findByRole('button',{name:'Disable online selling'}));
+ expect(await screen.findByText(/The shop does not allow Cloud to make this change/)).toBeTruthy();
 });

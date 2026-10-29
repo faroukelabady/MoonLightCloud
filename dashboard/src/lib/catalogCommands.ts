@@ -115,3 +115,23 @@ export type CatalogCommandRequest = ReturnType<
  typeof productDetailsCommand | typeof categoryDetailsCommand | typeof categoryParentsCommand | typeof tagDetailsCommand |
  typeof productTypeDetailsCommand | typeof productTypeStatusCommand | typeof productTypeCreateCommand | typeof productTypeAssignmentCommand
 >;
+
+// CommandScope is the shop permission a command needs (Retail Settings →
+// Cloud sync → What Cloud may change). Mirrors catalogadmin.ScopeOf; every
+// scope except online selling also needs a fresh authenticator code.
+export type CommandScope = 'online_selling' | 'products' | 'catalog';
+
+export function commandScope(type: string): CommandScope {
+ switch (type) {
+  case 'catalog.product.online-policy.update.v1':
+  case 'catalog.category.online-policy.update.v1':
+   return 'online_selling';
+  case 'catalog.product.details.update.v1':
+  case 'catalog.product.variants.update.v1':
+  case 'catalog.product.variant.update.v1':
+  case 'catalog.variant.attributes.update.v1':
+   return 'products';
+  default:
+   return 'catalog';
+ }
+}

@@ -30,7 +30,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, subMinor } from './lib/money.js';
-	import { arabic, lang, setLang, t, tb } from './lib/i18n.svelte.js';
+	import { arabic, lang, msg, msgb, setLang, t } from './lib/i18n.svelte.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -601,7 +601,7 @@ let branchContext = $derived.by(() => {
 </script>
 
 {#if authed === null}
-	<div class="muted pad">{tb('جارٍ التحميل…', 'Loading…')}</div>
+	<div class="muted pad">{msgb('app.loading')}</div>
 {:else if !authed}
 	<LoginPage stage={pendingStage} onauthenticated={() => void onAuthenticated()} />
 {:else}
@@ -611,7 +611,7 @@ let branchContext = $derived.by(() => {
 			<header class="topbar">
 				<div class="brandblock">
 					<div class="brandname">MoonLightCloud</div>
-					<h1 class="dash-title">{t('لوحة متابعة المبيعات', 'Sales dashboard')}</h1>
+					<h1 class="dash-title">{msg('app.salesDashboard')}</h1>
 					<div class="muted brandsub">Your business insights in one place</div>
 				</div>
 				<div class="periodblock">
@@ -621,7 +621,7 @@ let branchContext = $derived.by(() => {
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if route === 'overview'}
 						<!-- One currency choice for every Overview card. -->
-						<div class="currencyctl" data-testid="currency-mode" role="group" aria-label={tb('العملة', 'Currency')} title={tb('العملة', 'Currency')}>
+						<div class="currencyctl" data-testid="currency-mode" role="group" aria-label={msgb('app.currency')} title={msgb('app.currency')}>
 							<Segmented
 								size="sm"
 								options={[
@@ -644,13 +644,13 @@ let branchContext = $derived.by(() => {
 							<span>{operatorName}</span>
 						</div>
 					{/if}
-					<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={t('Switch to English', 'التبديل إلى العربية')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
+					<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={msg('app.text')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
 						{arabic() ? 'English' : 'العربية'}
 					</button>
 					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
-						{tb('خروج', 'Logout')}
+						{msgb('app.logout')}
 					</button>
 				</div>
 			</header>

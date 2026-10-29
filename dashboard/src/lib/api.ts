@@ -40,7 +40,8 @@ import type {
 	AdminCategoryRow,
 	AdminTagRow,
 	AdminConfiguration,
-	AdminCommand
+	AdminCommand,
+	AdminPermissions
 } from './apiTypes';
 
 // analytics and catalog health ("" = all durable providers).
@@ -137,8 +138,12 @@ export const dashboardApi = {
 	},
 	adminCommand: (store: string, id: string, s?: AbortSignal) =>
 		get<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}&payload=1`, s),
-	adminCreateCommand: (req: CatalogCommandRequest, s?: AbortSignal) =>
-		postJson<AdminCommand>('/api/v1/dashboard/catalog-admin/commands', req, s),
+	// mfaCode approves product, price and catalog changes (checked and
+	// consumed by the server, never stored).
+	adminCreateCommand: (req: CatalogCommandRequest, mfaCode?: string, s?: AbortSignal) =>
+		postJson<AdminCommand>('/api/v1/dashboard/catalog-admin/commands', mfaCode ? { ...req, mfa_code: mfaCode } : req, s),
+	adminPermissions: (store: string, s?: AbortSignal) =>
+		get<AdminPermissions>(`/api/v1/dashboard/catalog-admin/permissions?store_id=${encodeURIComponent(store)}`, s),
 	adminCancelCommand: (store: string, id: string, s?: AbortSignal) =>
 		postJson<AdminCommand>(`/api/v1/dashboard/catalog-admin/commands/${encodeURIComponent(id)}/cancel?store_id=${encodeURIComponent(store)}`, {}, s),
 	incidents: (params: { state?: string; severity?: string; rule?: string; limit?: number; cursor?: string | null }, s?: AbortSignal) => {

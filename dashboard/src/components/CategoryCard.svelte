@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msg, msgb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -91,8 +91,8 @@
 		<Segmented
 			size="sm"
 			options={[
-				{ value: 'root_category', ar: 'رئيسية', en: 'Roots', aria: tb('الفئات الرئيسية', 'Roots') },
-				{ value: 'subcategory', ar: 'فرعية', en: 'Subcategories', aria: tb('الفئات الفرعية', 'Subcategories') }
+				{ value: 'root_category', ar: 'رئيسية', en: 'Roots', aria: msgb('categoryCard.roots') },
+				{ value: 'subcategory', ar: 'فرعية', en: 'Subcategories', aria: msgb('categoryCard.subcategories') }
 			]}
 			value={kind}
 			onchange={(v) => onkind(v as CategoryKind)}
@@ -112,7 +112,7 @@
 	</div>
 	{#if kind !== 'root_category'}
 		<div class="muted facet">
-			{t('قد ينتمي المنتج إلى أكثر من فئة فرعية، لذلك لا تمثل الفئات الفرعية أجزاءً من إجمالي واحد — عرض بالأعمدة فقط.', 'Products can belong to multiple subcategories, so subcategories do not form parts of a single whole — bar view only.')}{#if arabic()}
+			{msg('categoryCard.productsCanBelongToMultipleSubcategories')}{#if arabic()}
 			<br /><span class="sub-en">Products can belong to multiple subcategories, so subcategories do not form parts of a single whole — bar view only.</span>{/if}
 		</div>
 	{/if}
@@ -128,7 +128,7 @@
 			en="Chart value is outside the supported display range"
 		/>
 	{:else}
-		<div use:chart={option} class="chart" role="img" aria-label={t('مخطط أداء الفئات', 'Category performance chart')}></div>
+		<div use:chart={option} class="chart" role="img" aria-label={msg('categoryCard.categoryPerformanceChart')}></div>
 	{/if}
 </Card>
 

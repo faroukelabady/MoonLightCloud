@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { ReportShop } from '../lib/reportsApi.js';
-	import { lang, t } from '../lib/i18n.svelte.js';
+	import { lang, msg } from '../lib/i18n.svelte.js';
 
 	// Printed only: report title, the shop's letterhead (from its newest
 	// synced Sale) and the facts row passed in as <div><dt/><dd/></div>.
@@ -11,7 +11,7 @@
 	function pick(ar: string, en: string) {
 		return (lang() === 'ar' ? ar || en : en || ar).trim();
 	}
-	let brand = $derived(storeName ? (shop ? pick(shop.name_ar, shop.name_en) : '') || storeName : t('كل المتاجر', 'All Stores'));
+	let brand = $derived(storeName ? (shop ? pick(shop.name_ar, shop.name_en) : '') || storeName : msg('reportLetterhead.allStores'));
 	let address = $derived(storeName && shop ? pick(shop.address_ar, shop.address_en) : '');
 </script>
 

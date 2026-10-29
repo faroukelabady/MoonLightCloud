@@ -399,3 +399,13 @@ The provider selector and scope context stay visible when the result set
 is empty (Phase 12 review item R1-L03, fixed while touching the widget).
 Health keeps its frozen invariants: zero provider calls, zero writes,
 durable Cloud state only.
+
+## Interface text (2026-10-29)
+
+Dashboard text lives in `dashboard/src/locales/ar.json` and `en.json`, looked
+up by key with `msg()` (chosen language) or `msgb()` (the Arabic-mode
+"عربي / English" pairing some screens keep). `src/lib/i18n.test.ts` fails when
+the two files' keys or `{placeholders}` differ. Adding a language is one more
+file plus its `Lang` entry. Text that arrives as data (Store and product
+names, labels passed to shared cards) is still chosen per record. The Catalog
+Admin page shows only the chosen language.

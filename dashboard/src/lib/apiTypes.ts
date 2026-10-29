@@ -560,6 +560,15 @@ export interface AdminConfiguration {
 	position: number;
 }
 
+// What the shop lets Cloud change (Retail Settings → Cloud sync), as
+// advertised by the Store's devices. Retail checks every command again.
+export interface AdminPermissions {
+	online_selling: boolean;
+	products: boolean;
+	catalog: boolean;
+	devices: number;
+}
+
 export interface AdminCommandTarget {
 	id: string;
 	command_id: string;

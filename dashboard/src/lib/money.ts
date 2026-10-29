@@ -3,7 +3,7 @@
 // values beyond Number.MAX_SAFE_INTEGER still render exactly. Only chart
 // coordinates convert to Number, via toChartNumber with a loud safe-range
 // check (unrealistic magnitudes become an error state, never silent loss).
-import { t } from './i18n.svelte.js';
+import { msg } from './i18n.svelte.js';
 
 export function formatMinor(minor: string, currency: 'EGP' | 'USD'): string {
 	const negative = minor.startsWith('-');
@@ -16,7 +16,7 @@ export function formatMinor(minor: string, currency: 'EGP' | 'USD'): string {
 		return `${negative ? '-' : ''}$${grouped}.${frac.toString().padStart(2, '0')}`;
 	}
 	const fracPart = frac === 0n ? '' : '.' + frac.toString().padStart(2, '0');
-	return `${negative ? '-' : ''}${grouped}${fracPart} ${t('ج.م', 'EGP')}`;
+	return `${negative ? '-' : ''}${grouped}${fracPart} ${msg('money.egp')}`;
 }
 
 function groupDigits(s: string): string {

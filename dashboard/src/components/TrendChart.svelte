@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t } from '../lib/i18n.svelte.js';
+	import { arabic, msg } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -121,7 +121,7 @@
 		</div>
 		<ul class="exact">
 			{#each exact as d, i}
-				<li><span class="num" dir="ltr">{d.date}</span> — <span class="num">{d.amount_minor} {unit}</span>{#if refundExact?.[i]} <span class="num refund">{t('مرتجعات', 'Refunds')} {refundExact[i].refund_minor}</span>{/if}</li>
+				<li><span class="num" dir="ltr">{d.date}</span> — <span class="num">{d.amount_minor} {unit}</span>{#if refundExact?.[i]} <span class="num refund">{msg('trendChart.refunds')} {refundExact[i].refund_minor}</span>{/if}</li>
 			{/each}
 		</ul>
 	{:else if values.length === 0}

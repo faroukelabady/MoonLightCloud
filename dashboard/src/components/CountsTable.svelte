@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t } from '../lib/i18n.svelte.js';
+	import { arabic, msg } from '../lib/i18n.svelte.js';
 	import { formatInt } from '../lib/money.js';
 	import type { OverviewResponse } from '../lib/api.js';
 
@@ -21,33 +21,33 @@
 		const units = mode === 'all' ? data.summary.units_returned : (data.summary.currency_totals.find((b) => b.currency === mode)?.returned_units ?? 0);
 		return { transactions: formatInt(data.summary.return_transaction_count), units: formatInt(units) };
 	});
-	let scope = $derived(mode === 'all' ? t('النطاق: الكل', 'Scope: all') : `${t('النطاق', 'Scope')}: ${mode}`);
+	let scope = $derived(mode === 'all' ? msg('countsTable.scopeAll') : `${msg('countsTable.scope')}: ${mode}`);
 </script>
 
 <div class="counts">
-	<table class="totals" data-testid="activity-totals" aria-label={t('المعاملات والوحدات', 'Transactions and units')}>
+	<table class="totals" data-testid="activity-totals" aria-label={msg('countsTable.transactionsAndUnits')}>
 		<thead>
 			<tr>
 				<td></td>
-				<th scope="col">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
-				<th scope="col">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
+				<th scope="col">{msg('countsTable.sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
+				<th scope="col">{msg('countsTable.returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
 			</tr>
 		</thead>
 		<tbody>
 			<tr>
-				<th scope="row">{t('المعاملات', 'Transactions')}{#if arabic()}<span class="sub-en"> · Transactions</span>{/if}</th>
+				<th scope="row">{msg('countsTable.transactions')}{#if arabic()}<span class="sub-en"> · Transactions</span>{/if}</th>
 				<td class="num">{sales.transactions}</td>
 				<td class="num ret">{returns.transactions}{#if mode !== 'all'}<sup class="note-mark" aria-hidden="true">*</sup>{/if}</td>
 			</tr>
 			<tr>
-				<th scope="row">{t('الوحدات', 'Units')}{#if arabic()}<span class="sub-en"> · Units</span>{/if}</th>
+				<th scope="row">{msg('countsTable.units')}{#if arabic()}<span class="sub-en"> · Units</span>{/if}</th>
 				<td class="num">{sales.units}</td>
 				<td class="num ret">{returns.units}</td>
 			</tr>
 		</tbody>
 	</table>
 	<div class="muted ctx">{scope}</div>
-	{#if mode !== 'all'}<div class="muted ctx" role="note">* {t('معاملات المرتجعات تشمل كل العملات', 'Return transactions count every currency')}</div>{/if}
+	{#if mode !== 'all'}<div class="muted ctx" role="note">* {msg('countsTable.returnTransactionsCountEveryCurrency')}</div>{/if}
 </div>
 
 <style>

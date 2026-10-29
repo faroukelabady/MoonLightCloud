@@ -3,7 +3,7 @@
 	import { settingsApi, type ExchangeRate } from '../lib/settingsApi.js';
 	import type { BusinessSettings } from '../lib/reportsApi.js';
 	import { absoluteTime } from '../lib/time.js';
-	import { lang, t } from '../lib/i18n.svelte.js';
+	import { lang, msg } from '../lib/i18n.svelte.js';
 	import Switch from './ui/Switch.svelte';
 	import TextField from './ui/TextField.svelte';
 	import MessagingSettings from './MessagingSettings.svelte';
@@ -32,12 +32,12 @@
 
 	function errorText(err: unknown): string {
 		if (err instanceof ApiError) {
-			if (err.detail === 'SETTINGS_CHANGED') return t('غيّر شخص آخر الإعدادات للتو. أُعيد تحميلها؛ راجعها واحفظ مرة أخرى.', 'Someone else just changed these settings. They were reloaded; review and save again.');
-			if (err.detail === 'RATE_TIME_TAKEN') return t('يوجد سعر يبدأ في نفس الوقت. اختر وقتاً آخر.', 'A rate already starts at that time. Choose another time.');
-			if (err.code === 'FORBIDDEN') return t('ليست لديك صلاحية تغيير الإعدادات.', 'You do not have permission to change settings.');
+			if (err.detail === 'SETTINGS_CHANGED') return msg('settingsPage.someoneElseJustChangedTheseSettings');
+			if (err.detail === 'RATE_TIME_TAKEN') return msg('settingsPage.aRateAlreadyStartsAtThat');
+			if (err.code === 'FORBIDDEN') return msg('settingsPage.youDoNotHavePermissionTo');
 			if (err.code === 'INVALID_INPUT' && err.detail) return err.detail;
 		}
-		return t('تعذر الحفظ. حاول مرة أخرى.', 'Could not save. Try again.');
+		return msg('settingsPage.couldNotSaveTryAgain');
 	}
 
 	function localNow(): string {
@@ -70,7 +70,7 @@
 		notice = null;
 		try {
 			business = await settingsApi.saveBusiness({ ...draft, revision: business.revision });
-			notice = { kind: 'ok', text: t('حُفظت الإعدادات. تطبق التقارير الإعدادات الجديدة فوراً.', 'Settings saved. Reports use them right away.') };
+			notice = { kind: 'ok', text: msg('settingsPage.settingsSavedReportsUseThemRight') };
 		} catch (err) {
 			notice = { kind: 'err', text: errorText(err) };
 			if (err instanceof ApiError && err.detail === 'SETTINGS_CHANGED') await load();
@@ -84,7 +84,7 @@
 		if (busy) return;
 		rateError = '';
 		if (!/^\d+(\.\d{1,6})?$/.test(rateInput.trim()) || Number(rateInput) <= 0) {
-			rateError = t('أدخل سعراً موجباً بست منازل عشرية كحد أقصى، مثل 50.25.', 'Enter a positive rate with at most six decimals, such as 50.25.');
+			rateError = msg('settingsPage.enterAPositiveRateWithAt');
 			return;
 		}
 		busy = true;
@@ -99,7 +99,7 @@
 			rateInput = '';
 			rateNote = '';
 			rateAt = localNow();
-			notice = { kind: 'ok', text: t('أُضيف سعر الصرف.', 'Exchange rate added.') };
+			notice = { kind: 'ok', text: msg('settingsPage.exchangeRateAdded') };
 		} catch (err) {
 			rateError = errorText(err);
 		} finally {
@@ -125,72 +125,72 @@
 
 <section class="settings-page" aria-labelledby="settings-title">
 	<header class="card settings-head">
-		<h2 id="settings-title">{t('الإعدادات', 'Settings')}</h2>
-		<p class="sub">{t('إعدادات تخص كل المتاجر: ما يظهر في التقارير، وأسعار الصرف، وإرسال التقارير.', 'Settings for every Store: what reports show, exchange rates and sending reports.')}</p>
+		<h2 id="settings-title">{msg('settingsPage.settings')}</h2>
+		<p class="sub">{msg('settingsPage.settingsForEveryStoreWhatReports')}</p>
 	</header>
 	{#if notice}<div class="notice {notice.kind}" role={notice.kind === 'err' ? 'alert' : 'status'}>{notice.text}</div>{/if}
-	{#if !canManage}<p class="readonly muted">{t('للعرض فقط: يغيّر هذه الإعدادات المالك أو المسؤول الذي يصل إلى كل المتاجر.', 'View only: an owner or admin with access to every Store changes these settings.')}</p>{/if}
+	{#if !canManage}<p class="readonly muted">{msg('settingsPage.viewOnlyAnOwnerOrAdmin')}</p>{/if}
 
 	{#if loading && !business}
-		<div class="card muted" role="status">{t('جارٍ التحميل…', 'Loading…')}</div>
+		<div class="card muted" role="status">{msg('settingsPage.loading')}</div>
 	{:else if business}
 		<section class="card" aria-labelledby="toggles-title">
-			<h3 id="toggles-title">{t('خصائص المبيعات في التقارير', 'Sales features in reports')}</h3>
-			<p class="sub">{t('مثل إعدادات MoonLightRetail: الخاصية المعطلة تختفي من التقارير إلا إذا احتوت الفترة على مبالغ منها.', 'As in MoonLightRetail: a feature that is off disappears from reports unless the period still holds such amounts.')}</p>
+			<h3 id="toggles-title">{msg('settingsPage.salesFeaturesInReports')}</h3>
+			<p class="sub">{msg('settingsPage.asInMoonlightretailAFeatureThat')}</p>
 			<Switch
 				id="toggle-tax"
-				label={t('الضريبة', 'Tax')}
-				description={t('عند الإيقاف تُعرض المبيعات والمرتجعات دون الضريبة وتختفي صفوف الضريبة.', 'When off, sales and refunds are shown without tax and the tax rows disappear.')}
+				label={msg('settingsPage.tax')}
+				description={msg('settingsPage.whenOffSalesAndRefundsAre')}
 				checked={draft.tax_enabled}
 				disabled={!canManage || busy}
 				onchange={(v) => (draft.tax_enabled = v)}
 			/>
 			<Switch
 				id="toggle-discount"
-				label={t('خصومات البيع', 'Sale discounts')}
-				description={t('يُظهر جدول طريقة حساب إجمالي البيع وخصوماته.', 'Shows the table explaining sale totals and their discounts.')}
+				label={msg('settingsPage.saleDiscounts')}
+				description={msg('settingsPage.showsTheTableExplainingSaleTotals')}
 				checked={draft.discount_enabled}
 				disabled={!canManage || busy}
 				onchange={(v) => (draft.discount_enabled = v)}
 			/>
 			<Switch
 				id="toggle-returns"
-				label={t('المرتجعات والإلغاء', 'Returns and voids')}
-				description={t('يُظهر أعمدة المرتجعات والمبالغ المستردة وجدول تطابق الأرقام.', 'Shows the returns and refunds columns and the reconciliation tables.')}
+				label={msg('settingsPage.returnsAndVoids')}
+				description={msg('settingsPage.showsTheReturnsAndRefundsColumns')}
 				checked={draft.returns_enabled}
 				disabled={!canManage || busy}
 				onchange={(v) => (draft.returns_enabled = v)}
 			/>
 			{#if canManage}
 				<div class="btn-row actions">
-					<button type="button" class="btn-primary" disabled={!dirty || busy} onclick={saveToggles} data-testid="save-toggles">{t('حفظ', 'Save')}</button>
-					{#if dirty}<button type="button" class="btn-secondary" disabled={busy} onclick={() => business && (draft = { tax_enabled: business.tax_enabled, discount_enabled: business.discount_enabled, returns_enabled: business.returns_enabled })}>{t('تراجع', 'Undo')}</button>{/if}
+					<button type="button" class="btn-primary" disabled={!dirty || busy} onclick={saveToggles} data-testid="save-toggles">{msg('settingsPage.save')}</button>
+					{#if dirty}<button type="button" class="btn-secondary" disabled={busy} onclick={() => business && (draft = { tax_enabled: business.tax_enabled, discount_enabled: business.discount_enabled, returns_enabled: business.returns_enabled })}>{msg('settingsPage.undo')}</button>{/if}
 				</div>
 			{/if}
 		</section>
 
 		<section class="card" aria-labelledby="rates-title">
-			<h3 id="rates-title">{t('أسعار صرف الدولار', 'USD exchange rates')}</h3>
+			<h3 id="rates-title">{msg('settingsPage.usdExchangeRates')}</h3>
 			<p class="sub">
-				{t('عند عرض مبيعات الجنيه بالدولار تستخدم التقارير السعر المعمول به وقت كل بيع. مبيعات الدولار تحتفظ دائماً بالسعر المحفوظ معها في MoonLightRetail.', 'When EGP sales are shown in USD, reports use the rate in effect when each sale was made. USD sales always keep the rate saved with them in MoonLightRetail.')}
+				{msg('settingsPage.whenEgpSalesAreShownIn')}
 			</p>
 			{#if current}
-				<p class="current" data-testid="current-rate">{t('السعر الحالي', 'Current rate')}: <bdi class="num">1 USD = {current.rate} EGP</bdi></p>
+				<p class="current" data-testid="current-rate">{msg('settingsPage.currentRate')}: <bdi class="num">1 USD = {current.rate} EGP</bdi></p>
 			{/if}
 			{#if canManage}
 				<form class="rate-form" onsubmit={addRate}>
-					<TextField id="rate-value" label={t('جنيه لكل دولار', 'EGP per USD')} inputmode="decimal" dir="ltr" placeholder="50.25" error={rateError} bind:value={rateInput} data-testid="rate-value" />
-					<TextField id="rate-at" label={t('يبدأ من', 'Effective from')} type="datetime-local" bind:value={rateAt} />
-					<TextField id="rate-note" label={t('ملاحظة (اختياري)', 'Note (optional)')} maxlength={120} bind:value={rateNote} />
-					<button type="submit" class="btn-primary" disabled={busy}>{t('إضافة سعر', 'Add rate')}</button>
+					<TextField id="rate-value" label={msg('settingsPage.egpPerUsd')} inputmode="decimal" dir="ltr" placeholder="50.25" error={rateError} bind:value={rateInput} data-testid="rate-value" />
+					<TextField id="rate-at" label={msg('settingsPage.effectiveFrom')} type="datetime-local" bind:value={rateAt} />
+					<TextField id="rate-note" label={msg('settingsPage.noteOptional')} maxlength={120} bind:value={rateNote} />
+					<button type="submit" class="btn-primary" disabled={busy}>{msg('settingsPage.addRate')}</button>
 				</form>
 			{/if}
 			{#if rates.length === 0}
-				<p class="muted">{t('لا توجد أسعار بعد. بدونها تُحوَّل مبيعات الجنيه بسعر أقرب بيع بالدولار في المتجر.', 'No rates yet. Without one, EGP sales convert at the rate of the Store’s nearest USD sale.')}</p>
+				<p class="muted">{msg('settingsPage.noRatesYetWithoutOneEgp')}</p>
 			{:else}
 				<div class="table-wrap">
 					<table class="data">
-						<thead><tr><th>{t('يبدأ من', 'Effective from')}</th><th>{t('السعر', 'Rate')}</th><th>{t('ملاحظة', 'Note')}</th>{#if canManage}<th></th>{/if}</tr></thead>
+						<thead><tr><th>{msg('settingsPage.effectiveFrom')}</th><th>{msg('settingsPage.rate')}</th><th>{msg('settingsPage.note')}</th>{#if canManage}<th></th>{/if}</tr></thead>
 						<tbody>
 							{#each rates as r (r.id)}
 								<tr data-testid="rate-row">
@@ -200,10 +200,10 @@
 									{#if canManage}
 										<td class="row-actions">
 											{#if confirmDelete === r.id}
-												<button type="button" class="btn-danger btn-sm" disabled={busy} onclick={() => deleteRate(r.id)}>{t('تأكيد الحذف', 'Confirm delete')}</button>
-												<button type="button" class="btn-secondary btn-sm" onclick={() => (confirmDelete = null)}>{t('إلغاء', 'Cancel')}</button>
+												<button type="button" class="btn-danger btn-sm" disabled={busy} onclick={() => deleteRate(r.id)}>{msg('settingsPage.confirmDelete')}</button>
+												<button type="button" class="btn-secondary btn-sm" onclick={() => (confirmDelete = null)}>{msg('settingsPage.cancel')}</button>
 											{:else}
-												<button type="button" class="btn-link" onclick={() => (confirmDelete = r.id)}>{t('حذف', 'Delete')}</button>
+												<button type="button" class="btn-link" onclick={() => (confirmDelete = r.id)}>{msg('settingsPage.delete')}</button>
 											{/if}
 										</td>
 									{/if}

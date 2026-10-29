@@ -1,4 +1,4 @@
-import { tb } from './i18n.svelte.js';
+import { msgb } from './i18n.svelte.js';
 import { ApiError, get, mutationHeaders, postJson, setCSRFToken } from './http';
 
 // Phase 18 R1 human authentication & user administration (ADR-0053).
@@ -98,27 +98,27 @@ export function authErrorText(err: unknown): string {
 	const reason = err instanceof ApiError ? err.detail || err.code : '';
 	switch (reason) {
 		case 'INVALID_CREDENTIALS':
-			return tb('البريد أو كلمة المرور غير صحيحة.', 'Invalid email or password.');
+			return msgb('authApi.invalidEmailOrPassword');
 		case 'RATE_LIMITED':
-			return tb('محاولات كثيرة — حاول لاحقًا.', 'Too many attempts, try again later.');
+			return msgb('authApi.tooManyAttemptsTryAgainLater');
 		case 'INVALID_MFA_CODE':
-			return tb('رمز التحقق غير صحيح.', 'Invalid verification code.');
+			return msgb('authApi.invalidVerificationCode');
 		case 'WEAK_PASSWORD':
-			return tb('كلمة المرور يجب أن تكون 12 حرفًا على الأقل.', 'Password must be at least 12 characters.');
+			return msgb('authApi.passwordMustBeAtLeast12');
 		case 'ACTIVATION_INVALID':
-			return tb('رابط التفعيل غير صالح أو منتهي.', 'Activation link is invalid or expired.');
+			return msgb('authApi.activationLinkIsInvalidOrExpired');
 		case 'AUTH_REQUIRED':
 		case 'UNAUTHORIZED':
-			return tb('انتهت الجلسة — سجّل الدخول مجددًا.', 'Session expired, please sign in again.');
+			return msgb('authApi.sessionExpiredPleaseSignInAgain');
 		case 'FORBIDDEN':
 		case 'STORE_FORBIDDEN':
-			return tb('غير مصرح لك.', 'Not authorized.');
+			return msgb('authApi.notAuthorized');
 		case 'LAST_OWNER':
-			return tb('يجب أن يبقى مالك نشط واحد على الأقل.', 'At least one active owner must remain.');
+			return msgb('authApi.atLeastOneActiveOwnerMust');
 		case 'LOGIN_TAKEN':
-			return tb('اسم الدخول مستخدم.', 'That login already exists.');
+			return msgb('authApi.thatLoginAlreadyExists');
 		default:
-			return tb('تعذر إكمال العملية.', 'The operation could not be completed.');
+			return msgb('authApi.theOperationCouldNotBeCompleted');
 	}
 }
 

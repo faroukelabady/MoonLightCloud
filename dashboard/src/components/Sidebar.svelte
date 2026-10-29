@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, sub, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msgb, sub, t } from '../lib/i18n.svelte.js';
 	// Navigation mirrors the server-side permission map (ADR-0053). Hiding an
 	// entry is UX only: every API re-checks permission and Store scope.
 	let {
@@ -39,7 +39,7 @@
 	};
 </script>
 
-<nav class="sidebar" aria-label={tb('التنقل الرئيسي', 'Main navigation')}>
+<nav class="sidebar" aria-label={msgb('sidebar.mainNavigation')}>
 	<div class="brand">
 		<div class="brand-mark" aria-hidden="true">
 			<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13.5A8 8 0 0 1 10.5 4 6.5 6.5 0 1 0 20 13.5z" /><path d="M17 4l.6 1.7L19.3 6.3l-1.7.6L17 8.6l-.6-1.7-1.7-.6 1.7-.6L17 4z" /></svg>

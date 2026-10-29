@@ -1,4 +1,4 @@
-import { tb } from './i18n.svelte.js';
+import { msgb } from './i18n.svelte.js';
 import { get, postJson, q } from './http';
 
 // Phase 18 release registry + fleet rollout control (ADR-0051/0052).
@@ -129,39 +129,39 @@ export function updateStateLabel(state: string | undefined): string {
 	switch (state) {
 		case undefined:
 		case '':
-			return tb('غير مستهدف', 'Not targeted');
+			return msgb('updatesApi.notTargeted');
 		case 'not_selected':
-			return tb('خارج المرحلة الحالية', 'Not in current stage');
+			return msgb('updatesApi.notInCurrentStage');
 		case 'pending':
-			return tb('بانتظار التسليم', 'Pending');
+			return msgb('updatesApi.pending');
 		case 'delivered':
-			return tb('تم التسليم', 'Delivered');
+			return msgb('updatesApi.delivered');
 		case 'downloading':
-			return tb('جارٍ التنزيل', 'Downloading');
+			return msgb('updatesApi.downloading');
 		case 'verified':
-			return tb('تم التحقق', 'Verified');
+			return msgb('updatesApi.verified');
 		case 'waiting_safe_boundary':
-			return tb('بانتظار نقطة آمنة', 'Waiting for safe boundary');
+			return msgb('updatesApi.waitingForSafeBoundary');
 		case 'installing':
-			return tb('جارٍ التثبيت', 'Installing');
+			return msgb('updatesApi.installing');
 		case 'awaiting_health':
-			return tb('فحص التشغيل', 'Checking health');
+			return msgb('updatesApi.checkingHealth');
 		case 'succeeded':
-			return tb('تم التحديث', 'Succeeded');
+			return msgb('updatesApi.succeeded');
 		case 'already_compliant':
-			return tb('محدَّث مسبقًا', 'Already compliant');
+			return msgb('updatesApi.alreadyCompliant');
 		case 'failed':
-			return tb('فشل', 'Failed');
+			return msgb('updatesApi.failed');
 		case 'rolled_back':
-			return tb('تم التراجع', 'Rolled back');
+			return msgb('updatesApi.rolledBack');
 		case 'manual_action_required':
-			return tb('يتطلب تدخلًا يدويًا', 'Manual action required');
+			return msgb('updatesApi.manualActionRequired');
 		case 'skipped_newer':
-			return tb('إصدار أحدث مثبت', 'Skipped (newer installed)');
+			return msgb('updatesApi.skippedNewerInstalled');
 		case 'unsupported':
-			return tb('غير مدعوم', 'Unsupported');
+			return msgb('updatesApi.unsupported');
 		case 'cancelled':
-			return tb('أُلغي', 'Cancelled');
+			return msgb('updatesApi.cancelled');
 		default:
 			return state;
 	}

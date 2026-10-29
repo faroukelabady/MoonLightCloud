@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msg, tb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -58,7 +58,7 @@
 </script>
 
 <Card ar="صحة الكتالوج (تشخيص)" en="Catalog Health (diagnostics)">
-	<p class="note" role="note">{t('صحة الكتالوج تعكس الحالة الحالية للكتالوج والتكامل؛ فترة التقرير المختارة لا ترشح هذه النتائج.', 'Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.')}{#if arabic()}<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span>{/if}</p>
+	<p class="note" role="note">{msg('catalogHealthCard.catalogHealthReflectsCurrentCatalogIntegration')}{#if arabic()}<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span>{/if}</p>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -90,10 +90,10 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col">{t('السبب', 'Reason')}{#if arabic()} / <span class="th-en">Reason</span>{/if}</th>
+							<th scope="col">{msg('catalogHealthCard.reason')}{#if arabic()} / <span class="th-en">Reason</span>{/if}</th>
 							<th scope="col">SKU</th>
-							<th scope="col">{t('المنتج', 'Product')}{#if arabic()} / <span class="th-en">Product</span>{/if}</th>
-							<th scope="col">{t('المزود', 'Provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</th>
+							<th scope="col">{msg('catalogHealthCard.product')}{#if arabic()} / <span class="th-en">Product</span>{/if}</th>
+							<th scope="col">{msg('catalogHealthCard.provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -115,7 +115,7 @@
 			{/if}
 		{/if}
 		<p class="note" role="note">
-			{t('للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط.', 'Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.')}{#if arabic()}<br />
+			{msg('catalogHealthCard.diagnosticOnlyNoAutoFixRetail')}{#if arabic()}<br />
 			<span class="th-en">Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.</span>{/if}
 		</p>
 	{/if}

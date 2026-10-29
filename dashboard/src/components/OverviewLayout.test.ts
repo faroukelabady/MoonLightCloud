@@ -199,6 +199,16 @@ describe('Overview', () => {
 		for (const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi, k as any).mockImplementation((async () => ({})) as any);
 		vi.mocked(dashboardApi.me).mockResolvedValue({ authenticated: true, stage: 'full', csrf_token: 't', user: { id: 'u', login: 'o@test', display_name: 'Owner', role: 'owner', mfa_enabled: true }, permissions: ['reports.read'], all_stores: true, store_ids: [], session: { expires_at: '', idle_timeout_seconds: 1800 } } as never);
 		vi.mocked(dashboardApi.stores).mockResolvedValue({ stores: [{ store_id: live, display_name: 'MoonLight Store', timezone: 'Africa/Cairo', status: 'active', device_count: 1, created_at: '', updated_at: '' }] });
+		vi.mocked(dashboardApi.overview).mockResolvedValue({ period: { start_local: '2026-10-03', end_local_exclusive: '2026-10-04' }, summary: { transaction_count: 0, return_transaction_count: 0, currency_totals: [] }, normalized: {}, averages: {}, fx: {} } as never);
+		vi.mocked(dashboardApi.daily).mockResolvedValue({ days: [], display_currency: 'EGP', normalized: false } as never);
+		for (const k of ['products', 'categories', 'branches'] as const) vi.mocked(dashboardApi[k]).mockResolvedValue({ rows: [] } as never);
+		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
+		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
+		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
+		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
+		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
+		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);
 		vi.mocked(dashboardApi.logout).mockResolvedValue(undefined as never);
 		const { getByRole } = render(App);
 		await waitFor(() => expect(dashboardApi.overview).toHaveBeenCalled());

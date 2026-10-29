@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msg, msgb, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -96,12 +96,12 @@
 			<!-- The two headline figures sit in the header, beside the title. -->
 			<div class="headline">
 				<div class="kpi">
-					<span class="kpi-label">{t('صافي المبيعات', 'Net sales')}</span>
+					<span class="kpi-label">{msg('salesCard.netSales')}</span>
 					<span class="kpi-value num" data-testid="net-sales">{formatMinor(lead.net, lead.currency)}</span>
 				</div>
 				{#if hasProfit}
 					<div class="kpi">
-						<span class="kpi-label">{t('صافي الربح', 'Net profit')}</span>
+						<span class="kpi-label">{msg('salesCard.netProfit')}</span>
 						<span class="kpi-value num profit" class:loss={lead.profit?.startsWith('-')} data-testid="net-profit">{cell(lead, 'profit')}</span>
 					</div>
 				{/if}
@@ -116,7 +116,7 @@
 		<EmptyState ar="لا توجد مبيعات في هذه الفترة" en="No sales in this period" />
 	{:else}
 		<div class="tables">
-			<table class="money" data-testid="sales-money" aria-label={t('المبيعات والربح', 'Sales and profit')}>
+			<table class="money" data-testid="sales-money" aria-label={msg('salesCard.salesAndProfit')}>
 				<thead>
 					<tr>
 						<td></td>
@@ -140,15 +140,15 @@
 		</div>
 		<div class="muted notes">
 			{#if columns.some((c) => c.total)}
-				<span>{t('الإجمالي بالجنيه يحوّل كل بيع واسترداد بالدولار بسعر الصرف المحفوظ معه.', "Total in EGP converts each USD sale and refund at the rate saved with it.")}</span>
+				<span>{msg('salesCard.totalInEgpConvertsEachUsd')}</span>
 			{/if}
 			{#if hasProfit}
-				<span>{t('صافي الربح = صافي المبيعات − الضريبة − تكلفة البضاعة. البنود بلا تكلفة مسجلة لا تضيف تكلفة.', 'Net profit = net sales − tax − cost of goods. Items without a recorded cost add no cost.')}</span>
+				<span>{msg('salesCard.netProfitNetSalesTaxCost')}</span>
 			{/if}
 			{#if mode === 'all' && data.fx.has_usd}
 				<span>
-					{t('آخر سعر صرف مسجل على بيع', 'Latest rate on a sale')}: <bdi dir="ltr">1 USD = {data.fx.latest_rate ?? '?'} EGP</bdi>
-					{#if data.fx.multiple_rates_used}<span class="badge warn">{tb('أسعار تاريخية متعددة', 'Multiple historical rates used')}</span>{/if}
+					{msg('salesCard.latestRateOnASale')}: <bdi dir="ltr">1 USD = {data.fx.latest_rate ?? '?'} EGP</bdi>
+					{#if data.fx.multiple_rates_used}<span class="badge warn">{msgb('salesCard.multipleHistoricalRatesUsed')}</span>{/if}
 				</span>
 			{/if}
 		</div>

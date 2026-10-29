@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, lang, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, lang, msg, msgb, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -51,9 +51,9 @@
 <Card ar="حالة المزامنة مع المتجر" en="Sync Health Status">
 	{#snippet actions()}
 		{#if status !== 'loading'}
-			<button type="button" class="refresh" aria-label={tb('تحديث الحالة', 'Refresh status')} onclick={onrefresh}>
+			<button type="button" class="refresh" aria-label={msgb('syncHealthCard.refreshStatus')} onclick={onrefresh}>
 				<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4" /></svg>
-				{t('تحديث', 'Refresh')}
+				{msg('syncHealthCard.refresh')}
 			</button>
 		{/if}
 	{/snippet}
@@ -72,48 +72,48 @@
 			</div>
 		</div>
 		{#if noShop || !health}
-			<p class="muted noshop-hint">{t('سجّل جهاز متجر من صفحة الأجهزة لتبدأ المزامنة.', "Register a shop's device on the Devices page to start syncing.")}</p>
+			<p class="muted noshop-hint">{msg('syncHealthCard.registerAShopsDeviceOnThe')}</p>
 		{:else}
 		{@const f = health.freshness}
 		<table class="health" data-testid="sync-table">
 			<thead>
 				<tr>
 					<td></td>
-					<th scope="col">{t('مبيعات', 'Sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
-					<th scope="col">{t('مرتجعات', 'Returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
+					<th scope="col">{msg('syncHealthCard.sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
+					<th scope="col">{msg('syncHealthCard.returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
 				</tr>
 			</thead>
 			<tbody>
 				<tr>
-					<th scope="row">{t('آخر حدث', 'Latest event')}{#if arabic()}<span class="sub-en"> · Latest event</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.latestEvent')}{#if arabic()}<span class="sub-en"> · Latest event</span>{/if}</th>
 					<td class="num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</td>
 					<td class="num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</td>
 				</tr>
 				<tr>
-					<th scope="row">{t('متأخر', 'Backlog')}{#if arabic()}<span class="sub-en"> · Backlog</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.backlog')}{#if arabic()}<span class="sub-en"> · Backlog</span>{/if}</th>
 					<td class="num"><strong>{f.projection_backlog_count}</strong><span class="muted det">{health.pending_count} pending · {health.retry_count} retry</span></td>
 					<td class="num"><strong>{f.return_backlog_count}</strong><span class="muted det">{health.return_pending_count} pending · {health.return_retry_count} retry</span></td>
 				</tr>
 				<tr>
-					<th scope="row">{t('محظور', 'Blocked')}{#if arabic()}<span class="sub-en"> · Blocked</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.blocked')}{#if arabic()}<span class="sub-en"> · Blocked</span>{/if}</th>
 					<td class="num"><strong>{f.blocked_sale_event_count}</strong></td>
 					<td class="num"><strong>{f.return_blocked_count}</strong></td>
 				</tr>
 				<tr>
-					<th scope="row">{t('الحالة', 'Status')}{#if arabic()}<span class="sub-en"> · Status</span>{/if}</th>
-					<td>{#if f.blocked_sale_event_count > 0}<span class="badge warn">{tb('محظورة', 'Blocked')}</span>{:else if f.cloud_projection_complete}<span class="badge ok">{tb('مكتمل', 'Complete')}</span>{:else}<span class="badge">{tb('يلحق', 'Catching up')}</span>{/if}</td>
-					<td>{#if f.return_blocked_count > 0}<span class="badge warn">{tb('محظورة', 'Blocked')}</span>{:else if f.return_projection_complete}<span class="badge ok">{tb('مكتمل', 'Complete')}</span>{:else}<span class="badge">{tb('يلحق', 'Catching up')}</span>{/if}</td>
+					<th scope="row">{msg('syncHealthCard.status')}{#if arabic()}<span class="sub-en"> · Status</span>{/if}</th>
+					<td>{#if f.blocked_sale_event_count > 0}<span class="badge warn">{msgb('syncHealthCard.blocked2')}</span>{:else if f.cloud_projection_complete}<span class="badge ok">{msgb('syncHealthCard.complete')}</span>{:else}<span class="badge">{msgb('syncHealthCard.catchingUp')}</span>{/if}</td>
+					<td>{#if f.return_blocked_count > 0}<span class="badge warn">{msgb('syncHealthCard.blocked2')}</span>{:else if f.return_projection_complete}<span class="badge ok">{msgb('syncHealthCard.complete')}</span>{:else}<span class="badge">{msgb('syncHealthCard.catchingUp')}</span>{/if}</td>
 				</tr>
 			</tbody>
 		</table>
 		{#if health.last_error_code}
-			<div class="muted errmsg">{t('آخر خطأ', 'Last error')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic() && health.last_error_label_en}<span class="sub-en"> · {health.last_error_label_en}</span>{/if}</div>
+			<div class="muted errmsg">{msg('syncHealthCard.lastError')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic() && health.last_error_label_en}<span class="sub-en"> · {health.last_error_label_en}</span>{/if}</div>
 		{/if}
 		{#if health.return_last_error_code}
-			<div class="muted errmsg">{t('آخر خطأ مرتجعات', 'Last return error')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic() && health.return_last_error_label_en}<span class="sub-en"> · {health.return_last_error_label_en}</span>{/if}</div>
+			<div class="muted errmsg">{msg('syncHealthCard.lastReturnError')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic() && health.return_last_error_label_en}<span class="sub-en"> · {health.return_last_error_label_en}</span>{/if}</div>
 		{/if}
 		<div class="muted note">
-			{t('التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر.', 'Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.')}{#if arabic()}
+			{msg('syncHealthCard.reportsIncludeProjectedReturnsPendingBlocked')}{#if arabic()}
 			<span class="sub-en note-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
 		</div>
 		{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { t, tb } from '../lib/i18n.svelte.js';
+	import { msg, msgb, t } from '../lib/i18n.svelte.js';
 	import type { PeriodParams } from '../lib/api.js';
 
 	let {
@@ -69,11 +69,11 @@
 
 	function applyCustom() {
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(customFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(customTo)) {
-			customError = tb('أدخل تاريخين صحيحين بصيغة YYYY-MM-DD', 'Enter two valid YYYY-MM-DD dates');
+			customError = msgb('periodSelector.enterTwoValidYyyyMmDd');
 			return;
 		}
 		if (customFrom > customTo) {
-			customError = tb('تاريخ البداية يجب أن يسبق تاريخ النهاية', 'Start date must not be after end date');
+			customError = msgb('periodSelector.startDateMustNotBeAfter');
 			return;
 		}
 		customError = null;
@@ -82,7 +82,7 @@
 </script>
 
 <div class="periodbar">
-	<div class="modes" role="group" aria-label={tb('الفترة', 'Period')}>
+	<div class="modes" role="group" aria-label={msgb('periodSelector.period')}>
 		{#each periods as p}
 			<button
 				type="button"
@@ -98,14 +98,14 @@
 	     Custom range makes them editable. -->
 	<div class="custom" class:locked={!custom} title={timezone}>
 		{#if custom}
-			<label>{t('من', 'From')}<input type="date" bind:value={customFrom} /></label>
-			<label>{t('إلى', 'To')}<input type="date" bind:value={customTo} /></label>
+			<label>{msg('periodSelector.from')}<input type="date" bind:value={customFrom} /></label>
+			<label>{msg('periodSelector.to')}<input type="date" bind:value={customTo} /></label>
 		{:else}
-			<label>{t('من', 'From')}<input type="date" value={range?.from ?? ''} disabled /></label>
-			<label>{t('إلى', 'To')}<input type="date" value={range?.to ?? ''} disabled /></label>
+			<label>{msg('periodSelector.from')}<input type="date" value={range?.from ?? ''} disabled /></label>
+			<label>{msg('periodSelector.to')}<input type="date" value={range?.to ?? ''} disabled /></label>
 		{/if}
 		<!-- Short visible text to fit the row; the name stays bilingual. -->
-		<button type="button" class="apply" disabled={!custom} aria-label={tb('عرض', 'Show')} onclick={applyCustom}>{t('عرض', 'Show')}</button>
+		<button type="button" class="apply" disabled={!custom} aria-label={msgb('periodSelector.show')} onclick={applyCustom}>{msg('periodSelector.show')}</button>
 	</div>
 	{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{#if showTimezone}<div class="tz muted" dir="ltr">{timezone}</div>{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, lang, setLang, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, lang, msg, msgb, setLang } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, type AuthStage } from '../lib/api.js';
 	import QrCode from './QrCode.svelte';
@@ -80,7 +80,7 @@
 	function submitActivation(e: Event) {
 		e.preventDefault();
 		if (password !== password2) {
-			error = tb('كلمتا المرور غير متطابقتين.', 'Passwords do not match.');
+			error = msgb('loginPage.passwordsDoNotMatch');
 			return;
 		}
 		void run(async () => {
@@ -134,37 +134,37 @@
 		<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>{arabic() ? 'English' : 'العربية'}</button>
 		{#if view === 'login'}
 			<form onsubmit={submitLogin} data-testid="login-form">
-				<h1>{t('تسجيل الدخول', 'Sign in')}</h1>
+				<h1>{msg('loginPage.signIn')}</h1>
 				{#if arabic()}<p class="muted">Sign in</p>{/if}
-				<label>{tb('البريد أو اسم الدخول', 'Email or login')}<input name="login" autocomplete="username" bind:value={login} required /></label>
+				<label>{msgb('loginPage.emailOrLogin')}<input name="login" autocomplete="username" bind:value={login} required /></label>
 				<label
-					>{tb('كلمة المرور', 'Password')}<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
+					>{msgb('loginPage.password')}<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : tb('دخول', 'Sign in')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.signIn2')}</button>
 			</form>
 		{:else if view === 'activate'}
 			<form onsubmit={submitActivation} data-testid="activate-form">
-				<h1>{t('تفعيل الحساب', 'Activate account')}</h1>
+				<h1>{msg('loginPage.activateAccount')}</h1>
 				<p class="muted">Activate your account — choose a password (at least 12 characters).</p>
 				<label
-					>{tb('كلمة المرور', 'Password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
+					>{msgb('loginPage.password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
 				>
 				<label
-					>{tb('تأكيد كلمة المرور', 'Repeat password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
+					>{msgb('loginPage.repeatPassword')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : tb('تفعيل', 'Activate')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.activate')}</button>
 			</form>
 		{:else if view === 'mfa'}
 			<form onsubmit={submitMFA} data-testid="mfa-form">
-				<h1>{t('التحقق بخطوتين', 'Two-step verification')}</h1>
+				<h1>{msg('loginPage.twoStepVerification')}</h1>
 				{#if arabic()}<p class="muted">Two-step verification</p>{/if}
 				{#if useRecovery}
-					<label>{tb('رمز الاسترداد', 'Recovery code')}<input autocomplete="one-time-code" bind:value={code} required /></label>
+					<label>{msgb('loginPage.recoveryCode')}<input autocomplete="one-time-code" bind:value={code} required /></label>
 				{:else}
 					<label
-						>{tb('رمز التطبيق', 'Authenticator code')}<input
+						>{msgb('loginPage.authenticatorCode')}<input
 							inputmode="numeric"
 							autocomplete="one-time-code"
 							pattern="[0-9 ]*"
@@ -175,47 +175,47 @@
 					>
 				{/if}
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : tb('تحقق', 'Verify')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.verify')}</button>
 				<button type="button" class="link" onclick={() => ((useRecovery = !useRecovery), (code = ''), (error = null))}>
-					{useRecovery ? tb('استخدام رمز التطبيق', 'Use authenticator code') : tb('استخدام رمز استرداد', 'Use a recovery code')}
+					{useRecovery ? msgb('loginPage.useAuthenticatorCode') : msgb('loginPage.useARecoveryCode')}
 				</button>
 			</form>
 		{:else if view === 'setup'}
 			<form onsubmit={submitSetup} data-testid="setup-form">
-				<h1>{t('إعداد التحقق بخطوتين', 'Set up two-step verification')}</h1>
+				<h1>{msg('loginPage.setUpTwoStepVerification')}</h1>
 				<p class="muted">
-					{t('التحقق بخطوتين مطلوب لكل حساب. امسح رمز QR بتطبيق المصادقة، ثم أدخل الرمز المكوّن من 6 أرقام.', 'Two-step verification is required for every account. Scan this QR code with an authenticator app, then enter the 6-digit code.')}
+					{msg('loginPage.twoStepVerificationIsRequiredFor')}
 				</p>
 				{#if enrollment}
-					<QrCode value={enrollment.otpauth_uri} label={t('رمز QR لتطبيق المصادقة', 'QR code for your authenticator app')} />
+					<QrCode value={enrollment.otpauth_uri} label={msg('loginPage.qrCodeForYourAuthenticatorApp')} />
 					<button type="button" class="link keytoggle" aria-expanded={showKey} aria-controls="totp-key" onclick={() => (showKey = !showKey)}>
-						{showKey ? tb('إخفاء المفتاح', 'Hide key') : tb('لا يمكنك المسح؟ اعرض المفتاح', "Can't scan? Show the key")}
+						{showKey ? msgb('loginPage.hideKey') : msgb('loginPage.cantScanShowTheKey')}
 					</button>
 					{#if showKey}
 						<div id="totp-key">
 							<div class="secret" dir="ltr" data-testid="totp-secret">{grouped(enrollment.secret)}</div>
-							<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{tb('otpauth:// — فتح في تطبيق المصادقة', 'open in authenticator')}</a>
+							<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{msgb('loginPage.openInAuthenticator')}</a>
 						</div>
 					{/if}
 				{/if}
 				<label
-					>{tb('الرمز', 'Code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
+					>{msgb('loginPage.code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : tb('تأكيد', 'Confirm')}</button>
+				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : msgb('loginPage.confirm')}</button>
 			</form>
 		{:else}
 			<div data-testid="recovery-codes">
-				<h1>{t('رموز الاسترداد', 'Recovery codes')}</h1>
+				<h1>{msg('loginPage.recoveryCodes')}</h1>
 				<p class="muted">
-					{t('احفظ رموز الاسترداد هذه في مكان آمن. يعمل كل رمز مرة واحدة إذا فقدت تطبيق المصادقة، ولن تظهر مجددًا.', 'Save these one-time recovery codes somewhere safe. Each works once if you lose your authenticator. They will not be shown again.')}
+					{msg('loginPage.saveTheseOneTimeRecoveryCodes')}
 				</p>
 				<ol class="codes" dir="ltr">
 					{#each recoveryCodes as c (c)}<li><code>{c}</code></li>{/each}
 				</ol>
-				<button type="button" class="download" data-testid="download-codes" onclick={() => downloadRecoveryCodes(login, recoveryCodes)}>{tb('تنزيل الرموز', 'Download codes')}</button>
-				<label class="check"><input type="checkbox" bind:checked={saved} /> {tb('حفظت الرموز', 'I have saved these codes')}</label>
-				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{tb('متابعة', 'Continue')}</button>
+				<button type="button" class="download" data-testid="download-codes" onclick={() => downloadRecoveryCodes(login, recoveryCodes)}>{msgb('loginPage.downloadCodes')}</button>
+				<label class="check"><input type="checkbox" bind:checked={saved} /> {msgb('loginPage.iHaveSavedTheseCodes')}</label>
+				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{msgb('loginPage.continue')}</button>
 			</div>
 		{/if}
 	</div>

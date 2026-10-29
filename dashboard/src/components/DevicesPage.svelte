@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { lang, tb } from '../lib/i18n.svelte.js';
+	import { lang, msgb } from '../lib/i18n.svelte.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
@@ -106,8 +106,8 @@
 </script>
 
 <section class="card devices" aria-label="Devices">
-	<h2>{tb('الأجهزة', 'Devices')}</h2>
-	<p class="hint">{tb('متصل يعني أن السحابة سمعت من تطبيق المتجر مؤخرًا. لا يثبت ذلك أن البيانات محدّثة؛ عمود آخر بيانات يوضح متى وصلت آخر بيانات مزامنة.', 'Online means Cloud heard from the Retail app recently (a sync upload or a control poll). It does not prove data is current; Last data shows when sync data last arrived.')}</p>
+	<h2>{msgb('devicesPage.devices')}</h2>
+	<p class="hint">{msgb('devicesPage.onlineMeansCloudHeardFromThe')}</p>
 	{#if loading}<p>Loading…</p>
 	{:else if error}<p role="alert">Failed: {error}</p>
 	{:else if devices.length === 0}<p>No devices registered.</p>
@@ -116,13 +116,13 @@
 			<table class="grid-table" data-testid="devices-table">
 				<thead>
 					<tr>
-						<th scope="col">{tb('الجهاز', 'Device')}</th>
-						<th scope="col">{tb('المتجر', 'Store')}</th>
-						<th scope="col">{tb('الاتصال', 'Connection')}</th>
-						<th scope="col">{tb('آخر ظهور', 'Last seen')}</th>
-						<th scope="col">{tb('آخر بيانات', 'Last data')}</th>
-						<th scope="col">{tb('الحوادث', 'Incidents')}</th>
-						<th scope="col">{tb('المزامنة', 'Sync')}</th>
+						<th scope="col">{msgb('devicesPage.device')}</th>
+						<th scope="col">{msgb('devicesPage.store')}</th>
+						<th scope="col">{msgb('devicesPage.connection')}</th>
+						<th scope="col">{msgb('devicesPage.lastSeen')}</th>
+						<th scope="col">{msgb('devicesPage.lastData')}</th>
+						<th scope="col">{msgb('devicesPage.incidents')}</th>
+						<th scope="col">{msgb('devicesPage.sync')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -147,8 +147,8 @@
 								{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
 									<div class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
 										{d.control === 'never_polled'
-											? tb('متصل بالمزامنة ولم يستعلم بعد', 'Syncing, not polled yet — Sync Now waits for its first poll')
-											: tb('متصل بالمزامنة وقناة التحكم متأخرة', 'Syncing, control poll stale — Sync Now may be delayed')}
+											? msgb('devicesPage.syncingNotPolledYetSyncNow')
+											: msgb('devicesPage.syncingControlPollStaleSyncNow')}
 									</div>
 								{/if}
 							</td>
@@ -172,7 +172,7 @@
 									<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
 									{#if past.length > 0}
 										<details>
-											<summary>{tb('السجل', 'History')} ({past.length})</summary>
+											<summary>{msgb('devicesPage.history')} ({past.length})</summary>
 											<ul data-testid="sync-history">
 												{#each past as c (c.id)}
 													<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time></li>
@@ -190,18 +190,18 @@
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
 	{#if stores !== null}
-		<h3>{tb('المتاجر', 'Stores')}</h3>
+		<h3>{msgb('devicesPage.stores')}</h3>
 		{#if stores.length === 0}<p>No stores registered.</p>
 		{:else}
 			<div class="table-wrap">
 				<table class="grid-table" data-testid="stores-table">
 					<thead>
 						<tr>
-							<th scope="col">{tb('المتجر', 'Store')}</th>
-							<th scope="col">{tb('المعرّف', 'Store ID')}</th>
-							<th scope="col">{tb('الأجهزة', 'Devices')}</th>
-							<th scope="col">{tb('المنطقة الزمنية', 'Time zone')}</th>
-							<th scope="col">{tb('الحالة', 'Status')}</th>
+							<th scope="col">{msgb('devicesPage.store')}</th>
+							<th scope="col">{msgb('devicesPage.storeId')}</th>
+							<th scope="col">{msgb('devicesPage.devices')}</th>
+							<th scope="col">{msgb('devicesPage.timeZone')}</th>
+							<th scope="col">{msgb('devicesPage.status')}</th>
 						</tr>
 					</thead>
 					<tbody>

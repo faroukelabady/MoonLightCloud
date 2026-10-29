@@ -3,7 +3,7 @@
 	import { emptyFilter, reportsApi, type CurrencyMixRow, type FilterOption, type ReportDisplay, type ReportFilter, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
 		import { formatInt, formatMicrorate, formatMinor } from '../lib/money.js';
 	import { absoluteTime } from '../lib/time.js';
-	import { lang, t } from '../lib/i18n.svelte.js';
+	import { lang, msg, t } from '../lib/i18n.svelte.js';
 	import { parseMajor } from '../lib/zakat.js';
 	import ReportLetterhead from './ReportLetterhead.svelte';
 	import SingleSelect from './ui/SingleSelect.svelte';
@@ -57,13 +57,10 @@
 
 	function failure(err: unknown): string {
 		if (err instanceof ApiError && err.detail === 'EXCHANGE_RATE_REQUIRED')
-			return t(
-				'لا يوجد سعر صرف للدولار بعد. أضف سعراً من صفحة الإعدادات.',
-				'There is no USD exchange rate yet. Add one on the Settings page.'
-			);
-		if (err instanceof ApiError && err.detail === 'STORE_SCOPE_REQUIRED') return t('اختر متجراً من أعلى الصفحة.', 'Choose a Store at the top of the page.');
-		if (err instanceof ApiError && err.code === 'FORBIDDEN') return t('ليست لديك صلاحية عرض التقارير.', 'You do not have permission to view reports.');
-		return t('تعذر تحميل التقرير. حاول مرة أخرى.', 'The report could not be loaded. Try again.');
+			return msg('salesReportView.thereIsNoUsdExchangeRate');
+		if (err instanceof ApiError && err.detail === 'STORE_SCOPE_REQUIRED') return msg('salesReportView.chooseAStoreAtTheTop');
+		if (err instanceof ApiError && err.code === 'FORBIDDEN') return msg('salesReportView.youDoNotHavePermissionTo');
+		return msg('salesReportView.theReportCouldNotBeLoaded');
 	}
 
 	function setCurrency(value: string) {
@@ -134,7 +131,7 @@
 		return new Intl.DateTimeFormat(lang() === 'ar' ? 'ar-EG' : 'en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
 	}
 	function method(value: string) {
-		return value === 'cash' ? t('نقدي', 'Cash') : value === 'card' ? t('بطاقة', 'Card') : t('أخرى', 'Other');
+		return value === 'cash' ? msg('salesReportView.cash') : value === 'card' ? msg('salesReportView.card') : msg('salesReportView.other');
 	}
 	function missing(count: number) {
 		return t(`التكلفة غير متاحة لعدد ${count} من البنود`, `Cost unavailable for ${count} item(s)`);
@@ -219,11 +216,11 @@
 				<tr>
 					<th>{t(...label)}</th>
 					{#if products}<th>SKU</th>{/if}
-					<th>{t('القطع المباعة', 'Items sold')}</th>
-					{#if showRefunds}<th>{t('البنود المرتجعة', 'Items returned')}</th>{/if}
-					<th>{products ? t('إجمالي المبيعات', 'Sales') : t('المبيعات المنسوبة', 'Attributed sales')}</th>
-					<th>{t('التكلفة الأصلية', 'Original cost')}</th>
-					{#if showRefunds}<th>{t('المرتجعات', 'Refunds')}</th><th>{t('صافي المبيعات', 'Net sales')}</th>{/if}
+					<th>{msg('salesReportView.itemsSold')}</th>
+					{#if showRefunds}<th>{msg('salesReportView.itemsReturned')}</th>{/if}
+					<th>{products ? msg('salesReportView.sales') : msg('salesReportView.attributedSales')}</th>
+					<th>{msg('salesReportView.originalCost')}</th>
+					{#if showRefunds}<th>{msg('salesReportView.refunds')}</th><th>{msg('salesReportView.netSales')}</th>{/if}
 				</tr>
 			</thead>
 			<tbody>
@@ -238,7 +235,7 @@
 						{#if showRefunds}<td><bdi class="num">{money(row.refund_minor, row.currency)}</bdi></td><td><bdi class="num">{money(row.net_sales_minor, row.currency)}</bdi></td>{/if}
 					</tr>
 				{:else}
-					<tr><td colspan="8" class="muted">{t('لا توجد بيانات في هذه الفترة.', 'Nothing in this period.')}</td></tr>
+					<tr><td colspan="8" class="muted">{msg('salesReportView.nothingInThisPeriod')}</td></tr>
 				{/each}
 			</tbody>
 		</table>
@@ -247,7 +244,7 @@
 
 {#snippet stepTable(steps: { ar: string; en: string; key: keyof ReportSummaryRow; total?: boolean }[], title: [string, string])}
 	<table aria-label={t(...title)}>
-		<thead><tr><th>{t('الخطوة', 'Step')}</th>{#each summary as row}<th>{row.currency}</th>{/each}</tr></thead>
+		<thead><tr><th>{msg('salesReportView.step')}</th>{#each summary as row}<th>{row.currency}</th>{/each}</tr></thead>
 		<tbody>
 			{#each steps as step}
 				<tr class:report-total-row={step.total}>
@@ -264,133 +261,133 @@
 	</table>
 {/snippet}
 
-<section class="card report-controls screen-only" aria-label={t('فترة التقرير والتصفية', 'Report range and filters')}>
+<section class="card report-controls screen-only" aria-label={msg('salesReportView.reportRangeAndFilters')}>
 	<div class="filter-head">
-		<h2>{t('فترة التقرير والتصفية', 'Report range and filters')}</h2>
-		<button type="button" class="btn-link" onclick={resetFilters}>{t('إعادة الضبط', 'Reset')}</button>
+		<h2>{msg('salesReportView.reportRangeAndFilters')}</h2>
+		<button type="button" class="btn-link" onclick={resetFilters}>{msg('salesReportView.reset')}</button>
 	</div>
 	<div class="report-filter-grid">
 		<SingleSelect
 			id="report-currency"
-			label={t('العملة', 'Currency')}
+			label={msg('salesReportView.currency')}
 			testid="report-currency"
 			value={currency}
 			options={[
-				{ value: 'EGP', label: t('جنيه مصري (مع تحويل مبيعات الدولار)', 'EGP (USD sales converted)') },
-				{ value: 'USD', label: t('دولار أمريكي (مع تحويل مبيعات الجنيه)', 'USD (EGP sales converted)') },
-				{ value: 'all', label: t('الكل (كل عملة على حدة)', 'All (each currency separately)') }
+				{ value: 'EGP', label: msg('salesReportView.egpUsdSalesConverted') },
+				{ value: 'USD', label: msg('salesReportView.usdEgpSalesConverted') },
+				{ value: 'all', label: msg('salesReportView.allEachCurrencySeparately') }
 			]}
 			onchange={setCurrency}
 		/>
 		<SingleSelect
 			id="report-payment"
-			label={t('الدفع', 'Payment')}
+			label={msg('salesReportView.payment')}
 			testid="report-payment"
 			value={filter.payment_method}
 			options={[
-				{ value: '', label: t('الكل', 'All') },
-				{ value: 'cash', label: t('نقدي', 'Cash') },
-				{ value: 'card', label: t('بطاقة', 'Card') },
-				{ value: 'other', label: t('أخرى', 'Other') }
+				{ value: '', label: msg('salesReportView.all') },
+				{ value: 'cash', label: msg('salesReportView.cash') },
+				{ value: 'card', label: msg('salesReportView.card') },
+				{ value: 'other', label: msg('salesReportView.other') }
 			]}
 			onchange={(v) => setFilter({ payment_method: v as ReportFilter['payment_method'] })}
 		/>
 		<MultiSelect
 			id="report-categories"
-			label={t('التصنيفات الرئيسية', 'Root categories')}
+			label={msg('salesReportView.rootCategories')}
 			testid="report-categories"
-			emptyLabel={t('كل التصنيفات التاريخية', 'All historical categories')}
+			emptyLabel={msg('salesReportView.allHistoricalCategories')}
 			options={optionsOf(filterOptions.categories)}
 			selected={filter.root_category_ids}
 			onchange={(values) => setFilter({ root_category_ids: values })}
 		/>
 		<MultiSelect
 			id="report-subcategories"
-			label={t('التصنيفات الفرعية', 'Subcategories')}
+			label={msg('salesReportView.subcategories')}
 			testid="report-subcategories"
-			emptyLabel={t('كل التصنيفات الفرعية التاريخية', 'All historical subcategories')}
+			emptyLabel={msg('salesReportView.allHistoricalSubcategories')}
 			options={optionsOf(filterOptions.subcategories)}
 			selected={filter.subcategory_ids}
 			onchange={(values) => setFilter({ subcategory_ids: values })}
 		/>
 		<MultiSelect
 			id="report-tags"
-			label={t('الوسوم', 'Tags')}
+			label={msg('salesReportView.tags')}
 			testid="report-tags"
-			emptyLabel={t('كل الوسوم', 'All tags')}
+			emptyLabel={msg('salesReportView.allTags')}
 			options={optionsOf(filterOptions.tags)}
 			selected={filter.tag_ids}
 			onchange={(values) => setFilter({ tag_ids: values })}
 		/>
 	</div>
 	<p class="report-filter-note">
-		{t('تختار تصفية التصنيف والدفع عمليات البيع الكاملة التي تحتوي بنداً تاريخياً مطابقاً؛ وتظل إجماليات العملية والمدفوعات كاملة.', 'Classification and payment filters select complete sales containing a matching historical item; complete sale totals and payments remain intact.')}
+		{msg('salesReportView.classificationAndPaymentFiltersSelectComplete')}
 		{#if currency === 'all'}
-			{t('تُعرض كل عملة بشكل منفصل دون تحويل.', 'Each currency is shown separately, without conversion.')}
+			{msg('salesReportView.eachCurrencyIsShownSeparatelyWithout')}
 		{:else}
 			{t(
 				`تُعرض كل المبيعات بعملة ${currency}. تُحوَّل مبيعات الدولار بسعر الصرف المحفوظ مع كل بيع، ومبيعات الجنيه بسعر الصرف المسجل في الإعدادات وقت البيع.`,
 				`All sales are shown in ${currency}. USD sales convert at the rate saved with each sale; EGP sales at the rate in Settings when they were made.`
 			)}
 		{/if}
-		{t('الفترة والمتجر من أعلى الصفحة.', 'The period and Store come from the top of the page.')}
+		{msg('salesReportView.thePeriodAndStoreComeFrom')}
 	</p>
 	<fieldset class="report-extra-costs">
-		<legend>{t('تكاليف إضافية يدوية', 'Manual extra costs')}</legend>
-		{#if drafts.length === 0}<p class="muted">{t('لم تتم إضافة تكاليف إضافية.', 'No extra costs added.')}</p>{/if}
+		<legend>{msg('salesReportView.manualExtraCosts')}</legend>
+		{#if drafts.length === 0}<p class="muted">{msg('salesReportView.noExtraCostsAdded')}</p>{/if}
 		{#each drafts as draft, index (draft.id)}
 			<div class="report-extra-cost-row">
-				<TextField id={`extra-cost-desc-${draft.id}`} label={`${t('وصف مختصر', 'Short description')} ${index + 1}`} maxlength={120} bind:value={draft.description} />
-				<MoneyField id={`extra-cost-amount-${draft.id}`} label={`${t('المبلغ', 'Amount')} ${index + 1}`} bind:value={draft.amount} />
-				<button type="button" class="btn-danger btn-sm" onclick={() => removeCost(draft.id)}>{t('حذف', 'Remove')}</button>
+				<TextField id={`extra-cost-desc-${draft.id}`} label={`${msg('salesReportView.shortDescription')} ${index + 1}`} maxlength={120} bind:value={draft.description} />
+				<MoneyField id={`extra-cost-amount-${draft.id}`} label={`${msg('salesReportView.amount')} ${index + 1}`} bind:value={draft.amount} />
+				<button type="button" class="btn-danger btn-sm" onclick={() => removeCost(draft.id)}>{msg('salesReportView.remove')}</button>
 			</div>
 		{/each}
 		<div class="btn-row">
-			<button type="button" class="btn-secondary" disabled={drafts.length >= 50} onclick={addCost}>+ {t('إضافة تكلفة', 'Add cost')}</button>
-			<button type="button" class="btn-secondary" onclick={applyCosts}>{t('تحديث تكاليف التقرير', 'Update report costs')}</button>
+			<button type="button" class="btn-secondary" disabled={drafts.length >= 50} onclick={addCost}>+ {msg('salesReportView.addCost')}</button>
+			<button type="button" class="btn-secondary" onclick={applyCosts}>{msg('salesReportView.updateReportCosts')}</button>
 		</div>
-		<p class="muted">{t('تكاليف اختيارية بالجنيه المصري لهذا التقرير ونسخة الطباعة فقط، ولا يتم حفظها.', 'Optional EGP costs for this report and printout only. They are not saved.')}</p>
-		{#if costsError}<p class="field-error" role="alert">{t('يجب أن تحتوي كل تكلفة على وصف مختصر ومبلغ موجب بمنزلتين عشريتين كحد أقصى.', 'Every cost needs a short description and a positive amount with at most two decimals.')}</p>{/if}
+		<p class="muted">{msg('salesReportView.optionalEgpCostsForThisReport')}</p>
+		{#if costsError}<p class="field-error" role="alert">{msg('salesReportView.everyCostNeedsAShortDescription')}</p>{/if}
 	</fieldset>
 </section>
 
 {#if error}<div class="report-alert screen-only" role="alert">{error}</div>{/if}
-{#if loading && !report}<div class="card muted" role="status">{t('جارٍ تحميل التقرير…', 'Loading report…')}</div>
+{#if loading && !report}<div class="card muted" role="status">{msg('salesReportView.loadingReport')}</div>
 {:else if report && !error}
 	{#if hasActivity}
-		<div class="report-tabs screen-only" role="tablist" aria-label={t('أقسام التقرير', 'Report sections')}>
+		<div class="report-tabs screen-only" role="tablist" aria-label={msg('salesReportView.reportSections')}>
 			{#each panels as p}
 				<button type="button" class="tab" role="tab" aria-selected={panel === p.id} class:active={panel === p.id} onclick={() => (panel = p.id)}>{t(p.ar, p.en)}</button>
 			{/each}
 		</div>
 	{/if}
-	<article id="report-printable" class="report-surface" class:stale={loading} aria-label={t('تقرير المبيعات', 'Sales report')}>
-		<ReportLetterhead title={t('تقرير المبيعات', 'Sales Report')} shop={report.shop as ReportShop | null} {storeName}>
-			<div><dt>{t('الفترة', 'Period')}</dt><dd>{t(...(periodNames[report.period.kind] ?? [report.period.kind, report.period.kind]))}</dd></div>
-			<div><dt>{t('من', 'From')}</dt><dd>{day(report.period.start_date)}</dd></div>
-			<div><dt>{t('إلى', 'To')}</dt><dd>{day(report.period.end_date)}</dd></div>
-			<div><dt>{t('وقت الإنشاء', 'Generated')}</dt><dd>{absoluteTime(report.generated_at, lang())}</dd></div>
+	<article id="report-printable" class="report-surface" class:stale={loading} aria-label={msg('salesReportView.salesReport')}>
+		<ReportLetterhead title={msg('salesReportView.salesReport2')} shop={report.shop as ReportShop | null} {storeName}>
+			<div><dt>{msg('salesReportView.period')}</dt><dd>{t(...(periodNames[report.period.kind] ?? [report.period.kind, report.period.kind]))}</dd></div>
+			<div><dt>{msg('salesReportView.from')}</dt><dd>{day(report.period.start_date)}</dd></div>
+			<div><dt>{msg('salesReportView.to')}</dt><dd>{day(report.period.end_date)}</dd></div>
+			<div><dt>{msg('salesReportView.generated')}</dt><dd>{absoluteTime(report.generated_at, lang())}</dd></div>
 		</ReportLetterhead>
 
 		{#if !hasActivity}
 			<div class="card report-empty">
-				<h2>{t('لا توجد مبيعات في هذه الفترة', 'No sales in this period')}</h2>
+				<h2>{msg('salesReportView.noSalesInThisPeriod')}</h2>
 				<p class="muted">
 					{filtered
-						? t('اختر فترة أخرى أو أزل تصفيات التقرير.', 'Choose another period or clear the report filters.')
-						: t('اختر فترة أخرى أو متجراً آخر من أعلى الصفحة.', 'Choose another period or Store at the top of the page.')}
+						? msg('salesReportView.chooseAnotherPeriodOrClearThe')
+						: msg('salesReportView.chooseAnotherPeriodOrStoreAt')}
 				</p>
 			</div>
 		{:else}
 			<div class="report-panel" class:active={panel === 'overview'}>
 				<section aria-labelledby="report-summary-heading">
-					<h2 id="report-summary-heading">{t('الملخص العام', 'Overall summary')}</h2>
+					<h2 id="report-summary-heading">{msg('salesReportView.overallSummary')}</h2>
 					<div class="report-money-grid">
 						{#if showRefunds}
 							<div class="card report-money-detail">
-								<h3>{t('عمليات البيع والكميات', 'Sales and quantities')}</h3>
+								<h3>{msg('salesReportView.salesAndQuantities')}</h3>
 								<table>
-									<thead><tr><th>{t('العملة', 'Currency')}</th><th>{t('عدد عمليات البيع', 'Number of sales')}</th><th>{t('القطع المباعة', 'Items sold')}</th><th>{t('البنود المرتجعة', 'Items returned')}</th><th>{t('صافي البنود', 'Net items')}</th></tr></thead>
+									<thead><tr><th>{msg('salesReportView.currency')}</th><th>{msg('salesReportView.numberOfSales')}</th><th>{msg('salesReportView.itemsSold')}</th><th>{msg('salesReportView.itemsReturned')}</th><th>{msg('salesReportView.netItems')}</th></tr></thead>
 									<tbody>
 										{#each summary as row}
 											<tr><th scope="row">{row.currency}</th><td><bdi class="num">{formatInt(row.sales_count)}</bdi></td><td><bdi class="num">{formatInt(row.items_sold)}</bdi></td><td><bdi class="num">{formatInt(row.returned_items)}</bdi></td><td><bdi class="num">{formatInt(row.items_sold - row.returned_items)}</bdi></td></tr>
@@ -400,12 +397,12 @@
 							</div>
 						{:else}
 							<div class="card report-money-detail">
-								<h3>{egpOnly ? t('إجماليات المتجر · جنيه مصري', 'Business totals · EGP') : t('إجماليات المتجر', 'Business totals')}</h3>
+								<h3>{egpOnly ? msg('salesReportView.businessTotalsEgp') : msg('salesReportView.businessTotals')}</h3>
 								<table>
-									<thead><tr><th>{t('الخطوة', 'Step')}</th>{#each summary as row}<th>{row.currency}</th>{/each}</tr></thead>
+									<thead><tr><th>{msg('salesReportView.step')}</th>{#each summary as row}<th>{row.currency}</th>{/each}</tr></thead>
 									<tbody>
-										<tr><th scope="row">{t('عدد عمليات البيع', 'Number of sales')}</th>{#each summary as row}<td><bdi class="num">{formatInt(row.sales_count)}</bdi></td>{/each}</tr>
-										<tr><th scope="row">{t('القطع المباعة', 'Items sold')}</th>{#each summary as row}<td><bdi class="num">{formatInt(row.items_sold)}</bdi></td>{/each}</tr>
+										<tr><th scope="row">{msg('salesReportView.numberOfSales')}</th>{#each summary as row}<td><bdi class="num">{formatInt(row.sales_count)}</bdi></td>{/each}</tr>
+										<tr><th scope="row">{msg('salesReportView.itemsSold')}</th>{#each summary as row}<td><bdi class="num">{formatInt(row.items_sold)}</bdi></td>{/each}</tr>
 										{#each totalSteps as step}
 											<tr class:report-total-row={step.total}>
 												<th scope="row">{t(step.ar, step.en)}</th>
@@ -413,36 +410,36 @@
 											</tr>
 										{/each}
 										{#if egpOnly}
-											<tr><th scope="row">{t('تكاليف إضافية يدوية', 'Manual extra costs')}</th><td><bdi class="num">{money(extraTotal.toString(), 'EGP')}</bdi></td></tr>
-											<tr class="report-total-row"><th scope="row">{t('صافي الربح بعد التكاليف الإضافية', 'Net profit after extra costs')}</th><td><bdi class="num">{money(adjustedProfit, 'EGP')}</bdi></td></tr>
+											<tr><th scope="row">{msg('salesReportView.manualExtraCosts')}</th><td><bdi class="num">{money(extraTotal.toString(), 'EGP')}</bdi></td></tr>
+											<tr class="report-total-row"><th scope="row">{msg('salesReportView.netProfitAfterExtraCosts')}</th><td><bdi class="num">{money(adjustedProfit, 'EGP')}</bdi></td></tr>
 										{/if}
 									</tbody>
 								</table>
 								<p class="report-note">
 									{showTax
-										? t('المبيعات − الضريبة = صافي الإيراد. صافي الإيراد − التكلفة الأصلية = مجمل الربح. تُخصم التكاليف الإضافية بعد ذلك.', 'Sales − tax = net revenue. Net revenue − original cost = gross profit. Extra costs are deducted afterward.')
-										: t('المبيعات − التكلفة الأصلية = مجمل الربح. تُخصم التكاليف الإضافية بعد ذلك.', 'Sales − original cost = gross profit. Extra costs are deducted afterward.')}
+										? msg('salesReportView.salesTaxNetRevenueNetRevenue')
+										: msg('salesReportView.salesOriginalCostGrossProfitExtra')}
 								</p>
 							</div>
 						{/if}
 						{#if showRefunds || !egpOnly}
 							<div class="card report-money-detail">
-								<h3>{t('إجماليات المتجر · جنيه مصري', 'Business totals · EGP')}</h3>
+								<h3>{msg('salesReportView.businessTotalsEgp')}</h3>
 								<table>
-									<thead><tr><th>{t('الخطوة', 'Step')}</th><th>EGP</th></tr></thead>
+									<thead><tr><th>{msg('salesReportView.step')}</th><th>EGP</th></tr></thead>
 									<tbody>
-										<tr><th scope="row">{t('المبيعات بالجنيه المصري', 'Sales in EGP')}</th><td><bdi class="num">{money(report.base.sales_minor, 'EGP')}</bdi></td></tr>
-										<tr><th scope="row">{t('مجمل الربح بعد تحويل العملات', 'Gross profit after currency conversion')}</th><td><bdi class="num">{money(report.base.profit_minor, 'EGP')}</bdi></td></tr>
-										<tr><th scope="row">{t('تكاليف إضافية يدوية', 'Manual extra costs')}</th><td><bdi class="num">{money(extraTotal.toString(), 'EGP')}</bdi></td></tr>
-										<tr class="report-total-row"><th scope="row">{t('صافي الربح بعد التكاليف الإضافية', 'Net profit after extra costs')}</th><td><bdi class="num">{money(adjustedProfit, 'EGP')}</bdi></td></tr>
+										<tr><th scope="row">{msg('salesReportView.salesInEgp')}</th><td><bdi class="num">{money(report.base.sales_minor, 'EGP')}</bdi></td></tr>
+										<tr><th scope="row">{msg('salesReportView.grossProfitAfterCurrencyConversion')}</th><td><bdi class="num">{money(report.base.profit_minor, 'EGP')}</bdi></td></tr>
+										<tr><th scope="row">{msg('salesReportView.manualExtraCosts')}</th><td><bdi class="num">{money(extraTotal.toString(), 'EGP')}</bdi></td></tr>
+										<tr class="report-total-row"><th scope="row">{msg('salesReportView.netProfitAfterExtraCosts')}</th><td><bdi class="num">{money(adjustedProfit, 'EGP')}</bdi></td></tr>
 									</tbody>
 								</table>
-								<p class="report-note">{t('تُحوّل مبالغ الدولار بسعر الصرف المحفوظ مع كل بيع أو استرداد.', 'USD amounts use the exchange rate saved with each sale or refund.')}</p>
+								<p class="report-note">{msg('salesReportView.usdAmountsUseTheExchangeRate')}</p>
 							</div>
 						{/if}
 						<div class="card report-money-detail report-currency-mix" data-testid="report-currency-mix">
-							<h3>{t('العملات وسعر الدولار', 'Currencies and USD rate')}</h3>
-							<table aria-label={t('العملات وسعر الدولار', 'Currencies and USD rate')}>
+							<h3>{msg('salesReportView.currenciesAndUsdRate')}</h3>
+							<table aria-label={msg('salesReportView.currenciesAndUsdRate')}>
 								<tbody>
 									{#each currencyRows as row (row.currency)}
 										<tr>
@@ -450,25 +447,25 @@
 											<td>
 												<bdi class="num">{money(row.total_minor, row.currency)}</bdi>
 												<small>{t(`عدد عمليات البيع: ${formatInt(row.sales_count)}`, `Sales: ${formatInt(row.sales_count)}`)}</small>
-												{#if row.report_currency !== row.currency && row.sales_count > 0}<small>{t('في هذا التقرير', 'In this report')}: <bdi class="num">{money(row.report_total_minor, row.report_currency)}</bdi></small>{/if}
+												{#if row.report_currency !== row.currency && row.sales_count > 0}<small>{msg('salesReportView.inThisReport')}: <bdi class="num">{money(row.report_total_minor, row.report_currency)}</bdi></small>{/if}
 											</td>
 										</tr>
 									{/each}
 									<tr>
-										<th scope="row">{t('آخر سعر للدولار', 'Latest USD rate')}</th>
+										<th scope="row">{msg('salesReportView.latestUsdRate')}</th>
 										<td>
 											{#if rates?.latest}
 												<bdi class="num">{rateText(rates.latest.rate_microrate)}</bdi>
-												<small>{t('سارٍ منذ', 'In effect since')} {absoluteTime(rates.latest.effective_at, lang())}</small>
-												<small>{rates.latest.source === 'cloud' ? t('من إعدادات السحابة', 'From Cloud settings') : t('من آخر بيع بالدولار', 'From the latest USD sale')}</small>
+												<small>{msg('salesReportView.inEffectSince')} {absoluteTime(rates.latest.effective_at, lang())}</small>
+												<small>{rates.latest.source === 'cloud' ? msg('salesReportView.fromCloudSettings') : msg('salesReportView.fromTheLatestUsdSale')}</small>
 											{:else}
-												{t('لم يُسجل سعر للدولار بعد', 'No USD rate recorded yet')}
+												{msg('salesReportView.noUsdRateRecordedYet')}
 											{/if}
 										</td>
 									</tr>
 									{#if rates?.period_min_microrate != null && rates.period_max_microrate != null}
 										<tr>
-											<th scope="row">{t('أسعار الدولار المستخدمة في هذه الفترة', 'USD rates used in this period')}</th>
+											<th scope="row">{msg('salesReportView.usdRatesUsedInThisPeriod')}</th>
 											<td><bdi class="num">{rates.period_min_microrate === rates.period_max_microrate
 												? rateText(rates.period_min_microrate)
 												: t(`${formatMicrorate(rates.period_min_microrate)} – ${formatMicrorate(rates.period_max_microrate)} جنيه لكل دولار`, `${formatMicrorate(rates.period_min_microrate)} – ${formatMicrorate(rates.period_max_microrate)} EGP per USD`)}</bdi></td>
@@ -476,34 +473,31 @@
 									{/if}
 								</tbody>
 							</table>
-							<p class="report-note">{t(
-								'يُحوَّل كل بيع بسعر الدولار المحفوظ معه، أو بالسعر الساري يوم البيع. يتغير السعر من يوم لآخر، لذا قد تستخدم المبيعات السابقة سعراً مختلفاً عن آخر سعر.',
-								'Each sale converts at the USD rate saved on it, or the rate in effect on the day it was made. The rate changes from day to day, so past sales can use a different rate from the latest one.'
-							)}</p>
+							<p class="report-note">{msg('salesReportView.eachSaleConvertsAtTheUsd')}</p>
 						</div>
 					</div>
 					{#if showRefunds}
 						<section class="report-reconciliation" aria-labelledby="report-reconciliation-heading">
-							<h3 id="report-reconciliation-heading">{t('كيف تتطابق الأرقام', 'How the figures add up')}</h3>
+							<h3 id="report-reconciliation-heading">{msg('salesReportView.howTheFiguresAddUp')}</h3>
 							<div class="report-money-grid">
 								<div class="card report-money-detail">
-									<h3>{t('الإيراد بعد الاسترداد', 'Revenue after refunds')}</h3>
+									<h3>{msg('salesReportView.revenueAfterRefunds')}</h3>
 									{@render stepTable(revenueSteps, ['الإيراد بعد الاسترداد', 'Revenue after refunds'])}
 								</div>
 								<div class="card report-money-detail">
-									<h3>{t('التكلفة ومجمل الربح', 'Cost and gross profit')}</h3>
+									<h3>{msg('salesReportView.costAndGrossProfit')}</h3>
 									{@render stepTable(costSteps, ['التكلفة ومجمل الربح', 'Cost and gross profit'])}
 								</div>
 							</div>
-							<p class="report-note">{t('تُعكس تكلفة المرتجعات المعادة للمخزون فقط. الاسترداد دون إعادة للمخزون يخفض الإيراد مع بقاء التكلفة.', 'Only returned items put back into stock reverse cost. Refunds without restocking reduce revenue; their cost remains.')}</p>
+							<p class="report-note">{msg('salesReportView.onlyReturnedItemsPutBackInto')}</p>
 						</section>
 					{/if}
 					<div class="report-money-grid">
 						{#if costs.length > 0}
 							<div class="card report-money-detail">
-								<h3>{t('تفاصيل التكاليف الإضافية', 'Extra-cost breakdown')}</h3>
+								<h3>{msg('salesReportView.extraCostBreakdown')}</h3>
 								<table>
-									<thead><tr><th>{t('وصف مختصر', 'Short description')}</th><th>{t('المبلغ', 'Amount')}</th></tr></thead>
+									<thead><tr><th>{msg('salesReportView.shortDescription')}</th><th>{msg('salesReportView.amount')}</th></tr></thead>
 									<tbody>
 										{#each costs as c}<tr><th scope="row">{c.description}</th><td><bdi class="num">{money(c.minor.toString(), 'EGP')}</bdi></td></tr>{/each}
 									</tbody>
@@ -512,7 +506,7 @@
 						{/if}
 						{#if showDiscount}
 							<div class="card report-money-detail">
-								<h3>{t('كيف يُحسب إجمالي البيع', 'How sales totals are calculated')}</h3>
+								<h3>{msg('salesReportView.howSalesTotalsAreCalculated')}</h3>
 								{@render stepTable(saleTotalSteps, ['كيف يُحسب إجمالي البيع', 'How sales totals are calculated'])}
 							</div>
 						{/if}
@@ -523,15 +517,15 @@
 				</section>
 
 				<section class="card report-section" aria-labelledby="report-daily-heading">
-					<h2 id="report-daily-heading">{t('المبيعات اليومية', 'Daily sales')}</h2>
+					<h2 id="report-daily-heading">{msg('salesReportView.dailySales')}</h2>
 					<div class="table-scroll">
 						<table>
 							<thead>
 								<tr>
-									<th>{t('التاريخ', 'Date')}</th><th>{t('عدد عمليات البيع', 'Number of sales')}</th><th>{t('القطع المباعة', 'Items sold')}</th>
-									{#if showRefunds}<th>{t('البنود المرتجعة', 'Items returned')}</th>{/if}
-									<th>{t('إجمالي المبيعات', 'Sales')}</th><th>{t('التكلفة الأصلية', 'Original cost')}</th>
-									{#if showRefunds}<th>{t('المرتجعات', 'Refunds')}</th><th>{t('صافي المبيعات', 'Net sales')}</th>{/if}
+									<th>{msg('salesReportView.date')}</th><th>{msg('salesReportView.numberOfSales')}</th><th>{msg('salesReportView.itemsSold')}</th>
+									{#if showRefunds}<th>{msg('salesReportView.itemsReturned')}</th>{/if}
+									<th>{msg('salesReportView.sales')}</th><th>{msg('salesReportView.originalCost')}</th>
+									{#if showRefunds}<th>{msg('salesReportView.refunds')}</th><th>{msg('salesReportView.netSales')}</th>{/if}
 								</tr>
 							</thead>
 							<tbody>
@@ -553,13 +547,13 @@
 			<div class="report-panel" class:active={panel === 'classifications'}>
 				<div class="report-performance-grid">
 					<section class="card report-section">
-						<h2>{t('أداء التصنيفات الرئيسية', 'Category performance')}</h2>
-						<p>{t('قد تتداخل الإجماليات المنسوبة لأن البند قد ينتمي إلى أكثر من تصنيف. المبالغ هي قيمة البنود قبل خصم البيع والضريبة.', 'Attributed totals may overlap because one item can have several classifications. Amounts are item totals before sale discounts and tax.')}</p>
+						<h2>{msg('salesReportView.categoryPerformance')}</h2>
+						<p>{msg('salesReportView.attributedTotalsMayOverlapBecauseOne')}</p>
 						{@render groupTable(report.categories, ['التصنيف الرئيسي', 'Category'])}
 					</section>
 					<section class="card report-section">
-						<h2>{t('أداء التصنيفات الفرعية', 'Subcategory performance')}</h2>
-						<p>{t('قد تتداخل الإجماليات المنسوبة لأن البند قد ينتمي إلى أكثر من تصنيف. المبالغ هي قيمة البنود قبل خصم البيع والضريبة.', 'Attributed totals may overlap because one item can have several classifications. Amounts are item totals before sale discounts and tax.')}</p>
+						<h2>{msg('salesReportView.subcategoryPerformance')}</h2>
+						<p>{msg('salesReportView.attributedTotalsMayOverlapBecauseOne')}</p>
 						{@render groupTable(report.subcategories, ['التصنيف الفرعي', 'Subcategory'])}
 					</section>
 				</div>
@@ -568,18 +562,18 @@
 			<div class="report-panel" class:active={panel === 'performance'}>
 				<div class="report-performance-grid">
 					<section class="card report-section">
-						<h2>{t('المبيعات حسب الوسم', 'Sales by tag')}</h2>
-						<p>{t('مجموعات الوسوم متداخلة: صنف البيع الواحد قد يحمل عدة وسوم، لذا قد تتجاوز مجاميعها الإجمالي.', 'Tag groups overlap: one sale item may carry several tags, so group totals can exceed the overall total.')}</p>
+						<h2>{msg('salesReportView.salesByTag')}</h2>
+						<p>{msg('salesReportView.tagGroupsOverlapOneSaleItem')}</p>
 						{@render groupTable(report.tags, ['الوسم', 'Tag'])}
 					</section>
 					<section class="card report-section">
-						<h2>{t('طرق الدفع', 'Payment methods')}</h2>
+						<h2>{msg('salesReportView.paymentMethods')}</h2>
 						<div class="table-scroll">
 							<table>
 								<thead>
 									<tr>
-										<th>{t('طريقة الدفع', 'Payment method')}</th><th>{t('عدد الدفعات', 'Payments')}</th><th>{t('المبلغ', 'Amount')}</th>
-										{#if showRefunds}<th>{t('المرتجعات', 'Refunds')}</th><th>{t('صافي المبيعات', 'Net sales')}</th>{/if}
+										<th>{msg('salesReportView.paymentMethod')}</th><th>{msg('salesReportView.payments')}</th><th>{msg('salesReportView.amount')}</th>
+										{#if showRefunds}<th>{msg('salesReportView.refunds')}</th><th>{msg('salesReportView.netSales')}</th>{/if}
 									</tr>
 								</thead>
 								<tbody>
@@ -596,22 +590,22 @@
 					</section>
 				</div>
 				<section class="card report-section">
-					<h2>{t('أداء المنتجات', 'Product performance')}</h2>
+					<h2>{msg('salesReportView.productPerformance')}</h2>
 					{@render groupTable(report.products, ['المنتج', 'Product'], true)}
 				</section>
 			</div>
 
 			<div class="report-panel" class:active={panel === 'details'}>
 				<section class="card report-section report-details" aria-labelledby="report-sales-heading">
-					<h2 id="report-sales-heading">{t('تفاصيل المبيعات', 'Sales details')}</h2>
+					<h2 id="report-sales-heading">{msg('salesReportView.salesDetails')}</h2>
 					<div class="table-scroll">
 						<table>
 							<thead>
 								<tr>
-									<th>{t('المرجع', 'Reference')}</th><th>{t('التاريخ', 'Date')}</th><th>{t('المنتج', 'Product')}</th>
-									<th>{t('التصنيف الرئيسي', 'Category')}</th><th>{t('التصنيف الفرعي', 'Subcategory')}</th><th>{t('القطع', 'Items')}</th>
-									<th>{t('الدفع', 'Payment')}</th><th>{t('التكلفة الأصلية', 'Original cost')}</th><th>{t('إجمالي المبيعات', 'Sales')}</th>
-									{#if showRecorded}<th>{t('المسجّل', 'Recorded as')}</th>{/if}
+									<th>{msg('salesReportView.reference')}</th><th>{msg('salesReportView.date')}</th><th>{msg('salesReportView.product')}</th>
+									<th>{msg('salesReportView.category')}</th><th>{msg('salesReportView.subcategory')}</th><th>{msg('salesReportView.items')}</th>
+									<th>{msg('salesReportView.payment')}</th><th>{msg('salesReportView.originalCost')}</th><th>{msg('salesReportView.sales')}</th>
+									{#if showRecorded}<th>{msg('salesReportView.recordedAs')}</th>{/if}
 								</tr>
 							</thead>
 							<tbody>
@@ -620,14 +614,14 @@
 										<td class="mono"><bdi dir="ltr">{row.sale_number}</bdi></td>
 										<td>{absoluteTime(row.occurred_at, lang())}</td>
 										<td>{row.products}<small class="mono" dir="ltr">{row.skus}</small></td>
-										<td>{(lang() === 'ar' ? row.root_names_ar : row.root_names_en) || t('التصنيف غير متاح', 'Classification unavailable')}</td>
+										<td>{(lang() === 'ar' ? row.root_names_ar : row.root_names_en) || msg('salesReportView.classificationUnavailable')}</td>
 										<td>{(lang() === 'ar' ? row.subcategory_names_ar : row.subcategory_names_en) || '—'}</td>
 										<td><bdi class="num">{formatInt(row.items_sold)}</bdi></td>
-										<td>{row.payment_methods.map(method).join(t('، ', ', '))}</td>
+										<td>{row.payment_methods.map(method).join(msg('salesReportView.text'))}</td>
 										{@render cost(row)}
 										<td><bdi class="num">{money(row.total_minor, row.currency)}</bdi></td>
 										{#if showRecorded}
-											<td>{#if row.rate_microrate !== null}<bdi class="num">{money(row.original_total_minor, row.original_currency)}</bdi><small>{t('بسعر', 'at')} <bdi class="num">{formatMicrorate(row.rate_microrate)}</bdi></small>{:else}—{/if}</td>
+											<td>{#if row.rate_microrate !== null}<bdi class="num">{money(row.original_total_minor, row.original_currency)}</bdi><small>{msg('salesReportView.at')} <bdi class="num">{formatMicrorate(row.rate_microrate)}</bdi></small>{:else}—{/if}</td>
 										{/if}
 									</tr>
 								{/each}
@@ -637,8 +631,8 @@
 					{#if report.sales_total_count > PAGE}
 						<div class="pager">
 							<span class="num">{offset + 1}–{Math.min(offset + report.sales.length, report.sales_total_count)} / {report.sales_total_count}</span>
-							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - PAGE))}>{t('السابق', 'Previous')}</button>
-							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset + PAGE >= report.sales_total_count} onclick={() => (offset += PAGE)}>{t('التالي', 'Next')}</button>
+							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset === 0} onclick={() => (offset = Math.max(0, offset - PAGE))}>{msg('salesReportView.previous')}</button>
+							<button type="button" class="btn-secondary btn-sm screen-only" disabled={offset + PAGE >= report.sales_total_count} onclick={() => (offset += PAGE)}>{msg('salesReportView.next')}</button>
 						</div>
 					{/if}
 				</section>

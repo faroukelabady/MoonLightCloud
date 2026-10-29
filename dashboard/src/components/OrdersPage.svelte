@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msg, msgb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -59,17 +59,17 @@
 </script>
 
 <Card ar="الطلبات عبر الإنترنت" en="Online Orders">
-	<div class="muted label-gap foot-note">{tb('طلبات ووكومرس للقراءة فقط — ليست مبيعات', 'Read-only WooCommerce orders, never Sales')}</div>
+	<div class="muted label-gap foot-note">{msgb('ordersPage.readOnlyWoocommerceOrdersNeverSales')}</div>
 	<div class="filters">
 		<SingleSelect
 			id="orders-status"
-			label={tb('الحالة', 'Status')}
+			label={msgb('ordersPage.status')}
 			testid="orders-status"
 			value={filterStatus}
-			options={[{ value: '', label: tb('الكل', 'All') }, ...statuses.map((s) => ({ value: s, label: s, dir: 'ltr' as const }))]}
+			options={[{ value: '', label: msgb('ordersPage.all') }, ...statuses.map((s) => ({ value: s, label: s, dir: 'ltr' as const }))]}
 			onchange={onstatus}
 		/>
-		<label class="field">{tb('المزود', 'Provider')}
+		<label class="field">{msgb('ordersPage.provider')}
 			<input value={filterProvider} placeholder="website" oninput={(e) => onprovider((e.target as HTMLInputElement).value)} />
 		</label>
 	</div>
@@ -87,16 +87,16 @@
 		<EmptyState ar="لا توجد طلبات عبر الإنترنت" en="No online orders yet" />
 	{:else}
 		<table class="data">
-			<thead><tr><th>#</th><th>{tb('رقم الطلب', 'Number')}</th><th>{tb('الحالة', 'Status')}</th><th>{tb('الإجمالي', 'Total')}</th><th>{tb('الربط', 'Mapping')}</th><th></th></tr></thead>
+			<thead><tr><th>#</th><th>{msgb('ordersPage.number')}</th><th>{msgb('ordersPage.status')}</th><th>{msgb('ordersPage.total')}</th><th>{msgb('ordersPage.mapping')}</th><th></th></tr></thead>
 			<tbody>
 				{#each orders as o (o.provider_key + '/' + o.external_order_id)}
 					<tr>
 						<td class="num">{o.external_order_id}</td>
 						<td class="num">{o.order_number || '—'}</td>
-						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">{tb('محذوف', 'deleted')}</span>{/if}</td>
+						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">{msgb('ordersPage.deleted')}</span>{/if}</td>
 						<td class="num"><strong>{money(o)}</strong> {o.currency}</td>
-						<td>{#if o.mapping_complete}<span class="ok">{tb('مكتمل', 'complete')}</span>{:else}<span class="warn">{t('غير مكتمل', 'incomplete')} ({o.unmapped_line_count}){#if arabic()} / incomplete{/if}</span>{/if}</td>
-						<td><button class="link" onclick={() => onselect(o)}>{tb('عرض', 'View')}</button></td>
+						<td>{#if o.mapping_complete}<span class="ok">{msgb('ordersPage.complete')}</span>{:else}<span class="warn">{msg('ordersPage.incomplete')} ({o.unmapped_line_count}){#if arabic()} / incomplete{/if}</span>{/if}</td>
+						<td><button class="link" onclick={() => onselect(o)}>{msgb('ordersPage.view')}</button></td>
 					</tr>
 				{/each}
 			</tbody>
@@ -104,7 +104,7 @@
 		{#if nextCursor}
 			<div class="more">
 				<button class="link" disabled={more === 'loading'} onclick={onloadmore}>
-					{more === 'loading' ? tb('جارٍ التحميل…', 'Loading…') : tb('تحميل المزيد', 'Load more')}
+					{more === 'loading' ? msgb('ordersPage.loading') : msgb('ordersPage.loadMore')}
 				</button>
 			</div>
 		{/if}
@@ -113,10 +113,10 @@
 		{/if}
 	{/if}
 	{#if selected}
-		<div class="drawer" role="dialog" aria-label={t('تفاصيل الطلب', 'Order detail')}>
+		<div class="drawer" role="dialog" aria-label={msg('ordersPage.orderDetail')}>
 			<div class="drawer-head">
-				<strong>{t('طلب', 'Order')} {selected.summary.order_number || selected.summary.external_order_id}{#if arabic()} / Order{/if}</strong>
-				<button class="link" onclick={() => onselect(null)}>{tb('إغلاق', 'Close')}</button>
+				<strong>{msg('ordersPage.order')} {selected.summary.order_number || selected.summary.external_order_id}{#if arabic()} / Order{/if}</strong>
+				<button class="link" onclick={() => onselect(null)}>{msgb('ordersPage.close')}</button>
 			</div>
 			{#if detailStatus === 'loading'}
 				<Skeleton />
@@ -124,20 +124,20 @@
 				<WidgetError status={detailErr} onretry={() => onselect(selected.summary)} />
 			{:else if detailStatus === 'loaded'}
 				{#if !selected.summary.mapping_complete}
-					<div class="alert" role="alert">{tb('يحتوي على منتجات غير مربوطة بكتالوج MoonLight', 'Contains products not mapped to MoonLight catalog')}</div>
+					<div class="alert" role="alert">{msgb('ordersPage.containsProductsNotMappedToMoonlight')}</div>
 				{/if}
 				{#if selected.summary.provider_deleted}
-					<div class="alert" role="status">{tb('محذوف لدى المزود', 'Deleted at provider — last-known details shown')}</div>
+					<div class="alert" role="status">{msgb('ordersPage.deletedAtProviderLastKnownDetails')}</div>
 				{/if}
 				<dl class="grid">
-					<div><dt>{tb('الحالة', 'Status')}</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
-					<div><dt>{tb('الإجمالي', 'Total')}</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
-					<div><dt>{tb('العميل', 'Customer')}</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
-					<div><dt>{tb('التواصل', 'Contact')}</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
-					<div><dt>{tb('الدفع', 'Payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
+					<div><dt>{msgb('ordersPage.status')}</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
+					<div><dt>{msgb('ordersPage.total')}</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
+					<div><dt>{msgb('ordersPage.customer')}</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
+					<div><dt>{msgb('ordersPage.contact')}</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
+					<div><dt>{msgb('ordersPage.payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
 				</dl>
 				<table class="data">
-					<thead><tr><th>{tb('المنتج', 'Item')}</th><th>SKU</th><th>{tb('الكمية', 'Qty')}</th><th>{tb('الإجمالي', 'Total')}</th><th>{tb('الربط', 'Mapped')}</th></tr></thead>
+					<thead><tr><th>{msgb('ordersPage.item')}</th><th>SKU</th><th>{msgb('ordersPage.qty')}</th><th>{msgb('ordersPage.total')}</th><th>{msgb('ordersPage.mapped')}</th></tr></thead>
 					<tbody>
 						{#each selected.lines as line}
 							<tr>

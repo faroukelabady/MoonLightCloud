@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t } from '../lib/i18n.svelte.js';
+	import { arabic, msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -75,12 +75,12 @@
 			<table class="branches" data-testid="branch-table">
 				<thead>
 					<tr>
-						<th scope="col">{t('الفرع / القناة', 'Branch / Channel')}{#if arabic()}<span class="sub-en">Branch / Channel</span>{/if}</th>
+						<th scope="col">{msg('branchCard.branchChannel')}{#if arabic()}<span class="sub-en">Branch / Channel</span>{/if}</th>
 						{#each currencies as cur}
 							<th scope="col" class="num">{t(`المبيعات ${cur}`, `Sales ${cur}`)}</th>
 						{/each}
-						<th scope="col" class="num">{t('المعاملات', 'Transactions')}{#if arabic()}<span class="sub-en">Transactions</span>{/if}</th>
-						<th scope="col" class="num">{t('الوحدات', 'Units')}{#if arabic()}<span class="sub-en">Units</span>{/if}</th>
+						<th scope="col" class="num">{msg('branchCard.transactions')}{#if arabic()}<span class="sub-en">Transactions</span>{/if}</th>
+						<th scope="col" class="num">{msg('branchCard.units')}{#if arabic()}<span class="sub-en">Units</span>{/if}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -95,7 +95,7 @@
 								<td class="num">
 									{#if r}
 										<div class="val">{formatMinor(r.sales_total_minor, cur)}</div>
-										{#if r.refund_total_minor !== '0'}<div class="refund">{t('مرتجعات', 'Refunds')} {formatMinor(r.refund_total_minor, cur)}</div>{/if}
+										{#if r.refund_total_minor !== '0'}<div class="refund">{msg('branchCard.refunds')} {formatMinor(r.refund_total_minor, cur)}</div>{/if}
 									{:else}
 										<span class="muted">—</span>
 									{/if}

@@ -2,7 +2,7 @@
 	import '../reports.css';
 	import type { PeriodParams } from '../lib/http.js';
 	import type { StoreRow } from '../lib/api.js';
-	import { t } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import SalesReportView from './SalesReportView.svelte';
 	import StocktakingView from './StocktakingView.svelte';
 
@@ -19,20 +19,20 @@
 <section class="reports-page">
 	<header class="card reports-head screen-only">
 		<div>
-			<h2>{t('التقارير', 'Reports')}</h2>
+			<h2>{msg('reportsPage.reports')}</h2>
 			<p class="sub">
 				{view === 'sales'
-					? t('أداء المبيعات من العمليات المتزامنة من MoonLightRetail', 'Sales performance from transactions synced from MoonLightRetail')
-					: t('المخزون الحالي وحساب الزكاة', 'Current stock and the zakat calculation')}
+					? msg('reportsPage.salesPerformanceFromTransactionsSyncedFrom')
+					: msg('reportsPage.currentStockAndTheZakatCalculation')}
 			</p>
 		</div>
 		<button type="button" class="btn-primary" onclick={() => window.print()}>
-			{view === 'sales' ? t('طباعة التقرير', 'Print report') : t('طباعة كشف الجرد', 'Print count sheet')}
+			{view === 'sales' ? msg('reportsPage.printReport') : msg('reportsPage.printCountSheet')}
 		</button>
 	</header>
-	<div class="report-tabs screen-only" role="tablist" aria-label={t('نوع التقرير', 'Report type')}>
-		<button type="button" class="tab" role="tab" aria-selected={view === 'sales'} class:active={view === 'sales'} onclick={() => (view = 'sales')}>{t('المبيعات', 'Sales')}</button>
-		<button type="button" class="tab" role="tab" aria-selected={view === 'stocktaking'} class:active={view === 'stocktaking'} onclick={() => (view = 'stocktaking')}>{t('الجرد والزكاة', 'Stocktaking & zakat')}</button>
+	<div class="report-tabs screen-only" role="tablist" aria-label={msg('reportsPage.reportType')}>
+		<button type="button" class="tab" role="tab" aria-selected={view === 'sales'} class:active={view === 'sales'} onclick={() => (view = 'sales')}>{msg('reportsPage.sales')}</button>
+		<button type="button" class="tab" role="tab" aria-selected={view === 'stocktaking'} class:active={view === 'stocktaking'} onclick={() => (view = 'stocktaking')}>{msg('reportsPage.stocktakingZakat')}</button>
 	</div>
 	{#if view === 'sales'}
 		<SalesReportView {params} store={scope} {storeName} />

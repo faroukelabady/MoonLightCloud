@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, t } from '../lib/i18n.svelte.js';
+	import { arabic, msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -83,7 +83,7 @@
 	{:else if view === 'table'}
 		<div class="tscroll">
 		<table class="data">
-			<thead><tr><th>#</th><th>{t('المنتج', 'Product')}{#if arabic()}<br /><span class="th-en">Product</span>{/if}</th><th>{t('المباعة / المرتجعة', 'Sold / Returned')}{#if arabic()}<br /><span class="th-en">Sold / Returned</span>{/if}</th><th>{t('صافي المبيعات', `Net sales (${unit})`)}{#if arabic()}<br /><span class="th-en">Net sales ({unit})</span>{/if}</th></tr></thead>
+			<thead><tr><th>#</th><th>{msg('topProducts.product')}{#if arabic()}<br /><span class="th-en">Product</span>{/if}</th><th>{msg('topProducts.soldReturned')}{#if arabic()}<br /><span class="th-en">Sold / Returned</span>{/if}</th><th>{t('صافي المبيعات', `Net sales (${unit})`)}{#if arabic()}<br /><span class="th-en">Net sales ({unit})</span>{/if}</th></tr></thead>
 			<tbody>
 				{#each rows as r, i}
 					<tr>
@@ -105,7 +105,7 @@
 			en="Chart value is outside the supported display range"
 		/>
 	{:else}
-		<div use:chart={option} class="chart" role="img" aria-label={t('مخطط أعلى المنتجات', 'Top products chart')}></div>
+		<div use:chart={option} class="chart" role="img" aria-label={msg('topProducts.topProductsChart')}></div>
 	{/if}
 </Card>
 

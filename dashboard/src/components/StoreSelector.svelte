@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, tb } from '../lib/i18n.svelte.js';
+	import { arabic, msgb } from '../lib/i18n.svelte.js';
 	import type { StoreRow } from '../lib/api.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
 
@@ -32,7 +32,7 @@
 		const counts = new Map<string, number>();
 		for (const s of stores) counts.set(s.display_name, (counts.get(s.display_name) ?? 0) + 1);
 		return [
-			{ value: '', label: tb('كل المتاجر', 'All Stores') },
+			{ value: '', label: msgb('storeSelector.allStores') },
 			...stores.map((s) => ({
 				value: s.store_id,
 				label: (counts.get(s.display_name) ?? 0) > 1 ? `${s.display_name} (${shortID(s.store_id)})` : s.display_name
@@ -46,9 +46,9 @@
 		<SingleSelect id="store-scope" label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'} hideLabel testid="store-selector" {value} {options} {onchange} />
 	</div>
 	{#if state === 'error'}
-		<span class="storeerror" role="alert">{tb('تعذر تحميل المتاجر', 'Stores unavailable')}</span>
+		<span class="storeerror" role="alert">{msgb('storeSelector.storesUnavailable')}</span>
 		<button type="button" class="storeretry btn-secondary btn-sm" data-testid="store-retry" onclick={() => onretry()}>
-			{tb('إعادة المحاولة', 'Retry')}
+			{msgb('storeSelector.retry')}
 		</button>
 	{/if}
 </div>
