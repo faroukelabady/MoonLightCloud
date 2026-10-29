@@ -620,7 +620,7 @@ let branchContext = $derived.by(() => {
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} range={periodDates} />
-					<!-- One row: period buttons, dates, Store and currency. -->
+					<!-- One row: period buttons, dates, Store, currency, then the account block. -->
 					<div class="scopecol">
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if route === 'overview'}
@@ -639,26 +639,26 @@ let branchContext = $derived.by(() => {
 						</div>
 					{/if}
 					</div>
-				</div>
-				<div class="actorblock">
-					<div class="actorrow">
-					{#if operatorName}
-						<div class="userchip" data-testid="current-user">
-							<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
-							<span>{operatorName}</span>
+					<!-- Same row, at the end: branch context and account controls. -->
+					<div class="actorblock">
+						{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
+						<div class="actorrow">
+						{#if operatorName}
+							<div class="userchip" data-testid="current-user">
+								<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+								<span>{operatorName}</span>
+							</div>
+						{/if}
+						<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={msg('app.text')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
+							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
+							{arabic() ? 'English' : 'العربية'}
+						</button>
+						<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
+							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
+							{msg('app.logout')}
+						</button>
 						</div>
-					{/if}
-					<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={msg('app.text')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
-						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
-						{arabic() ? 'English' : 'العربية'}
-					</button>
-					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
-						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
-						{msg('app.logout')}
-					</button>
 					</div>
-					<!-- Second row: the branch context centred, account controls at the end. -->
-					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
@@ -826,8 +826,7 @@ let branchContext = $derived.by(() => {
 		flex-direction: column;
 		gap: 12px;
 	}
-	/* Row 1: brand, then every filter in one line. Row 2: the branch
-	   context centred and the account controls at the end. */
+	/* Brand, then one row with every filter and the account controls. */
 	.topbar {
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr);
@@ -839,7 +838,7 @@ let branchContext = $derived.by(() => {
 		padding: 10px 16px;
 	}
 	.brandblock {
-		grid-row: 1 / span 2;
+		grid-row: 1;
 	}
 	.brandname {
 		font-weight: 700;
@@ -883,25 +882,18 @@ let branchContext = $derived.by(() => {
 		align-items: center;
 		gap: 6px;
 	}
+	/* The account block keeps together and sits at the row's end; it
+	   wraps as one piece when the row is too narrow. */
 	.actorblock {
-		grid-row: 2;
-		grid-column: 2;
-		display: grid;
-		grid-template-columns: 1fr auto 1fr;
-		align-items: center;
-		gap: 10px;
-	}
-	.actorblock .branchctx {
-		grid-column: 2;
-		grid-row: 1;
-	}
-	.actorrow {
-		grid-column: 3;
-		grid-row: 1;
-		justify-self: end;
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 8px;
+		margin-inline-start: auto;
+	}
+	.actorrow {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.branchctx {
 		font-size: 0.82rem;
@@ -1069,8 +1061,7 @@ let branchContext = $derived.by(() => {
 			grid-template-columns: minmax(0, 1fr);
 		}
 		.brandblock,
-		.periodblock,
-		.actorblock {
+		.periodblock {
 			grid-row: auto;
 			grid-column: 1;
 		}
