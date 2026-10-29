@@ -655,7 +655,7 @@
 						{:else}
 							<ul data-testid="frame-configurations">
 								{#each configurations as c (c.id)}
-									<li>{pick(c.style_name_ar, c.style_name_en)} / {pick(c.color_name_ar, c.color_name_en)} <span class="num">+{formatMinor(c.egp_delta_minor, 'EGP')}</span>{#if c.usd_delta_minor !== null} · <span class="num">+{formatMinor(c.usd_delta_minor, 'USD')}</span>{/if}{c.enabled ? '' : ` · ${k('inactive')}`}</li>
+									<li>{pick(c.style_name_ar, c.style_name_en)} / {pick(c.color_name_ar, c.color_name_en)} <span class="num">+{formatMinor(c.egp_delta_minor, 'EGP')}</span>{#if c.usd_delta_minor !== null}{' · '}<span class="num">+{formatMinor(c.usd_delta_minor, 'USD')}</span>{/if}{c.enabled ? '' : ` · ${k('inactive')}`}</li>
 								{/each}
 							</ul>
 						{/if}
