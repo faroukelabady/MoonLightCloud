@@ -98,11 +98,13 @@
 	     Custom range makes them editable. -->
 	<div class="custom" class:locked={!custom} title={timezone}>
 		{#if custom}
-			<label>{msg('periodSelector.from')}<input type="date" bind:value={customFrom} /></label>
-			<label>{msg('periodSelector.to')}<input type="date" bind:value={customTo} /></label>
+			<input type="date" aria-label={msg('periodSelector.from')} title={msg('periodSelector.from')} bind:value={customFrom} />
+			<span class="dash-sep" aria-hidden="true">–</span>
+			<input type="date" aria-label={msg('periodSelector.to')} title={msg('periodSelector.to')} bind:value={customTo} />
 		{:else}
-			<label>{msg('periodSelector.from')}<input type="date" value={range?.from ?? ''} disabled /></label>
-			<label>{msg('periodSelector.to')}<input type="date" value={range?.to ?? ''} disabled /></label>
+			<input type="date" aria-label={msg('periodSelector.from')} title={msg('periodSelector.from')} value={range?.from ?? ''} disabled />
+			<span class="dash-sep" aria-hidden="true">–</span>
+			<input type="date" aria-label={msg('periodSelector.to')} title={msg('periodSelector.to')} value={range?.to ?? ''} disabled />
 		{/if}
 		<!-- Short visible text to fit the row; the name stays bilingual. -->
 		<button type="button" class="apply" disabled={!custom} aria-label={msg('periodSelector.show')} onclick={applyCustom}>{msg('periodSelector.show')}</button>
@@ -143,15 +145,14 @@
 	}
 	.custom {
 		display: flex;
-		gap: 8px;
+		gap: 6px;
 		align-items: center;
 		flex-wrap: wrap;
 	}
-	.custom label {
-		display: inline-flex;
-		gap: 6px;
-		align-items: center;
-		font-size: 0.82rem;
+	/* The fields carry From/To as their accessible names and tooltips;
+	   a dash between them keeps the row short. */
+	.dash-sep {
+		color: var(--text-muted);
 	}
 	.custom input:disabled,
 	.apply:disabled {
@@ -159,7 +160,7 @@
 		cursor: not-allowed;
 	}
 	.custom input {
-		width: 8rem;
+		width: 7.75rem;
 		padding: 5px 8px;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-control);

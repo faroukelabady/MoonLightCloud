@@ -112,16 +112,17 @@ Categories & Tags pages are part of it and have no sidebar entries
 (`/dashboard/sales`, `/daily`, `/products` and `/categories` open Overview
 and the address bar is rewritten to `/dashboard/`).
 
-- Top bar: the brand, then one row (a single container) with every
-  filter and the account block on a common centre line: the period
-  buttons, the From/To date fields (always showing the applied period's
-  dates, editable with Show only for a custom range), the Store selector
-  (Store names; a short ID only when two Stores share a name), one
-  All / EGP / USD switch that drives every Overview card, and at the end
-  the branch context, the signed-in user (a person icon and name, no
-  background), Language (blue) and Logout (red). It is one line from about
-  1920 px wide; narrower, the account block wraps as one piece to the end
-  of a second line. Every top-bar control is one height
+- Top bar: the brand (name, dashboard title and, under it, the branch
+  context), then one row with every filter and the account controls on a
+  common centre line: the period buttons, the From–To date fields (always
+  showing the applied period's dates, editable with Show only for a
+  custom range; "From"/"To" are their accessible names and tooltips), the
+  Store selector (Store names; a short ID only when two Stores share a
+  name), one All / EGP / USD switch that drives every Overview card, and
+  at the end three compact controls: the signed-in user (a person icon;
+  the name on hover), Language (blue, globe and EN/ع) and Logout (red,
+  icon only). It fits on one line from 1536 px wide in both languages and
+  wraps below that. Every top-bar control is one height
   (`--topbar-control-h`).
 - Logging out removes `store_id` from the address, so the next login
   starts from all Stores (or the user's own Store). A `store_id` the

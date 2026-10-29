@@ -616,7 +616,8 @@ let branchContext = $derived.by(() => {
 				<div class="brandblock">
 					<div class="brandname">MoonLightCloud</div>
 					<h1 class="dash-title">{msg('app.salesDashboard')}</h1>
-					<div class="muted brandsub">{msg('app.tagline')}</div>
+					<!-- The branch context replaces the tagline under the title. -->
+					{#if branchContext}<div class="muted branchctx" title={branchContext}>{branchContext}</div>{/if}
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} range={periodDates} />
@@ -639,23 +640,20 @@ let branchContext = $derived.by(() => {
 						</div>
 					{/if}
 					</div>
-					<!-- Same row, at the end: branch context and account controls. -->
+					<!-- Same row, at the end: compact account controls (names on hover). -->
 					<div class="actorblock">
-						{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
 						<div class="actorrow">
 						{#if operatorName}
-							<div class="userchip" data-testid="current-user">
+							<div class="userchip" data-testid="current-user" role="img" aria-label={operatorName} title={operatorName}>
 								<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
-								<span>{operatorName}</span>
 							</div>
 						{/if}
-						<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} title={msg('app.text')} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
+						<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} aria-label={arabic() ? 'English' : 'العربية'} title={arabic() ? 'English' : 'العربية'} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
 							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
-							{arabic() ? 'English' : 'العربية'}
+							<span aria-hidden="true">{arabic() ? 'EN' : 'ع'}</span>
 						</button>
-						<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
+						<button type="button" class="logout" disabled={loggingOut} aria-label={msg('app.logout')} title={msg('app.logout')} onclick={logout}>
 							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
-							{msg('app.logout')}
 						</button>
 						</div>
 					</div>
@@ -850,10 +848,6 @@ let branchContext = $derived.by(() => {
 		font-size: 0.85rem;
 		font-weight: 700;
 	}
-	.brandsub {
-		font-size: 0.72rem;
-		line-height: 1.4;
-	}
 	.periodblock {
 		grid-row: 1;
 		grid-column: 2;
@@ -861,10 +855,10 @@ let branchContext = $derived.by(() => {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 6px 8px;
+		gap: 6px;
 	}
 	.periodblock :global(.modes button) {
-		padding-inline: 10px;
+		padding-inline: 8px;
 	}
 	/* The period selector and the scope column dissolve into this row so
 	   all four controls share one centre line. */
@@ -895,10 +889,12 @@ let branchContext = $derived.by(() => {
 		align-items: center;
 		gap: 8px;
 	}
+	/* Under the dashboard title, in the brand column. */
 	.branchctx {
-		font-size: 0.82rem;
+		font-size: 0.72rem;
 		font-weight: 600;
-		max-width: 100%;
+		line-height: 1.4;
+		max-width: 12rem;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -906,17 +902,11 @@ let branchContext = $derived.by(() => {
 	.userchip {
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
-		padding: 5px 2px;
+		justify-content: center;
+		padding: 0 4px;
 		color: var(--text);
 		font-size: 0.82rem;
 		font-weight: 700;
-		max-width: 160px;
-	}
-	.userchip span {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 	.userchip svg {
 		flex-shrink: 0;
@@ -930,7 +920,6 @@ let branchContext = $derived.by(() => {
 	.topbar :global(.periodbar .apply),
 	.topbar :global(.single-select .trigger),
 	.userchip,
-	.branchctx,
 	.langswitch,
 	.logout {
 		height: var(--topbar-control-h);
@@ -953,10 +942,6 @@ let branchContext = $derived.by(() => {
 	.topbar :global(.periodbar input) {
 		padding-block: 0;
 	}
-	.branchctx {
-		display: inline-flex;
-		align-items: center;
-	}
 	/* Language and logout share one button shape: blue and red. */
 	.langswitch,
 	.logout {
@@ -968,7 +953,7 @@ let branchContext = $derived.by(() => {
 		color: #fff;
 		border: 0;
 		border-radius: var(--radius-control);
-		padding: 6px 12px;
+		padding: 0 10px;
 		cursor: pointer;
 	}
 	.langswitch {
