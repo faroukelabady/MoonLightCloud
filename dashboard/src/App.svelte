@@ -568,8 +568,12 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 let branchContext = $derived.by(() => {
 		if (branchesState === 'loading') return '…';
 		if (branches.length === 0) return '';
+		// Rows are one per branch and currency: count branches, not rows, so
+		// a shop selling in EGP and USD is still one branch (same key as the
+		// branch card).
+		const distinct = new Set(branches.map((r) => [r.shop_name_ar, r.shop_name_en, r.shop_phone, r.channel].join('\u0000'))).size;
 		const first = branches[0];
-		const extra = branches.length > 1 ? ` +${branches.length - 1}` : '';
+		const extra = distinct > 1 ? ` +${distinct - 1}` : '';
 		return `${t(first.shop_name_ar, first.shop_name_en || first.shop_name_ar)}${extra}`;
 	});
 

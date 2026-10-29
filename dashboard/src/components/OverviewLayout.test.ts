@@ -217,4 +217,33 @@ describe('Overview', () => {
 		await waitFor(() => expect(window.location.search).not.toContain('store_id'));
 		expect(window.location.search).toContain('period=today');
 	});
+
+	it('counts a branch selling in two currencies once in the top bar', async () => {
+		setLang('en');
+		const live = 'cc035b12-8456-4d18-ad8c-3010b4460450';
+		window.history.replaceState({}, '', `/dashboard/?period=today&store_id=${live}`);
+		for (const k of Object.keys(dashboardApi)) vi.spyOn(dashboardApi, k as any).mockImplementation((async () => ({})) as any);
+		vi.mocked(dashboardApi.me).mockResolvedValue({ authenticated: true, stage: 'full', csrf_token: 't', user: { id: 'u', login: 'o@test', display_name: 'Owner', role: 'owner', mfa_enabled: true }, permissions: ['reports.read'], all_stores: true, store_ids: [], session: { expires_at: '', idle_timeout_seconds: 1800 } } as never);
+		vi.mocked(dashboardApi.stores).mockResolvedValue({ stores: [{ store_id: live, display_name: 'MoonLight Store', timezone: 'Africa/Cairo', status: 'active', device_count: 1, created_at: '', updated_at: '' }] });
+		vi.mocked(dashboardApi.overview).mockResolvedValue({ period: { start_local: '2026-10-03', end_local_exclusive: '2026-10-04' }, summary: { transaction_count: 0, return_transaction_count: 0, currency_totals: [] }, normalized: {}, averages: {}, fx: {} } as never);
+		vi.mocked(dashboardApi.daily).mockResolvedValue({ days: [], display_currency: 'EGP', normalized: false } as never);
+		for (const k of ['products', 'categories', 'branches'] as const) vi.mocked(dashboardApi[k]).mockResolvedValue({ rows: [] } as never);
+		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
+		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
+		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
+		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
+		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
+		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);
+		const shop = (name: string, currency: string) => ({ shop_name_ar: name, shop_name_en: name, shop_phone: '', channel: 'STORE', currency, transactions: 1, units: 1,
+			return_transactions: 0, units_returned: 0, subtotal_minor: '100', sales_total_minor: '100', refund_total_minor: '0', returned_cost_minor: '0' });
+		vi.mocked(dashboardApi.branches).mockResolvedValue({ rows: [shop('MoonLight Papyrus Shop', 'EGP'), shop('MoonLight Papyrus Shop', 'USD')] } as never);
+		const first = render(App);
+		await waitFor(() => expect(first.container.querySelector('.branchctx')?.textContent).toBe('MoonLight Papyrus Shop'));
+		first.unmount();
+		vi.mocked(dashboardApi.branches).mockResolvedValue({ rows: [shop('MoonLight Papyrus Shop', 'EGP'), shop('MoonLight Papyrus Shop', 'USD'), shop('Second Shop', 'EGP')] } as never);
+		const second = render(App);
+		await waitFor(() => expect(second.container.querySelector('.branchctx')?.textContent).toBe('MoonLight Papyrus Shop +1'));
+	});
+
 });
