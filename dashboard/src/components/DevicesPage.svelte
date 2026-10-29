@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { lang, msgb } from '../lib/i18n.svelte.js';
+	import { lang, msg } from '../lib/i18n.svelte.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
@@ -16,17 +16,12 @@
 	function userFacing(status: string): string {
 		switch (status) {
 			case 'pending':
-				return 'Queued';
 			case 'leased':
-				return 'Delivering';
 			case 'accepted':
-				return 'Received by device';
 			case 'running':
-				return 'Syncing';
 			case 'completed':
-				return 'Completed';
 			case 'failed':
-				return 'Failed';
+				return msg(`devicesPage.command.${status}`);
 			default:
 				return status;
 		}
@@ -94,7 +89,7 @@
 		notice = null;
 		try {
 			const res = await dashboardApi.syncRequest(deviceId, newKey());
-			notice = res.created ? 'Sync requested — queued for device.' : 'Sync request already active.';
+			notice = res.created ? msg('devicesPage.syncQueued') : msg('devicesPage.syncAlreadyActive');
 			await refresh();
 		} catch (e) {
 			if (e instanceof ApiError) notice = e.code;
@@ -105,24 +100,24 @@
 	}
 </script>
 
-<section class="card devices" aria-label="Devices">
-	<h2>{msgb('devicesPage.devices')}</h2>
-	<p class="hint">{msgb('devicesPage.onlineMeansCloudHeardFromThe')}</p>
-	{#if loading}<p>Loading…</p>
-	{:else if error}<p role="alert">Failed: {error}</p>
-	{:else if devices.length === 0}<p>No devices registered.</p>
+<section class="card devices" aria-label={msg('devicesPage.devices')}>
+	<h2>{msg('devicesPage.devices')}</h2>
+	<p class="hint">{msg('devicesPage.onlineMeansCloudHeardFromThe')}</p>
+	{#if loading}<p>{msg('devicesPage.loading')}</p>
+	{:else if error}<p role="alert">{msg('devicesPage.failed', { code: error })}</p>
+	{:else if devices.length === 0}<p>{msg('devicesPage.noDevices')}</p>
 	{:else}
 		<div class="table-wrap">
 			<table class="grid-table" data-testid="devices-table">
 				<thead>
 					<tr>
-						<th scope="col">{msgb('devicesPage.device')}</th>
-						<th scope="col">{msgb('devicesPage.store')}</th>
-						<th scope="col">{msgb('devicesPage.connection')}</th>
-						<th scope="col">{msgb('devicesPage.lastSeen')}</th>
-						<th scope="col">{msgb('devicesPage.lastData')}</th>
-						<th scope="col">{msgb('devicesPage.incidents')}</th>
-						<th scope="col">{msgb('devicesPage.sync')}</th>
+						<th scope="col">{msg('devicesPage.device')}</th>
+						<th scope="col">{msg('devicesPage.store')}</th>
+						<th scope="col">{msg('devicesPage.connection')}</th>
+						<th scope="col">{msg('devicesPage.lastSeen')}</th>
+						<th scope="col">{msg('devicesPage.lastData')}</th>
+						<th scope="col">{msg('devicesPage.incidents')}</th>
+						<th scope="col">{msg('devicesPage.sync')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -139,40 +134,40 @@
 								{#if d.store_id}
 									<span data-testid="device-store" title={d.store_id}>{d.store_name || d.store_id}</span>
 								{:else}
-									<span class="muted" data-testid="device-store-unbound" title="no Store binding">unbound</span>
+									<span class="muted" data-testid="device-store-unbound" title={msg('devicesPage.unboundTitle')}>{msg('devicesPage.unbound')}</span>
 								{/if}
 							</td>
 							<td>
-								<span class="pill" class:ok={d.connectivity === 'online'} data-testid="connectivity">{d.connectivity}</span>
+								<span class="pill" class:ok={d.connectivity === 'online'} data-testid="connectivity">{d.connectivity === 'online' || d.connectivity === 'offline' ? msg(`devicesPage.connectivity.${d.connectivity}`) : d.connectivity}</span>
 								{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
-									<div class="warn" data-testid="control-indicator" title={d.last_poll_at ? `last poll ${d.last_poll_at}` : 'never polled'}>
+									<div class="warn" data-testid="control-indicator" title={d.last_poll_at ? msg('devicesPage.lastPoll', { at: d.last_poll_at }) : msg('devicesPage.neverPolled')}>
 										{d.control === 'never_polled'
-											? msgb('devicesPage.syncingNotPolledYetSyncNow')
-											: msgb('devicesPage.syncingControlPollStaleSyncNow')}
+											? msg('devicesPage.syncingNotPolledYetSyncNow')
+											: msg('devicesPage.syncingControlPollStaleSyncNow')}
 									</div>
 								{/if}
 							</td>
-							<td>{#if d.last_seen_at}<time datetime={d.last_seen_at} title={d.last_seen_at}>{absoluteTime(d.last_seen_at, lang())}</time>{:else}<span class="muted">never</span>{/if}</td>
-							<td data-testid="last-data">{#if d.last_data_at}<time datetime={d.last_data_at} title={d.last_data_at}>{absoluteTime(d.last_data_at, lang())}</time>{:else}<span class="muted">none yet</span>{/if}</td>
+							<td>{#if d.last_seen_at}<time datetime={d.last_seen_at} title={d.last_seen_at}>{absoluteTime(d.last_seen_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.never')}</span>{/if}</td>
+							<td data-testid="last-data">{#if d.last_data_at}<time datetime={d.last_data_at} title={d.last_data_at}>{absoluteTime(d.last_data_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.noneYet')}</span>{/if}</td>
 							<td>
 								{#if incidentSummary[d.device_id]}
-									<span class="pill warn-pill" data-testid="incident-badge" title="open operational incidents">{incidentSummary[d.device_id].open_count} incident(s) · {incidentSummary[d.device_id].max_severity}</span>
+									<span class="pill warn-pill" data-testid="incident-badge" title={msg('devicesPage.openIncidents')}>{msg('devicesPage.incidentCount', { count: incidentSummary[d.device_id].open_count, severity: incidentSummary[d.device_id].max_severity })}</span>
 								{:else}<span class="muted">—</span>{/if}
 							</td>
 							<td><div class="sync">
 								{#if active}
 									<span data-testid="command-status">{userFacing(active.status)}</span>
-									<button class="btn-secondary btn-sm" disabled title="A sync request is already active">Sync Now</button>
+									<button class="btn-secondary btn-sm" disabled title={msg('devicesPage.syncAlreadyActive')}>{msg('devicesPage.syncNow')}</button>
 								{:else}
 									{#if terminal}
-										<span data-testid="last-sync">Last sync: {userFacing(terminal.status)}</span>
+										<span data-testid="last-sync">{msg('devicesPage.lastSync', { status: userFacing(terminal.status) })}</span>
 									{:else}
-										<span class="muted" data-testid="command-status">idle</span>
+										<span class="muted" data-testid="command-status">{msg('devicesPage.idle')}</span>
 									{/if}
-									<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>Sync Now</button>
+									<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>{msg('devicesPage.syncNow')}</button>
 									{#if past.length > 0}
 										<details>
-											<summary>{msgb('devicesPage.history')} ({past.length})</summary>
+											<summary>{msg('devicesPage.history')} ({past.length})</summary>
 											<ul data-testid="sync-history">
 												{#each past as c (c.id)}
 													<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time></li>
@@ -190,18 +185,18 @@
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}
 	{#if stores !== null}
-		<h3>{msgb('devicesPage.stores')}</h3>
-		{#if stores.length === 0}<p>No stores registered.</p>
+		<h3>{msg('devicesPage.stores')}</h3>
+		{#if stores.length === 0}<p>{msg('devicesPage.noStores')}</p>
 		{:else}
 			<div class="table-wrap">
 				<table class="grid-table" data-testid="stores-table">
 					<thead>
 						<tr>
-							<th scope="col">{msgb('devicesPage.store')}</th>
-							<th scope="col">{msgb('devicesPage.storeId')}</th>
-							<th scope="col">{msgb('devicesPage.devices')}</th>
-							<th scope="col">{msgb('devicesPage.timeZone')}</th>
-							<th scope="col">{msgb('devicesPage.status')}</th>
+							<th scope="col">{msg('devicesPage.store')}</th>
+							<th scope="col">{msg('devicesPage.storeId')}</th>
+							<th scope="col">{msg('devicesPage.devices')}</th>
+							<th scope="col">{msg('devicesPage.timeZone')}</th>
+							<th scope="col">{msg('devicesPage.status')}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -209,9 +204,9 @@
 							<tr data-testid="store-row" data-store={st.store_id}>
 								<th scope="row">{st.display_name}</th>
 								<td class="mono" dir="ltr">{st.store_id}</td>
-								<td>{st.device_count} device(s)</td>
+								<td>{msg('devicesPage.deviceCount', { count: st.device_count })}</td>
 								<td dir="ltr">{st.timezone}</td>
-								<td>{st.status}</td>
+								<td>{st.status === 'active' ? msg('devicesPage.storeActive') : st.status}</td>
 							</tr>
 						{/each}
 					</tbody>

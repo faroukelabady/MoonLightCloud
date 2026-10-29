@@ -4,7 +4,8 @@
 		"salesDashboard": "لوحة متابعة المبيعات",
 		"currency": "العملة",
 		"text": "Switch to English",
-		"logout": "خروج"
+		"logout": "خروج",
+		"tagline": "مؤشرات نشاطك التجاري في مكان واحد"
 	},
 	"branchCard": {
 		"branchChannel": "الفرع / القناة",
@@ -17,7 +18,10 @@
 		"reason": "السبب",
 		"product": "المنتج",
 		"provider": "المزود",
-		"diagnosticOnlyNoAutoFixRetail": "للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط."
+		"diagnosticOnlyNoAutoFixRetail": "للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط.",
+		"truncated": "عرض أول {count} من النتائج؛ الأعداد في الملخص كاملة.",
+		"providerFilter": "فلتر المزود",
+		"allProviders": "كل المزودين"
 	},
 	"categoryCard": {
 		"roots": "الفئات الرئيسية",
@@ -51,7 +55,38 @@
 		"stores": "المتاجر",
 		"storeId": "المعرّف",
 		"timeZone": "المنطقة الزمنية",
-		"status": "الحالة"
+		"status": "الحالة",
+		"command": {
+			"pending": "في الانتظار",
+			"leased": "قيد التسليم",
+			"accepted": "استلمه الجهاز",
+			"running": "جارٍ المزامنة",
+			"completed": "اكتملت",
+			"failed": "فشلت"
+		},
+		"syncQueued": "تم طلب المزامنة — في انتظار الجهاز.",
+		"syncAlreadyActive": "يوجد طلب مزامنة نشط بالفعل.",
+		"loading": "جارٍ التحميل…",
+		"failed": "فشل التحميل: {code}",
+		"noDevices": "لا توجد أجهزة مسجلة.",
+		"unboundTitle": "غير مرتبط بمتجر",
+		"unbound": "غير مرتبط",
+		"connectivity": {
+			"online": "متصل",
+			"offline": "غير متصل"
+		},
+		"lastPoll": "آخر استعلام {at}",
+		"neverPolled": "لم يستعلم بعد",
+		"never": "لم يحدث",
+		"noneYet": "لا شيء بعد",
+		"openIncidents": "حوادث تشغيلية مفتوحة",
+		"incidentCount": "{count} حادثة · {severity}",
+		"syncNow": "مزامنة الآن",
+		"lastSync": "آخر مزامنة: {status}",
+		"idle": "خامل",
+		"noStores": "لا توجد متاجر مسجلة.",
+		"deviceCount": "{count} جهاز",
+		"storeActive": "نشط"
 	},
 	"latestSalesCard": {
 		"orderTrackingArrivesWithOnlineCommerce": "تتبع الطلبات سيتوفر عند تفعيل التكامل مع المتجر الإلكتروني",
@@ -87,7 +122,8 @@
 		"saveTheseOneTimeRecoveryCodes": "احفظ رموز الاسترداد هذه في مكان آمن. يعمل كل رمز مرة واحدة إذا فقدت تطبيق المصادقة، ولن تظهر مجددًا.",
 		"downloadCodes": "تنزيل الرموز",
 		"iHaveSavedTheseCodes": "حفظت الرموز",
-		"continue": "متابعة"
+		"continue": "متابعة",
+		"activateHint": "فعّل حسابك — اختر كلمة مرور (12 حرفًا على الأقل)."
 	},
 	"messagingSettings": {
 		"invalidAddressWhatsappNeedsAnInternational": "رقم أو معرف غير صالح: واتساب يحتاج رقماً دولياً (مثل 201012345678)، وتيليجرام معرف محادثة رقمياً أو @اسم_مستخدم.",
@@ -165,7 +201,11 @@
 		"currency": "العملة",
 		"orderValue": "قيمة الطلبات",
 		"onlineOrdersAreOperationalProviderOrders": "الطلبات عبر الإنترنت هي طلبات تشغيلية من المزودين، وقد لا تمثل إيرادًا مُعترفًا به إضافةً إلى المبيعات النهائية.",
-		"finalizedSalesVsOnlineOrders": "المبيعات النهائية مقابل الطلبات عبر الإنترنت"
+		"finalizedSalesVsOnlineOrders": "المبيعات النهائية مقابل الطلبات عبر الإنترنت",
+		"transactionsAllCurrencies": "معاملة (بكل عملات الكاشير)",
+		"netIn": "الصافي {currency}",
+		"orderValueIn": "قيمة الطلبات {currency} · {orders} طلب",
+		"noOrderValue": "لا توجد قيمة طلبات عبر الإنترنت في هذه الفترة."
 	},
 	"ordersPage": {
 		"readOnlyWoocommerceOrdersNeverSales": "طلبات ووكومرس للقراءة فقط — ليست مبيعات",
@@ -191,7 +231,10 @@
 		"payment": "الدفع",
 		"item": "المنتج",
 		"qty": "الكمية",
-		"mapped": "الربط"
+		"mapped": "الربط",
+		"viewOrder": "عرض الطلب {number}",
+		"webhookInbox": "صندوق الويب هوك (انتظار/إعادة/محظور)",
+		"inbox": "الوارد"
 	},
 	"periodSelector": {
 		"enterTwoValidYyyyMmDd": "أدخل تاريخين صحيحين بصيغة YYYY-MM-DD",
@@ -437,7 +480,8 @@
 	"storeSelector": {
 		"allStores": "كل المتاجر",
 		"storesUnavailable": "تعذر تحميل المتاجر",
-		"retry": "إعادة المحاولة"
+		"retry": "إعادة المحاولة",
+		"storeScope": "نطاق المتجر"
 	},
 	"syncHealthCard": {
 		"refreshStatus": "تحديث الحالة",
@@ -470,7 +514,9 @@
 		"topProductsChart": "مخطط أعلى المنتجات"
 	},
 	"trendChart": {
-		"refunds": "مرتجعات"
+		"refunds": "المرتجعات",
+		"gross": "الإجمالي",
+		"net": "الصافي"
 	},
 	"updatesPage": {
 		"releaseSignatureOrManifestRejected": "توقيع أو بيان الإصدار مرفوض.",
@@ -525,7 +571,26 @@
 		"resume": "استئناف",
 		"widen": "توسيع",
 		"cancel": "إلغاء",
-		"devices": "الأجهزة"
+		"devices": "الأجهزة",
+		"colDevice": "الجهاز",
+		"colVersion": "الإصدار",
+		"colUpdater": "أداة التحديث",
+		"colDeviceState": "حالة الجهاز",
+		"colTarget": "الهدف",
+		"colLastSeen": "آخر ظهور",
+		"colSequence": "التسلسل",
+		"colKey": "المفتاح",
+		"colStatus": "الحالة",
+		"colImported": "تاريخ الاستيراد",
+		"deviceId": "معرّف الجهاز",
+		"colRelease": "الإصدار المطروح",
+		"colScope": "النطاق",
+		"colMode": "الوضع",
+		"colProgress": "التقدم",
+		"confirmRevoke": "سحب الإصدار {version}؟ لن تستلمه الأجهزة التي لم تثبته بعد.",
+		"confirmMandatoryAll": "إنشاء طرح تحديث إلزامي لكل الأجهزة المؤهلة في كل المتاجر؟ تثبته الأجهزة تلقائيًا عند نقطتها الآمنة التالية.",
+		"confirmStartMandatory": "بدء طرح إلزامي للإصدار {version} على {count} جهاز؟",
+		"confirmCancel": "إلغاء هذا الطرح؟ الأجهزة التي بدأت التثبيت ستكمله أو تتراجع بأمان."
 	},
 	"usersPage": {
 		"passwordChangedOtherSessionsWereSigned": "تم تغيير كلمة المرور وإنهاء الجلسات الأخرى.",
@@ -543,7 +608,10 @@
 		"addUser": "إضافة مستخدم",
 		"login": "البريد أو اسم الدخول",
 		"displayName": "الاسم",
-		"role": "الدور",
+		"role": {
+			"owner": "مالك",
+			"admin": "مسؤول"
+		},
 		"admin": "مسؤول",
 		"owner": "مالك",
 		"stores": "المتاجر",
@@ -558,7 +626,23 @@
 		"resetMfa": "إعادة MFA",
 		"signOut": "تسجيل الخروج",
 		"more": "المزيد",
-		"securityAuditLatest50": "سجل الأمان"
+		"securityAuditLatest50": "سجل الأمان",
+		"activationLink": "رابط التفعيل لمرة واحدة لـ {login} (صالح 24 ساعة). أرسله بطريقة آمنة؛ لن يظهر مجددًا.",
+		"colLogin": "اسم الدخول",
+		"colName": "الاسم",
+		"colRole": "الدور",
+		"colStatus": "الحالة",
+		"colStores": "المتاجر",
+		"colMfa": "التحقق بخطوتين",
+		"confirmDisable": "تعطيل {login}؟ تنتهي كل جلساته فورًا.",
+		"confirmEnable": "إعادة تفعيل {login}؟",
+		"confirmRole": "تغيير {login} إلى {role}؟ تنتهي جلساته ويجب أن يسجل الدخول مجددًا.",
+		"confirmMfaReset": "إعادة ضبط التحقق بخطوتين لـ {login}؟ عليه تسجيل تطبيق المصادقة من جديد عند الدخول التالي.",
+		"mfaResetDone": "تمت إعادة ضبط التحقق بخطوتين لـ {login}.",
+		"confirmSignOut": "تسجيل خروج {login} من كل مكان؟",
+		"sessionsRevoked": "تم إنهاء جلسات {login}.",
+		"confirmRegenerate": "إنشاء رموز استرداد جديدة؟ تتوقف كل الرموز السابقة عن العمل فورًا.",
+		"confirmCreateOwner": "إنشاء {login} كمالك؟ يستطيع المالك إدارة الحسابات والأمان."
 	},
 	"widgetError": {
 		"reportingIsTemporarilyUnavailable": "خدمة التقارير غير متاحة مؤقتًا",
@@ -769,5 +853,45 @@
 		"created": "تم الإنشاء",
 		"createWaiting": "إنشاء “{key}” — بانتظار الكاشير",
 		"cancelPending": "إلغاء الأمر المعلق"
+	},
+	"operationsPage": {
+		"title": "العمليات",
+		"hint": "الحوادث المفتوحة والمُقَر بها تحتاج انتباه المشغل. الإقرار يلغي حالة \"غير مُقَر به\" فقط — ولا يعني أن المشكلة زالت.",
+		"state": "الحالة",
+		"severity": "الخطورة",
+		"rule": "القاعدة",
+		"all": "الكل",
+		"states": {
+			"open": "مفتوحة",
+			"acknowledged": "مُقَر بها",
+			"resolved": "محلولة"
+		},
+		"severities": {
+			"warning": "تحذير",
+			"urgent": "عاجل"
+		},
+		"rules": {
+			"DEVICE_OFFLINE": "الجهاز غير متصل",
+			"DEVICE_SYNC_FAILED": "فشلت المزامنة",
+			"DEVICE_SYNC_STALE": "المزامنة متأخرة",
+			"BUSINESS_REPORT_BLOCKED": "التقرير محظور",
+			"BUSINESS_REPORT_STALE": "التقرير متأخر",
+			"NOTIFICATION_BLOCKED": "الإشعار محظور",
+			"NOTIFICATION_AMBIGUOUS": "نتيجة الإشعار غير مؤكدة",
+			"NOTIFICATION_RETRY_STALE": "إعادة محاولة الإشعار متأخرة"
+		},
+		"loading": "جارٍ التحميل…",
+		"failed": "فشل التحميل: {code}",
+		"none": "لا توجد حوادث مطابقة.",
+		"subject": "العنصر",
+		"opened": "وقت الفتح",
+		"needsReview": "تحتاج مراجعة",
+		"needsReviewHint": "نية التنبيه سابقة للكتابة الذرية؛ قم بالمطابقة يدويًا إذا استدعت المراجعة ذلك",
+		"acknowledge": "إقرار",
+		"resolve": "حل",
+		"more": "المزيد",
+		"ackFailed": "فشل الإقرار.",
+		"stillActive": "الحالة ما زالت قائمة — لا يمكن الحل حتى تزول.",
+		"resolveFailed": "فشل الحل."
 	}
 }

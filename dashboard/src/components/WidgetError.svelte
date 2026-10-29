@@ -1,16 +1,14 @@
 <script lang="ts">
-	import { arabic, msg, msgb } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	let { status, onretry }: { status: number | null; onretry: () => void } = $props();
 </script>
 
 <div class="werr" role="alert">
 	{#if status === 503}
 		<div>{msg('widgetError.reportingIsTemporarilyUnavailable')}</div>
-		{#if arabic()}<div class="muted sub-en">Reporting is temporarily unavailable</div>{/if}
-		<button type="button" onclick={onretry}>{msgb('widgetError.retry')}</button>
+		<button type="button" onclick={onretry}>{msg('widgetError.retry')}</button>
 	{:else}
 		<div>{msg('widgetError.couldNotLoadData')}</div>
-		{#if arabic()}<div class="muted sub-en">Could not load data</div>{/if}
 	{/if}
 </div>
 

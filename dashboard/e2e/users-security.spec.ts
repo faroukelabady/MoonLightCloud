@@ -2,6 +2,11 @@ import { test, expect } from '@playwright/test';
 import { admin, hasAdmin, uiLogin } from './auth';
 import { choose } from './support/select';
 
+// These checks read the English interface (the dashboard shows one language).
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('moonlight.dashboard.lang', 'en'));
+});
+
 // Phase 18 Users & Security surface (ADR-0053) against the live server:
 // real password + TOTP sign-in, real user list and real account creation
 // (a throwaway E2E database; scripts/e2e-dashboard.sh). Nothing here is

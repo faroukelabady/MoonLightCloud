@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { msgb } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
 	import { untrack } from 'svelte';
 	import { updatesApi, updateStateLabel, previewEnvelope, ApiError } from '../lib/api.js';
@@ -29,17 +29,17 @@
 				case 'UPDATE_KEY_UNKNOWN':
 				case 'UPDATE_MANIFEST_INVALID':
 				case 'UPDATE_MANIFEST_UNSUPPORTED':
-					return `${msgb('updatesPage.releaseSignatureOrManifestRejected')} (${reason}).`;
+					return `${msg('updatesPage.releaseSignatureOrManifestRejected')} (${reason}).`;
 				case 'RELEASE_SEQUENCE_CONFLICT':
-					return msgb('updatesPage.conflictSameSequenceWithDifferentContent');
+					return msg('updatesPage.conflictSameSequenceWithDifferentContent');
 				case 'RELEASE_TRUST_NOT_CONFIGURED':
-					return msgb('updatesPage.releasePublicKeysAreNotConfigured');
+					return msg('updatesPage.releasePublicKeysAreNotConfigured');
 				case 'RELEASE_REVOKED':
-					return msgb('updatesPage.releaseIsRevoked');
+					return msg('updatesPage.releaseIsRevoked');
 				case 'ROLLOUT_STATE_CONFLICT':
-					return msgb('updatesPage.notAllowedInTheCurrentRollout');
+					return msg('updatesPage.notAllowedInTheCurrentRollout');
 				case 'ROLLOUT_PERCENTAGE_CONFLICT':
-					return msgb('updatesPage.percentageMustIncreaseAndBeAt');
+					return msg('updatesPage.percentageMustIncreaseAndBeAt');
 			}
 			return `${fallback} (${err.code}${reason ? `: ${reason}` : ''})`;
 		}
@@ -70,9 +70,9 @@
 	}
 
 	function capability(d: FleetDeviceRow): string {
-		if (!d.updater_reported) return msgb('updatesPage.notReportedPrePhase18Retail');
-		if (!d.updater_capable) return `${msgb('updatesPage.unsupported')}${d.unsupported_reason ? ` (${d.unsupported_reason})` : ''}`;
-		return `${msgb('updatesPage.capable')} (protocol ${d.updater_protocol})`;
+		if (!d.updater_reported) return msg('updatesPage.notReportedPrePhase18Retail');
+		if (!d.updater_capable) return `${msg('updatesPage.unsupported')}${d.unsupported_reason ? ` (${d.unsupported_reason})` : ''}`;
+		return `${msg('updatesPage.capable')} (protocol ${d.updater_protocol})`;
 	}
 
 	// ---- releases ----
@@ -107,26 +107,26 @@
 			const artifactURLs: Record<string, string> = {};
 			for (const f of preview.files) if (urls[f]?.trim()) artifactURLs[f] = urls[f].trim();
 			const r = await updatesApi.importRelease(envelopeText.trim(), artifactURLs);
-			notice = { kind: 'ok', text: `${msgb('updatesPage.importedRelease')} ${r.version} (#${r.release_sequence})` };
+			notice = { kind: 'ok', text: `${msg('updatesPage.importedRelease')} ${r.version} (#${r.release_sequence})` };
 			envelopeText = '';
 			urls = {};
 			await loadReleases();
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, msgb('updatesPage.importFailed')) };
+			notice = { kind: 'err', text: errText(e, msg('updatesPage.importFailed')) };
 		} finally {
 			busy = false;
 		}
 	}
 
 	async function setStatus(r: ReleaseView, status: 'active' | 'revoked') {
-		if (status === 'revoked' && !confirm(`Revoke release ${r.version}? Devices that have not installed it will not receive it.`)) return;
+		if (status === 'revoked' && !confirm(msg('updatesPage.confirmRevoke', { version: r.version }))) return;
 		busy = true;
 		try {
 			await updatesApi.setReleaseStatus(r.id, status);
-			notice = { kind: 'ok', text: status === 'revoked' ? msgb('updatesPage.releaseRevoked') : msgb('updatesPage.releaseReactivated') };
+			notice = { kind: 'ok', text: status === 'revoked' ? msg('updatesPage.releaseRevoked') : msg('updatesPage.releaseReactivated') };
 			await loadReleases();
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, msgb('updatesPage.changeFailed')) };
+			notice = { kind: 'err', text: errText(e, msg('updatesPage.changeFailed')) };
 		} finally {
 			busy = false;
 		}
@@ -158,7 +158,7 @@
 		if (
 			form.mode === 'mandatory' &&
 			form.scope === 'all' &&
-			!confirm('Create a MANDATORY update rollout for ALL eligible devices in every Store? Devices install it automatically at their next safe point.')
+			!confirm(msg('updatesPage.confirmMandatoryAll'))
 		)
 			return;
 		busy = true;
@@ -171,24 +171,24 @@
 				mode: form.mode,
 				percentage: Number(form.percentage)
 			});
-			notice = { kind: 'ok', text: `${msgb('updatesPage.rolloutCreatedAsDraft')} (${r.target_count} devices)` };
+			notice = { kind: 'ok', text: `${msg('updatesPage.rolloutCreatedAsDraft')} (${r.target_count} devices)` };
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, msgb('updatesPage.createFailed')) };
+			notice = { kind: 'err', text: errText(e, msg('updatesPage.createFailed')) };
 		} finally {
 			busy = false;
 		}
 	}
 
 	async function act(r: RolloutView, action: 'start' | 'pause' | 'resume' | 'cancel') {
-		if (action === 'start' && r.mode === 'mandatory' && !confirm(`Start MANDATORY rollout of ${r.release_version} to ${r.target_count} device(s)?`)) return;
-		if (action === 'cancel' && !confirm('Cancel this rollout? Devices already installing will finish or roll back safely.')) return;
+		if (action === 'start' && r.mode === 'mandatory' && !confirm(msg('updatesPage.confirmStartMandatory', { version: r.release_version, count: r.target_count }))) return;
+		if (action === 'cancel' && !confirm(msg('updatesPage.confirmCancel'))) return;
 		busy = true;
 		try {
 			await updatesApi.rolloutAction(r.id, action);
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, msgb('updatesPage.actionFailed')) };
+			notice = { kind: 'err', text: errText(e, msg('updatesPage.actionFailed')) };
 		} finally {
 			busy = false;
 		}
@@ -202,7 +202,7 @@
 			await updatesApi.widenRollout(r.id, Number(raw));
 			await loadRollouts(true);
 		} catch (e) {
-			notice = { kind: 'err', text: errText(e, msgb('updatesPage.widenFailed')) };
+			notice = { kind: 'err', text: errText(e, msg('updatesPage.widenFailed')) };
 		} finally {
 			busy = false;
 		}
@@ -215,7 +215,7 @@
 			if (my !== epoch) return; // scope changed while loading
 			openTargets = { id: r.id, rows: v.targets };
 		} catch (e) {
-			if (my === epoch) notice = { kind: 'err', text: errText(e, msgb('updatesPage.loadFailed')) };
+			if (my === epoch) notice = { kind: 'err', text: errText(e, msg('updatesPage.loadFailed')) };
 		}
 	}
 
@@ -256,14 +256,14 @@
 </script>
 
 <section class="updates card" data-testid="updates-page">
-	<h2>{msgb('updatesPage.updates')}</h2>
+	<h2>{msg('updatesPage.updates')}</h2>
 	<p class="muted">
-		{msgb('updatesPage.releasesAreSignedOfflineCloudOnly')}
+		{msg('updatesPage.releasesAreSignedOfflineCloudOnly')}
 	</p>
 	<div class="tabs" role="tablist">
-		<button class="tab" class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>{msgb('updatesPage.fleet')}</button>
-		<button class="tab" class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>{msgb('updatesPage.releases')}</button>
-		<button class="tab" class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>{msgb('updatesPage.rollouts')}</button>
+		<button class="tab" class:active={tab === 'fleet'} onclick={() => (tab = 'fleet')}>{msg('updatesPage.fleet')}</button>
+		<button class="tab" class:active={tab === 'releases'} onclick={() => (tab = 'releases')}>{msg('updatesPage.releases')}</button>
+		<button class="tab" class:active={tab === 'rollouts'} onclick={() => (tab = 'rollouts')}>{msg('updatesPage.rollouts')}</button>
 	</div>
 	{#if notice}
 		<p class="notice {notice.kind}" role="status" data-testid="updates-notice">{notice.text}</p>
@@ -271,13 +271,13 @@
 
 	{#if tab === 'fleet'}
 		{#if fleetState === 'error'}
-			<p role="alert">{msgb('updatesPage.couldNotLoadFleet')}</p>
+			<p role="alert">{msg('updatesPage.couldNotLoadFleet')}</p>
 		{:else if fleetState === 'loaded' && fleet.length === 0}
-			<p class="muted">{msgb('updatesPage.noDevices')}</p>
+			<p class="muted">{msg('updatesPage.noDevices')}</p>
 		{:else}
 			<table class="data">
 				<thead>
-					<tr><th>Device</th><th>Version</th><th>Updater</th><th>Device state</th><th>Target</th><th>Last seen</th></tr>
+					<tr><th>{msg('updatesPage.colDevice')}</th><th>{msg('updatesPage.colVersion')}</th><th>{msg('updatesPage.colUpdater')}</th><th>{msg('updatesPage.colDeviceState')}</th><th>{msg('updatesPage.colTarget')}</th><th>{msg('updatesPage.colLastSeen')}</th></tr>
 				</thead>
 				<tbody>
 					{#each fleet as d (d.device_id)}
@@ -298,32 +298,32 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if fleetCursor}<button class="btn-secondary btn-sm" onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>{msgb('updatesPage.more')}</button>{/if}
+			{#if fleetCursor}<button class="btn-secondary btn-sm" onclick={() => loadFleet(false)} disabled={fleetState === 'loading'}>{msg('updatesPage.more')}</button>{/if}
 		{/if}
 	{/if}
 
 	{#if tab === 'releases'}
 		<fieldset class="import">
-			<legend>{msgb('updatesPage.importSignedRelease')}</legend>
-			<label class="field">{msgb('updatesPage.envelopeFile')} <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
+			<legend>{msg('updatesPage.importSignedRelease')}</legend>
+			<label class="field">{msg('updatesPage.envelopeFile')} <input type="file" accept=".json,application/json" onchange={onEnvelopeFile} data-testid="envelope-file" /></label>
 			<textarea rows="4" bind:value={envelopeText} placeholder="release-envelope.json" data-testid="envelope-text"></textarea>
 			{#if envelopeText.trim() && !preview}
-				<p role="alert">{msgb('updatesPage.notAReleaseEnvelope')}</p>
+				<p role="alert">{msg('updatesPage.notAReleaseEnvelope')}</p>
 			{/if}
 			{#if preview}
-				<p class="muted">{msgb('updatesPage.unverifiedPreviewTheServerVerifiesThe')}: {preview.version} (#{preview.sequence})</p>
+				<p class="muted">{msg('updatesPage.unverifiedPreviewTheServerVerifiesThe')}: {preview.version} (#{preview.sequence})</p>
 				{#each preview.files as f}
 					<label class="url">{f} <input type="url" placeholder="https://…" bind:value={urls[f]} data-testid="artifact-url" /></label>
 				{/each}
-				<button class="btn-primary" onclick={importRelease} disabled={busy} data-testid="import-release">{msgb('updatesPage.import')}</button>
+				<button class="btn-primary" onclick={importRelease} disabled={busy} data-testid="import-release">{msg('updatesPage.import')}</button>
 			{/if}
 		</fieldset>
 		{#if releasesState === 'error'}
-			<p role="alert">{msgb('updatesPage.couldNotLoadReleases')}</p>
+			<p role="alert">{msg('updatesPage.couldNotLoadReleases')}</p>
 		{:else}
 			<table class="data">
 				<thead>
-					<tr><th>Version</th><th>Sequence</th><th>Key</th><th>Status</th><th>Imported</th><th></th></tr>
+					<tr><th>{msg('updatesPage.colVersion')}</th><th>{msg('updatesPage.colSequence')}</th><th>{msg('updatesPage.colKey')}</th><th>{msg('updatesPage.colStatus')}</th><th>{msg('updatesPage.colImported')}</th><th></th></tr>
 				</thead>
 				<tbody>
 					{#each releases as r (r.id)}
@@ -335,9 +335,9 @@
 							<td>{when(r.imported_at)} · {r.imported_by}</td>
 							<td>
 								{#if r.status === 'active'}
-									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'revoked')} disabled={busy}>{msgb('updatesPage.revoke')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'revoked')} disabled={busy}>{msg('updatesPage.revoke')}</button>
 								{:else}
-									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'active')} disabled={busy}>{msgb('updatesPage.reactivate')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => setStatus(r, 'active')} disabled={busy}>{msg('updatesPage.reactivate')}</button>
 								{/if}
 							</td>
 						</tr>
@@ -349,10 +349,10 @@
 
 	{#if tab === 'rollouts'}
 		<fieldset class="create">
-			<legend>{msgb('updatesPage.newRollout')}</legend>
+			<legend>{msg('updatesPage.newRollout')}</legend>
 			<SingleSelect
 				id="rollout-release"
-				label={msgb('updatesPage.release')}
+				label={msg('updatesPage.release')}
 				testid="rollout-release"
 				value={form.release_id}
 				options={[{ value: '', label: '—' }, ...activeReleases.map((r) => ({ value: r.id, label: `${r.version} (#${r.release_sequence})`, dir: 'ltr' as const }))]}
@@ -360,43 +360,43 @@
 			/>
 			<SingleSelect
 				id="rollout-scope"
-				label={msgb('updatesPage.scope')}
+				label={msg('updatesPage.scope')}
 				testid="rollout-scope"
 				value={form.scope}
 				options={[
-					{ value: 'store', label: msgb('updatesPage.selectedStore') },
-					{ value: 'device', label: msgb('updatesPage.device') },
-					{ value: 'all', label: msgb('updatesPage.allDevices') }
+					{ value: 'store', label: msg('updatesPage.selectedStore') },
+					{ value: 'device', label: msg('updatesPage.device') },
+					{ value: 'all', label: msg('updatesPage.allDevices') }
 				]}
 				onchange={(v) => (form.scope = v as typeof form.scope)}
 			/>
 			{#if form.scope === 'device'}
-				<label class="field">Device ID <input bind:value={form.device_id} /></label>
+				<label class="field">{msg('updatesPage.deviceId')} <input bind:value={form.device_id} dir="ltr" /></label>
 			{/if}
 			<SingleSelect
 				id="rollout-mode"
-				label={msgb('updatesPage.mode')}
+				label={msg('updatesPage.mode')}
 				testid="rollout-mode"
 				value={form.mode}
-				options={[{ value: 'optional', label: msgb('updatesPage.optional') }, { value: 'mandatory', label: msgb('updatesPage.mandatory') }]}
+				options={[{ value: 'optional', label: msg('updatesPage.optional') }, { value: 'mandatory', label: msg('updatesPage.mandatory') }]}
 				onchange={(v) => (form.mode = v as typeof form.mode)}
 			/>
 			<label class="field">% <input type="number" min="1" max="100" bind:value={form.percentage} /></label>
 			{#if form.scope !== 'all' && !store}
-				<p class="muted">{msgb('updatesPage.chooseAStoreFirst')}</p>
+				<p class="muted">{msg('updatesPage.chooseAStoreFirst')}</p>
 			{/if}
 			<button class="btn-primary"
 				onclick={createRollout}
 				disabled={busy || !form.release_id || (form.scope !== 'all' && !store) || (form.scope === 'device' && !form.device_id.trim())}
-				data-testid="create-rollout">{msgb('updatesPage.createDraft')}</button
+				data-testid="create-rollout">{msg('updatesPage.createDraft')}</button
 			>
 		</fieldset>
 		{#if rolloutsState === 'error'}
-			<p role="alert">{msgb('updatesPage.couldNotLoadRollouts')}</p>
+			<p role="alert">{msg('updatesPage.couldNotLoadRollouts')}</p>
 		{:else}
 			<table class="data">
 				<thead>
-					<tr><th>Release</th><th>Scope</th><th>Mode</th><th>%</th><th>Status</th><th>Progress</th><th></th></tr>
+					<tr><th>{msg('updatesPage.colRelease')}</th><th>{msg('updatesPage.colScope')}</th><th>{msg('updatesPage.colMode')}</th><th>%</th><th>{msg('updatesPage.colStatus')}</th><th>{msg('updatesPage.colProgress')}</th><th></th></tr>
 				</thead>
 				<tbody>
 					{#each rollouts as r (r.id)}
@@ -410,16 +410,16 @@
 								{#each Object.entries(r.counts ?? {}) as [state, n]}<span class="chip">{updateStateLabel(state)}: {n}</span>{/each}
 							</td>
 							<td class="actions">
-								{#if r.status === 'draft'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'start')} disabled={busy}>{msgb('updatesPage.start')}</button>{/if}
-								{#if r.status === 'active'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'pause')} disabled={busy}>{msgb('updatesPage.pause')}</button>{/if}
-								{#if r.status === 'paused'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'resume')} disabled={busy}>{msgb('updatesPage.resume')}</button>{/if}
+								{#if r.status === 'draft'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'start')} disabled={busy}>{msg('updatesPage.start')}</button>{/if}
+								{#if r.status === 'active'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'pause')} disabled={busy}>{msg('updatesPage.pause')}</button>{/if}
+								{#if r.status === 'paused'}<button class="btn-secondary btn-sm" onclick={() => act(r, 'resume')} disabled={busy}>{msg('updatesPage.resume')}</button>{/if}
 								{#if (r.status === 'active' || r.status === 'paused' || r.status === 'draft') && r.percentage < 100}
-									<button class="btn-secondary btn-sm" onclick={() => widen(r)} disabled={busy}>{msgb('updatesPage.widen')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => widen(r)} disabled={busy}>{msg('updatesPage.widen')}</button>
 								{/if}
 								{#if r.status !== 'completed' && r.status !== 'cancelled'}
-									<button class="btn-secondary btn-sm" onclick={() => act(r, 'cancel')} disabled={busy}>{msgb('updatesPage.cancel')}</button>
+									<button class="btn-secondary btn-sm" onclick={() => act(r, 'cancel')} disabled={busy}>{msg('updatesPage.cancel')}</button>
 								{/if}
-								<button class="link" onclick={() => showTargets(r)}>{msgb('updatesPage.devices')}</button>
+								<button class="link" onclick={() => showTargets(r)}>{msg('updatesPage.devices')}</button>
 							</td>
 						</tr>
 						{#if openTargets?.id === r.id}
@@ -438,7 +438,7 @@
 					{/each}
 				</tbody>
 			</table>
-			{#if rolloutsCursor}<button class="btn-secondary btn-sm" onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>{msgb('updatesPage.more')}</button>{/if}
+			{#if rolloutsCursor}<button class="btn-secondary btn-sm" onclick={() => loadRollouts(false)} disabled={rolloutsState === 'loading'}>{msg('updatesPage.more')}</button>{/if}
 		{/if}
 	{/if}
 </section>

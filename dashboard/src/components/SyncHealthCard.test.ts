@@ -38,11 +38,9 @@ describe('SyncHealthCard compact dual scope (Phase 4B)', () => {
 		const { container } = render(SyncHealthCard, { props: { ...base, health, onretry: vi.fn(), onrefresh: vi.fn() } });
 		const text = container.textContent ?? '';
 		expect(text).toContain('متصل');
-		expect(text).toContain('Sales');
-		expect(text).toContain('Returns');
-		expect(text).toContain('Latest event');
-		expect(text).toContain('Backlog');
-		expect(text).toContain('Blocked');
+		for (const label of ['مبيعات', 'مرتجعات', 'آخر حدث', 'متأخر', 'محظور']) expect(text).toContain(label);
+		// Arabic mode shows Arabic only: no English sub-labels.
+		for (const english of ['Sales', 'Returns', 'Latest event', 'Backlog', 'Blocked']) expect(text).not.toContain(english);
 		expect(text).not.toContain('جميع البيانات');
 		expect(text).not.toContain('all data is up to date');
 	});
@@ -50,7 +48,7 @@ describe('SyncHealthCard compact dual scope (Phase 4B)', () => {
 	it('shows separate sale/return completeness and no Phase 4A exclusion note', () => {
 		const { container } = render(SyncHealthCard, { props: { ...base, health, onretry: vi.fn(), onrefresh: vi.fn() } });
 		const text = container.textContent ?? '';
-		expect(text).toContain('مكتمل / Complete');
+		expect(text).toContain('مكتمل');
 		expect(text).not.toContain('المرحلة 4B');
 		expect(text).not.toContain('excluded from reporting until Phase 4B');
 	});
@@ -63,8 +61,8 @@ describe('SyncHealthCard compact dual scope (Phase 4B)', () => {
 		} as unknown as SyncHealth;
 		const { container } = render(SyncHealthCard, { props: { ...base, health: blocked, onretry: vi.fn(), onrefresh: vi.fn() } });
 		const text = container.textContent ?? '';
-		expect(text).toContain('محظورة / Blocked');
-		expect(text).toContain('مكتمل / Complete');
+		expect(text).toContain('محظورة');
+		expect(text).toContain('مكتمل');
 	});
 
 	it('keeps sale and return diagnostics on independent channels', () => {
@@ -81,6 +79,6 @@ describe('SyncHealthCard compact dual scope (Phase 4B)', () => {
 		const text = container.textContent ?? '';
 		expect(text).toContain('تعارض');
 		expect(text).toContain('تعارض مرتجعات');
-		expect(text).toContain('return conflict');
+		expect(text).not.toContain('return conflict');
 	});
 });

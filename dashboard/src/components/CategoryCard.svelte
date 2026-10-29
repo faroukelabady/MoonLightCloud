@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg, msgb } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -91,8 +91,8 @@
 		<Segmented
 			size="sm"
 			options={[
-				{ value: 'root_category', ar: 'رئيسية', en: 'Roots', aria: msgb('categoryCard.roots') },
-				{ value: 'subcategory', ar: 'فرعية', en: 'Subcategories', aria: msgb('categoryCard.subcategories') }
+				{ value: 'root_category', ar: 'رئيسية', en: 'Roots', aria: msg('categoryCard.roots') },
+				{ value: 'subcategory', ar: 'فرعية', en: 'Subcategories', aria: msg('categoryCard.subcategories') }
 			]}
 			value={kind}
 			onchange={(v) => onkind(v as CategoryKind)}
@@ -112,8 +112,7 @@
 	</div>
 	{#if kind !== 'root_category'}
 		<div class="muted facet">
-			{msg('categoryCard.productsCanBelongToMultipleSubcategories')}{#if arabic()}
-			<br /><span class="sub-en">Products can belong to multiple subcategories, so subcategories do not form parts of a single whole — bar view only.</span>{/if}
+			{msg('categoryCard.productsCanBelongToMultipleSubcategories')}
 		</div>
 	{/if}
 	{#if status === 'loading'}

@@ -80,7 +80,7 @@ describe('Branch card', () => {
 		const online = { generated_at: '', store_id: null, provider_key: '', active_statuses: [], currency_totals: [{ currency: 'EGP', orders: 2, value_minor: '4400', active_orders: 1, active_value_minor: '2200' }], status_counts: [], provider_totals: [] };
 		render(BranchCard, { props: { rows: [row('EGP', '100', 1)], status: 'loaded', errStatus: null, onretry: () => {}, online: online as never, onlineStatus: 'loaded' } });
 		expect(screen.getByRole('heading', { name: /Finalized sales vs online orders/ })).toBeTruthy();
-		expect(screen.getByLabelText('Online Orders').textContent).toContain('order value EGP');
+		expect(screen.getByLabelText(/Online Orders/).textContent).toContain('order value EGP');
 	});
 });
 

@@ -109,24 +109,25 @@ export async function freshTotp(secret: string): Promise<string> {
 	});
 }
 
-// uiLogin signs in through the real login + MFA screens.
+// uiLogin signs in through the real login + MFA screens. The dashboard shows
+// one language at a time, so each step accepts the Arabic or English label.
 export async function uiLogin(page: Page, url = 'login', account: Account = owner()) {
 	await page.goto(url);
 	await page.getByLabel(/اسم الدخول|Email or login/).fill(account.user);
 	await page.getByLabel(/كلمة المرور|Password/).fill(account.password);
-	await page.getByRole('button', { name: /دخول/ }).click();
-	const code = page.getByLabel(/Authenticator code/);
+	await page.getByRole('button', { name: /^(دخول|Sign in)$/ }).click();
+	const code = page.getByLabel(/رمز التطبيق|Authenticator code/);
 	await expect(code).toBeVisible({ timeout: 15000 });
 	await code.fill(await freshTotp(account.secret));
-	await page.getByRole('button', { name: /Verify/ }).click();
-	await expect(page.getByText('لوحة متابعة المبيعات')).toBeVisible({ timeout: 15000 });
+	await page.getByRole('button', { name: /^(تحقق|Verify)$/ }).click();
+	await expect(page.getByRole('heading', { name: /^(لوحة متابعة المبيعات|Sales dashboard)$/ })).toBeVisible({ timeout: 15000 });
 }
 
 // uiLogout signs out through the shell's Logout button (server-side
 // revocation) and waits for the login screen.
 export async function uiLogout(page: Page) {
-	await page.getByRole('button', { name: /خروج \/ Logout/ }).click();
-	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible();
+	await page.getByRole('button', { name: /خروج|Logout/ }).click();
+	await expect(page.getByRole('heading', { name: /^(تسجيل الدخول|Sign in)$/ })).toBeVisible();
 }
 
 function origin(): string {

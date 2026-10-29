@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg, t } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -75,12 +75,12 @@
 			<table class="branches" data-testid="branch-table">
 				<thead>
 					<tr>
-						<th scope="col">{msg('branchCard.branchChannel')}{#if arabic()}<span class="sub-en">Branch / Channel</span>{/if}</th>
+						<th scope="col">{msg('branchCard.branchChannel')}</th>
 						{#each currencies as cur}
 							<th scope="col" class="num">{t(`المبيعات ${cur}`, `Sales ${cur}`)}</th>
 						{/each}
-						<th scope="col" class="num">{msg('branchCard.transactions')}{#if arabic()}<span class="sub-en">Transactions</span>{/if}</th>
-						<th scope="col" class="num">{msg('branchCard.units')}{#if arabic()}<span class="sub-en">Units</span>{/if}</th>
+						<th scope="col" class="num">{msg('branchCard.transactions')}</th>
+						<th scope="col" class="num">{msg('branchCard.units')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -88,7 +88,7 @@
 						<tr>
 							<th scope="row">
 								<div class="lname">{t(b.first.shop_name_ar, b.first.shop_name_en || b.first.shop_name_ar)}</div>
-								<div class="muted lsub">{arabic() ? `${b.first.shop_name_en} · ${b.first.channel}` : b.first.channel}</div>
+								<div class="muted lsub">{b.first.channel}</div>
 							</th>
 							{#each currencies as cur}
 								{@const r = b.byCurrency[cur]}
@@ -141,11 +141,6 @@
 	}
 	.branches tbody th {
 		text-align: start;
-		font-weight: 400;
-	}
-	.sub-en {
-		display: block;
-		font-size: 0.66rem;
 		font-weight: 400;
 	}
 	.lname {

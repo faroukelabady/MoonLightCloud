@@ -1,9 +1,13 @@
 import { render } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import TagCard from './TagCard.svelte';
 import OnlineComparison from './OnlineComparison.svelte';
 import CatalogHealthCard from './CatalogHealthCard.svelte';
 import type { TagListResponse, OrderAnalyticsResponse, CatalogHealthResponse } from '../lib/api.js';
+import { setLang } from '../lib/i18n.svelte.js';
+
+// These tests read the English interface; each language is shown alone.
+beforeEach(() => setLang('en'));
 
 vi.mock('../lib/chartAction.js', () => ({ chart: () => ({ destroy() {} }) }));
 

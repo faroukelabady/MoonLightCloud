@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -38,11 +38,11 @@
 				<thead>
 					<tr>
 						<th scope="col">#</th>
-						<th scope="col">{msg('tagCard.tag')}{#if arabic()}<br /><span class="th-en">Tag</span>{/if}</th>
-						<th scope="col">{msg('tagCard.units')}{#if arabic()}<br /><span class="th-en">Units</span>{/if}</th>
-						<th scope="col">{msg('tagCard.gross')}{#if arabic()}<br /><span class="th-en">Gross</span>{/if}</th>
-						<th scope="col">{msg('tagCard.refunds')}{#if arabic()}<br /><span class="th-en">Refunds</span>{/if}</th>
-						<th scope="col">{msg('tagCard.net')}{#if arabic()}<br /><span class="th-en">Net</span>{/if}</th>
+						<th scope="col">{msg('tagCard.tag')}</th>
+						<th scope="col">{msg('tagCard.units')}</th>
+						<th scope="col">{msg('tagCard.gross')}</th>
+						<th scope="col">{msg('tagCard.refunds')}</th>
+						<th scope="col">{msg('tagCard.net')}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -79,8 +79,7 @@
 			</table>
 		</div>
 		<p class="note" role="note">
-			{msg('tagCard.tagTotalsOverlapOneLineCan')}{#if arabic()}<br />
-			<span class="th-en">Tag totals overlap (one line can carry several tags) and must not be summed to derive total business revenue.</span>{/if}
+			{msg('tagCard.tagTotalsOverlapOneLineCan')}
 		</p>
 	{/if}
 </Card>

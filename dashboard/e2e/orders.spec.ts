@@ -99,10 +99,10 @@ test('orders paginate, then render list, detail, exact money and warning', async
 	await expect(page.getByRole('main').getByText('الطلبات عبر الإنترنت')).toBeVisible({ timeout: 15000 });
 	// First page: 20 view buttons, continuation visible.
 	await expect(page.getByRole('button', { name: /تحميل المزيد/ })).toBeVisible();
-	expect(await page.getByRole('button', { name: /عرض \/ View/ }).count()).toBe(20);
+	expect(await page.getByRole('button', { name: /عرض الطلب/ }).count()).toBe(20);
 	// Load more appends the final 5 and the control disappears.
 	await page.getByRole('button', { name: /تحميل المزيد/ }).click();
-	await expect(page.getByRole('button', { name: /عرض \/ View/ })).toHaveCount(25, { timeout: 10000 });
+	await expect(page.getByRole('button', { name: /عرض الطلب/ })).toHaveCount(25, { timeout: 10000 });
 	await expect(page.getByRole('button', { name: /تحميل المزيد/ })).toHaveCount(0);
 	// No duplicate order rows by stable identity.
 	const ids = await page.evaluate(() =>
@@ -118,7 +118,7 @@ test('orders paginate, then render list, detail, exact money and warning', async
 	await page.reload();
 	await expect(page.getByRole('main').getByText('الطلبات عبر الإنترنت')).toBeVisible({ timeout: 15000 });
 	await expect(page.getByText('90,071,992,547,409.93')).toBeVisible();
-	await page.getByRole('button', { name: /عرض \/ View/ }).click();
+	await page.getByRole('button', { name: /عرض الطلب/ }).click();
 	await expect(page.getByText(/غير مربوطة بكتالوج/)).toBeVisible();
 	await expect(page.getByText('FOREIGN', { exact: true })).toBeVisible();
 	overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

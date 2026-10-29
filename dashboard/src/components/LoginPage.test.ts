@@ -5,6 +5,10 @@ import UsersPage from './UsersPage.svelte';
 import Sidebar from './Sidebar.svelte';
 import { authApi, dashboardApi, usersApi, ApiError, mutationHeaders, setCSRFToken } from '../lib/api.js';
 import type { Me } from '../lib/api.js';
+import { setLang } from '../lib/i18n.svelte.js';
+
+// These tests read the English interface; each language is shown alone.
+beforeEach(() => setLang('en'));
 
 afterEach(() => {
 	cleanup();
@@ -113,7 +117,8 @@ describe('CSRF and storage (ADR-0053)', () => {
 		const init = fetchSpy.mock.calls.at(-1)![1] as RequestInit;
 		expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-1');
 		expect(init.credentials).toBe('same-origin');
-		expect(window.localStorage.length).toBe(0);
+		// Only the per-browser language choice is stored; never session data.
+		expect(Object.keys(window.localStorage).filter((key) => key !== 'moonlight.dashboard.lang')).toEqual([]);
 		expect(window.sessionStorage.length).toBe(0);
 		fetchSpy.mockResolvedValue(new Response('{}', { status: 200 }));
 		await dashboardApi.logout();

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import { formatInt } from '../lib/money.js';
 	import type { OverviewResponse } from '../lib/api.js';
 
@@ -29,18 +29,18 @@
 		<thead>
 			<tr>
 				<td></td>
-				<th scope="col">{msg('countsTable.sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
-				<th scope="col">{msg('countsTable.returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
+				<th scope="col">{msg('countsTable.sales')}</th>
+				<th scope="col">{msg('countsTable.returns')}</th>
 			</tr>
 		</thead>
 		<tbody>
 			<tr>
-				<th scope="row">{msg('countsTable.transactions')}{#if arabic()}<span class="sub-en"> · Transactions</span>{/if}</th>
+				<th scope="row">{msg('countsTable.transactions')}</th>
 				<td class="num">{sales.transactions}</td>
 				<td class="num ret">{returns.transactions}{#if mode !== 'all'}<sup class="note-mark" aria-hidden="true">*</sup>{/if}</td>
 			</tr>
 			<tr>
-				<th scope="row">{msg('countsTable.units')}{#if arabic()}<span class="sub-en"> · Units</span>{/if}</th>
+				<th scope="row">{msg('countsTable.units')}</th>
 				<td class="num">{sales.units}</td>
 				<td class="num ret">{returns.units}</td>
 			</tr>
@@ -81,11 +81,6 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.totals td.ret {
-		color: var(--text-muted);
-	}
-	.sub-en {
-		font-size: 0.68rem;
-		font-weight: 400;
 		color: var(--text-muted);
 	}
 	.note-mark {

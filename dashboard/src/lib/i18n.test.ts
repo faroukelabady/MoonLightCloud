@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import ar from '../locales/ar.json';
 import en from '../locales/en.json';
-import { messageIn, msg, msgb, setLang } from './i18n.svelte.js';
+import { messageIn, msg, setLang } from './i18n.svelte.js';
 
 function flattenKeys(value: Record<string, unknown>, prefix = ''): string[] {
 	return Object.entries(value).flatMap(([key, nested]) => {
@@ -40,12 +40,6 @@ describe('msg', () => {
 		expect(msg('catalogAdmin.variantMany', { count: 3 })).toBe('3 خيارات');
 	});
 
-	it('pairs both languages only where a screen asks for it', () => {
-		setLang('ar');
-		expect(msgb('catalogAdmin.tabs.products')).toBe('المنتجات / Products');
-		setLang('en');
-		expect(msgb('catalogAdmin.tabs.products')).toBe('Products');
-	});
 
 	it('shows the key for a missing entry instead of blank text', () => {
 		expect(msg('nowhere.missing')).toBe('nowhere.missing');

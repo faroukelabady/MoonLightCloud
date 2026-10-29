@@ -3,6 +3,13 @@
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { IncidentRow } from '../lib/api';
 	import SingleSelect from './ui/SingleSelect.svelte';
+	import { msg } from '../lib/i18n.svelte.js';
+	const k = (key: string, params?: Record<string, string | number>) => msg(`operationsPage.${key}`, params);
+	const rules = ['DEVICE_OFFLINE', 'DEVICE_SYNC_FAILED', 'DEVICE_SYNC_STALE', 'BUSINESS_REPORT_BLOCKED', 'BUSINESS_REPORT_STALE', 'NOTIFICATION_BLOCKED', 'NOTIFICATION_AMBIGUOUS', 'NOTIFICATION_RETRY_STALE'];
+	const states = ['open', 'acknowledged', 'resolved'];
+	const severities = ['warning', 'urgent'];
+	// Known codes read in the chosen language; anything new shows as sent.
+	const label = (group: string, list: string[], value: string) => (list.includes(value) ? k(`${group}.${value}`) : value);
 
 	let incidents: IncidentRow[] = [];
 	let loading = true;
@@ -53,7 +60,7 @@
 			const updated = await dashboardApi.incidentAck(id);
 			incidents = incidents.map((i) => (i.id === id ? updated : i));
 		} catch {
-			notice = 'Acknowledge failed.';
+			notice = k('ackFailed');
 		} finally {
 			acting[id] = false;
 		}
@@ -67,64 +74,54 @@
 			const updated = await dashboardApi.incidentResolve(id);
 			incidents = incidents.map((i) => (i.id === id ? updated : i));
 		} catch (e) {
-			if (e instanceof ApiError && e.status === 409) notice = 'Condition still active — resolve is blocked until it clears.';
-			else notice = 'Resolve failed.';
+			if (e instanceof ApiError && e.status === 409) notice = k('stillActive');
+			else notice = k('resolveFailed');
 		} finally {
 			acting[id] = false;
 		}
 	}
 </script>
 
-<section class="card" aria-label="Operations">
-	<h2>Operations</h2>
-	<p class="hint">Open and acknowledged incidents need operator attention. Acknowledge suppresses the unacknowledged state only — it never claims recovery.</p>
+<section class="card" aria-label={k('title')}>
+	<h2>{k('title')}</h2>
+	<p class="hint">{k('hint')}</p>
 	<div class="filters">
-		<SingleSelect id="filter-state" label="State" testid="filter-state" value={filterState}
-			options={[{ value: '', label: 'All' }, { value: 'open', label: 'Open' }, { value: 'acknowledged', label: 'Acknowledged' }, { value: 'resolved', label: 'Resolved' }]}
+		<SingleSelect id="filter-state" label={k('state')} testid="filter-state" value={filterState}
+			options={[{ value: '', label: k('all') }, ...states.map((value) => ({ value, label: k(`states.${value}`) }))]}
 			onchange={(v) => { filterState = v; applyFilters(); }} />
-		<SingleSelect id="filter-severity" label="Severity" testid="filter-severity" value={filterSeverity}
-			options={[{ value: '', label: 'All' }, { value: 'warning', label: 'Warning' }, { value: 'urgent', label: 'Urgent' }]}
+		<SingleSelect id="filter-severity" label={k('severity')} testid="filter-severity" value={filterSeverity}
+			options={[{ value: '', label: k('all') }, ...severities.map((value) => ({ value, label: k(`severities.${value}`) }))]}
 			onchange={(v) => { filterSeverity = v; applyFilters(); }} />
-		<SingleSelect id="filter-rule" label="Rule" testid="filter-rule" value={filterRule}
-			options={[
-				{ value: '', label: 'All' },
-				{ value: 'DEVICE_OFFLINE', label: 'Device offline' },
-				{ value: 'DEVICE_SYNC_FAILED', label: 'Sync failed' },
-				{ value: 'DEVICE_SYNC_STALE', label: 'Sync stale' },
-				{ value: 'BUSINESS_REPORT_BLOCKED', label: 'Report blocked' },
-				{ value: 'BUSINESS_REPORT_STALE', label: 'Report stale' },
-				{ value: 'NOTIFICATION_BLOCKED', label: 'Notification blocked' },
-				{ value: 'NOTIFICATION_AMBIGUOUS', label: 'Notification ambiguous' },
-				{ value: 'NOTIFICATION_RETRY_STALE', label: 'Notification retry stale' }
-			]}
+		<SingleSelect id="filter-rule" label={k('rule')} testid="filter-rule" value={filterRule}
+			options={[{ value: '', label: k('all') }, ...rules.map((value) => ({ value, label: k(`rules.${value}`) }))]}
 			onchange={(v) => { filterRule = v; applyFilters(); }} />
 	</div>
-	{#if loading}<p>Loading…</p>
-	{:else if error}<p role="alert">Failed: {error}</p>
-	{:else if incidents.length === 0}<p>No incidents match.</p>
+	{#if loading}<p>{k('loading')}</p>
+	{:else if error}<p role="alert">{k('failed', { code: error })}</p>
+	{:else if incidents.length === 0}<p>{k('none')}</p>
 	{:else}
 		<ul>
 			{#each incidents as i (i.id)}
 				<li data-testid="incident-row" data-id={i.id}>
-					<strong data-testid="incident-rule">{i.rule}</strong>
-					<span data-testid="incident-severity">{i.severity}</span>
-					<span data-testid="incident-state">{i.state}</span>
-					<span title="subject">{i.subject_type}:{i.subject_id.slice(0, 8)}</span>
-					<span title="opened">{i.opened_at}</span>
+					<strong data-testid="incident-rule" title={i.rule}>{label('rules', rules, i.rule)}</strong>
+					<span data-testid="incident-severity">{label('severities', severities, i.severity)}</span>
+					<span data-testid="incident-state">{label('states', states, i.state)}</span>
+					<span title={k('subject')} dir="ltr">{i.subject_type}:{i.subject_id.slice(0, 8)}</span>
+					<span title={k('opened')} dir="ltr">{i.opened_at}</span>
 					{#if (i.state !== 'resolved' && !i.open_intent_materialized) || (i.state === 'resolved' && !i.resolved_intent_materialized)}
-						<span data-testid="intent-review" title="Alert intent predates atomic writes; reconcile explicitly if review warrants it">needs review</span>
+						<span data-testid="intent-review" title={k('needsReviewHint')}>{k('needsReview')}</span>
 					{/if}
 					{#if i.state === 'open'}
-						<button class="btn-secondary btn-sm" data-testid="ack" disabled={!!acting[i.id]} on:click={() => ack(i.id)}>Acknowledge</button>
+						<button class="btn-secondary btn-sm" data-testid="ack" disabled={!!acting[i.id]} on:click={() => ack(i.id)}>{k('acknowledge')}</button>
 					{/if}
 					{#if i.state !== 'resolved'}
-						<button class="btn-secondary btn-sm" data-testid="resolve" disabled={!!acting[i.id]} on:click={() => resolve(i.id)}>Resolve</button>
+						<button class="btn-secondary btn-sm" data-testid="resolve" disabled={!!acting[i.id]} on:click={() => resolve(i.id)}>{k('resolve')}</button>
 					{/if}
 				</li>
 			{/each}
 		</ul>
 		{#if next}
-			<button class="btn-secondary btn-sm" data-testid="more" on:click={() => load(true)}>More</button>
+			<button class="btn-secondary btn-sm" data-testid="more" on:click={() => load(true)}>{k('more')}</button>
 		{/if}
 	{/if}
 	{#if notice}<p role="status">{notice}</p>{/if}

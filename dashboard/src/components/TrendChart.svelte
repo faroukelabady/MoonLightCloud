@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -46,7 +46,7 @@
 		if (status !== 'loaded' || values.length === 0) return null;
 		const series: { name: string; type: 'line'; data: number[]; smooth: boolean; symbol: string; symbolSize: number; areaStyle?: { opacity: number }; lineStyle: { color: string; width: number }; itemStyle: { color: string } }[] = [
 			{
-				name: arabic() ? 'Gross / الإجمالي' : 'Gross',
+				name: msg('trendChart.gross'),
 				type: 'line',
 				data: values,
 				smooth: true,
@@ -59,7 +59,7 @@
 		];
 		if (refundValues && refundValues.length === values.length) {
 			series.push({
-				name: arabic() ? 'Refunds / المرتجعات' : 'Refunds',
+				name: msg('trendChart.refunds'),
 				type: 'line',
 				data: refundValues,
 				smooth: true,
@@ -71,7 +71,7 @@
 		}
 		if (netValues && netValues.length === values.length) {
 			series.push({
-				name: arabic() ? 'Net / الصافي' : 'Net',
+				name: msg('trendChart.net'),
 				type: 'line',
 				data: netValues,
 				smooth: true,

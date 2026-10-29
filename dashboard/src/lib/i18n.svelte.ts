@@ -1,9 +1,8 @@
 // Dashboard language. Interface text lives in src/locales/<lang>.json and
 // is looked up by key with msg(); adding a language is one more file plus
-// its Lang entry. Arabic mode keeps the approved bilingual presentation
-// where a screen asks for it (msgb: "عربي / English"); English shows English
-// only, LTR. The choice is a per-browser preference and never reaches the
-// server.
+// its Lang entry. Every screen shows the chosen language only (Arabic RTL,
+// English LTR). The choice is a per-browser preference and never reaches
+// the server.
 import ar from '../locales/ar.json';
 import en from '../locales/en.json';
 
@@ -50,19 +49,9 @@ export function t(ar: string, en: string): string {
 	return state.lang === 'ar' ? ar : en;
 }
 
-// tb keeps the Arabic-mode "عربي / English" pairing and shows English alone
-// in English mode.
-export function tb(ar: string, en: string): string {
-	return state.lang === 'ar' ? `${ar} / ${en}` : en;
-}
 
-// sub is the muted sublabel under a primary label: English in Arabic mode,
-// nothing in English mode.
-export function sub(en: string | undefined): string {
-	return state.lang === 'ar' ? (en ?? '') : '';
-}
 
-// arabic is true in Arabic mode, where English sublabels are shown.
+// arabic is true in Arabic mode (the language switch offers English).
 export function arabic(): boolean {
 	return state.lang === 'ar';
 }
@@ -94,8 +83,3 @@ export function msg(key: string, params?: Params): string {
 	return messageIn(state.lang, key, params);
 }
 
-// msgb is the bilingual form: "عربي / English" in Arabic mode, English
-// alone in English mode.
-export function msgb(key: string, params?: Params): string {
-	return state.lang === 'ar' ? `${messageIn('ar', key, params)} / ${messageIn('en', key, params)}` : messageIn('en', key, params);
-}

@@ -1,4 +1,4 @@
-import { msgb } from './i18n.svelte.js';
+import { msg } from './i18n.svelte.js';
 import { ApiError, get, mutationHeaders, postJson, setCSRFToken } from './http';
 
 // Phase 18 R1 human authentication & user administration (ADR-0053).
@@ -98,27 +98,27 @@ export function authErrorText(err: unknown): string {
 	const reason = err instanceof ApiError ? err.detail || err.code : '';
 	switch (reason) {
 		case 'INVALID_CREDENTIALS':
-			return msgb('authApi.invalidEmailOrPassword');
+			return msg('authApi.invalidEmailOrPassword');
 		case 'RATE_LIMITED':
-			return msgb('authApi.tooManyAttemptsTryAgainLater');
+			return msg('authApi.tooManyAttemptsTryAgainLater');
 		case 'INVALID_MFA_CODE':
-			return msgb('authApi.invalidVerificationCode');
+			return msg('authApi.invalidVerificationCode');
 		case 'WEAK_PASSWORD':
-			return msgb('authApi.passwordMustBeAtLeast12');
+			return msg('authApi.passwordMustBeAtLeast12');
 		case 'ACTIVATION_INVALID':
-			return msgb('authApi.activationLinkIsInvalidOrExpired');
+			return msg('authApi.activationLinkIsInvalidOrExpired');
 		case 'AUTH_REQUIRED':
 		case 'UNAUTHORIZED':
-			return msgb('authApi.sessionExpiredPleaseSignInAgain');
+			return msg('authApi.sessionExpiredPleaseSignInAgain');
 		case 'FORBIDDEN':
 		case 'STORE_FORBIDDEN':
-			return msgb('authApi.notAuthorized');
+			return msg('authApi.notAuthorized');
 		case 'LAST_OWNER':
-			return msgb('authApi.atLeastOneActiveOwnerMust');
+			return msg('authApi.atLeastOneActiveOwnerMust');
 		case 'LOGIN_TAKEN':
-			return msgb('authApi.thatLoginAlreadyExists');
+			return msg('authApi.thatLoginAlreadyExists');
 		default:
-			return msgb('authApi.theOperationCouldNotBeCompleted');
+			return msg('authApi.theOperationCouldNotBeCompleted');
 	}
 }
 

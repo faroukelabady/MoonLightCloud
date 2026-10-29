@@ -4,7 +4,8 @@
 		"salesDashboard": "Sales dashboard",
 		"currency": "Currency",
 		"text": "التبديل إلى العربية",
-		"logout": "Logout"
+		"logout": "Logout",
+		"tagline": "Your business insights in one place"
 	},
 	"branchCard": {
 		"branchChannel": "Branch / Channel",
@@ -17,7 +18,10 @@
 		"reason": "Reason",
 		"product": "Product",
 		"provider": "Provider",
-		"diagnosticOnlyNoAutoFixRetail": "Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live."
+		"diagnosticOnlyNoAutoFixRetail": "Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.",
+		"truncated": "Showing the first {count} rows; summary counts are complete.",
+		"providerFilter": "Provider filter",
+		"allProviders": "All providers"
 	},
 	"categoryCard": {
 		"roots": "Roots",
@@ -51,7 +55,38 @@
 		"stores": "Stores",
 		"storeId": "Store ID",
 		"timeZone": "Time zone",
-		"status": "Status"
+		"status": "Status",
+		"command": {
+			"pending": "Queued",
+			"leased": "Delivering",
+			"accepted": "Received by device",
+			"running": "Syncing",
+			"completed": "Completed",
+			"failed": "Failed"
+		},
+		"syncQueued": "Sync requested — queued for device.",
+		"syncAlreadyActive": "Sync request already active.",
+		"loading": "Loading…",
+		"failed": "Failed: {code}",
+		"noDevices": "No devices registered.",
+		"unboundTitle": "no Store binding",
+		"unbound": "unbound",
+		"connectivity": {
+			"online": "online",
+			"offline": "offline"
+		},
+		"lastPoll": "last poll {at}",
+		"neverPolled": "never polled",
+		"never": "never",
+		"noneYet": "none yet",
+		"openIncidents": "open operational incidents",
+		"incidentCount": "{count} incident(s) · {severity}",
+		"syncNow": "Sync Now",
+		"lastSync": "Last sync: {status}",
+		"idle": "idle",
+		"noStores": "No stores registered.",
+		"deviceCount": "{count} device(s)",
+		"storeActive": "active"
 	},
 	"latestSalesCard": {
 		"orderTrackingArrivesWithOnlineCommerce": "Order tracking arrives with online-commerce integration",
@@ -87,7 +122,8 @@
 		"saveTheseOneTimeRecoveryCodes": "Save these one-time recovery codes somewhere safe. Each works once if you lose your authenticator. They will not be shown again.",
 		"downloadCodes": "Download codes",
 		"iHaveSavedTheseCodes": "I have saved these codes",
-		"continue": "Continue"
+		"continue": "Continue",
+		"activateHint": "Activate your account — choose a password (at least 12 characters)."
 	},
 	"messagingSettings": {
 		"invalidAddressWhatsappNeedsAnInternational": "Invalid address: WhatsApp needs an international number (such as 201012345678); Telegram a numeric chat ID or @username.",
@@ -165,7 +201,11 @@
 		"currency": "Currency",
 		"orderValue": "Order value",
 		"onlineOrdersAreOperationalProviderOrders": "Online orders are operational provider orders and may not represent additional recognized revenue beyond finalized Retail Sales. The two sources are shown separately and never summed.",
-		"finalizedSalesVsOnlineOrders": "Finalized sales vs online orders"
+		"finalizedSalesVsOnlineOrders": "Finalized sales vs online orders",
+		"transactionsAllCurrencies": "transactions (all Retail currencies)",
+		"netIn": "net {currency}",
+		"orderValueIn": "order value {currency} · {orders} orders",
+		"noOrderValue": "No online order value in this period."
 	},
 	"ordersPage": {
 		"readOnlyWoocommerceOrdersNeverSales": "Read-only WooCommerce orders, never Sales",
@@ -191,7 +231,10 @@
 		"payment": "Payment",
 		"item": "Item",
 		"qty": "Qty",
-		"mapped": "Mapped"
+		"mapped": "Mapped",
+		"viewOrder": "View order {number}",
+		"webhookInbox": "webhook inbox (pending/retry/blocked)",
+		"inbox": "inbox"
 	},
 	"periodSelector": {
 		"enterTwoValidYyyyMmDd": "Enter two valid YYYY-MM-DD dates",
@@ -437,7 +480,8 @@
 	"storeSelector": {
 		"allStores": "All Stores",
 		"storesUnavailable": "Stores unavailable",
-		"retry": "Retry"
+		"retry": "Retry",
+		"storeScope": "Store scope"
 	},
 	"syncHealthCard": {
 		"refreshStatus": "Refresh status",
@@ -470,7 +514,9 @@
 		"topProductsChart": "Top products chart"
 	},
 	"trendChart": {
-		"refunds": "Refunds"
+		"refunds": "Refunds",
+		"gross": "Gross",
+		"net": "Net"
 	},
 	"updatesPage": {
 		"releaseSignatureOrManifestRejected": "Release signature or manifest rejected",
@@ -525,7 +571,26 @@
 		"resume": "Resume",
 		"widen": "Widen",
 		"cancel": "Cancel",
-		"devices": "Devices"
+		"devices": "Devices",
+		"colDevice": "Device",
+		"colVersion": "Version",
+		"colUpdater": "Updater",
+		"colDeviceState": "Device state",
+		"colTarget": "Target",
+		"colLastSeen": "Last seen",
+		"colSequence": "Sequence",
+		"colKey": "Key",
+		"colStatus": "Status",
+		"colImported": "Imported",
+		"deviceId": "Device ID",
+		"colRelease": "Release",
+		"colScope": "Scope",
+		"colMode": "Mode",
+		"colProgress": "Progress",
+		"confirmRevoke": "Revoke release {version}? Devices that have not installed it will not receive it.",
+		"confirmMandatoryAll": "Create a MANDATORY update rollout for ALL eligible devices in every Store? Devices install it automatically at their next safe point.",
+		"confirmStartMandatory": "Start MANDATORY rollout of {version} to {count} device(s)?",
+		"confirmCancel": "Cancel this rollout? Devices already installing will finish or roll back safely."
 	},
 	"usersPage": {
 		"passwordChangedOtherSessionsWereSigned": "Password changed; other sessions were signed out.",
@@ -543,7 +608,10 @@
 		"addUser": "Add user",
 		"login": "Login",
 		"displayName": "Display name",
-		"role": "Role",
+		"role": {
+			"owner": "owner",
+			"admin": "admin"
+		},
 		"admin": "ADMIN",
 		"owner": "OWNER",
 		"stores": "Stores",
@@ -558,7 +626,23 @@
 		"resetMfa": "Reset MFA",
 		"signOut": "Sign out",
 		"more": "More",
-		"securityAuditLatest50": "Security audit (latest 50)"
+		"securityAuditLatest50": "Security audit (latest 50)",
+		"activationLink": "One-time activation link for {login} (valid 24 h). Send it securely; it will not be shown again.",
+		"colLogin": "Login",
+		"colName": "Name",
+		"colRole": "Role",
+		"colStatus": "Status",
+		"colStores": "Stores",
+		"colMfa": "MFA",
+		"confirmDisable": "Disable {login}? All of their sessions end immediately.",
+		"confirmEnable": "Re-enable {login}?",
+		"confirmRole": "Change {login} to {role}? Their sessions end and they must sign in again.",
+		"confirmMfaReset": "Reset two-step verification for {login}? They must re-enroll at next sign-in.",
+		"mfaResetDone": "MFA reset for {login}.",
+		"confirmSignOut": "Sign {login} out everywhere?",
+		"sessionsRevoked": "Sessions revoked for {login}.",
+		"confirmRegenerate": "Regenerate recovery codes? All previous recovery codes stop working immediately.",
+		"confirmCreateOwner": "Create {login} as OWNER? Owners can administer accounts and security."
 	},
 	"widgetError": {
 		"reportingIsTemporarilyUnavailable": "Reporting is temporarily unavailable",
@@ -769,5 +853,45 @@
 		"created": "Created",
 		"createWaiting": "Create “{key}” — waiting for Retail",
 		"cancelPending": "Cancel pending command"
+	},
+	"operationsPage": {
+		"title": "Operations",
+		"hint": "Open and acknowledged incidents need operator attention. Acknowledge suppresses the unacknowledged state only — it never claims recovery.",
+		"state": "State",
+		"severity": "Severity",
+		"rule": "Rule",
+		"all": "All",
+		"states": {
+			"open": "Open",
+			"acknowledged": "Acknowledged",
+			"resolved": "Resolved"
+		},
+		"severities": {
+			"warning": "Warning",
+			"urgent": "Urgent"
+		},
+		"rules": {
+			"DEVICE_OFFLINE": "Device offline",
+			"DEVICE_SYNC_FAILED": "Sync failed",
+			"DEVICE_SYNC_STALE": "Sync stale",
+			"BUSINESS_REPORT_BLOCKED": "Report blocked",
+			"BUSINESS_REPORT_STALE": "Report stale",
+			"NOTIFICATION_BLOCKED": "Notification blocked",
+			"NOTIFICATION_AMBIGUOUS": "Notification ambiguous",
+			"NOTIFICATION_RETRY_STALE": "Notification retry stale"
+		},
+		"loading": "Loading…",
+		"failed": "Failed: {code}",
+		"none": "No incidents match.",
+		"subject": "subject",
+		"opened": "opened",
+		"needsReview": "needs review",
+		"needsReviewHint": "Alert intent predates atomic writes; reconcile explicitly if review warrants it",
+		"acknowledge": "Acknowledge",
+		"resolve": "Resolve",
+		"more": "More",
+		"ackFailed": "Acknowledge failed.",
+		"stillActive": "Condition still active — resolve is blocked until it clears.",
+		"resolveFailed": "Resolve failed."
 	}
 }

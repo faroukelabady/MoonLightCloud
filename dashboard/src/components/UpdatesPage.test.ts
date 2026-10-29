@@ -1,8 +1,12 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import UpdatesPage from './UpdatesPage.svelte';
 import { updatesApi, ApiError, updateStateLabel, previewEnvelope } from '../lib/api.js';
 import { choose } from '../test/choose.js';
+import { setLang } from '../lib/i18n.svelte.js';
+
+// These tests read the English interface; each language is shown alone.
+beforeEach(() => setLang('en'));
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;
@@ -102,7 +106,7 @@ describe('UpdatesPage', () => {
 		api.releases.mockResolvedValue({ releases: [] });
 		api.importRelease.mockRejectedValueOnce(new ApiError(400, 'INVALID_INPUT', 'request failed (400)', 'UPDATE_SIGNATURE_INVALID'));
 		render(UpdatesPage, { store: STORE });
-		await fireEvent.click(await screen.findByText('الإصدارات / Releases'));
+		await fireEvent.click(await screen.findByText('Releases'));
 		const text = (await screen.findByTestId('envelope-text')) as HTMLTextAreaElement;
 		const env = envelopeText(['moonlight-linux-amd64.tar.gz']);
 		await fireEvent.input(text, { target: { value: env } });
@@ -123,7 +127,7 @@ describe('UpdatesPage', () => {
 		api.createRollout.mockResolvedValue(draft);
 		api.rolloutAction.mockResolvedValue({ ...draft, status: 'active' });
 		render(UpdatesPage, { store: STORE });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		const select = await screen.findByTestId('rollout-release');
 		// Revoked releases are not offered for new rollouts.
 		await fireEvent.click(select);
@@ -136,11 +140,11 @@ describe('UpdatesPage', () => {
 		expect(row.textContent).toContain('Pending: 1');
 		// Starting a MANDATORY rollout requires an explicit confirmation.
 		const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-		await fireEvent.click(await screen.findByText('بدء / Start'));
+		await fireEvent.click(await screen.findByText('Start'));
 		expect(confirmSpy).toHaveBeenCalledOnce();
 		expect(api.rolloutAction).not.toHaveBeenCalled();
 		confirmSpy.mockReturnValue(true);
-		await fireEvent.click(await screen.findByText('بدء / Start'));
+		await fireEvent.click(await screen.findByText('Start'));
 		expect(api.rolloutAction).toHaveBeenCalledWith('ro1', 'start');
 		confirmSpy.mockRestore();
 	});
@@ -150,7 +154,7 @@ describe('UpdatesPage', () => {
 		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		await choose(await screen.findByTestId('rollout-release'), 'r1');
 		expect(((await screen.findByTestId('create-rollout')) as HTMLButtonElement).disabled).toBe(true);
 	});
@@ -161,7 +165,7 @@ describe('UpdatesPage', () => {
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		api.createRollout.mockResolvedValue({ target_count: 1 });
 		render(UpdatesPage, { store: STORE });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		await choose(await screen.findByTestId('rollout-release'), 'r1');
 		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: '  device-a  ' } });
@@ -176,12 +180,12 @@ describe('UpdatesPage', () => {
 		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		render(UpdatesPage, { store: '' });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		await choose(screen.getByTestId('rollout-release'), 'r1');
 		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
 		expect((screen.getByTestId('create-rollout') as HTMLButtonElement).disabled).toBe(true);
-		expect(screen.getByText('اختر متجرًا أولاً / Choose a Store first.')).toBeTruthy();
+		expect(screen.getByText('Choose a Store first.')).toBeTruthy();
 		await fireEvent.click(screen.getByTestId('create-rollout'));
 		expect(api.createRollout).not.toHaveBeenCalled();
 	});
@@ -191,7 +195,7 @@ describe('UpdatesPage', () => {
 		api.releases.mockResolvedValue({ releases: [release('r1', 'active')] });
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		const { rerender } = render(UpdatesPage, { store: STORE });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		await choose(screen.getByTestId('rollout-release'), 'r1');
 		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });
@@ -209,7 +213,7 @@ describe('UpdatesPage', () => {
 		api.rollouts.mockResolvedValue({ rollouts: [], next_cursor: '' });
 		api.createRollout.mockResolvedValue({ target_count: 2 });
 		render(UpdatesPage, { store: STORE });
-		await fireEvent.click(await screen.findByText('الطرح / Rollouts'));
+		await fireEvent.click(await screen.findByText('Rollouts'));
 		await choose(screen.getByTestId('rollout-release'), 'r1');
 		await choose(screen.getByTestId('rollout-scope'), 'device');
 		await fireEvent.input(screen.getByLabelText('Device ID'), { target: { value: 'device-a' } });

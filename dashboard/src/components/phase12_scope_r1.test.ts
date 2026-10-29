@@ -1,8 +1,12 @@
 import {render,fireEvent,waitFor,cleanup} from '@testing-library/svelte';
-import {it,expect,vi,afterEach} from 'vitest';
+import {it,expect,vi,afterEach, beforeEach } from 'vitest';
 import App from '../App.svelte';
 import {dashboardApi,ApiError} from '../lib/api.js';
 import {choose} from '../test/choose.js';
+import { setLang } from '../lib/i18n.svelte.js';
+
+// These tests read the English interface; each language is shown alone.
+beforeEach(() => setLang('en'));
 vi.mock('../lib/chartAction.js',()=>({chart:()=>({destroy(){}})}));
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const A='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',B='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -72,7 +76,7 @@ it('R1 regression: new Store B Retail totals appear beside old Store A online to
  await waitFor(()=>expect(vi.mocked(dashboardApi.orderSummary).mock.calls.some(c=>c[1]===B)).toBe(true));
  expect(r.getByTestId('store-selector').dataset.value).toBe(B);
  expect(r.container.textContent).not.toContain('ONLY_STORE_A');
- expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull();
+ expect(r.queryByLabelText('Finalized Retail Sales')).toBeNull();
 });
 
 // Deliberately ignore AbortSignal in these deferred doubles: epoch fencing must
@@ -102,10 +106,10 @@ for(const first of ['retail','online'] as const)it(`coherent comparison waits fo
  const h=setupScopes(),r=render(App);await waitFor(()=>expect(h.onlineCalls.length).toBe(1));h.retailCalls[0].pending.resolve(h.retail('1100'));h.onlineCalls[0].pending.resolve(h.online('A_READY'));await waitFor(()=>expect(r.container.textContent).toContain('A_READY'));
  await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(h.onlineCalls.length).toBe(2));expect(r.container.textContent).not.toContain('A_READY');
  if(first==='retail')h.retailCalls[1].pending.resolve(h.retail('2200'));else h.onlineCalls[1].pending.resolve(h.online('B_READY'));
- await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull());
+ await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales')).toBeNull());
  if(first==='retail')h.onlineCalls[1].pending.resolve(h.online('B_READY'));else h.retailCalls[1].pending.resolve(h.retail('2200'));
- await waitFor(()=>expect(r.container.textContent).toContain('B_READY'));expect(r.getByLabelText('Finalized Retail Sales / المبيعات النهائية').textContent).toContain('22');
- await choose(r.getByTestId('store-selector'),A);await waitFor(()=>expect(h.onlineCalls.length).toBe(3));h.retailCalls[2].pending.resolve(h.retail('3300'));h.onlineCalls[2].pending.reject(new ApiError(503,'UNAVAILABLE','bounded fixture failure'));await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales / المبيعات النهائية')).toBeNull());expect(r.container.textContent).not.toContain('B_READY');
+ await waitFor(()=>expect(r.container.textContent).toContain('B_READY'));expect(r.getByLabelText('Finalized Retail Sales').textContent).toContain('22');
+ await choose(r.getByTestId('store-selector'),A);await waitFor(()=>expect(h.onlineCalls.length).toBe(3));h.retailCalls[2].pending.resolve(h.retail('3300'));h.onlineCalls[2].pending.reject(new ApiError(503,'UNAVAILABLE','bounded fixture failure'));await waitFor(()=>expect(r.queryByLabelText('Finalized Retail Sales')).toBeNull());expect(r.container.textContent).not.toContain('B_READY');
  await waitFor(()=>expect(r.container.textContent).toContain('Reporting is temporarily unavailable'));const retries=r.getAllByRole('button').filter(b=>b.textContent?.includes('Retry'));expect(retries.length).toBeGreaterThan(0);await fireEvent.click(retries[0]);await waitFor(()=>expect(h.onlineCalls.length).toBe(4));h.retailCalls[3].pending.resolve(h.retail('3300'));h.onlineCalls[3].pending.resolve(h.online('A_RETRY'));await waitFor(()=>expect(r.container.textContent).toContain('A_RETRY'));
 });
 it('late A, rapid A→B→A, combined period/currency and history scopes remain fenced',async()=>{
@@ -129,13 +133,13 @@ for(const first of ['more','detail'] as const)it(`independent order reads finish
  vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,c)=>c?more.promise:orderPage(['a'],'cursor-a') as any);
  vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
- const view=async()=>fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
- const load=async()=>fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));
+ const view=async()=>fireEvent.click(r.getByRole('button',{name:/View/}));
+ const load=async()=>fireEvent.click(r.getByRole('button',{name:/Load more/}));
  if(first==='more'){await load();await view()}else{await view();await load()}
  more.resolve(orderPage(['a','b'],'cursor-b'));detail.resolve(orderDetail('a'));
  await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
  await waitFor(()=>expect(r.queryByText('DETAIL_a')).not.toBeNull());
- expect((r.getByRole('button',{name:/تحميل المزيد \/ Load more/}) as HTMLButtonElement).disabled).toBe(false);
+ expect((r.getByRole('button',{name:/Load more/}) as HTMLButtonElement).disabled).toBe(false);
  expect(r.getAllByText('ORDER_b')).toHaveLength(1);
 });
 it('replacing an order list rejects old continuation but preserves a pending detail',async()=>{
@@ -144,8 +148,8 @@ it('replacing an order list rejects old continuation but preserves a pending det
  vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,c)=>c?more.promise:orderPage([++lists===1?'a':'filtered'],lists===1?'cursor-a':null) as any);
  vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
- await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));
- await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
+ await fireEvent.click(r.getByRole('button',{name:/Load more/}));
+ await fireEvent.click(r.getByRole('button',{name:/View/}));
  await choose(r.getByTestId('orders-status'),'completed');
  await waitFor(()=>expect(r.queryByText('ORDER_filtered')).not.toBeNull());
  more.resolve(orderPage(['old-continuation'],null));detail.resolve(orderDetail('a'));
@@ -168,7 +172,7 @@ it('late detail A cannot replace newer detail B',async()=>{
  vi.mocked(dashboardApi.orders).mockResolvedValue(orderPage(['a','b'],null) as any);
  vi.mocked(dashboardApi.orderDetail).mockImplementation(async(_provider,id)=>id==='a'?first.promise:second.promise);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
- const views=r.getAllByRole('button',{name:/عرض \/ View/});await fireEvent.click(views[0]);await fireEvent.click(views[1]);
+ const views=r.getAllByRole('button',{name:/View/});await fireEvent.click(views[0]);await fireEvent.click(views[1]);
  second.resolve(orderDetail('b'));await waitFor(()=>expect(r.queryByText('DETAIL_b')).not.toBeNull());
  first.resolve(orderDetail('a'));await Promise.resolve();await Promise.resolve();
  expect(r.queryByText('DETAIL_a')).toBeNull();expect(r.queryByText('DETAIL_b')).not.toBeNull();
@@ -179,7 +183,7 @@ it('a Store transition fences every old order sibling including late authorizati
  vi.mocked(dashboardApi.orders).mockImplementation(async(_status,_provider,cursor,store)=>cursor?more.promise:orderPage([store===A?'a':'b'],store===A?'cursor-a':null) as any);
  vi.mocked(dashboardApi.orderDetail).mockReturnValue(detail.promise);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
- await fireEvent.click(r.getByRole('button',{name:/تحميل المزيد \/ Load more/}));await fireEvent.click(r.getByRole('button',{name:/عرض \/ View/}));
+ await fireEvent.click(r.getByRole('button',{name:/Load more/}));await fireEvent.click(r.getByRole('button',{name:/View/}));
  await choose(r.getByTestId('store-selector'),B);await waitFor(()=>expect(r.queryByText('ORDER_b')).not.toBeNull());
  more.reject(new ApiError(401,'UNAUTHORIZED','old session'));detail.resolve(orderDetail('a'));
  await Promise.resolve();await Promise.resolve();
@@ -191,7 +195,7 @@ it('does not start new Store reads while logout is pending',async()=>{
  vi.mocked(dashboardApi.logout).mockReturnValue(logout.promise);
  vi.mocked(dashboardApi.orders).mockImplementation(async(_s,_p,_c,store)=>store===A?orderPage(['a'],null):late.promise as any);
  const r=render(App);await waitFor(()=>expect(r.queryByText('ORDER_a')).not.toBeNull());
- await fireEvent.click(r.getByRole('button',{name:/خروج \/ Logout/}));
+ await fireEvent.click(r.getByRole('button',{name:/Logout/}));
  await choose(r.getByTestId('store-selector'),B);
  expect(vi.mocked(dashboardApi.orders).mock.calls.map(c=>c[3])).toEqual([A]);
  logout.resolve(undefined);

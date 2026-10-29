@@ -1,4 +1,4 @@
-import { msgb } from './i18n.svelte.js';
+import { msg } from './i18n.svelte.js';
 import { get, postJson, q } from './http';
 
 // Phase 18 release registry + fleet rollout control (ADR-0051/0052).
@@ -129,39 +129,39 @@ export function updateStateLabel(state: string | undefined): string {
 	switch (state) {
 		case undefined:
 		case '':
-			return msgb('updatesApi.notTargeted');
+			return msg('updatesApi.notTargeted');
 		case 'not_selected':
-			return msgb('updatesApi.notInCurrentStage');
+			return msg('updatesApi.notInCurrentStage');
 		case 'pending':
-			return msgb('updatesApi.pending');
+			return msg('updatesApi.pending');
 		case 'delivered':
-			return msgb('updatesApi.delivered');
+			return msg('updatesApi.delivered');
 		case 'downloading':
-			return msgb('updatesApi.downloading');
+			return msg('updatesApi.downloading');
 		case 'verified':
-			return msgb('updatesApi.verified');
+			return msg('updatesApi.verified');
 		case 'waiting_safe_boundary':
-			return msgb('updatesApi.waitingForSafeBoundary');
+			return msg('updatesApi.waitingForSafeBoundary');
 		case 'installing':
-			return msgb('updatesApi.installing');
+			return msg('updatesApi.installing');
 		case 'awaiting_health':
-			return msgb('updatesApi.checkingHealth');
+			return msg('updatesApi.checkingHealth');
 		case 'succeeded':
-			return msgb('updatesApi.succeeded');
+			return msg('updatesApi.succeeded');
 		case 'already_compliant':
-			return msgb('updatesApi.alreadyCompliant');
+			return msg('updatesApi.alreadyCompliant');
 		case 'failed':
-			return msgb('updatesApi.failed');
+			return msg('updatesApi.failed');
 		case 'rolled_back':
-			return msgb('updatesApi.rolledBack');
+			return msg('updatesApi.rolledBack');
 		case 'manual_action_required':
-			return msgb('updatesApi.manualActionRequired');
+			return msg('updatesApi.manualActionRequired');
 		case 'skipped_newer':
-			return msgb('updatesApi.skippedNewerInstalled');
+			return msg('updatesApi.skippedNewerInstalled');
 		case 'unsupported':
-			return msgb('updatesApi.unsupported');
+			return msg('updatesApi.unsupported');
 		case 'cancelled':
-			return msgb('updatesApi.cancelled');
+			return msg('updatesApi.cancelled');
 		default:
 			return state;
 	}

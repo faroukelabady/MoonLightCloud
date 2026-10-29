@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, lang, msg, msgb, t } from '../lib/i18n.svelte.js';
+	import { lang, msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -51,7 +51,7 @@
 <Card ar="حالة المزامنة مع المتجر" en="Sync Health Status">
 	{#snippet actions()}
 		{#if status !== 'loading'}
-			<button type="button" class="refresh" aria-label={msgb('syncHealthCard.refreshStatus')} onclick={onrefresh}>
+			<button type="button" class="refresh" aria-label={msg('syncHealthCard.refreshStatus')} onclick={onrefresh}>
 				<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4" /></svg>
 				{msg('syncHealthCard.refresh')}
 			</button>
@@ -68,7 +68,6 @@
 			<span class="okic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={icons[level]} /></svg></span>
 			<div>
 				<div class="headline">{t(headlines[level][0], headlines[level][1])}</div>
-				{#if arabic()}<div class="sub">{headlines[level][1]}</div>{/if}
 			</div>
 		</div>
 		{#if noShop || !health}
@@ -79,42 +78,41 @@
 			<thead>
 				<tr>
 					<td></td>
-					<th scope="col">{msg('syncHealthCard.sales')}{#if arabic()}<span class="sub-en"> · Sales</span>{/if}</th>
-					<th scope="col">{msg('syncHealthCard.returns')}{#if arabic()}<span class="sub-en"> · Returns</span>{/if}</th>
+					<th scope="col">{msg('syncHealthCard.sales')}</th>
+					<th scope="col">{msg('syncHealthCard.returns')}</th>
 				</tr>
 			</thead>
 			<tbody>
 				<tr>
-					<th scope="row">{msg('syncHealthCard.latestEvent')}{#if arabic()}<span class="sub-en"> · Latest event</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.latestEvent')}</th>
 					<td class="num" dir="ltr">{f.latest_sale_event_received_at ? absoluteTime(f.latest_sale_event_received_at, lang()) : '—'}</td>
 					<td class="num" dir="ltr">{f.latest_return_event_received_at ? absoluteTime(f.latest_return_event_received_at, lang()) : '—'}</td>
 				</tr>
 				<tr>
-					<th scope="row">{msg('syncHealthCard.backlog')}{#if arabic()}<span class="sub-en"> · Backlog</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.backlog')}</th>
 					<td class="num"><strong>{f.projection_backlog_count}</strong><span class="muted det">{health.pending_count} pending · {health.retry_count} retry</span></td>
 					<td class="num"><strong>{f.return_backlog_count}</strong><span class="muted det">{health.return_pending_count} pending · {health.return_retry_count} retry</span></td>
 				</tr>
 				<tr>
-					<th scope="row">{msg('syncHealthCard.blocked')}{#if arabic()}<span class="sub-en"> · Blocked</span>{/if}</th>
+					<th scope="row">{msg('syncHealthCard.blocked')}</th>
 					<td class="num"><strong>{f.blocked_sale_event_count}</strong></td>
 					<td class="num"><strong>{f.return_blocked_count}</strong></td>
 				</tr>
 				<tr>
-					<th scope="row">{msg('syncHealthCard.status')}{#if arabic()}<span class="sub-en"> · Status</span>{/if}</th>
-					<td>{#if f.blocked_sale_event_count > 0}<span class="badge warn">{msgb('syncHealthCard.blocked2')}</span>{:else if f.cloud_projection_complete}<span class="badge ok">{msgb('syncHealthCard.complete')}</span>{:else}<span class="badge">{msgb('syncHealthCard.catchingUp')}</span>{/if}</td>
-					<td>{#if f.return_blocked_count > 0}<span class="badge warn">{msgb('syncHealthCard.blocked2')}</span>{:else if f.return_projection_complete}<span class="badge ok">{msgb('syncHealthCard.complete')}</span>{:else}<span class="badge">{msgb('syncHealthCard.catchingUp')}</span>{/if}</td>
+					<th scope="row">{msg('syncHealthCard.status')}</th>
+					<td>{#if f.blocked_sale_event_count > 0}<span class="badge warn">{msg('syncHealthCard.blocked2')}</span>{:else if f.cloud_projection_complete}<span class="badge ok">{msg('syncHealthCard.complete')}</span>{:else}<span class="badge">{msg('syncHealthCard.catchingUp')}</span>{/if}</td>
+					<td>{#if f.return_blocked_count > 0}<span class="badge warn">{msg('syncHealthCard.blocked2')}</span>{:else if f.return_projection_complete}<span class="badge ok">{msg('syncHealthCard.complete')}</span>{:else}<span class="badge">{msg('syncHealthCard.catchingUp')}</span>{/if}</td>
 				</tr>
 			</tbody>
 		</table>
 		{#if health.last_error_code}
-			<div class="muted errmsg">{msg('syncHealthCard.lastError')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}{#if arabic() && health.last_error_label_en}<span class="sub-en"> · {health.last_error_label_en}</span>{/if}</div>
+			<div class="muted errmsg">{msg('syncHealthCard.lastError')}: {t(health.last_error_label_ar ?? health.last_error_code ?? '', health.last_error_label_en ?? health.last_error_code ?? '')}</div>
 		{/if}
 		{#if health.return_last_error_code}
-			<div class="muted errmsg">{msg('syncHealthCard.lastReturnError')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}{#if arabic() && health.return_last_error_label_en}<span class="sub-en"> · {health.return_last_error_label_en}</span>{/if}</div>
+			<div class="muted errmsg">{msg('syncHealthCard.lastReturnError')}: {t(health.return_last_error_label_ar ?? health.return_last_error_code ?? '', health.return_last_error_label_en ?? health.return_last_error_code ?? '')}</div>
 		{/if}
 		<div class="muted note">
-			{msg('syncHealthCard.reportsIncludeProjectedReturnsPendingBlocked')}{#if arabic()}
-			<span class="sub-en note-en">Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox.</span>{/if}
+			{msg('syncHealthCard.reportsIncludeProjectedReturnsPendingBlocked')}
 		</div>
 		{/if}
 	{/if}
@@ -194,10 +192,6 @@
 		font-weight: 600;
 		font-size: 0.74rem;
 		width: 30%;
-	}
-	.health .sub-en {
-		font-weight: 400;
-		color: var(--text-muted);
 	}
 	.health strong {
 		font-size: 0.82rem;

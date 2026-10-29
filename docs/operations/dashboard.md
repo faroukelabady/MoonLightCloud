@@ -72,7 +72,7 @@ direct peer. Never trust ranges you do not operate; arbitrary
 
 `queue_count` is pending + retry counted exactly once. The UI shows it as
 "In queue" with the pending/retry sub-breakdown. Blocked events are
-terminal conflicts shown separately with allowlisted bilingual labels;
+terminal conflicts shown separately with allowlisted labels in the chosen language;
 raw stored diagnostics never reach the browser.
 
 ## Rounding rule
@@ -345,7 +345,7 @@ COMMERCE_STORE_CONFLICT, and since Phase 17 the variant codes
 PRODUCT_NO_ACTIVE_VARIANTS, PRODUCT_NO_SELLABLE_VARIANT,
 VARIANT_DUPLICATE_COMBINATION, VARIANT_MISSING_SKU,
 VARIANT_MAPPING_MISSING, with VARIANT_INTENTIONALLY_OFFLINE as
-informational only) are the API contract; bilingual labels may
+informational only) are the API contract; the Arabic and English labels may
 evolve. Detail rows are bounded and carry IDs + stable codes only — no
 credentials, PII, raw provider errors or SQL.
 
@@ -403,9 +403,11 @@ durable Cloud state only.
 ## Interface text (2026-10-29)
 
 Dashboard text lives in `dashboard/src/locales/ar.json` and `en.json`, looked
-up by key with `msg()` (chosen language) or `msgb()` (the Arabic-mode
-"عربي / English" pairing some screens keep). `src/lib/i18n.test.ts` fails when
-the two files' keys or `{placeholders}` differ. Adding a language is one more
-file plus its `Lang` entry. Text that arrives as data (Store and product
-names, labels passed to shared cards) is still chosen per record. The Catalog
-Admin page shows only the chosen language.
+up by key with `msg()`. Every screen shows the chosen language only: Arabic
+(right to left) or English (left to right), with no English sub-labels in
+Arabic mode. `src/lib/i18n.test.ts` fails when the two files' keys or
+`{placeholders}` differ. Adding a language is one more file plus its `Lang`
+entry. Text that arrives as data (Store, product and category names, provider
+error labels) is chosen per record with `t(ar, en)`, falling back to Arabic
+when the English name is empty. Codes stay visible where they help support:
+an incident's rule code is its tooltip on the Operations page.

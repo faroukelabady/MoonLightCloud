@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg, msgb, t } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -121,14 +121,14 @@
 					<tr>
 						<td></td>
 						{#each columns as c (c.key)}
-							<th scope="col" class:total={c.total}>{t(...c.label)}{#if arabic() && c.total}<span class="sub-en"> · {c.label[1]}</span>{/if}</th>
+							<th scope="col" class:total={c.total}>{t(...c.label)}</th>
 						{/each}
 					</tr>
 				</thead>
 				<tbody>
 					{#each rows as r (r.key)}
 						<tr class:strong={r.strong}>
-							<th scope="row">{r.less ? '− ' : ''}{t(r.ar, r.en)}{#if arabic()}<span class="sub-en"> · {r.en}</span>{/if}</th>
+							<th scope="row">{r.less ? '− ' : ''}{t(r.ar, r.en)}</th>
 							{#each columns as c (c.key)}
 								<td class="num" class:total={c.total} class:refund={r.key === 'refunds'} data-testid={r.key === 'average' && c === lead ? 'average-value' : undefined}>{cell(c, r.key)}</td>
 							{/each}
@@ -148,7 +148,7 @@
 			{#if mode === 'all' && data.fx.has_usd}
 				<span>
 					{msg('salesCard.latestRateOnASale')}: <bdi dir="ltr">1 USD = {data.fx.latest_rate ?? '?'} EGP</bdi>
-					{#if data.fx.multiple_rates_used}<span class="badge warn">{msgb('salesCard.multipleHistoricalRatesUsed')}</span>{/if}
+					{#if data.fx.multiple_rates_used}<span class="badge warn">{msg('salesCard.multipleHistoricalRatesUsed')}</span>{/if}
 				</span>
 			{/if}
 		</div>
@@ -209,11 +209,6 @@
 		text-align: start;
 		font-weight: 500;
 		white-space: normal;
-	}
-	.money .sub-en {
-		font-size: 0.66rem;
-		font-weight: 400;
-		color: var(--text-muted);
 	}
 	.money tr.strong th,
 	.money tr.strong td {

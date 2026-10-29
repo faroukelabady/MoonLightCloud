@@ -224,7 +224,7 @@ test('subcategory view is bar-only with facet explanation', async ({ page }) => 
 	await mockDashboard(page);
 	await login(page);
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
-	await page.getByRole('button', { name: 'الفئات الفرعية / Subcategories' }).click().catch(() => {});
+	await page.getByRole('button', { name: 'الفئات الفرعية' }).click().catch(() => {});
 	// Switch via kind buttons if present; otherwise assert explanation text.
 	const subBtn = page.getByRole('button', { name: /الفئات الفرعية/ });
 	if (await subBtn.count()) await subBtn.first().click();

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, lang, msg, msgb, setLang } from '../lib/i18n.svelte.js';
+	import { arabic, lang, msg, setLang } from '../lib/i18n.svelte.js';
 	import { onMount } from 'svelte';
 	import { authApi, authErrorText, type AuthStage } from '../lib/api.js';
 	import QrCode from './QrCode.svelte';
@@ -80,7 +80,7 @@
 	function submitActivation(e: Event) {
 		e.preventDefault();
 		if (password !== password2) {
-			error = msgb('loginPage.passwordsDoNotMatch');
+			error = msg('loginPage.passwordsDoNotMatch');
 			return;
 		}
 		void run(async () => {
@@ -135,36 +135,34 @@
 		{#if view === 'login'}
 			<form onsubmit={submitLogin} data-testid="login-form">
 				<h1>{msg('loginPage.signIn')}</h1>
-				{#if arabic()}<p class="muted">Sign in</p>{/if}
-				<label>{msgb('loginPage.emailOrLogin')}<input name="login" autocomplete="username" bind:value={login} required /></label>
+				<label>{msg('loginPage.emailOrLogin')}<input name="login" autocomplete="username" bind:value={login} required /></label>
 				<label
-					>{msgb('loginPage.password')}<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
+					>{msg('loginPage.password')}<input name="password" type="password" autocomplete="current-password" bind:value={password} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.signIn2')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msg('loginPage.signIn2')}</button>
 			</form>
 		{:else if view === 'activate'}
 			<form onsubmit={submitActivation} data-testid="activate-form">
 				<h1>{msg('loginPage.activateAccount')}</h1>
-				<p class="muted">Activate your account — choose a password (at least 12 characters).</p>
+				<p class="muted">{msg('loginPage.activateHint')}</p>
 				<label
-					>{msgb('loginPage.password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
+					>{msg('loginPage.password')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password} required /></label
 				>
 				<label
-					>{msgb('loginPage.repeatPassword')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
+					>{msg('loginPage.repeatPassword')}<input type="password" autocomplete="new-password" minlength="12" bind:value={password2} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.activate')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msg('loginPage.activate')}</button>
 			</form>
 		{:else if view === 'mfa'}
 			<form onsubmit={submitMFA} data-testid="mfa-form">
 				<h1>{msg('loginPage.twoStepVerification')}</h1>
-				{#if arabic()}<p class="muted">Two-step verification</p>{/if}
 				{#if useRecovery}
-					<label>{msgb('loginPage.recoveryCode')}<input autocomplete="one-time-code" bind:value={code} required /></label>
+					<label>{msg('loginPage.recoveryCode')}<input autocomplete="one-time-code" bind:value={code} required /></label>
 				{:else}
 					<label
-						>{msgb('loginPage.authenticatorCode')}<input
+						>{msg('loginPage.authenticatorCode')}<input
 							inputmode="numeric"
 							autocomplete="one-time-code"
 							pattern="[0-9 ]*"
@@ -175,9 +173,9 @@
 					>
 				{/if}
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy}>{busy ? '…' : msgb('loginPage.verify')}</button>
+				<button type="submit" disabled={busy}>{busy ? '…' : msg('loginPage.verify')}</button>
 				<button type="button" class="link" onclick={() => ((useRecovery = !useRecovery), (code = ''), (error = null))}>
-					{useRecovery ? msgb('loginPage.useAuthenticatorCode') : msgb('loginPage.useARecoveryCode')}
+					{useRecovery ? msg('loginPage.useAuthenticatorCode') : msg('loginPage.useARecoveryCode')}
 				</button>
 			</form>
 		{:else if view === 'setup'}
@@ -189,20 +187,20 @@
 				{#if enrollment}
 					<QrCode value={enrollment.otpauth_uri} label={msg('loginPage.qrCodeForYourAuthenticatorApp')} />
 					<button type="button" class="link keytoggle" aria-expanded={showKey} aria-controls="totp-key" onclick={() => (showKey = !showKey)}>
-						{showKey ? msgb('loginPage.hideKey') : msgb('loginPage.cantScanShowTheKey')}
+						{showKey ? msg('loginPage.hideKey') : msg('loginPage.cantScanShowTheKey')}
 					</button>
 					{#if showKey}
 						<div id="totp-key">
 							<div class="secret" dir="ltr" data-testid="totp-secret">{grouped(enrollment.secret)}</div>
-							<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{msgb('loginPage.openInAuthenticator')}</a>
+							<a class="muted small" href={enrollment.otpauth_uri} dir="ltr">{msg('loginPage.openInAuthenticator')}</a>
 						</div>
 					{/if}
 				{/if}
 				<label
-					>{msgb('loginPage.code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
+					>{msg('loginPage.code')}<input inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" bind:value={code} required /></label
 				>
 				{#if error}<div class="err" role="alert">{error}</div>{/if}
-				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : msgb('loginPage.confirm')}</button>
+				<button type="submit" disabled={busy || !enrollment}>{busy ? '…' : msg('loginPage.confirm')}</button>
 			</form>
 		{:else}
 			<div data-testid="recovery-codes">
@@ -213,9 +211,9 @@
 				<ol class="codes" dir="ltr">
 					{#each recoveryCodes as c (c)}<li><code>{c}</code></li>{/each}
 				</ol>
-				<button type="button" class="download" data-testid="download-codes" onclick={() => downloadRecoveryCodes(login, recoveryCodes)}>{msgb('loginPage.downloadCodes')}</button>
-				<label class="check"><input type="checkbox" bind:checked={saved} /> {msgb('loginPage.iHaveSavedTheseCodes')}</label>
-				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{msgb('loginPage.continue')}</button>
+				<button type="button" class="download" data-testid="download-codes" onclick={() => downloadRecoveryCodes(login, recoveryCodes)}>{msg('loginPage.downloadCodes')}</button>
+				<label class="check"><input type="checkbox" bind:checked={saved} /> {msg('loginPage.iHaveSavedTheseCodes')}</label>
+				<button type="button" disabled={!saved} onclick={() => ((recoveryCodes = []), onauthenticated())}>{msg('loginPage.continue')}</button>
 			</div>
 		{/if}
 	</div>

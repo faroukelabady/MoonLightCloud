@@ -1,7 +1,11 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { cleanup, render, screen, fireEvent, within } from '@testing-library/svelte';
 import DevicesPage from './DevicesPage.svelte';
 import { dashboardApi } from '../lib/api.js';
+import { setLang } from '../lib/i18n.svelte.js';
+
+// These tests read the English interface; each language is shown alone.
+beforeEach(() => setLang('en'));
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;

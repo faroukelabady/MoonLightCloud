@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg, msgb } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -59,24 +59,24 @@
 </script>
 
 <Card ar="الطلبات عبر الإنترنت" en="Online Orders">
-	<div class="muted label-gap foot-note">{msgb('ordersPage.readOnlyWoocommerceOrdersNeverSales')}</div>
+	<div class="muted label-gap foot-note">{msg('ordersPage.readOnlyWoocommerceOrdersNeverSales')}</div>
 	<div class="filters">
 		<SingleSelect
 			id="orders-status"
-			label={msgb('ordersPage.status')}
+			label={msg('ordersPage.status')}
 			testid="orders-status"
 			value={filterStatus}
-			options={[{ value: '', label: msgb('ordersPage.all') }, ...statuses.map((s) => ({ value: s, label: s, dir: 'ltr' as const }))]}
+			options={[{ value: '', label: msg('ordersPage.all') }, ...statuses.map((s) => ({ value: s, label: s, dir: 'ltr' as const }))]}
 			onchange={onstatus}
 		/>
-		<label class="field">{msgb('ordersPage.provider')}
+		<label class="field">{msg('ordersPage.provider')}
 			<input value={filterProvider} placeholder="website" oninput={(e) => onprovider((e.target as HTMLInputElement).value)} />
 		</label>
 	</div>
 	{#if counts.length > 0}
 		<div class="chips" role="status">
 			{#each counts as c}<span class="chip">{c.canonical_status}: {c.total}</span>{/each}
-			{#if inbox}<span class="chip warn" title="webhook inbox">inbox {inbox.pending}/{inbox.retry}/{inbox.blocked}</span>{/if}
+			{#if inbox}<span class="chip warn" title={msg('ordersPage.webhookInbox')}>{msg('ordersPage.inbox')} <bdi dir="ltr">{inbox.pending}/{inbox.retry}/{inbox.blocked}</bdi></span>{/if}
 		</div>
 	{/if}
 	{#if status === 'loading'}
@@ -87,16 +87,16 @@
 		<EmptyState ar="لا توجد طلبات عبر الإنترنت" en="No online orders yet" />
 	{:else}
 		<table class="data">
-			<thead><tr><th>#</th><th>{msgb('ordersPage.number')}</th><th>{msgb('ordersPage.status')}</th><th>{msgb('ordersPage.total')}</th><th>{msgb('ordersPage.mapping')}</th><th></th></tr></thead>
+			<thead><tr><th>#</th><th>{msg('ordersPage.number')}</th><th>{msg('ordersPage.status')}</th><th>{msg('ordersPage.total')}</th><th>{msg('ordersPage.mapping')}</th><th></th></tr></thead>
 			<tbody>
 				{#each orders as o (o.provider_key + '/' + o.external_order_id)}
 					<tr>
 						<td class="num">{o.external_order_id}</td>
 						<td class="num">{o.order_number || '—'}</td>
-						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">{msgb('ordersPage.deleted')}</span>{/if}</td>
+						<td>{o.canonical_status}{#if o.provider_deleted} <span class="tag">{msg('ordersPage.deleted')}</span>{/if}</td>
 						<td class="num"><strong>{money(o)}</strong> {o.currency}</td>
-						<td>{#if o.mapping_complete}<span class="ok">{msgb('ordersPage.complete')}</span>{:else}<span class="warn">{msg('ordersPage.incomplete')} ({o.unmapped_line_count}){#if arabic()} / incomplete{/if}</span>{/if}</td>
-						<td><button class="link" onclick={() => onselect(o)}>{msgb('ordersPage.view')}</button></td>
+						<td>{#if o.mapping_complete}<span class="ok">{msg('ordersPage.complete')}</span>{:else}<span class="warn">{msg('ordersPage.incomplete')} ({o.unmapped_line_count})</span>{/if}</td>
+						<td><button class="link" aria-label={msg('ordersPage.viewOrder', { number: o.order_number || o.external_order_id })} onclick={() => onselect(o)}>{msg('ordersPage.view')}</button></td>
 					</tr>
 				{/each}
 			</tbody>
@@ -104,7 +104,7 @@
 		{#if nextCursor}
 			<div class="more">
 				<button class="link" disabled={more === 'loading'} onclick={onloadmore}>
-					{more === 'loading' ? msgb('ordersPage.loading') : msgb('ordersPage.loadMore')}
+					{more === 'loading' ? msg('ordersPage.loading') : msg('ordersPage.loadMore')}
 				</button>
 			</div>
 		{/if}
@@ -115,8 +115,8 @@
 	{#if selected}
 		<div class="drawer" role="dialog" aria-label={msg('ordersPage.orderDetail')}>
 			<div class="drawer-head">
-				<strong>{msg('ordersPage.order')} {selected.summary.order_number || selected.summary.external_order_id}{#if arabic()} / Order{/if}</strong>
-				<button class="link" onclick={() => onselect(null)}>{msgb('ordersPage.close')}</button>
+				<strong>{msg('ordersPage.order')} {selected.summary.order_number || selected.summary.external_order_id}</strong>
+				<button class="link" onclick={() => onselect(null)}>{msg('ordersPage.close')}</button>
 			</div>
 			{#if detailStatus === 'loading'}
 				<Skeleton />
@@ -124,20 +124,20 @@
 				<WidgetError status={detailErr} onretry={() => onselect(selected.summary)} />
 			{:else if detailStatus === 'loaded'}
 				{#if !selected.summary.mapping_complete}
-					<div class="alert" role="alert">{msgb('ordersPage.containsProductsNotMappedToMoonlight')}</div>
+					<div class="alert" role="alert">{msg('ordersPage.containsProductsNotMappedToMoonlight')}</div>
 				{/if}
 				{#if selected.summary.provider_deleted}
-					<div class="alert" role="status">{msgb('ordersPage.deletedAtProviderLastKnownDetails')}</div>
+					<div class="alert" role="status">{msg('ordersPage.deletedAtProviderLastKnownDetails')}</div>
 				{/if}
 				<dl class="grid">
-					<div><dt>{msgb('ordersPage.status')}</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
-					<div><dt>{msgb('ordersPage.total')}</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
-					<div><dt>{msgb('ordersPage.customer')}</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
-					<div><dt>{msgb('ordersPage.contact')}</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
-					<div><dt>{msgb('ordersPage.payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
+					<div><dt>{msg('ordersPage.status')}</dt><dd>{selected.summary.canonical_status} ({selected.summary.provider_status})</dd></div>
+					<div><dt>{msg('ordersPage.total')}</dt><dd><strong>{lineMoney(selected.summary.total_minor, selected.summary.currency)}</strong> {selected.summary.currency}</dd></div>
+					<div><dt>{msg('ordersPage.customer')}</dt><dd>{selected.customer_first_name} {selected.customer_last_name}</dd></div>
+					<div><dt>{msg('ordersPage.contact')}</dt><dd dir="ltr">{selected.customer_email || selected.customer_phone || '—'}</dd></div>
+					<div><dt>{msg('ordersPage.payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
 				</dl>
 				<table class="data">
-					<thead><tr><th>{msgb('ordersPage.item')}</th><th>SKU</th><th>{msgb('ordersPage.qty')}</th><th>{msgb('ordersPage.total')}</th><th>{msgb('ordersPage.mapped')}</th></tr></thead>
+					<thead><tr><th>{msg('ordersPage.item')}</th><th>SKU</th><th>{msg('ordersPage.qty')}</th><th>{msg('ordersPage.total')}</th><th>{msg('ordersPage.mapped')}</th></tr></thead>
 					<tbody>
 						{#each selected.lines as line}
 							<tr>

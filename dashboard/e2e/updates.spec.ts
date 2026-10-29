@@ -2,6 +2,11 @@ import { test, expect, type Page, type Route } from '@playwright/test';
 import { uiLogin } from './auth';
 import { choose } from './support/select';
 
+// These checks read the English interface (the dashboard shows one language).
+test.beforeEach(async ({ page }) => {
+	await page.addInitScript(() => localStorage.setItem('moonlight.dashboard.lang', 'en'));
+});
+
 // Phase 18 Updates page (ADR-0051/0052). Sign-in is real (production cookie
 // over HTTPS in scripts/e2e-dashboard.sh); the release/rollout/fleet data
 // routes are fixtures, so no real signed release is needed to exercise the

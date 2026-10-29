@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { msg, msgb, t } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import type { PeriodParams } from '../lib/api.js';
 
 	let {
@@ -69,11 +69,11 @@
 
 	function applyCustom() {
 		if (!/^\d{4}-\d{2}-\d{2}$/.test(customFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(customTo)) {
-			customError = msgb('periodSelector.enterTwoValidYyyyMmDd');
+			customError = msg('periodSelector.enterTwoValidYyyyMmDd');
 			return;
 		}
 		if (customFrom > customTo) {
-			customError = msgb('periodSelector.startDateMustNotBeAfter');
+			customError = msg('periodSelector.startDateMustNotBeAfter');
 			return;
 		}
 		customError = null;
@@ -82,7 +82,7 @@
 </script>
 
 <div class="periodbar">
-	<div class="modes" role="group" aria-label={msgb('periodSelector.period')}>
+	<div class="modes" role="group" aria-label={msg('periodSelector.period')}>
 		{#each periods as p}
 			<button
 				type="button"
@@ -105,7 +105,7 @@
 			<label>{msg('periodSelector.to')}<input type="date" value={range?.to ?? ''} disabled /></label>
 		{/if}
 		<!-- Short visible text to fit the row; the name stays bilingual. -->
-		<button type="button" class="apply" disabled={!custom} aria-label={msgb('periodSelector.show')} onclick={applyCustom}>{msg('periodSelector.show')}</button>
+		<button type="button" class="apply" disabled={!custom} aria-label={msg('periodSelector.show')} onclick={applyCustom}>{msg('periodSelector.show')}</button>
 	</div>
 	{#if customError}<div class="err" role="alert">{customError}</div>{/if}
 	{#if showTimezone}<div class="tz muted" dir="ltr">{timezone}</div>{/if}

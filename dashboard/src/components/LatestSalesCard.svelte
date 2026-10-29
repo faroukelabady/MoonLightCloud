@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { msgb } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
+	import { msg } from '../lib/i18n.svelte.js';
 	import { formatMinor } from '../lib/money.js';
 	import type { LatestSale } from '../lib/api.js';
 
@@ -11,7 +11,7 @@
 </script>
 
 <Card ar="أحدث المبيعات" en="Latest Sales">
-	<div class="muted label-gap foot-note">{msgb('latestSalesCard.orderTrackingArrivesWithOnlineCommerce')}</div>
+	<div class="muted label-gap foot-note">{msg('latestSalesCard.orderTrackingArrivesWithOnlineCommerce')}</div>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -20,7 +20,7 @@
 		<EmptyState ar="لا توجد مبيعات بعد" en="No sales yet" />
 	{:else}
 		<table class="data">
-			<thead><tr><th>#</th><th>{msgb('latestSalesCard.number')}</th><th>{msgb('latestSalesCard.channel')}</th><th>{msgb('latestSalesCard.cashier')}</th><th>{msgb('latestSalesCard.total')}</th></tr></thead>
+			<thead><tr><th>#</th><th>{msg('latestSalesCard.number')}</th><th>{msg('latestSalesCard.channel')}</th><th>{msg('latestSalesCard.cashier')}</th><th>{msg('latestSalesCard.total')}</th></tr></thead>
 			<tbody>
 				{#each sales as s, i}
 					<tr>

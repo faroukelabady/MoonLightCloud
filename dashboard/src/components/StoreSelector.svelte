@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msgb } from '../lib/i18n.svelte.js';
+	import { msg } from '../lib/i18n.svelte.js';
 	import type { StoreRow } from '../lib/api.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
 
@@ -32,7 +32,7 @@
 		const counts = new Map<string, number>();
 		for (const s of stores) counts.set(s.display_name, (counts.get(s.display_name) ?? 0) + 1);
 		return [
-			{ value: '', label: msgb('storeSelector.allStores') },
+			{ value: '', label: msg('storeSelector.allStores') },
 			...stores.map((s) => ({
 				value: s.store_id,
 				label: (counts.get(s.display_name) ?? 0) > 1 ? `${s.display_name} (${shortID(s.store_id)})` : s.display_name
@@ -43,12 +43,12 @@
 
 <div class="storeselect" aria-busy={state === 'loading'}>
 	<div class="picker">
-		<SingleSelect id="store-scope" label={arabic() ? 'Store scope / نطاق المتجر' : 'Store scope'} hideLabel testid="store-selector" {value} {options} {onchange} />
+		<SingleSelect id="store-scope" label={msg('storeSelector.storeScope')} hideLabel testid="store-selector" {value} {options} {onchange} />
 	</div>
 	{#if state === 'error'}
-		<span class="storeerror" role="alert">{msgb('storeSelector.storesUnavailable')}</span>
+		<span class="storeerror" role="alert">{msg('storeSelector.storesUnavailable')}</span>
 		<button type="button" class="storeretry btn-secondary btn-sm" data-testid="store-retry" onclick={() => onretry()}>
-			{msgb('storeSelector.retry')}
+			{msg('storeSelector.retry')}
 		</button>
 	{/if}
 </div>

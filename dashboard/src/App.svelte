@@ -30,7 +30,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, subMinor } from './lib/money.js';
-	import { arabic, lang, msg, msgb, setLang, t } from './lib/i18n.svelte.js';
+	import { arabic, lang, msg, setLang, t } from './lib/i18n.svelte.js';
 
 	type WidgetState = 'loading' | 'loaded' | 'empty' | 'error';
 
@@ -461,7 +461,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 			}, (s) => (productsState = s), (n) => (productsErr = n)),
 			done(dashboardApi.categories(params, catKind, breakdownMode, currency === 'all' ? '' : currency, store, signal), (v) => {
 				categories = v.rows.map((r) => ({
-					name: r.name_en ? `${r.name_ar} / ${r.name_en}` : r.name_ar,
+					name: t(r.name_ar, r.name_en || r.name_ar),
 					units: r.units,
 					units_returned: r.units_returned,
 					amount_minor: r.amount_minor,
@@ -601,7 +601,7 @@ let branchContext = $derived.by(() => {
 </script>
 
 {#if authed === null}
-	<div class="muted pad">{msgb('app.loading')}</div>
+	<div class="muted pad">{msg('app.loading')}</div>
 {:else if !authed}
 	<LoginPage stage={pendingStage} onauthenticated={() => void onAuthenticated()} />
 {:else}
@@ -612,7 +612,7 @@ let branchContext = $derived.by(() => {
 				<div class="brandblock">
 					<div class="brandname">MoonLightCloud</div>
 					<h1 class="dash-title">{msg('app.salesDashboard')}</h1>
-					<div class="muted brandsub">Your business insights in one place</div>
+					<div class="muted brandsub">{msg('app.tagline')}</div>
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} range={periodDates} />
@@ -621,7 +621,7 @@ let branchContext = $derived.by(() => {
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if route === 'overview'}
 						<!-- One currency choice for every Overview card. -->
-						<div class="currencyctl" data-testid="currency-mode" role="group" aria-label={msgb('app.currency')} title={msgb('app.currency')}>
+						<div class="currencyctl" data-testid="currency-mode" role="group" aria-label={msg('app.currency')} title={msg('app.currency')}>
 							<Segmented
 								size="sm"
 								options={[
@@ -650,7 +650,7 @@ let branchContext = $derived.by(() => {
 					</button>
 					<button type="button" class="logout" disabled={loggingOut} onclick={logout}>
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
-						{msgb('app.logout')}
+						{msg('app.logout')}
 					</button>
 				</div>
 			</header>

@@ -161,7 +161,7 @@ async function login(page: Page, url = 'login') {
 }
 
 async function openFirstDetail(page: Page) {
-	await page.getByRole('button', { name: /عرض \/ View/ }).first().click();
+	await page.getByRole('button', { name: /عرض الطلب/ }).first().click();
 }
 
 function selector(page: Page) {
@@ -196,7 +196,7 @@ test('logout and login reinitializes the registry', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await expect.poll(() => optionCount(selector(page))).toBe(3);
-	await page.getByRole('button', { name: /خروج \/ Logout/ }).click();
+	await page.getByRole('button', { name: /خروج/ }).click();
 	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible();
 	await login(page);
 	await expect.poll(() => optionCount(selector(page))).toBe(3);

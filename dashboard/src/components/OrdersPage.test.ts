@@ -3,6 +3,8 @@ import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
 import OrdersPage from './OrdersPage.svelte';
 import type { OrderSummary } from '../lib/api.js';
 import { choose } from '../test/choose.js';
+import { setLang } from '../lib/i18n.svelte.js';
+import { tick } from 'svelte';
 
 const order: OrderSummary = {
 	provider_key: 'website',
@@ -53,10 +55,15 @@ const base: {
 
 describe('OrdersPage', () => {
 	afterEach(() => cleanup());
-	it('shows Arabic and English labels', () => {
-		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
+	it('shows the chosen language only', async () => {
+		const { container } = render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect: () => {}, onretry: () => {} } });
 		expect(screen.getByText(/الطلبات عبر الإنترنت/)).toBeTruthy();
+		expect(container.textContent).not.toMatch(/Online Orders|Load more|View/);
+		setLang('en');
+		await tick();
 		expect(screen.getByText(/Online Orders/)).toBeTruthy();
+		expect(container.textContent).not.toContain('الطلبات عبر الإنترنت');
+		setLang('ar');
 	});
 
 	it('renders exact >2^53 money without float loss', () => {
@@ -91,7 +98,7 @@ describe('OrdersPage', () => {
 	it('opens detail on view and closes it', async () => {
 		const onselect = vi.fn();
 		render(OrdersPage, { props: { ...base, onstatus: () => {}, onprovider: () => {}, onloadmore: () => {}, onselect, onretry: () => {} } });
-		await fireEvent.click(screen.getByText(/عرض \/ View/));
+		await fireEvent.click(screen.getByText(/عرض/));
 		expect(onselect).toHaveBeenCalledWith(order);
 	});
 
@@ -146,7 +153,7 @@ describe('OrdersPage pagination', () => {
 
 	it('shows Load more exactly when a cursor exists', () => {
 		render(OrdersPage, { props: pageProps({ nextCursor: 'opaque-token' }) });
-		expect(screen.getByRole('button', { name: /تحميل المزيد \/ Load more/ })).toBeTruthy();
+		expect(screen.getByRole('button', { name: /تحميل المزيد/ })).toBeTruthy();
 	});
 
 	it('hides Load more on the final page', () => {

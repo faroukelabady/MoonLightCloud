@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { arabic, msg, tb } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -44,7 +44,7 @@
 	};
 	function label(code: string): string {
 		const l = labels[code];
-		return l ? tb(l.ar, l.en) : code;
+		return l ? t(l.ar, l.en) : code;
 	}
 	// Provider options come from durable rows only (never invented).
 	let providers = $derived(
@@ -58,18 +58,18 @@
 </script>
 
 <Card ar="صحة الكتالوج (تشخيص)" en="Catalog Health (diagnostics)">
-	<p class="note" role="note">{msg('catalogHealthCard.catalogHealthReflectsCurrentCatalogIntegration')}{#if arabic()}<br /><span class="th-en">Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.</span>{/if}</p>
+	<p class="note" role="note">{msg('catalogHealthCard.catalogHealthReflectsCurrentCatalogIntegration')}</p>
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
 	{:else if data}
-		<div class="filters" role="group" aria-label={arabic() ? 'Provider filter / فلتر المزود' : 'Provider filter'}>
+		<div class="filters" role="group" aria-label={msg('catalogHealthCard.providerFilter')}>
 			<SingleSelect
 				id="health-provider"
-				label={arabic() ? 'المزود / Provider' : 'Provider'}
+				label={msg('catalogHealthCard.provider')}
 				value={provider}
-				options={[{ value: '', label: arabic() ? 'All providers / كل المزودين' : 'All providers' }, ...providers.map((p) => ({ value: p, label: p, dir: 'ltr' as const }))]}
+				options={[{ value: '', label: msg('catalogHealthCard.allProviders') }, ...providers.map((p) => ({ value: p, label: p, dir: 'ltr' as const }))]}
 				onchange={onprovider}
 			/>
 		</div>
@@ -90,10 +90,10 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col">{msg('catalogHealthCard.reason')}{#if arabic()} / <span class="th-en">Reason</span>{/if}</th>
+							<th scope="col">{msg('catalogHealthCard.reason')}</th>
 							<th scope="col">SKU</th>
-							<th scope="col">{msg('catalogHealthCard.product')}{#if arabic()} / <span class="th-en">Product</span>{/if}</th>
-							<th scope="col">{msg('catalogHealthCard.provider')}{#if arabic()} / <span class="th-en">Provider</span>{/if}</th>
+							<th scope="col">{msg('catalogHealthCard.product')}</th>
+							<th scope="col">{msg('catalogHealthCard.provider')}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -110,13 +110,12 @@
 			</div>
 			{#if data.detail_truncated}
 				<p class="note" role="status">
-					{#if arabic()}عرض أول {formatInt(data.detail_limit)} من النتائج / {/if}<span class="th-en">Showing the first {formatInt(data.detail_limit)} rows; summary counts are complete.</span>
+					{msg('catalogHealthCard.truncated', { count: formatInt(data.detail_limit) })}
 				</p>
 			{/if}
 		{/if}
 		<p class="note" role="note">
-			{msg('catalogHealthCard.diagnosticOnlyNoAutoFixRetail')}{#if arabic()}<br />
-			<span class="th-en">Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.</span>{/if}
+			{msg('catalogHealthCard.diagnosticOnlyNoAutoFixRetail')}
 		</p>
 	{/if}
 </Card>
