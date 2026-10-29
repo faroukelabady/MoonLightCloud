@@ -216,6 +216,12 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 		if (me && !me.all_stores && (!store || !me.store_ids.includes(store))) {
 			store = me.store_ids[0] ?? '';
 			window.history.replaceState({}, '', urlFor());
+		} else if (store && storesState === 'loaded' && !stores.some((s) => s.store_id === store)) {
+			// A Store the registry does not list (for example a bookmark from
+			// before a database reset) would show every card empty: fall back
+			// to all Stores instead.
+			store = '';
+			window.history.replaceState({}, '', urlFor());
 		}
 		await reloadAll();
 	}
