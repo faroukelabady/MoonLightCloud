@@ -616,7 +616,7 @@ let branchContext = $derived.by(() => {
 				</div>
 				<div class="periodblock">
 					<PeriodSelector {params} timezone={overview?.timezone ?? 'Africa/Cairo'} onchange={onParams} showTimezone={false} range={periodDates} />
-					<!-- Store above currency, beside the period and its dates. -->
+					<!-- One row: period buttons, dates, Store and currency. -->
 					<div class="scopecol">
 					<StoreSelector {stores} value={store} state={storesState} onchange={onStore} onretry={() => void loadStores()} />
 					{#if route === 'overview'}
@@ -637,7 +637,7 @@ let branchContext = $derived.by(() => {
 					</div>
 				</div>
 				<div class="actorblock">
-					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
+					<div class="actorrow">
 					{#if operatorName}
 						<div class="userchip" data-testid="current-user">
 							<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
@@ -652,6 +652,9 @@ let branchContext = $derived.by(() => {
 						<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
 						{msg('app.logout')}
 					</button>
+					</div>
+					<!-- Second row: the branch context centred, account controls at the end. -->
+					{#if branchContext}<div class="branchctx" title={branchContext}>{branchContext}</div>{/if}
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
@@ -819,17 +822,20 @@ let branchContext = $derived.by(() => {
 		flex-direction: column;
 		gap: 12px;
 	}
+	/* Row 1: brand, then every filter in one line. Row 2: the branch
+	   context centred and the account controls at the end. */
 	.topbar {
-		display: flex;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
 		align-items: center;
-		gap: 16px;
+		gap: 6px 16px;
 		background: var(--surface);
 		border-bottom: 1px solid var(--border);
 		margin: 0 -16px;
 		padding: 10px 16px;
 	}
 	.brandblock {
-		flex-shrink: 0;
+		grid-row: 1 / span 2;
 	}
 	.brandname {
 		font-weight: 700;
@@ -846,22 +852,27 @@ let branchContext = $derived.by(() => {
 		line-height: 1.4;
 	}
 	.periodblock {
-		flex: 1;
+		grid-row: 1;
+		grid-column: 2;
 		min-width: 0;
-		/* F06: keep the period controls and the Store selector on one
-		row when space allows (they wrap only when they genuinely do not
-		fit), so adding the selector never inflates the topbar and pushes
-		the dashboard grid past its density budget. */
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 6px 12px;
+		gap: 6px 8px;
 	}
+	.periodblock :global(.modes button) {
+		padding-inline: 10px;
+	}
+	/* The period selector and the scope column dissolve into this row so
+	   all four controls share one centre line. */
+	.periodblock :global(.periodbar),
 	.scopecol {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 4px;
+		display: contents;
+	}
+	.periodblock :global(.periodbar .err),
+	.periodblock :global(.periodbar .tz) {
+		order: 10;
+		flex-basis: 100%;
 	}
 	.currencyctl {
 		display: inline-flex;
@@ -869,15 +880,29 @@ let branchContext = $derived.by(() => {
 		gap: 6px;
 	}
 	.actorblock {
+		grid-row: 2;
+		grid-column: 2;
+		display: grid;
+		grid-template-columns: 1fr auto 1fr;
+		align-items: center;
+		gap: 10px;
+	}
+	.actorblock .branchctx {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	.actorrow {
+		grid-column: 3;
+		grid-row: 1;
+		justify-self: end;
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		flex-shrink: 0;
 	}
 	.branchctx {
 		font-size: 0.82rem;
 		font-weight: 600;
-		max-width: 120px;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -886,9 +911,7 @@ let branchContext = $derived.by(() => {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 5px 10px;
-		border-radius: 999px;
-		background: var(--primary-soft);
+		padding: 5px 2px;
 		color: var(--text);
 		font-size: 0.82rem;
 		font-weight: 700;
@@ -1037,12 +1060,15 @@ let branchContext = $derived.by(() => {
 		.sidewrap {
 			width: 100%;
 		}
+		/* Phones: brand, filters and account controls stack. */
 		.topbar {
-			flex-wrap: wrap;
+			grid-template-columns: minmax(0, 1fr);
 		}
-		.periodblock {
-			flex-basis: 100%;
-			order: 3;
+		.brandblock,
+		.periodblock,
+		.actorblock {
+			grid-row: auto;
+			grid-column: 1;
 		}
 		.dash > .cell,
 		.dash.ov > .cell {

@@ -112,13 +112,15 @@ Categories & Tags pages are part of it and have no sidebar entries
 (`/dashboard/sales`, `/daily`, `/products` and `/categories` open Overview
 and the address bar is rewritten to `/dashboard/`).
 
-- Top bar: two rows. The period buttons sit above From/To date fields,
-  which always show the applied period's dates and are editable (with
-  Show) only for a custom range. The Store selector (Store names; a short
-  ID only when two Stores share a name) sits above one All / EGP / USD
-  switch that drives every Overview card. The signed-in user is a chip
-  with a person icon; Language is blue and Logout red. Every top-bar
-  control is one height (`--topbar-control-h`) in both languages.
+- Top bar: two rows. The first holds every filter on one centre line:
+  the period buttons, the From/To date fields (always showing the applied
+  period's dates, editable with Show only for a custom range), the Store
+  selector (Store names; a short ID only when two Stores share a name) and
+  one All / EGP / USD switch that drives every Overview card. They fit on
+  one row from 1536 px wide in both languages and wrap below that. The
+  second row centres the branch context and ends with the signed-in user
+  (a person icon and name, no background), Language (blue) and Logout
+  (red). Every top-bar control is one height (`--topbar-control-h`).
 - Logging out removes `store_id` from the address, so the next login
   starts from all Stores (or the user's own Store). A `store_id` the
   loaded registry does not list also falls back to all Stores.
