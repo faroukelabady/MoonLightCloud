@@ -110,6 +110,9 @@ export const dashboardApi = {
 		),
 	adminProduct: (store: string, id: string, s?: AbortSignal) =>
 		get<AdminProductDetail>(`/api/v1/dashboard/catalog-admin/products/${encodeURIComponent(id)}?store_id=${encodeURIComponent(store)}`, s),
+	// Image URL (not a fetch): the hash names the file, so the browser caches it.
+	adminMediaUrl: (store: string, sha256: string) =>
+		`/api/v1/dashboard/catalog-admin/media/${encodeURIComponent(sha256)}?store_id=${encodeURIComponent(store)}`,
 	adminConfigurations: (store: string, id: string, s?: AbortSignal) =>
 		get<{ configurations: AdminConfiguration[] }>(
 			`/api/v1/dashboard/catalog-admin/products/${encodeURIComponent(id)}/configurations?store_id=${encodeURIComponent(store)}`,

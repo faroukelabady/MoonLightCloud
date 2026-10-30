@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adminStoreMediaBlob = `-- name: AdminStoreMediaBlob :one
+SELECT b.sha256, b.content_type, b.content
+FROM media_blobs b
+WHERE b.sha256 = $1
+  AND EXISTS (SELECT 1 FROM catalog_product_media m
+              JOIN catalog_products p ON p.product_id = m.product_id
+              WHERE m.sha256 = b.sha256 AND p.store_id = $2::uuid)
+`
+
+type AdminStoreMediaBlobParams struct {
+	Sha256  string      `json:"sha256"`
+	StoreID pgtype.UUID `json:"store_id"`
+}
+
+type AdminStoreMediaBlobRow struct {
+	Sha256      string `json:"sha256"`
+	ContentType string `json:"content_type"`
+	Content     []byte `json:"content"`
+}
+
+// Dashboard image read: the file must be named by a gallery of a Product
+// the Store owns, so an operator never reads another Store's files.
+func (q *Queries) AdminStoreMediaBlob(ctx context.Context, arg AdminStoreMediaBlobParams) (AdminStoreMediaBlobRow, error) {
+	row := q.db.QueryRow(ctx, adminStoreMediaBlob, arg.Sha256, arg.StoreID)
+	var i AdminStoreMediaBlobRow
+	err := row.Scan(&i.Sha256, &i.ContentType, &i.Content)
+	return i, err
+}
+
 const catalogProductMediaByProduct = `-- name: CatalogProductMediaByProduct :many
 
 SELECT image_id, product_id, variant_id, position, is_primary, sha256,

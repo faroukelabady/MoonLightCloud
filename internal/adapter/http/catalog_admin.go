@@ -422,3 +422,25 @@ func (h *CatalogAdminHandlers) AdminProductTypeDetail(w http.ResponseWriter, r *
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"product_type": row})
 }
+
+// AdminMedia serves GET /api/v1/dashboard/catalog-admin/media/{sha256}
+// (ADR-0056): one product image of the selected Store. The path is the
+// content hash, so the response never changes and caches privately.
+func (h *CatalogAdminHandlers) AdminMedia(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, r, apperr.New(apperr.NotFound, "not found"))
+		return
+	}
+	file, err := h.Svc.AdminMedia(r.Context(), r.URL.Query().Get("store_id"), r.PathValue("sha256"))
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", file.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(file.Content)))
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(file.Content)
+}

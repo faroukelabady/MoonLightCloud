@@ -99,6 +99,9 @@ type AdminProductRow struct {
 	DerivedStock          int64  `json:"derived_stock"`
 	ConfigurationRevision int64  `json:"configuration_revision"`
 	HasPending            bool   `json:"has_pending"`
+	// ThumbnailSHA256 names the list thumbnail (ADR-0056): the first stored
+	// file of the Product gallery, else of a Variant gallery; "" when none.
+	ThumbnailSHA256 string `json:"thumbnail_sha256"`
 }
 
 // AdminProductDetail is the full projection snapshot an editor needs:
@@ -132,6 +135,28 @@ type AdminProductDetail struct {
 	// Variants are the product's Phase 17 SKU/inventory-owning rows with
 	// attributes, prices and last-known stock.
 	Variants []AdminProductVariant `json:"variants"`
+	// Images are the Product gallery and every Variant gallery (ADR-0056),
+	// Product gallery first. Available is false until the file arrives.
+	Images []AdminProductImage `json:"images"`
+}
+
+// AdminProductImage is one gallery entry; VariantID "" is the Product
+// gallery.
+type AdminProductImage struct {
+	ImageID   string `json:"image_id"`
+	VariantID string `json:"variant_id"`
+	Position  int    `json:"position"`
+	IsPrimary bool   `json:"is_primary"`
+	SHA256    string `json:"sha256"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Available bool   `json:"available"`
+}
+
+// AdminMedia is one stored image file served to the operator UI.
+type AdminMedia struct {
+	ContentType string
+	Content     []byte
 }
 
 // AdminCategoryRow is one Store-scoped Category with DAG position.
@@ -244,6 +269,8 @@ type Store interface {
 	// Phase 17-R2 type reads (Store-scoped, projection only).
 	AdminProductTypeList(ctx context.Context, storeID string) ([]AdminProductType, error)
 	AdminProductType(ctx context.Context, storeID, typeID string) (AdminProductType, error)
+	// ADR-0056 image read: only files a gallery of the Store's Products names.
+	AdminMedia(ctx context.Context, storeID, sha256 string) (AdminMedia, error)
 }
 
 // AdminProductType is one projected structural type for the editor:

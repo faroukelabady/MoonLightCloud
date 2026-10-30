@@ -255,3 +255,90 @@ func TestProductMediaCommerceState(t *testing.T) {
 		t.Fatalf("after delete: %+v %v", rows, err)
 	}
 }
+
+// The catalog admin shows galleries and serves their files: the list
+// thumbnail prefers a stored Product-gallery main image over Variant
+// galleries and missing files, and a Store never reads another's files.
+func TestCatalogAdminMedia(t *testing.T) {
+	f := openScopeFixture(t)
+	ctx := context.Background()
+	seq := 0
+	project := func(dev, cred, typ, payload string) {
+		t.Helper()
+		event := fmt.Sprintf("e3d1c000-0000-4000-8000-%012d", seq)
+		seq++
+		f.ingest(t, dev, cred, event, typ, payload)
+		if result := projectCatalogTerminal(t, f, event, typ); result.Outcome != catalog.OutcomeProcessed {
+			t.Fatalf("project %s: %+v", typ, result)
+		}
+	}
+	product := "33333333-0000-4000-8000-0000000000d1"
+	variant := "44444444-0000-4000-8000-0000000000d1"
+	category := "aaaaaaaa-0000-4000-8000-0000000000d2"
+	project(f.devA, f.credA, catalog.EventCategorySnapshotV2,
+		categoryPayload(category, "active", map[string]string{"en": "Root"}, nil, 1))
+	project(f.devA, f.credA, catalog.EventProductSnapshotV2,
+		productPayload(product, "ML-MEDIA-D", "D", category, nil, nil, 1))
+	project(f.devA, f.credA, catalog.EventProductVariantSnapshotV1,
+		variantPayload(variant, product, "ML-MEDIA-D-1", true, false, "", []any{}, 1))
+	project(f.devA, f.credA, catalog.EventProductMediaSnapshotV1, mediaPayload(product, 1,
+		mediaImage("55555555-0000-4000-8000-0000000000d1", nil, 1, false, "1"),
+		mediaImage("55555555-0000-4000-8000-0000000000d2", nil, 0, true, "2"),
+		mediaImage("55555555-0000-4000-8000-0000000000d3", variant, 0, true, "3")))
+
+	admin := NewCatalogAdmin(f.pool, 5*time.Second)
+	blobs := NewMediaBlobs(f.pool, 5*time.Second)
+	store := func(hashByte string) {
+		t.Helper()
+		blob := media.Blob{SHA256: strings.Repeat(hashByte, 64), ContentType: "image/jpeg", ByteSize: 3, Width: 1, Height: 1, Content: []byte(hashByte + "..")}
+		if _, err := blobs.StoreBlob(ctx, blob, f.devA); err != nil {
+			t.Fatal(err)
+		}
+	}
+	thumbnail := func() string {
+		t.Helper()
+		rows, err := admin.AdminProductList(ctx, scopeStoreA, "ML-MEDIA-D", "", 20)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("list: %+v %v", rows, err)
+		}
+		return rows[0].ThumbnailSHA256
+	}
+	if got := thumbnail(); got != "" {
+		t.Fatalf("no file stored yet, thumbnail %q", got)
+	}
+	store("3")
+	if got := thumbnail(); got != strings.Repeat("3", 64) {
+		t.Fatalf("only the variant file arrived, thumbnail %q", got)
+	}
+	store("1")
+	if got := thumbnail(); got != strings.Repeat("1", 64) {
+		t.Fatalf("product gallery beats variant gallery, thumbnail %q", got)
+	}
+	store("2")
+	if got := thumbnail(); got != strings.Repeat("2", 64) {
+		t.Fatalf("main image first, thumbnail %q", got)
+	}
+
+	detail, err := admin.AdminProductDetail(ctx, scopeStoreA, product)
+	if err != nil || len(detail.Images) != 3 {
+		t.Fatalf("detail images: %+v %v", detail.Images, err)
+	}
+	if first := detail.Images[0]; first.VariantID != "" || !first.IsPrimary || !first.Available {
+		t.Fatalf("product gallery main image first: %+v", first)
+	}
+	if last := detail.Images[2]; last.VariantID != variant {
+		t.Fatalf("variant gallery entry: %+v", last)
+	}
+
+	file, err := admin.AdminMedia(ctx, scopeStoreA, strings.Repeat("2", 64))
+	if err != nil || file.ContentType != "image/jpeg" || string(file.Content) != "2.." {
+		t.Fatalf("own file: %+v %v", file, err)
+	}
+	if _, err := admin.AdminMedia(ctx, scopeStoreB, strings.Repeat("2", 64)); err == nil {
+		t.Fatal("another Store read the file")
+	}
+	store("9")
+	if _, err := admin.AdminMedia(ctx, scopeStoreA, strings.Repeat("9", 64)); err == nil {
+		t.Fatal("a file no gallery names was served")
+	}
+}

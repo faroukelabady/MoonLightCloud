@@ -31,6 +31,7 @@ type stubCatalogStore struct {
 	bound       map[string][]catalogadmin.BoundDevice
 	owner       map[string]string // entity -> store
 	rev         map[string]int64
+	media       map[string]catalogadmin.AdminMedia // store + "/" + sha256 -> file
 }
 
 func errNotFoundStub() error {
@@ -193,6 +194,14 @@ func (s *stubCatalogStore) AdminProductTypeList(_ context.Context, _ string) ([]
 
 func (s *stubCatalogStore) AdminProductType(_ context.Context, _, _ string) (catalogadmin.AdminProductType, error) {
 	return catalogadmin.AdminProductType{}, errNotFoundStub()
+}
+
+func (s *stubCatalogStore) AdminMedia(_ context.Context, storeID, sha256 string) (catalogadmin.AdminMedia, error) {
+	file, ok := s.media[storeID+"/"+sha256]
+	if !ok {
+		return catalogadmin.AdminMedia{}, errNotFoundStub()
+	}
+	return file, nil
 }
 
 func (s *stubCatalogStore) SetCommandResultEntity(_ context.Context, _, _ string) error {
@@ -529,4 +538,32 @@ func (s *stubCatalogStore) CatalogAdminDeviceStates(_ context.Context, deviceIDs
 		out[id] = state
 	}
 	return out, nil
+}
+
+// Product images are served by content hash for the selected Store only,
+// as an image the browser caches and never runs.
+func TestCatalogAdminMediaServesStoreFile(t *testing.T) {
+	handlers, stub, _, storeID, _ := catalogAdminTestSetup()
+	hash := strings.Repeat("a", 64)
+	stub.media = map[string]catalogadmin.AdminMedia{storeID + "/" + hash: {ContentType: "image/png", Content: []byte("png")}}
+	get := func(store, sha string) *httptest.ResponseRecorder {
+		req := ownerRequest(http.MethodGet, "/api/v1/dashboard/catalog-admin/media/"+sha+"?store_id="+store, nil)
+		req.SetPathValue("sha256", sha)
+		rec := httptest.NewRecorder()
+		handlers.AdminMedia(rec, req)
+		return rec
+	}
+	rec := get(storeID, hash)
+	if rec.Code != http.StatusOK || rec.Body.String() != "png" || rec.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("own file: %d %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(rec.Header().Get("Cache-Control"), "private") {
+		t.Fatalf("headers: %v", rec.Header())
+	}
+	if rec := get(uuid.NewString(), hash); rec.Code != http.StatusNotFound {
+		t.Fatalf("another Store: %d", rec.Code)
+	}
+	if rec := get(storeID, "../etc"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad hash: %d", rec.Code)
+	}
 }

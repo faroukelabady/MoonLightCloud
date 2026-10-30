@@ -215,6 +215,10 @@ func (s *fakeStore) AdminProductType(_ context.Context, _, _ string) (AdminProdu
 	return AdminProductType{}, errFakeNotFound()
 }
 
+func (s *fakeStore) AdminMedia(_ context.Context, _, _ string) (AdminMedia, error) {
+	return AdminMedia{}, errFakeNotFound()
+}
+
 func (s *fakeStore) SetCommandResultEntity(_ context.Context, targetID, entityID string) error {
 	s.resultSet = append(s.resultSet, [2]string{targetID, entityID})
 	for cmdID, list := range s.targets {

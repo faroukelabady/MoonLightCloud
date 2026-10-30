@@ -39,6 +39,7 @@ func (d CatalogAdmin) AdminProductList(ctx context.Context, storeID, search, cur
 			DerivedStock:          row.DerivedStock,
 			ConfigurationRevision: row.ConfigurationRevision,
 			HasPending:            row.HasPending,
+			ThumbnailSHA256:       row.ThumbnailSha256,
 		})
 	}
 	return out, nil
@@ -127,7 +128,37 @@ func (d CatalogAdmin) AdminProductDetail(ctx context.Context, storeID, productID
 		return catalogadmin.AdminProductDetail{}, catalogAdminErr(err)
 	}
 	detail.HasPending = pending
+	media, err := q.CatalogProductMediaForCommerce(ctx, puid)
+	if err != nil {
+		return catalogadmin.AdminProductDetail{}, catalogAdminErr(err)
+	}
+	detail.Images = make([]catalogadmin.AdminProductImage, 0, len(media))
+	for _, m := range media {
+		detail.Images = append(detail.Images, catalogadmin.AdminProductImage{
+			ImageID: uuidString(m.ImageID), VariantID: uuidString(m.VariantID),
+			Position: int(m.Position), IsPrimary: m.IsPrimary, SHA256: m.Sha256,
+			Width: int(m.Width), Height: int(m.Height), Available: m.Available,
+		})
+	}
 	return detail, nil
+}
+
+// AdminMedia reads one stored image for the operator UI, only when a
+// gallery of one of the Store's Products names it (else NotFound).
+func (d CatalogAdmin) AdminMedia(ctx context.Context, storeID, sha256 string) (catalogadmin.AdminMedia, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	suid, err := parseUUID(storeID)
+	if err != nil {
+		return catalogadmin.AdminMedia{}, err
+	}
+	row, err := sqlcgen.New(d.pool).AdminStoreMediaBlob(ctx, sqlcgen.AdminStoreMediaBlobParams{
+		Sha256: sha256, StoreID: suid,
+	})
+	if err != nil {
+		return catalogadmin.AdminMedia{}, catalogAdminErr(err)
+	}
+	return catalogadmin.AdminMedia{ContentType: row.ContentType, Content: row.Content}, nil
 }
 
 // AdminCategoryList serves the Store-scoped tree rows.

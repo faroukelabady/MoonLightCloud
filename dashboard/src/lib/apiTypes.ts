@@ -461,6 +461,21 @@ export interface AdminProductRow {
 	derived_stock: number;
 	configuration_revision: number;
 	has_pending: boolean;
+	// ADR-0056: list thumbnail file ("" when no image has arrived).
+	thumbnail_sha256?: string;
+}
+
+// One gallery entry; variant_id "" is the Product gallery. available is
+// false until Retail has uploaded the file.
+export interface AdminProductImage {
+	image_id: string;
+	variant_id: string;
+	position: number;
+	is_primary: boolean;
+	sha256: string;
+	width: number;
+	height: number;
+	available: boolean;
 }
 
 export interface AdminProductDetail extends AdminProductRow {
@@ -479,6 +494,7 @@ export interface AdminProductDetail extends AdminProductRow {
 	// Phase 17: SKU/inventory-owning variant rows (variant rows carry the
 	// SKU; product rows carry the derived rollup only).
 	variants?: AdminProductVariant[];
+	images?: AdminProductImage[];
 }
 
 export interface AdminProductVariantAttribute {

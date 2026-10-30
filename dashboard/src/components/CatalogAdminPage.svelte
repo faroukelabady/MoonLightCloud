@@ -20,7 +20,7 @@
 	import { dashboardApi, ApiError } from '../lib/api.js';
 	import { decimalToMinor, formatMinor, minorToDecimal } from '../lib/money.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
-	import type { AdminProductRow, AdminProductDetail, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration, AdminPermissions } from '../lib/api.js';
+	import type { AdminProductRow, AdminProductDetail, AdminProductImage, AdminProductVariant, AdminCategoryRow, AdminTagRow, AdminCommand, AdminProductType, AdminConfiguration, AdminPermissions } from '../lib/api.js';
 
 	// CatalogAdminPage: the Cloud command/control surface for catalog
 	// state. It edits nothing directly: every Save persists a typed,
@@ -191,6 +191,7 @@
 			const v = await dashboardApi.adminProduct(store, id);
 			if (my !== epoch || request !== requests.openProduct) return;
 			selectedProduct = v;
+			previewImage = null;
 			try {
 				const cfgs = await dashboardApi.adminConfigurations(store, id);
 				if (my !== epoch || request !== requests.openProduct) return;
@@ -239,6 +240,49 @@
 	// Frame choices are shared and edited in Retail (ADR-049 1g); Cloud
 	// shows the product's projected choices read-only.
 	let configurations: AdminConfiguration[] = $state([]);
+
+	// Images (ADR-0056) are edited in Retail; Cloud shows the Product
+	// gallery and each Variant gallery read-only, main image first.
+	let previewImage = $state<string | null>(null);
+	type Gallery = { key: string; label: string; images: AdminProductImage[] };
+	const galleryOrder = (a: AdminProductImage, b: AdminProductImage) => Number(b.is_primary) - Number(a.is_primary) || a.position - b.position;
+
+	function mediaUrl(sha256: string): string {
+		return dashboardApi.adminMediaUrl(store, sha256);
+	}
+
+	function variantLabel(v: AdminProductVariant): string {
+		return v.attributes.map((a) => pick(a.name_ar, a.name_en)).join(' · ') || v.sku;
+	}
+
+	function galleries(p: AdminProductDetail): Gallery[] {
+		const images = p.images ?? [];
+		const out: Gallery[] = [];
+		const own = images.filter((i) => !i.variant_id).sort(galleryOrder);
+		if (own.length > 0) out.push({ key: 'product', label: k('productGallery'), images: own });
+		for (const v of p.variants ?? []) {
+			const rows = images.filter((i) => i.variant_id === v.variant_id).sort(galleryOrder);
+			if (rows.length > 0) out.push({ key: v.variant_id, label: variantLabel(v), images: rows });
+		}
+		return out;
+	}
+
+	// variantThumbnail is the first arrived file of one Variant gallery.
+	function variantThumbnail(p: AdminProductDetail, variantId: string): string | undefined {
+		return (p.images ?? []).filter((i) => i.variant_id === variantId && i.available).sort(galleryOrder)[0]?.sha256;
+	}
+
+	function shownImage(list: Gallery[]): { image: AdminProductImage; label: string } | null {
+		for (const g of list) {
+			const found = g.images.find((i) => i.image_id === previewImage && i.available);
+			if (found) return { image: found, label: g.label };
+		}
+		for (const g of list) {
+			const first = g.images.find((i) => i.available);
+			if (first) return { image: first, label: g.label };
+		}
+		return null;
+	}
 
 	// ---- categories ----
 	let categories: AdminCategoryRow[] = $state([]);
@@ -446,6 +490,7 @@
 		permissionsState = 'loading';
 		productState = 'idle';
 		configurations = [];
+		previewImage = null;
 		products = [];
 		productCursor = null;
 		selectedProduct = null;
@@ -486,6 +531,10 @@
 {/snippet}
 {#snippet pending(on: boolean)}
 	{#if on}<span class="pill pending">{k('pendingChange')}</span>{:else}<span class="muted">—</span>{/if}
+{/snippet}
+{#snippet thumb(sha256: string | undefined)}
+	{#if sha256}<img class="thumb" src={mediaUrl(sha256)} alt="" loading="lazy" decoding="async" />
+	{:else}<span class="thumb empty" aria-hidden="true"></span>{/if}
 {/snippet}
 {#snippet closeButton(onclose: () => void)}
 	<button type="button" class="close" aria-label={k('close')} onclick={onclose}>×</button>
@@ -548,7 +597,7 @@
 								{#each products as p (p.product_id)}
 									<tr class:selected={selectedProduct?.product_id === p.product_id}>
 										<td class="num">{variantSummary(p)}</td>
-										<td><button type="button" class="link" onclick={() => void openProduct(p.product_id)}>{pick(p.name_ar, p.name_en)}</button></td>
+										<td><span class="name-cell">{@render thumb(p.thumbnail_sha256)}<button type="button" class="link" onclick={() => void openProduct(p.product_id)}>{pick(p.name_ar, p.name_en)}</button></span></td>
 										<td>{@render yesNo(p.sell_online)}</td>
 										<td>{@render pending(p.has_pending)}</td>
 									</tr>
@@ -565,6 +614,8 @@
 				{/if}
 				{#if selectedProduct}
 					{@const p = selectedProduct}
+					{@const productGalleries = galleries(p)}
+					{@const shown = shownImage(productGalleries)}
 					<section class="detail" aria-label={k('productEditor')}>
 						<header class="detail-head">
 							<h3>{pick(p.name_ar, p.name_en)} <span class="muted num">{variantSummary(p)}</span></h3>
@@ -576,13 +627,46 @@
 							<div><dt>{k('configurationRevision')}</dt><dd class="num" dir="ltr">{p.configuration_revision}</dd></div>
 							<div><dt>{k('derivedStock')}</dt><dd class="num" dir="ltr">{p.derived_stock}</dd></div>
 						</dl>
+						<h4>{k('images')}</h4>
+						<p class="muted">{k('imagesReadOnly')}</p>
+						{#if productGalleries.length === 0}<p class="muted">{k('noImages')}</p>
+						{:else}
+							<div class="gallery" data-testid="product-images">
+								{#if shown}
+									<figure class="preview">
+										<img src={mediaUrl(shown.image.sha256)} alt={`${pick(p.name_ar, p.name_en)} — ${shown.label}`} width={shown.image.width} height={shown.image.height} />
+										<figcaption class="muted">{shown.label}{shown.image.is_primary ? ` · ${k('mainImage')}` : ''} <span class="num" dir="ltr">{shown.image.width}×{shown.image.height}</span></figcaption>
+									</figure>
+								{/if}
+								{#each productGalleries as g (g.key)}
+									<div class="strip">
+										<span class="strip-label">{g.label}</span>
+										<ul>
+											{#each g.images as img, i (img.image_id)}
+												<li>
+													{#if img.available}
+														<button type="button" class="tile" class:current={shown?.image.image_id === img.image_id} aria-pressed={shown?.image.image_id === img.image_id} aria-label={`${g.label} — ${k('image')} ${i + 1}`} onclick={() => (previewImage = img.image_id)}>
+															<img src={mediaUrl(img.sha256)} alt="" loading="lazy" decoding="async" />
+															{#if img.is_primary}<span class="main-badge">{k('mainImage')}</span>{/if}
+														</button>
+													{:else}
+														<span class="tile waiting" title={k('imageWaiting')}>{k('imageWaiting')}</span>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									</div>
+								{/each}
+							</div>
+						{/if}
 						{#if p.variants && p.variants.length > 0}
 							<h4>{k('variants')}</h4>
 							<table class="data">
-								<thead><tr><th>{k('sku')}</th><th>{k('option')}</th><th>{k('stock')}</th><th>{k('state')}</th></tr></thead>
+								<thead><tr><th><span class="sr-only">{k('image')}</span></th><th>{k('sku')}</th><th>{k('option')}</th><th>{k('stock')}</th><th>{k('state')}</th></tr></thead>
 								<tbody>
 									{#each p.variants as v (v.variant_id)}
 										<tr>
+											<td class="thumb-cell">{@render thumb(variantThumbnail(p, v.variant_id))}</td>
 											<td class="num" dir="ltr">{v.sku}</td>
 											<td>{v.attributes.map((a) => `${pick(a.definition_name_ar, a.definition_name_en)}: ${pick(a.name_ar, a.name_en)}`).join(' · ') || '—'}</td>
 											<td class="num" dir="ltr">{v.stock_quantity}</td>
@@ -967,5 +1051,22 @@
 	.mfa-dialog h3 { margin: 0; font-size: 1rem; }
 	.mfa-dialog p { margin: 0; }
 	.mfa-dialog input { font-size: 1.25rem; letter-spacing: 0.3em; text-align: center; padding: 0.4rem; }
+	.name-cell { display: inline-flex; align-items: center; gap: 0.5rem; }
+	.thumb { flex: none; width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--surface-muted); border: 1px solid var(--border); display: inline-block; }
+	.thumb-cell { width: 36px; }
+	.gallery { display: flex; flex-direction: column; gap: 0.6rem; }
+	.preview { margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+	.preview img { max-width: 100%; max-height: 320px; width: auto; height: auto; object-fit: contain; align-self: flex-start; border-radius: var(--radius-control); border: 1px solid var(--border); background: var(--surface-muted); }
+	.preview figcaption { font-size: 0.78rem; }
+	.strip { display: flex; flex-direction: column; gap: 0.25rem; }
+	.strip-label { font-size: 0.76rem; font-weight: 700; color: var(--text-muted); }
+	.strip ul { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+	.tile { position: relative; width: 64px; height: 64px; padding: 0; border: 2px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-muted); cursor: pointer; display: grid; place-items: center; }
+	.tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+	.tile.current { border-color: var(--primary); }
+	.tile:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+	.tile.waiting { cursor: default; font-size: 0.62rem; text-align: center; color: var(--text-muted); padding: 0.2rem; border-style: dashed; }
+	.main-badge { position: absolute; inset-inline-start: 2px; bottom: 2px; padding: 0 4px; border-radius: 4px; background: rgb(15 23 42 / 0.7); color: #fff; font-size: 0.6rem; font-weight: 700; }
+	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	@media (max-width: 1100px) { .split.has-detail { grid-template-columns: minmax(0, 1fr); } }
 </style>

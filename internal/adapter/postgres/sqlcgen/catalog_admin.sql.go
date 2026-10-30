@@ -260,7 +260,14 @@ SELECT p.product_id, p.name_ar,
         JOIN catalog_admin_command_targets t ON t.command_id = c.id
         WHERE c.store_id = $1::uuid AND c.entity_id = p.product_id::text
           AND c.status = 'pending' AND t.status IN ('pending','delivered')
-    ) AS has_pending
+    ) AS has_pending,
+    -- ADR-0056: the list thumbnail is the first stored file, Product gallery
+    -- (main image first) before any Variant gallery.
+    COALESCE((SELECT m.sha256 FROM catalog_product_media m
+              JOIN media_blobs b ON b.sha256 = m.sha256
+              WHERE m.product_id = p.product_id
+              ORDER BY m.variant_id IS NOT NULL, m.is_primary DESC, m.position, m.variant_id
+              LIMIT 1), '')::text AS thumbnail_sha256
 FROM catalog_products p
 LEFT JOIN catalog_product_sales_policies s ON s.product_id = p.product_id
 LEFT JOIN catalog_product_types product_type ON product_type.type_id = p.product_type_id
@@ -299,6 +306,7 @@ type AdminProductListRow struct {
 	DerivedStock          int64       `json:"derived_stock"`
 	ConfigurationRevision int64       `json:"configuration_revision"`
 	HasPending            bool        `json:"has_pending"`
+	ThumbnailSha256       string      `json:"thumbnail_sha256"`
 }
 
 // Admin catalog reads: Store-scoped projection lists for the operator.
@@ -337,6 +345,7 @@ func (q *Queries) AdminProductList(ctx context.Context, arg AdminProductListPara
 			&i.DerivedStock,
 			&i.ConfigurationRevision,
 			&i.HasPending,
+			&i.ThumbnailSha256,
 		); err != nil {
 			return nil, err
 		}

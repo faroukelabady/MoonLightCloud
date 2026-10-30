@@ -103,6 +103,22 @@ adapter uses the file model instead:
 - Every image mutation goes through the existing mutation barrier and
   settles under the same definitive-outcome rule.
 
+## Catalog admin display (2026-10-30)
+
+Operators see the images in the dashboard catalog admin, read-only:
+
+- The product list carries `thumbnail_sha256`: the first stored file of the
+  Product gallery (main image first), else of a Variant gallery.
+- The product detail carries `images`: every gallery entry, Product gallery
+  first, with `available` false until the file arrives. The page shows the
+  Product gallery and each Variant gallery, and each variant row shows its
+  main image.
+- `GET /api/v1/dashboard/catalog-admin/media/{sha256}?store_id=` serves
+  a file to an operator with catalog read access, only when a gallery of one
+  of that Store's Products names it. It is cached privately (the hash never
+  changes) and served with `nosniff` and a sandboxing CSP. Files are served
+  as stored; there are no resized thumbnails yet.
+
 ## Consequences
 
 - One more catalog stream and processor (`allProjectionProcessors`, the
@@ -112,7 +128,7 @@ adapter uses the file model instead:
   `00112_baseline`; Retail `100001_baseline`, renamed per Retail ADR-049):
   every development database is recreated.
 - Blobs that no snapshot references any more stay in `media_blobs` until a
-  later clean-up job; they are never served to anyone but Cloud itself.
+  later clean-up job; they are never served to devices or shoppers, and operators only see files a gallery of their Store names.
 - Threat model: a device can store at most 5 MiB per request and only files
   that decode as images; uploads are authenticated, never public, and the
   bytes are never logged.

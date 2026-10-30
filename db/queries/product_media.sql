@@ -68,3 +68,13 @@ ON CONFLICT (product_id) DO UPDATE SET
     next_attempt_at = now(),
     attempts = 0,
     last_error_code = NULL;
+
+-- name: AdminStoreMediaBlob :one
+-- Dashboard image read: the file must be named by a gallery of a Product
+-- the Store owns, so an operator never reads another Store's files.
+SELECT b.sha256, b.content_type, b.content
+FROM media_blobs b
+WHERE b.sha256 = @sha256
+  AND EXISTS (SELECT 1 FROM catalog_product_media m
+              JOIN catalog_products p ON p.product_id = m.product_id
+              WHERE m.sha256 = b.sha256 AND p.store_id = @store_id::uuid);

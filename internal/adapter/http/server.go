@@ -136,6 +136,7 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/product-types/{id}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminProductTypeDetail))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/categories", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminCategories))
 		mux.Handle("GET /api/v1/dashboard/catalog-admin/tags", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminTags))
+		mux.Handle("GET /api/v1/dashboard/catalog-admin/media/{sha256}", g(humanauth.PermCatalogRead, ScopeQuery, catalogAdmin.AdminMedia))
 	}
 	// Phase 20 R2 recovery protocol: device-authenticated continuity
 	// verification after a Cloud restore. Registered whenever the

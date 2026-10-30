@@ -5,7 +5,7 @@ import { dashboardApi, ApiError } from '../lib/api.js';
 import { setLang } from '../lib/i18n.svelte.js';
 vi.mock('../lib/api.js', async (orig) => {
  const m = await orig() as Record<string, unknown>;
- return {...m,dashboardApi:{adminProducts:vi.fn(),adminCategories:vi.fn(),adminTags:vi.fn(),adminCommands:vi.fn(),adminProduct:vi.fn(),adminConfigurations:vi.fn(),adminProductTypes:vi.fn(),adminProductType:vi.fn(),adminCreateCommand:vi.fn(),adminCommand:vi.fn(),adminPermissions:vi.fn()}};
+ return {...m,dashboardApi:{adminProducts:vi.fn(),adminCategories:vi.fn(),adminTags:vi.fn(),adminCommands:vi.fn(),adminProduct:vi.fn(),adminConfigurations:vi.fn(),adminProductTypes:vi.fn(),adminProductType:vi.fn(),adminCreateCommand:vi.fn(),adminCommand:vi.fn(),adminPermissions:vi.fn(),adminMediaUrl:vi.fn()}};
 });
 const api=dashboardApi as unknown as Record<string,ReturnType<typeof vi.fn>>;
 // The editor shows one language; most tests read the English labels.
@@ -223,4 +223,25 @@ it('explains a change the shop refused in Cloud', async()=>{
  render(CatalogAdminPage,{store:'store-A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
  await fireEvent.click(await screen.findByRole('button',{name:'Disable online selling'}));
  expect(await screen.findByText(/The shop does not allow Cloud to make this change/)).toBeTruthy();
+});
+it('shows product and variant images with list thumbnails (ADR-0056)', async()=>{
+ defaults();api.adminMediaUrl.mockImplementation((store:string,sha:string)=>`/media/${store}/${sha}`);
+ api.adminProducts.mockResolvedValue({products:[{...productRow('pic'),thumbnail_sha256:'main'},productRow('bare')],next_cursor:''});
+ const img=(id:string,variant:string,position:number,primary:boolean,sha:string,available=true)=>({image_id:id,variant_id:variant,position,is_primary:primary,sha256:sha,width:800,height:600,available});
+ api.adminProduct.mockResolvedValue({...productDetail('pic'),images:[img('i2','',1,false,'second'),img('i1','',0,true,'main'),img('i3','v-pic',0,true,'red'),img('i4','v-pic',1,false,'late',false)]});
+ api.adminConfigurations.mockResolvedValue({configurations:[]});
+ const {container}=render(CatalogAdminPage,{store:'A'});
+ await screen.findByText('Product pic');
+ const listThumbs=[...container.querySelectorAll('table.data img.thumb')].map(e=>e.getAttribute('src'));
+ expect(listThumbs).toEqual(['/media/A/main']);
+ expect(container.querySelectorAll('table.data span.thumb.empty').length).toBe(1);
+ await fireEvent.click(screen.getByRole('button',{name:'Product pic'}));
+ const gallery=await screen.findByTestId('product-images');
+ // The Product gallery's main image is shown first; the Variant gallery is labelled by its SKU.
+ expect(gallery.querySelector('figure img')?.getAttribute('src')).toBe('/media/A/main');
+ expect(screen.getByText('Waiting for upload')).toBeTruthy();
+ await fireEvent.click(screen.getByRole('button',{name:'SKU-pic — Image 1'}));
+ expect(gallery.querySelector('figure img')?.getAttribute('src')).toBe('/media/A/red');
+ // The variant row carries its own main image.
+ expect([...container.querySelectorAll('td.thumb-cell img')].map(e=>e.getAttribute('src'))).toEqual(['/media/A/red']);
 });

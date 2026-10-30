@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/catalog"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
 )
 
@@ -639,6 +640,18 @@ func (s *Service) AdminProductVariants(ctx context.Context, storeID, productID s
 		return nil, apperr.New(apperr.InvalidInput, "invalid product id")
 	}
 	return s.store.AdminProductVariants(ctx, strings.TrimSpace(storeID), strings.TrimSpace(productID))
+}
+
+// AdminMedia returns one product image file for the operator UI (ADR-0056).
+// Files no gallery of the Store names are NotFound, never another Store's.
+func (s *Service) AdminMedia(ctx context.Context, storeID, sha256 string) (AdminMedia, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(storeID)); err != nil {
+		return AdminMedia{}, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	if !catalog.ValidSHA256(sha256) {
+		return AdminMedia{}, apperr.New(apperr.InvalidInput, "invalid sha256")
+	}
+	return s.store.AdminMedia(ctx, strings.TrimSpace(storeID), sha256)
 }
 
 // AdminCategories lists the Store-scoped Category tree rows.

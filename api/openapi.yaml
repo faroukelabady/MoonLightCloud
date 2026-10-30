@@ -846,6 +846,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/catalog-admin/media/{sha256}:
+    get:
+      summary: One product image of the Store (ADR-0056)
+      operationId: catalogAdminMedia
+      description: >-
+        Serves a file only when a gallery of one of the Store's Products names
+        it. The path is the content hash, so responses are cached privately
+        and never change. Served with nosniff and a sandboxing CSP.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/StoreScope'
+        - name: sha256
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: The image bytes.
+          content:
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/png:
+              schema: {type: string, format: binary}
+        '400':
+          description: Invalid store_id or sha256.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid operator session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No gallery of this Store names the file, or it has not arrived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/dashboard/catalog-admin/product-types:
     get:
       summary: Store-scoped ProductType rows with dimensions and capabilities
@@ -5211,6 +5259,7 @@ components:
               derived_stock: {type: integer, format: int64, description: 'SUM of active, non-tombstoned variant stock. Derived only; never authoritative.'}
               configuration_revision: {type: integer}
               has_pending: {type: boolean}
+              thumbnail_sha256: {type: string, description: 'ADR-0056 list thumbnail: the first stored file of the Product gallery (main image first), else of a Variant gallery; empty when no file has arrived. Read it from /api/v1/dashboard/catalog-admin/media/{sha256}.'}
         next_cursor:
           type: string
           description: Keyset cursor for the next page. Empty on the final page.
@@ -5254,6 +5303,23 @@ components:
           description: Phase 17 SKU/inventory-owning variants with attributes, prices and stock.
           items:
             $ref: '#/components/schemas/CatalogAdminProductVariant'
+        images:
+          type: array
+          description: ADR-0056 galleries, read-only (edited in Retail). Product gallery entries have an empty variant_id; available is false until Retail uploads the file.
+          items:
+            $ref: '#/components/schemas/CatalogAdminProductImage'
+    CatalogAdminProductImage:
+      type: object
+      required: [image_id, variant_id, position, is_primary, sha256, width, height, available]
+      properties:
+        image_id: {type: string, format: uuid}
+        variant_id: {type: string, description: Empty for the Product gallery.}
+        position: {type: integer}
+        is_primary: {type: boolean}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        width: {type: integer}
+        height: {type: integer}
+        available: {type: boolean}
     CatalogAdminProductVariantList:
       type: object
       required: [variants]
