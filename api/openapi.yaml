@@ -851,8 +851,9 @@ paths:
       summary: One product image of the Store (ADR-0056)
       operationId: catalogAdminMedia
       description: >-
-        Serves a file only when a gallery of one of the Store's Products names
-        it. The path is the content hash, so responses are cached privately
+        Serves a file only when it is stored and a gallery of one of the
+        Store's Products names it. Bytes come from object storage (ADR-0057)
+        and must match the recorded size and SHA-256. The path is the content hash, so responses are cached privately
         and never change. Served with nosniff and a sandboxing CSP.
       security:
         - dashboardSession: []
@@ -890,6 +891,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: No gallery of this Store names the file, or it has not arrived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Object storage is unavailable, or the stored object is missing or no longer matches its recorded hash.
           content:
             application/json:
               schema:
@@ -1226,7 +1233,7 @@ paths:
   /api/v1/sync/media/{sha256}:
     put:
       summary: Upload one Retail product image by its SHA-256
-      description: ADR-0056. Content-addressed and idempotent - the first upload stores the file, a repeat answers already_stored. The body must hash to the path, decode as the declared format and stay within 20,000,000 pixels. Gallery state travels separately as catalog.product.media.snapshot.v1.
+      description: ADR-0056 and ADR-0057. Content-addressed and idempotent - the first upload stores the file, a repeat answers already_stored. The body must hash to the path, decode as the declared format and stay within 20,000,000 pixels. Gallery state travels separately as catalog.product.media.snapshot.v1. The bytes are written to object storage (a private R2 bucket; a local directory in development) before the PostgreSQL record is committed and the success response is sent. PostgreSQL never stores the bytes.
       operationId: syncMediaUpload
       security:
         - deviceAuth: []
@@ -1250,13 +1257,13 @@ paths:
               format: binary
       responses:
         '200':
-          description: The file was already stored.
+          description: The file was already stored; its object was written again.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MediaUploadResult'
         '201':
-          description: The file was stored.
+          description: The file was stored in object storage and recorded.
           content:
             application/json:
               schema:
@@ -1287,6 +1294,18 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: The body does not match the hash (message MEDIA_HASH_MISMATCH) or is not a valid image of the declared type (message INVALID_MEDIA). Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Cloud could not commit the image. Retry with the same hash and bytes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Object storage is unavailable. Nothing is recorded. Retry with the same hash and bytes.
           content:
             application/json:
               schema:

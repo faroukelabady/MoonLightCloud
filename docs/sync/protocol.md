@@ -238,3 +238,7 @@ curl -X POST localhost:8080/api/v1/sync/batches \
   }]}'
 # → {"events":[{"event_id":"...","status":"accepted"}]}
 ```
+
+### Image bytes in object storage (ADR-0057)
+
+The unchanged media upload route validates the bytes, writes the object (private R2 bucket; a local directory in development), then commits the PostgreSQL record and re-evaluation before returning 200/201. PostgreSQL never stores the bytes. R2 failures return retryable 503; there is no direct Retail-to-R2 upload. Same-hash retries are safe. See [R2 operations](../operations/r2-media.md) and [ADR-0057](../decisions/0057-r2-media-uploads.md).

@@ -31,7 +31,7 @@ type stubCatalogStore struct {
 	bound       map[string][]catalogadmin.BoundDevice
 	owner       map[string]string // entity -> store
 	rev         map[string]int64
-	media       map[string]catalogadmin.AdminMedia // store + "/" + sha256 -> file
+	media       map[string]bool // store + "/" + sha256 -> a gallery of the Store names the file
 }
 
 func errNotFoundStub() error {
@@ -196,8 +196,15 @@ func (s *stubCatalogStore) AdminProductType(_ context.Context, _, _ string) (cat
 	return catalogadmin.AdminProductType{}, errNotFoundStub()
 }
 
-func (s *stubCatalogStore) AdminMedia(_ context.Context, storeID, sha256 string) (catalogadmin.AdminMedia, error) {
-	file, ok := s.media[storeID+"/"+sha256]
+func (s *stubCatalogStore) AdminMediaAllowed(_ context.Context, storeID, sha256 string) (bool, error) {
+	return s.media[storeID+"/"+sha256], nil
+}
+
+// stubImages serves image bytes by hash.
+type stubImages map[string]catalogadmin.AdminMedia
+
+func (s stubImages) ReadImage(_ context.Context, sha256 string) (catalogadmin.AdminMedia, error) {
+	file, ok := s[sha256]
 	if !ok {
 		return catalogadmin.AdminMedia{}, errNotFoundStub()
 	}
@@ -545,7 +552,8 @@ func (s *stubCatalogStore) CatalogAdminDeviceStates(_ context.Context, deviceIDs
 func TestCatalogAdminMediaServesStoreFile(t *testing.T) {
 	handlers, stub, _, storeID, _ := catalogAdminTestSetup()
 	hash := strings.Repeat("a", 64)
-	stub.media = map[string]catalogadmin.AdminMedia{storeID + "/" + hash: {ContentType: "image/png", Content: []byte("png")}}
+	stub.media = map[string]bool{storeID + "/" + hash: true}
+	handlers.Svc.SetImageReader(stubImages{hash: {ContentType: "image/png", Content: []byte("png")}})
 	get := func(store, sha string) *httptest.ResponseRecorder {
 		req := ownerRequest(http.MethodGet, "/api/v1/dashboard/catalog-admin/media/"+sha+"?store_id="+store, nil)
 		req.SetPathValue("sha256", sha)

@@ -7,13 +7,13 @@ import (
 
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres/sqlcgen"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
-	"github.com/faroukelabady/MoonLightCloud/internal/commerce"
 	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// MediaBlobs stores ADR-0056 image bytes in media_blobs.
+// MediaBlobs records ADR-0056 image files in media_blobs. The bytes live in
+// object storage (ADR-0057); a row means the file is stored there.
 type MediaBlobs struct {
 	pool    *pgxpool.Pool
 	timeout time.Duration
@@ -42,7 +42,7 @@ func (d MediaBlobs) StoreBlob(ctx context.Context, blob media.Blob, deviceID str
 	q := sqlcgen.New(tx)
 	rows, err := q.InsertMediaBlob(ctx, sqlcgen.InsertMediaBlobParams{
 		Sha256: blob.SHA256, ContentType: blob.ContentType, ByteSize: int32(blob.ByteSize),
-		Width: int32(blob.Width), Height: int32(blob.Height), Content: blob.Content, UploadedByDevice: device,
+		Width: int32(blob.Width), Height: int32(blob.Height), UploadedByDevice: device,
 	})
 	if err != nil {
 		return false, reportErr("media store", err)
@@ -58,22 +58,19 @@ func (d MediaBlobs) StoreBlob(ctx context.Context, blob media.Blob, deviceID str
 	return rows == 1, nil
 }
 
-// MediaContent reads one stored file for an online channel upload. Only
-// Cloud reads blobs; they are never served to devices or shoppers.
-func (d MediaBlobs) MediaContent(ctx context.Context, sha256 string) (commerce.MediaContent, error) {
+// BlobInfo reads one stored file's record (no bytes).
+func (d MediaBlobs) BlobInfo(ctx context.Context, sha256 string) (media.Blob, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	row, err := sqlcgen.New(d.pool).MediaBlobContent(ctx, sha256)
+	row, err := sqlcgen.New(d.pool).MediaBlobInfo(ctx, sha256)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return commerce.MediaContent{}, apperr.New(apperr.NotFound, "media file not stored")
+			return media.Blob{}, apperr.New(apperr.NotFound, "media file not stored")
 		}
-		return commerce.MediaContent{}, reportErr("media read", err)
+		return media.Blob{}, reportErr("media read", err)
 	}
-	return commerce.MediaContent{SHA256: row.Sha256, ContentType: row.ContentType, Bytes: row.Content}, nil
+	return media.Blob{SHA256: row.Sha256, ContentType: row.ContentType, ByteSize: int(row.ByteSize),
+		Width: int(row.Width), Height: int(row.Height)}, nil
 }
 
-var (
-	_ media.Repository            = MediaBlobs{}
-	_ commerce.MediaContentReader = MediaBlobs{}
-)
+var _ media.Repository = MediaBlobs{}

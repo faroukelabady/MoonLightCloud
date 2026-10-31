@@ -11,33 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const adminStoreMediaBlob = `-- name: AdminStoreMediaBlob :one
-SELECT b.sha256, b.content_type, b.content
-FROM media_blobs b
-WHERE b.sha256 = $1
-  AND EXISTS (SELECT 1 FROM catalog_product_media m
+const adminStoreMediaAllowed = `-- name: AdminStoreMediaAllowed :one
+SELECT EXISTS (
+    SELECT 1 FROM media_blobs b
+    WHERE b.sha256 = $1
+      AND EXISTS (SELECT 1 FROM catalog_product_media m
               JOIN catalog_products p ON p.product_id = m.product_id
               WHERE m.sha256 = b.sha256 AND p.store_id = $2::uuid)
+)::boolean AS allowed
 `
 
-type AdminStoreMediaBlobParams struct {
+type AdminStoreMediaAllowedParams struct {
 	Sha256  string      `json:"sha256"`
 	StoreID pgtype.UUID `json:"store_id"`
 }
 
-type AdminStoreMediaBlobRow struct {
-	Sha256      string `json:"sha256"`
-	ContentType string `json:"content_type"`
-	Content     []byte `json:"content"`
-}
-
-// Dashboard image read: the file must be named by a gallery of a Product
-// the Store owns, so an operator never reads another Store's files.
-func (q *Queries) AdminStoreMediaBlob(ctx context.Context, arg AdminStoreMediaBlobParams) (AdminStoreMediaBlobRow, error) {
-	row := q.db.QueryRow(ctx, adminStoreMediaBlob, arg.Sha256, arg.StoreID)
-	var i AdminStoreMediaBlobRow
-	err := row.Scan(&i.Sha256, &i.ContentType, &i.Content)
-	return i, err
+// Dashboard image read: the file must be stored and named by a gallery of a
+// Product the Store owns, so an operator never reads another Store's files.
+func (q *Queries) AdminStoreMediaAllowed(ctx context.Context, arg AdminStoreMediaAllowedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, adminStoreMediaAllowed, arg.Sha256, arg.StoreID)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
 }
 
 const catalogProductMediaByProduct = `-- name: CatalogProductMediaByProduct :many
@@ -273,8 +268,8 @@ func (q *Queries) InsertCatalogProductMedia(ctx context.Context, arg InsertCatal
 }
 
 const insertMediaBlob = `-- name: InsertMediaBlob :execrows
-INSERT INTO media_blobs (sha256, content_type, byte_size, width, height, content, uploaded_by_device)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO media_blobs (sha256, content_type, byte_size, width, height, uploaded_by_device)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (sha256) DO NOTHING
 `
 
@@ -284,11 +279,11 @@ type InsertMediaBlobParams struct {
 	ByteSize         int32       `json:"byte_size"`
 	Width            int32       `json:"width"`
 	Height           int32       `json:"height"`
-	Content          []byte      `json:"content"`
 	UploadedByDevice pgtype.UUID `json:"uploaded_by_device"`
 }
 
-// First upload wins; a repeat of the same hash is the same bytes.
+// First upload wins; a repeat of the same hash is the same bytes. The row is
+// written only after the object store holds the file (ADR-0057).
 func (q *Queries) InsertMediaBlob(ctx context.Context, arg InsertMediaBlobParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertMediaBlob,
 		arg.Sha256,
@@ -296,7 +291,6 @@ func (q *Queries) InsertMediaBlob(ctx context.Context, arg InsertMediaBlobParams
 		arg.ByteSize,
 		arg.Width,
 		arg.Height,
-		arg.Content,
 		arg.UploadedByDevice,
 	)
 	if err != nil {
@@ -305,30 +299,28 @@ func (q *Queries) InsertMediaBlob(ctx context.Context, arg InsertMediaBlobParams
 	return result.RowsAffected(), nil
 }
 
-const mediaBlobContent = `-- name: MediaBlobContent :one
-SELECT sha256, content_type, byte_size, width, height, content
+const mediaBlobInfo = `-- name: MediaBlobInfo :one
+SELECT sha256, content_type, byte_size, width, height
 FROM media_blobs WHERE sha256 = $1
 `
 
-type MediaBlobContentRow struct {
+type MediaBlobInfoRow struct {
 	Sha256      string `json:"sha256"`
 	ContentType string `json:"content_type"`
 	ByteSize    int32  `json:"byte_size"`
 	Width       int32  `json:"width"`
 	Height      int32  `json:"height"`
-	Content     []byte `json:"content"`
 }
 
-func (q *Queries) MediaBlobContent(ctx context.Context, sha256 string) (MediaBlobContentRow, error) {
-	row := q.db.QueryRow(ctx, mediaBlobContent, sha256)
-	var i MediaBlobContentRow
+func (q *Queries) MediaBlobInfo(ctx context.Context, sha256 string) (MediaBlobInfoRow, error) {
+	row := q.db.QueryRow(ctx, mediaBlobInfo, sha256)
+	var i MediaBlobInfoRow
 	err := row.Scan(
 		&i.Sha256,
 		&i.ContentType,
 		&i.ByteSize,
 		&i.Width,
 		&i.Height,
-		&i.Content,
 	)
 	return i, err
 }

@@ -215,8 +215,8 @@ func (s *fakeStore) AdminProductType(_ context.Context, _, _ string) (AdminProdu
 	return AdminProductType{}, errFakeNotFound()
 }
 
-func (s *fakeStore) AdminMedia(_ context.Context, _, _ string) (AdminMedia, error) {
-	return AdminMedia{}, errFakeNotFound()
+func (s *fakeStore) AdminMediaAllowed(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
 }
 
 func (s *fakeStore) SetCommandResultEntity(_ context.Context, targetID, entityID string) error {

@@ -94,3 +94,7 @@ See `.env.example` (placeholders only, never commit secrets):
 Start at `docs/architecture/overview.md`, then `docs/decisions/README.md`,
 `docs/security/threat-model.md`, `docs/sync/protocol.md`. Engineering rules
 in `AGENTS.md`.
+
+## Product images in R2
+
+Product image bytes live in a private Cloudflare R2 bucket (required in staging/production; development defaults to a local directory). PostgreSQL records which files arrived. Credentials stay on Cloud. See [R2 setup and rollback](docs/operations/r2-media.md).

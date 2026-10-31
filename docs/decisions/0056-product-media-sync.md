@@ -56,7 +56,9 @@ uploads).
    `media_blobs` to know whether the file has arrived.
    `GET /api/v1/sync/capabilities` advertises `media_upload: true` and
    `max_media_bytes`.
-4. **Blobs live in PostgreSQL** (`bytea`). At the expected scale (500–1,000
+4. **Blobs live in PostgreSQL** (`bytea`). *Superseded by ADR-0057 (31 October
+   2026): the bytes now live in object storage (R2) and `media_blobs` keeps
+   only the record of each stored file.* At the expected scale (500–1,000
    SKUs, a few images each) this is a few GB at most, it is covered by the
    existing database backups and restore, needs no shared volume between
    Cloud instances, and stays transactional. The blob table is only read by
@@ -132,3 +134,7 @@ Operators see the images in the dashboard catalog admin, read-only:
 - Threat model: a device can store at most 5 MiB per request and only files
   that decode as images; uploads are authenticated, never public, and the
   bytes are never logged.
+
+## R2 upload extension (31 October 2026)
+
+[ADR-0057](0057-r2-media-uploads.md) moves the bytes to a private R2 bucket (a local directory in development). PostgreSQL keeps the record of each stored file; the dashboard and Shopify read the object and verify it against that record. Retail’s upload contract and credentials do not change.

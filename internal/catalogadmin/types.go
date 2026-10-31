@@ -159,6 +159,11 @@ type AdminMedia struct {
 	Content     []byte
 }
 
+// ImageReader reads one stored file's verified bytes (ADR-0057).
+type ImageReader interface {
+	ReadImage(ctx context.Context, sha256 string) (AdminMedia, error)
+}
+
 // AdminCategoryRow is one Store-scoped Category with DAG position.
 type AdminCategoryRow struct {
 	CategoryID      string   `json:"category_id"`
@@ -269,8 +274,9 @@ type Store interface {
 	// Phase 17-R2 type reads (Store-scoped, projection only).
 	AdminProductTypeList(ctx context.Context, storeID string) ([]AdminProductType, error)
 	AdminProductType(ctx context.Context, storeID, typeID string) (AdminProductType, error)
-	// ADR-0056 image read: only files a gallery of the Store's Products names.
-	AdminMedia(ctx context.Context, storeID, sha256 string) (AdminMedia, error)
+	// ADR-0056 image scope: true only when the file is stored and a gallery of
+	// one of the Store's Products names it.
+	AdminMediaAllowed(ctx context.Context, storeID, sha256 string) (bool, error)
 }
 
 // AdminProductType is one projected structural type for the editor:

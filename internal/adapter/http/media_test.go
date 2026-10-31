@@ -13,10 +13,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/filemedia"
+	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/media"
 )
 
 type memoryBlobs map[string]media.Blob
+
+func (m memoryBlobs) BlobInfo(_ context.Context, hash string) (media.Blob, error) {
+	blob, ok := m[hash]
+	if !ok {
+		return media.Blob{}, apperr.New(apperr.NotFound, "media file not stored")
+	}
+	return blob, nil
+}
 
 func (m memoryBlobs) StoreBlob(_ context.Context, blob media.Blob, _ string) (bool, error) {
 	if _, ok := m[blob.SHA256]; ok {
@@ -35,7 +45,11 @@ func TestMediaUploadRoute(t *testing.T) {
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
 	mux := http.NewServeMux()
-	mux.Handle("PUT /api/v1/sync/media/{sha256}", MediaUpload(media.NewService(memoryBlobs{})))
+	objects, err := filemedia.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux.Handle("PUT /api/v1/sync/media/{sha256}", MediaUpload(media.NewService(memoryBlobs{}, objects)))
 	put := func(path, contentType string, body []byte, device bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", contentType)

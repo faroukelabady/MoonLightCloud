@@ -469,10 +469,15 @@ func openCommerceEnv(stderr io.Writer) (*commerceEnv, error) {
 		return nil, err
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
+	mediaSvc, err := app.NewMediaService(cfg.Media, postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout))
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &commerceEnv{
 		pool:           pool,
 		store:          store,
-		productService: app.NewCommerceService(store, postgres.NewCatalogProjection(pool, cfg.DBQueryTimeout), postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout), registry, logger),
+		productService: app.NewCommerceService(store, postgres.NewCatalogProjection(pool, cfg.DBQueryTimeout), app.MediaContentReader(mediaSvc), registry, logger),
 		registry:       registry,
 		orderService:   orders.NewOrderService(registry, postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout), logger),
 	}, nil

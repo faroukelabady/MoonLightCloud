@@ -143,22 +143,22 @@ func (d CatalogAdmin) AdminProductDetail(ctx context.Context, storeID, productID
 	return detail, nil
 }
 
-// AdminMedia reads one stored image for the operator UI, only when a
-// gallery of one of the Store's Products names it (else NotFound).
-func (d CatalogAdmin) AdminMedia(ctx context.Context, storeID, sha256 string) (catalogadmin.AdminMedia, error) {
+// AdminMediaAllowed reports whether the operator UI may read one image: the
+// file is stored and a gallery of one of the Store's Products names it.
+func (d CatalogAdmin) AdminMediaAllowed(ctx context.Context, storeID, sha256 string) (bool, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := parseUUID(storeID)
 	if err != nil {
-		return catalogadmin.AdminMedia{}, err
+		return false, err
 	}
-	row, err := sqlcgen.New(d.pool).AdminStoreMediaBlob(ctx, sqlcgen.AdminStoreMediaBlobParams{
+	allowed, err := sqlcgen.New(d.pool).AdminStoreMediaAllowed(ctx, sqlcgen.AdminStoreMediaAllowedParams{
 		Sha256: sha256, StoreID: suid,
 	})
 	if err != nil {
-		return catalogadmin.AdminMedia{}, catalogAdminErr(err)
+		return false, catalogAdminErr(err)
 	}
-	return catalogadmin.AdminMedia{ContentType: row.ContentType, Content: row.Content}, nil
+	return allowed, nil
 }
 
 // AdminCategoryList serves the Store-scoped tree rows.

@@ -719,7 +719,6 @@ type MediaBlob struct {
 	ByteSize         int32              `json:"byte_size"`
 	Width            int32              `json:"width"`
 	Height           int32              `json:"height"`
-	Content          []byte             `json:"content"`
 	UploadedByDevice pgtype.UUID        `json:"uploaded_by_device"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }

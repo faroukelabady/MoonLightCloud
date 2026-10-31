@@ -30,13 +30,14 @@ UPDATE catalog_products SET media_revision = $2 WHERE product_id = $1;
 SELECT media_revision FROM catalog_products WHERE product_id = $1;
 
 -- name: InsertMediaBlob :execrows
--- First upload wins; a repeat of the same hash is the same bytes.
-INSERT INTO media_blobs (sha256, content_type, byte_size, width, height, content, uploaded_by_device)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- First upload wins; a repeat of the same hash is the same bytes. The row is
+-- written only after the object store holds the file (ADR-0057).
+INSERT INTO media_blobs (sha256, content_type, byte_size, width, height, uploaded_by_device)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (sha256) DO NOTHING;
 
--- name: MediaBlobContent :one
-SELECT sha256, content_type, byte_size, width, height, content
+-- name: MediaBlobInfo :one
+SELECT sha256, content_type, byte_size, width, height
 FROM media_blobs WHERE sha256 = $1;
 
 -- name: MediaBlobsPresent :many
@@ -69,12 +70,13 @@ ON CONFLICT (product_id) DO UPDATE SET
     attempts = 0,
     last_error_code = NULL;
 
--- name: AdminStoreMediaBlob :one
--- Dashboard image read: the file must be named by a gallery of a Product
--- the Store owns, so an operator never reads another Store's files.
-SELECT b.sha256, b.content_type, b.content
-FROM media_blobs b
-WHERE b.sha256 = @sha256
-  AND EXISTS (SELECT 1 FROM catalog_product_media m
+-- name: AdminStoreMediaAllowed :one
+-- Dashboard image read: the file must be stored and named by a gallery of a
+-- Product the Store owns, so an operator never reads another Store's files.
+SELECT EXISTS (
+    SELECT 1 FROM media_blobs b
+    WHERE b.sha256 = @sha256
+      AND EXISTS (SELECT 1 FROM catalog_product_media m
               JOIN catalog_products p ON p.product_id = m.product_id
-              WHERE m.sha256 = b.sha256 AND p.store_id = @store_id::uuid);
+              WHERE m.sha256 = b.sha256 AND p.store_id = @store_id::uuid)
+)::boolean AS allowed;

@@ -212,11 +212,11 @@ func TestProductMediaCommerceState(t *testing.T) {
 	if images, err = read.GetProductMedia(ctx, product); err != nil || !images[0].Available {
 		t.Fatalf("after upload: %+v %v", images, err)
 	}
-	content, err := blobs.MediaContent(ctx, sha)
-	if err != nil || content.ContentType != "image/jpeg" || len(content.Bytes) != 3 {
-		t.Fatalf("content: %+v %v", content, err)
+	info, err := blobs.BlobInfo(ctx, sha)
+	if err != nil || info.ContentType != "image/jpeg" || info.ByteSize != 3 || info.Content != nil {
+		t.Fatalf("info: %+v %v", info, err)
 	}
-	if _, err := blobs.MediaContent(ctx, strings.Repeat("0", 64)); err == nil {
+	if _, err := blobs.BlobInfo(ctx, strings.Repeat("0", 64)); err == nil {
 		t.Fatal("missing file read succeeded")
 	}
 
@@ -330,15 +330,25 @@ func TestCatalogAdminMedia(t *testing.T) {
 		t.Fatalf("variant gallery entry: %+v", last)
 	}
 
-	file, err := admin.AdminMedia(ctx, scopeStoreA, strings.Repeat("2", 64))
-	if err != nil || file.ContentType != "image/jpeg" || string(file.Content) != "2.." {
-		t.Fatalf("own file: %+v %v", file, err)
+	allowed := func(storeID, hashByte string) bool {
+		t.Helper()
+		ok, err := admin.AdminMediaAllowed(ctx, storeID, strings.Repeat(hashByte, 64))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
 	}
-	if _, err := admin.AdminMedia(ctx, scopeStoreB, strings.Repeat("2", 64)); err == nil {
-		t.Fatal("another Store read the file")
+	if !allowed(scopeStoreA, "2") {
+		t.Fatal("own stored file refused")
+	}
+	if allowed(scopeStoreB, "2") {
+		t.Fatal("another Store may read the file")
+	}
+	if allowed(scopeStoreA, "4") {
+		t.Fatal("a file that was never stored is allowed")
 	}
 	store("9")
-	if _, err := admin.AdminMedia(ctx, scopeStoreA, strings.Repeat("9", 64)); err == nil {
-		t.Fatal("a file no gallery names was served")
+	if allowed(scopeStoreA, "9") {
+		t.Fatal("a file no gallery names is allowed")
 	}
 }

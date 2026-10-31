@@ -30,10 +30,18 @@ func setReportingToken(t *testing.T) {
 // 0x4d). It is never a valid production key.
 var testMFAKey = base64.StdEncoding.EncodeToString([]byte("MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM"))
 
-// TestMain gives every test the required MFA key so cases focus on other
-// settings; the auth matrix below overrides it.
+// TestMain gives every test the required MFA key and a synthetic R2 image
+// store (required outside development) so cases focus on other settings;
+// the auth and media tests override them.
 func TestMain(m *testing.M) {
 	_ = os.Setenv("AUTH_MFA_ENCRYPTION_KEY", testMFAKey)
+	for k, v := range map[string]string{
+		"MEDIA_STORAGE": "r2", "R2_ENDPOINT": "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+		"R2_BUCKET": "moonlight-media-test", "R2_ACCESS_KEY_ID": "synthetic-access-key",
+		"R2_SECRET_ACCESS_KEY": "synthetic-secret-access-key-0123456789",
+	} {
+		_ = os.Setenv(k, v)
+	}
 	for _, name := range legacyDashboardEnv {
 		_ = os.Unsetenv(name)
 	}

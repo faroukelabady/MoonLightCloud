@@ -2302,15 +2302,15 @@ CREATE UNIQUE INDEX catalog_product_media_one_primary
     WHERE is_primary;
 CREATE INDEX idx_catalog_product_media_sha256 ON catalog_product_media (sha256);
 
--- Uploaded image bytes, keyed by their SHA-256. Durable Cloud state (not a
--- projection): a rebuild keeps it, and only Cloud itself reads it.
+-- Uploaded image files, keyed by their SHA-256 (ADR-0057). The bytes live in
+-- object storage under that hash; a row means the file is stored there.
+-- Durable Cloud state (not a projection): a rebuild keeps it.
 CREATE TABLE media_blobs (
     sha256             TEXT PRIMARY KEY CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     content_type       TEXT NOT NULL CHECK (content_type IN ('image/jpeg', 'image/png')),
     byte_size          INT NOT NULL CHECK (byte_size BETWEEN 1 AND 5242880),
     width              INT NOT NULL CHECK (width > 0),
     height             INT NOT NULL CHECK (height > 0),
-    content            BYTEA NOT NULL CHECK (octet_length(content) = byte_size),
     uploaded_by_device UUID NOT NULL REFERENCES devices (id),
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );

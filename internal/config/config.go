@@ -171,6 +171,7 @@ type Config struct {
 	// to the baked-in assets path. Absent assets yield dashboard 404s;
 	// the API is unaffected.
 	DashboardAssetsDir string
+	Media              MediaConfig
 	// envExplicit records whether ENVIRONMENT was set. Missing-environment
 	// defaults still apply for other settings, but never grant open access.
 	envExplicit   bool
@@ -275,6 +276,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	c.Operations = ops
+	c.Media, err = loadMediaConfig()
+	if err != nil {
+		return Config{}, err
+	}
 	for _, name := range legacyDashboardEnv {
 		if strings.TrimSpace(os.Getenv(name)) != "" {
 			c.legacyDashboardSet = name
@@ -310,6 +315,9 @@ func (c *Config) Validate() error {
 	case EnvDevelopment, EnvStaging, EnvProduction:
 	default:
 		return fmt.Errorf("invalid ENVIRONMENT %q: want development|staging|production", c.Environment)
+	}
+	if err := c.Media.resolve(c.Environment); err != nil {
+		return err
 	}
 	if strings.TrimSpace(c.HTTPAddr) == "" {
 		return fmt.Errorf("HTTP_ADDR is required")

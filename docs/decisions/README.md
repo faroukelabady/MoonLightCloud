@@ -59,6 +59,8 @@ Concise, irreversible-or-important choices only.
 - [0055](0055-pre-production-database-baseline.md) — pre-production database baseline and schema conventions (Accepted 2026-10-17; with MoonLightRetail ADR-049)
 - [0056](0056-product-media-sync.md) — product media sync: Retail images in Cloud (gallery snapshot stream + content-addressed uploads) and on Shopify
 
+- [0057](0057-r2-media-uploads.md) — product image bytes in private R2 object storage (local directory in development); PostgreSQL keeps the file record only
+
 ## Phase numbering gaps
 
 The ADR sequence is not one-per-phase. These are intentional, not missing files:

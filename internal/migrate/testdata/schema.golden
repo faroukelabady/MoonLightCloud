@@ -544,7 +544,6 @@ media_blobs.content_type text NOT NULL
 media_blobs.byte_size int4 NOT NULL
 media_blobs.width int4 NOT NULL
 media_blobs.height int4 NOT NULL
-media_blobs.content bytea NOT NULL
 media_blobs.uploaded_by_device uuid NOT NULL
 media_blobs.created_at timestamptz NOT NULL DEFAULT now()
 notification_delivery_status_history.notification_id uuid NOT NULL
@@ -1644,8 +1643,6 @@ exchange_rates exchange_rates_rate_microrate_check CHECK ((rate_microrate > 0))
 exchange_rates exchange_rates_rate_microrate_not_null NOT NULL rate_microrate
 media_blobs media_blobs_byte_size_check CHECK (((byte_size >= 1) AND (byte_size <= 5242880)))
 media_blobs media_blobs_byte_size_not_null NOT NULL byte_size
-media_blobs media_blobs_check CHECK ((octet_length(content) = byte_size))
-media_blobs media_blobs_content_not_null NOT NULL content
 media_blobs media_blobs_content_type_check CHECK ((content_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text])))
 media_blobs media_blobs_content_type_not_null NOT NULL content_type
 media_blobs media_blobs_created_at_not_null NOT NULL created_at

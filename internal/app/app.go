@@ -27,7 +27,6 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/dashboard"
 	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"github.com/faroukelabady/MoonLightCloud/internal/humanauth"
-	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/migrate"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications/telegram"
@@ -126,6 +125,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	mediaSvc, err := NewMediaService(cfg.Media, postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout))
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	log.Info("media storage configured", "storage", cfg.Media.Storage)
 	hasher, err := auth.NewHasher(cfg.Pepper)
 	if err != nil {
 		pool.Close()
@@ -230,7 +235,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		// the exact same CommerceService the manual CLI uses. The store
 		// doubles as the durable queue; no provider I/O runs in any
 		// projection transaction.
-		a.CommerceService = NewCommerceService(commerceStore, catalogStore, postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout), a.CommerceRegistry, log)
+		a.CommerceService = NewCommerceService(commerceStore, catalogStore, MediaContentReader(mediaSvc), a.CommerceRegistry, log)
 		a.ReevaluationWorker = commerce.NewReevaluationWorker(commerceStore, a.CommerceService, a.CommerceRegistry, time.Now, log)
 	}
 	a.Log.Info("commerce providers", "count", a.CommerceRegistry.Count(),
@@ -339,6 +344,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	// is per-request via dashboard session / device credential, and
 	// commands only flow to capable bound devices.
 	catalogAdminSvc := catalogadmin.NewService(postgres.NewCatalogAdmin(pool, cfg.DBQueryTimeout), catalogAdminDevices{stores: storeRegistry, auth: a.Devices})
+	catalogAdminSvc.SetImageReader(mediaReaders{mediaSvc})
 	catalogAdminHandlers := &adapterhttp.CatalogAdminHandlers{Svc: catalogAdminSvc, Log: log,
 		StepUp: humanAuthSvc, ClientIP: humanAuth.ClientIP}
 	// Phase 20 R2: Cloud-restore recovery protocol. Durable state so a
@@ -382,7 +388,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	a.Handler = adapterhttp.Router(log, a.Health, a.Version, a.Devices, a.Sync, a.notifyProjectors,
 		adapterhttp.NewReportHandlers(a.Reports, log), cfg.ReportingToken,
-		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, settingsHandlers, media.NewService(postgres.NewMediaBlobs(pool, cfg.DBQueryTimeout)), cfg.DashboardAssetsDir)
+		humanAuth, dashData, dashOrders, commerceWebhooks, shopifyWebhooks, notificationWebhooks, ctlHandlers, dashDevices, opsHandlers, storeRegistry, catalogAdminHandlers, updateHandlers, syncRecoveryHandlers, settingsHandlers, mediaSvc, cfg.DashboardAssetsDir)
 	if err := a.VerifySchema(ctx); err != nil {
 		pool.Close()
 		return nil, err

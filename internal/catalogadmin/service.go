@@ -40,6 +40,7 @@ type NewCommand struct {
 type Service struct {
 	store   Store
 	devices DeviceDirectory
+	images  ImageReader
 }
 
 // NewService wires the admin command service.
@@ -651,8 +652,19 @@ func (s *Service) AdminMedia(ctx context.Context, storeID, sha256 string) (Admin
 	if !catalog.ValidSHA256(sha256) {
 		return AdminMedia{}, apperr.New(apperr.InvalidInput, "invalid sha256")
 	}
-	return s.store.AdminMedia(ctx, strings.TrimSpace(storeID), sha256)
+	allowed, err := s.store.AdminMediaAllowed(ctx, strings.TrimSpace(storeID), sha256)
+	if err != nil {
+		return AdminMedia{}, err
+	}
+	if !allowed || s.images == nil {
+		return AdminMedia{}, apperr.New(apperr.NotFound, CodeEntityNotFound)
+	}
+	return s.images.ReadImage(ctx, sha256)
 }
+
+// SetImageReader wires the object-storage reader for AdminMedia. Without it
+// no image is served.
+func (s *Service) SetImageReader(images ImageReader) { s.images = images }
 
 // AdminCategories lists the Store-scoped Category tree rows.
 func (s *Service) AdminCategories(ctx context.Context, storeID string) ([]AdminCategoryRow, error) {

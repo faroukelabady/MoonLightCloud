@@ -64,7 +64,11 @@ for _ in $(seq 60); do podman exec "$PG" pg_isready -U cloud >/dev/null 2>&1 && 
 sleep 2
 ENVS=(-e ENVIRONMENT=production -e "DATABASE_URL=postgres://cloud:$PGPW@$PG:5432/cloud?sslmode=disable"
   -e "DEVICE_SECRET_PEPPER=$(head -c 32 /dev/urandom | base64 -w0)" -e STORE_TIMEZONE=Africa/Cairo
-  -e "REPORTING_API_TOKEN=$(rand 32)" -e "AUTH_MFA_ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64 -w0)")
+  -e "REPORTING_API_TOKEN=$(rand 32)" -e "AUTH_MFA_ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64 -w0)"
+  # Production requires R2 (ADR-0057). Synthetic and never contacted: startup
+  # does no network I/O and the dashboard suite uploads no images.
+  -e MEDIA_STORAGE=r2 -e R2_ENDPOINT=https://00000000000000000000000000000000.r2.cloudflarestorage.com
+  -e R2_BUCKET=moonlight-e2e -e "R2_ACCESS_KEY_ID=$(rand 32)" -e "R2_SECRET_ACCESS_KEY=$(rand 64)")
 podman run --rm --network "$NET" "${ENVS[@]}" "$IMG" migrate up >/dev/null
 podman run -d --name "$APP" --network "$NET" -p "127.0.0.1:$HTTP_PORT:8080" "${ENVS[@]}" "$IMG" serve >/dev/null
 HTTP="http://127.0.0.1:$HTTP_PORT"

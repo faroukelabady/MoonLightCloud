@@ -37,3 +37,6 @@ dashboard/playwright-report/
 
 # Generated development credentials (scripts/dev-up.sh)
 /.dev-credentials
+
+# Development-only local image store (MEDIA_STORAGE=local, ADR-0057)
+/.media/

@@ -28,7 +28,7 @@ is solved for features that do not exist yet.
 | DB outage during ingestion | No ACK before commit; all-or-nothing batches; 503 retryable |
 | Report-delivery misuse from the dashboard (sending business totals to an attacker-chosen number) | Settings mutations need `settings.manage`, an all-Stores principal, a FULL (MFA) session and CSRF; recipients are read back masked (last four characters); provider credentials stay in the server environment and never reach the database or the dashboard |
 | A stolen or misused dashboard session changing prices or the catalog in the shop | The shop decides in Retail what Cloud may change (online selling on; product details and prices, and catalog structure off by default) and Retail rejects anything else with no business write. Cloud refuses to queue a change no Store device allows. Product, price and catalog changes need a fresh authenticator code per change (throttled, single-use TOTP step, audited as `auth.mfa.step_up`; recovery codes not accepted). Limitation: online-selling changes need only the FULL session |
-| Product image upload abuse (a device filling storage or planting a non-image) | Device auth on every upload; one file of at most 5 MiB per request; the body must hash to its path and decode as JPEG or PNG within 20,000,000 pixels; blobs are never served publicly: only Cloud itself and signed-in operators with catalog read access to a Store whose galleries name the file (served with nosniff and a sandboxing CSP) and bytes are never logged. Limitation: an authenticated device can still store many distinct valid images; orphaned blobs are kept until a later clean-up job (ADR-0056) |
+| Product image upload abuse (a device filling storage or planting a non-image) | Device auth on every upload; one file of at most 5 MiB per request; the body must hash to its path and decode as JPEG or PNG within 20,000,000 pixels; files are never served publicly: only Cloud itself and signed-in operators with catalog read access to a Store whose galleries name the file (served with nosniff and a sandboxing CSP), and bytes are never logged. Limitation: an authenticated device can still store many distinct valid images; orphaned objects are kept until a later clean-up job (ADR-0056, ADR-0057) |
 | Product images sent to Shopify (bytes leaking elsewhere, the access token reaching a third party, MoonLight deleting shop owners' photos) | Stored bytes are re-hashed before upload; the staged target must be HTTPS, redirects are refused and the Shopify access token is never sent to it; only media recorded in `commerce_media_mappings` is reordered, set on variants or deleted, and only on products whose `moonlight` ownership metafields match. Limitation: the staged target host is whatever Shopify returns (not allow-listed); a lost `fileCreate` response leaves the product behind the usual mutation barrier (ADR-0056) |
 
 ## Future (documented, not yet mitigated)
@@ -65,3 +65,19 @@ and the [operator procedure](../operations/shopify.md).
 Barrier records contain identifiers, a request fingerprint and bounded state,
 never credentials or raw request bodies. The design deliberately trades
 automatic recovery availability for prevention of uncertain mutation replay.
+
+## R2 image uploads (ADR-0057)
+
+| Threat | Current mitigation and limitation |
+|---|---|
+| R2 credentials reach Retail or the browser | Only Cloud runtime environment holds static S3 credentials. No presigned/direct-upload URL or public bucket is introduced. Env files are Git- and image-build-ignored. |
+| Untrusted uploads consume object storage or select arbitrary keys | Existing device authentication precedes image validation; only bounded JPEG/PNG bytes with matching SHA-256 reach R2. Keys derive from the validated hash. Authenticated-device storage quotas remain future work. |
+| Endpoint injection or signed credential forwarding | Require an exact HTTPS Cloudflare R2 account host; reject paths, ports, userinfo, queries and fragments. Refuse redirects; use explicit static credentials with no AWS metadata/default-chain fallback. |
+| Partial external/database failure loses an image or creates duplicate identity | Require a successful object write before the PostgreSQL record and ACK, so a recorded file always has an object; retry the same hash/key. Do not compensate with deletion. Failed requests can leave unreferenced private objects. |
+| A tampered, truncated or swapped object reaches the dashboard or Shopify | Every read checks the object's size and SHA-256 against the PostgreSQL record and refuses a mismatch (503); reads stop at 5 MiB + 1 byte. |
+| Images stored on a deployed Cloud's own disk | `MEDIA_STORAGE=local` is refused outside development; staging/production refuse to start without R2. |
+| SDK errors disclose signed request details | Return fixed retryable application errors; raw SDK errors and credentials are neither returned nor logged. Request deadline and two-attempt SDK retry budget bound failure. |
+
+The bucket is the only copy of the image bytes: database backups no longer
+contain them. Losing the bucket loses images until a Retail resync re-uploads
+the files Retail still holds; keep the token scoped and public access off.
