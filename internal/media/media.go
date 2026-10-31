@@ -124,3 +124,25 @@ func (s Service) Read(ctx context.Context, hash string) (Blob, error) {
 	blob.Content = data
 	return blob, nil
 }
+
+// Prober is implemented by object stores that can check a file without
+// reading its bytes.
+type Prober interface {
+	HasImage(ctx context.Context, sha256 string) (bool, error)
+}
+
+// HasImage reports whether the object store holds one file. Stores without
+// a cheap check read the file instead.
+func (s Service) HasImage(ctx context.Context, hash string) (bool, error) {
+	if prober, ok := s.objects.(Prober); ok {
+		return prober.HasImage(ctx, hash)
+	}
+	if _, err := s.objects.GetImage(ctx, hash); err != nil {
+		var ae *apperr.Error
+		if errors.As(err, &ae) && ae.Kind == apperr.NotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

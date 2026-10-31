@@ -14,14 +14,67 @@
 		"refunds": "Refunds"
 	},
 	"catalogHealthCard": {
-		"catalogHealthReflectsCurrentCatalogIntegration": "Catalog Health reflects current catalog/integration state; the selected reporting period does not filter it.",
-		"reason": "Reason",
+		"title": "Catalog checks",
+		"intro": "Products with a problem that stops online sale. Fix them in MoonLightRetail.",
+		"noIssues": "No problems found.",
+		"showProducts": "Show products ({count})",
 		"product": "Product",
-		"provider": "Provider",
-		"diagnosticOnlyNoAutoFixRetail": "Diagnostic only — no auto-fix. Retail inventory is authoritative; provider stock is downstream published state. Read-only: providers are never contacted live.",
-		"truncated": "Showing the first {count} rows; summary counts are complete.",
-		"providerFilter": "Provider filter",
-		"allProviders": "All providers"
+		"problem": "Problem",
+		"provider": "Online store",
+		"allProviders": "All online stores",
+		"providerFilter": "Online store filter",
+		"truncated": "The list shows the first {count} products. The counts include all products.",
+		"footnote": "This list only shows problems. It does not change data.",
+		"reasons": {
+			"CATALOG_MISSING_CATEGORY": {
+				"label": "No category",
+				"fix": "Add a category to the product."
+			},
+			"AVAILABILITY_NOT_READY": {
+				"label": "Availability is not ready",
+				"fix": "Wait for the next sync."
+			},
+			"COMMERCE_MAPPING_MISSING": {
+				"label": "Not linked to the online store",
+				"fix": "Link the product to the online store."
+			},
+			"COMMERCE_SYNC_AMBIGUOUS": {
+				"label": "Online store result is not known",
+				"fix": "Do the sync again."
+			},
+			"COMMERCE_STORE_CONFLICT": {
+				"label": "Linked to a different shop",
+				"fix": "Make sure that the product is in the correct shop."
+			},
+			"CATEGORY_ONLINE_DISABLED": {
+				"label": "Category is off for online sale",
+				"fix": "Turn on online sale for the category."
+			},
+			"PRODUCT_NO_ACTIVE_VARIANTS": {
+				"label": "No active variant",
+				"fix": "Make one variant active."
+			},
+			"PRODUCT_NO_SELLABLE_VARIANT": {
+				"label": "No variant can be sold",
+				"fix": "Give one variant a price and stock."
+			},
+			"VARIANT_DUPLICATE_COMBINATION": {
+				"label": "Two variants have the same options",
+				"fix": "Change the options of one variant."
+			},
+			"VARIANT_MISSING_SKU": {
+				"label": "Variant has no SKU",
+				"fix": "Add a SKU to the variant."
+			},
+			"VARIANT_MAPPING_MISSING": {
+				"label": "Variant is not linked to the online store",
+				"fix": "Link the variant to the online store."
+			},
+			"VARIANT_INTENTIONALLY_OFFLINE": {
+				"label": "Variant is off for online sale",
+				"fix": "No action is necessary."
+			}
+		}
 	},
 	"categoryCard": {
 		"roots": "Roots",
@@ -93,7 +146,8 @@
 		"number": "Number",
 		"channel": "Channel",
 		"cashier": "Cashier",
-		"total": "Total"
+		"total": "Total",
+		"openSale": "Show sale {number}"
 	},
 	"loginPage": {
 		"passwordsDoNotMatch": "Passwords do not match.",
@@ -405,7 +459,15 @@
 		"note": "Note",
 		"confirmDelete": "Confirm delete",
 		"cancel": "Cancel",
-		"delete": "Delete"
+		"delete": "Delete",
+		"usdRateTitle": "USD exchange rate",
+		"usdRateSub": "Reports use this rate (EGP for each USD) to show EGP sales in USD.",
+		"rateSince": "since {time}",
+		"rateSource": "Note: {note}",
+		"noCurrentRate": "No rate is in effect.",
+		"newRate": "Add a new rate",
+		"hideForm": "Close",
+		"recentRates": "Recent rates"
 	},
 	"sidebar": {
 		"mainNavigation": "Main navigation"
@@ -484,21 +546,34 @@
 		"storeScope": "Store scope"
 	},
 	"syncHealthCard": {
-		"refreshStatus": "Refresh status",
+		"title": "Sync health",
+		"syncNow": "Sync now",
+		"syncing": "Sending…",
 		"refresh": "Refresh",
-		"registerAShopsDeviceOnThe": "Register a shop's device on the Devices page to start syncing.",
-		"sales": "Sales",
-		"returns": "Returns",
-		"latestEvent": "Latest event",
-		"backlog": "Backlog",
+		"syncSent": "Sync request sent to {count} device(s).",
+		"syncNoDevice": "No active device for this Store. The view is refreshed.",
+		"syncFailed": "The sync request failed. Try again.",
+		"level": {
+			"ok": "Connected. Cloud has processed all data that it received.",
+			"catching": "Connected. Cloud is processing new data.",
+			"blocked": "Some data is blocked. Read the error below.",
+			"noshop": "No shop is set up."
+		},
+		"registerAShopsDeviceOnThe": "Register a device on the Devices page. Then the device can send data.",
+		"category": {
+			"sales": "Sales",
+			"returns": "Returns",
+			"catalog": "Products",
+			"stock": "Stock"
+		},
+		"inPeriod": "{count} in period",
+		"never": "Not received",
+		"lastSync": "Last sync",
+		"inQueue": "In queue",
+		"items": "{count} items",
 		"blocked": "Blocked",
-		"status": "Status",
-		"blocked2": "Blocked",
-		"complete": "Complete",
-		"catchingUp": "Catching up",
 		"lastError": "Last error",
-		"lastReturnError": "Last return error",
-		"reportsIncludeProjectedReturnsPendingBlocked": "Reports include projected returns; pending/blocked appear above. Cloud-complete ≠ empty Retail outbox."
+		"summaryUnavailable": "Period counts are not available."
 	},
 	"tagCard": {
 		"tag": "Tag",
@@ -900,5 +975,81 @@
 		"ackFailed": "Acknowledge failed.",
 		"stillActive": "Condition still active — resolve is blocked until it clears.",
 		"resolveFailed": "Resolve failed."
+	},
+	"activityCard": {
+		"previous": "Previous",
+		"next": "Next",
+		"page": "Page {page}",
+		"loadFailed": "The page did not load. Try again."
+	},
+	"saleDetail": {
+		"title": "Sale {number}",
+		"close": "Close",
+		"loading": "Loading…",
+		"failed": "The sale did not load. Try again.",
+		"retry": "Try again",
+		"cashier": "Cashier",
+		"shop": "Shop",
+		"date": "Date",
+		"item": "Item",
+		"qty": "Qty",
+		"soldFor": "Sold for",
+		"cost": "Cost",
+		"profit": "Profit",
+		"each": "{amount} each",
+		"unknown": "Not known",
+		"subtotal": "Subtotal",
+		"discount": "Discount",
+		"tax": "Tax",
+		"total": "Total",
+		"itemsSold": "Items sold for",
+		"totalCost": "Total cost",
+		"grossProfit": "Profit (before discount and tax)",
+		"costIncomplete": "Some items have no cost in MoonLightRetail. The profit is not shown.",
+		"fxRate": "Rate: 1 USD = {rate} EGP"
+	},
+	"mediaStatusCard": {
+		"title": "Image storage",
+		"storage": {
+			"r2": "Cloudflare R2",
+			"local": "Local disk (development)"
+		},
+		"check": {
+			"ok": "Working",
+			"missing": "A file is missing",
+			"error": "Not answering",
+			"empty": "No images yet"
+		},
+		"hint": {
+			"ok": "Cloud found the newest image in storage.",
+			"missing": "Cloud did not find the newest image. Do a full resync in MoonLightRetail.",
+			"error": "Cloud cannot reach the storage. Check the R2 settings.",
+			"empty": "MoonLightRetail did not upload images yet."
+		},
+		"checkedAt": "Checked {time} ({ms} ms)",
+		"stored": "Stored images",
+		"uploadedInPeriod": "Uploaded in period",
+		"lastUpload": "Last upload",
+		"waiting": "Waiting for upload",
+		"none": "None",
+		"recheck": "Check again"
+	},
+	"userMenu": {
+		"account": "Account menu",
+		"changePassword": "Change password",
+		"logout": "Log out",
+		"role": {
+			"owner": "Owner",
+			"admin": "Administrator"
+		},
+		"currentPassword": "Current password",
+		"newPassword": "New password",
+		"confirmPassword": "Confirm new password",
+		"save": "Change password",
+		"cancel": "Cancel",
+		"hint": "Use 12 characters or more. Other sessions will sign out.",
+		"mismatch": "The new passwords are not the same.",
+		"tooShort": "Use 12 characters or more.",
+		"changed": "Password changed. Other sessions signed out."
 	}
 }

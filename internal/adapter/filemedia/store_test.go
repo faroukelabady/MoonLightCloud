@@ -51,3 +51,26 @@ func TestStoreWritesReadsAndRefusesBadKeys(t *testing.T) {
 		t.Fatal("path escape read")
 	}
 }
+
+func TestStoreHasImage(t *testing.T) {
+	store, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("probe-bytes")
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	ctx := context.Background()
+	if found, err := store.HasImage(ctx, hash); err != nil || found {
+		t.Fatalf("before upload: %v %v", found, err)
+	}
+	if err := store.PutImage(ctx, media.Blob{SHA256: hash, ContentType: "image/png", ByteSize: len(data), Content: data}); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := store.HasImage(ctx, hash); err != nil || !found {
+		t.Fatalf("after upload: %v %v", found, err)
+	}
+	if _, err := store.HasImage(ctx, "../etc"); err == nil {
+		t.Fatal("a bad key must fail")
+	}
+}

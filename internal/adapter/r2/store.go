@@ -116,6 +116,28 @@ func (s *Store) GetImage(ctx context.Context, sha256 string) ([]byte, error) {
 	return data, nil
 }
 
+// HasImage checks one object with a HEAD request, without reading its bytes.
+func (s *Store) HasImage(ctx context.Context, sha256 string) (bool, error) {
+	if !catalog.ValidSHA256(sha256) {
+		return false, errDownload
+	}
+	ctx, cancel := context.WithTimeout(ctx, uploadTimeout)
+	defer cancel()
+	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(objectKey(sha256)),
+	})
+	if err != nil {
+		var notFound *types.NotFound
+		var noKey *types.NoSuchKey
+		if errors.As(err, &notFound) || errors.As(err, &noKey) {
+			return false, nil
+		}
+		return false, errDownload
+	}
+	return true, nil
+}
+
 // objectKey derives the key from the verified hash only, never a filename.
 func objectKey(sha256 string) string {
 	return "product-images/sha256/" + sha256[:2] + "/" + sha256

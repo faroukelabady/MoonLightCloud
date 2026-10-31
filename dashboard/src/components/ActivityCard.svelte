@@ -4,10 +4,73 @@
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
 	import { relativeTime } from '../lib/time.js';
-	import { lang, t } from '../lib/i18n.svelte.js';
+	import { lang, msg, t } from '../lib/i18n.svelte.js';
+	import { dashboardApi } from '../lib/api.js';
 	import type { ActivityItem } from '../lib/api.js';
 
-	let { items, status, errStatus, onretry }: { items: ActivityItem[]; status: 'loading' | 'loaded' | 'empty' | 'error'; errStatus: number | null; onretry: () => void } = $props();
+	// items is the first page the page loaded; later pages load here. The
+	// list scrolls inside the card, so the card keeps its height.
+	let {
+		items,
+		hasMore = false,
+		store = '',
+		status,
+		errStatus,
+		onretry
+	}: {
+		items: ActivityItem[];
+		hasMore?: boolean;
+		store?: string;
+		status: 'loading' | 'loaded' | 'empty' | 'error';
+		errStatus: number | null;
+		onretry: () => void;
+	} = $props();
+
+	const pageSize = 10;
+	let page = $state(0);
+	let pageItems = $state<ActivityItem[] | null>(null);
+	let pageMore = $state(false);
+	let pageState = $state<'idle' | 'loading' | 'error'>('idle');
+	let request = 0;
+	let feed: HTMLUListElement | undefined = $state();
+
+	// A reload of the first page (new Store or period) starts again at page 1.
+	$effect(() => {
+		void items;
+		void store;
+		request++;
+		page = 0;
+		pageItems = null;
+		pageState = 'idle';
+	});
+
+	let shown = $derived(page === 0 ? items : (pageItems ?? []));
+	let more = $derived(page === 0 ? hasMore : pageMore);
+
+	async function go(next: number) {
+		if (next < 0 || pageState === 'loading') return;
+		const my = ++request;
+		if (next === 0) {
+			page = 0;
+			pageItems = null;
+			pageState = 'idle';
+			feed?.scrollTo?.({ top: 0 });
+			return;
+		}
+		pageState = 'loading';
+		try {
+			const res = await dashboardApi.activityPage(store, next * pageSize);
+			if (my !== request) return;
+			page = next;
+			pageItems = res.items;
+			pageMore = res.has_more;
+			pageState = 'idle';
+			feed?.scrollTo?.({ top: 0 });
+		} catch {
+			if (my !== request) return;
+			pageState = 'error';
+		}
+	}
 
 	function kindLabel(k: string): [string, string, string] {
 		if (k === 'blocked') return ['محظور', 'blocked', 'bad'];
@@ -30,11 +93,11 @@
 		<Skeleton />
 	{:else if status === 'error'}
 		<WidgetError status={errStatus} {onretry} />
-	{:else if items.length === 0}
+	{:else if shown.length === 0 && page === 0}
 		<EmptyState ar="لا توجد أنشطة بعد" en="No activities yet" />
 	{:else}
-		<ul class="feed">
-			{#each items as it}
+		<ul class="feed" bind:this={feed} data-testid="activity-feed">
+			{#each shown as it (it.kind + it.event_id)}
 				{@const [ar, en, cls] = kindLabel(it.kind)}
 				<li>
 					<span class="aic {cls}" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d={iconOf(it.kind)} /></svg></span>
@@ -50,6 +113,14 @@
 				</li>
 			{/each}
 		</ul>
+		{#if pageState === 'error'}<p class="muted pgerr" role="alert">{msg('activityCard.loadFailed')}</p>{/if}
+		{#if page > 0 || more}
+			<nav class="pager" aria-label={msg('activityCard.page', { page: page + 1 })}>
+				<button type="button" class="btn-secondary btn-sm" disabled={page === 0 || pageState === 'loading'} onclick={() => void go(page - 1)}>{msg('activityCard.previous')}</button>
+				<span class="num muted">{msg('activityCard.page', { page: page + 1 })}</span>
+				<button type="button" class="btn-secondary btn-sm" disabled={!more || pageState === 'loading'} onclick={() => void go(page + 1)}>{msg('activityCard.next')}</button>
+			</nav>
+		{/if}
 	{/if}
 </Card>
 
@@ -60,6 +131,10 @@
 		padding: 0;
 		display: flex;
 		flex-direction: column;
+		max-height: 340px;
+		overflow-y: auto;
+		scrollbar-width: thin;
+		padding-inline-end: 4px;
 	}
 	.feed li {
 		display: flex;
@@ -115,5 +190,19 @@
 	.when {
 		font-size: 0.72rem;
 		white-space: nowrap;
+	}
+	.pager {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top: 1px solid var(--border);
+		font-size: 0.8rem;
+	}
+	.pgerr {
+		margin: 6px 0 0;
+		font-size: 0.8rem;
 	}
 </style>

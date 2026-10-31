@@ -196,7 +196,8 @@ test('logout and login reinitializes the registry', async ({ page }) => {
 	await mockStoreScope(page);
 	await login(page);
 	await expect.poll(() => optionCount(selector(page))).toBe(3);
-	await page.getByRole('button', { name: /خروج/ }).click();
+	await page.getByRole('button', { name: /قائمة الحساب/ }).click();
+	await page.getByRole('menuitem', { name: 'تسجيل الخروج' }).click();
 	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible();
 	await login(page);
 	await expect.poll(() => optionCount(selector(page))).toBe(3);

@@ -673,6 +673,33 @@ func (s Service) RecentActivity(ctx context.Context, req report.Request, limit i
 	return reader.DashboardRecentActivity(ctx, limit)
 }
 
+// MaxActivityOffset bounds how far back the activity feed pages.
+const MaxActivityOffset = 200
+
+// RecentActivityPage returns one page of the feed after offset items and
+// whether more follow (up to MaxActivityOffset).
+func (s Service) RecentActivityPage(ctx context.Context, req report.Request, offset, limit int) ([]ActivityItem, bool, error) {
+	if limit < 1 || limit > 50 {
+		return nil, false, apperr.New(apperr.InvalidInput, "limit must be within [1, 50]")
+	}
+	if offset < 0 || offset > MaxActivityOffset {
+		return nil, false, apperr.New(apperr.InvalidInput, "offset must be within [0, 200]")
+	}
+	items, err := ReaderFor(s.repo, req.Store).DashboardRecentActivity(ctx, offset+limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if offset >= len(items) {
+		return []ActivityItem{}, false, nil
+	}
+	items = items[offset:]
+	more := len(items) > limit && offset+limit < MaxActivityOffset
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, more, nil
+}
+
 // LatestSales returns the newest finalized sales (orders fallback).
 func (s Service) LatestSales(ctx context.Context, req report.Request, limit int) ([]LatestSale, error) {
 	reader := ReaderFor(s.repo, req.Store)

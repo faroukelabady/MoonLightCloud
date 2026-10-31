@@ -2390,6 +2390,13 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
+        - name: offset
+          in: query
+          description: Paged read. With offset the limit is 1..50, offset 0..200, and the response adds has_more.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 200
         - $ref: '#/components/parameters/StoreScope'
       responses:
         '200':
@@ -2424,6 +2431,147 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503':
           description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/sales/{id}:
+    get:
+      summary: One finalized sale with its lines, prices and recorded costs
+      operationId: dashboardSaleDetail
+      description: >-
+        Unit costs are the ones MoonLightRetail recorded at sale time; a line
+        without one has null costs and cost_complete is false. A sale of
+        another Store is 404.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: The sale.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSaleDetail'
+        '400':
+          description: Invalid period, Store or id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No such sale in the scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/sync-summary:
+    get:
+      summary: Events received in the period per kind, and the newest arrival of each kind
+      operationId: dashboardSyncSummary
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Counts for sales, returns, catalog and stock events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSyncSummary'
+        '400':
+          description: Invalid period, Store or id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/dashboard/media-status:
+    get:
+      summary: Product image storage check and file counts
+      operationId: dashboardMediaStatus
+      description: >-
+        Checks the newest stored image of the scope with one HEAD request to
+        the object store (Cloudflare R2 in production) and counts the files.
+        The response never carries keys, URLs or provider errors.
+      security:
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ReportPeriod'
+        - $ref: '#/components/parameters/ReportFromDate'
+        - $ref: '#/components/parameters/ReportToDate'
+        - $ref: '#/components/parameters/StoreScope'
+      responses:
+        '200':
+          description: Storage state and counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMediaStatus'
+        '400':
+          description: Invalid period, Store or id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN / STORE_SCOPE_REQUIRED (Store membership), MFA_REQUIRED / MFA_SETUP_REQUIRED (session not FULL).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Unexpected internal failure. Generic envelope, no internals.
           content:
             application/json:
               schema:
@@ -6818,10 +6966,75 @@ components:
         last_error_label_ar: {type: string}
         last_error_label_en: {type: string}
       description: cloud_projection_complete never proves Retail sync completeness.
+    DashboardSyncSummary:
+      type: object
+      required: [categories, total_synced]
+      properties:
+        categories:
+          type: array
+          items:
+            type: object
+            required: [category, synced]
+            properties:
+              category: {type: string, enum: [sales, returns, catalog, stock]}
+              synced: {type: integer, format: int64, description: Events received in the period.}
+              last_received_at: {type: string, format: date-time, description: Newest arrival of this kind at any time; absent when none.}
+        total_synced: {type: integer, format: int64}
+        last_received_at: {type: string, format: date-time}
+    DashboardSaleDetail:
+      type: object
+      required: [sale_id, sale_number, channel, occurred_at, currency, subtotal_minor, discount_minor, tax_minor, total_minor, shop_name_ar, shop_name_en, lines, cost_minor, cost_complete]
+      properties:
+        sale_id: {type: string, format: uuid}
+        sale_number: {type: string}
+        channel: {type: string}
+        occurred_at: {type: string, format: date-time}
+        currency: {type: string, enum: [EGP, USD]}
+        subtotal_minor: {type: string, description: Exact minor units.}
+        discount_minor: {type: string}
+        tax_minor: {type: string}
+        total_minor: {type: string}
+        cashier_name: {type: string}
+        fx_rate_microrate: {type: string, description: USD sales only.}
+        shop_name_ar: {type: string}
+        shop_name_en: {type: string}
+        cost_minor: {type: string, description: Sum of the known line costs.}
+        cost_complete: {type: boolean, description: False when a line has no recorded cost.}
+        lines:
+          type: array
+          items:
+            type: object
+            required: [sku, product_name, quantity, unit_price_minor, line_total_minor, unit_cost_minor, line_cost_minor]
+            properties:
+              sku: {type: string}
+              product_name: {type: string}
+              width_cm: {type: integer}
+              height_cm: {type: integer}
+              quantity: {type: integer}
+              unit_price_minor: {type: string}
+              line_total_minor: {type: string}
+              unit_cost_minor: {type: string, nullable: true}
+              line_cost_minor: {type: string, nullable: true}
+    DashboardMediaStatus:
+      type: object
+      required: [storage, check, checked_at, check_ms, stored_files, stored_bytes, uploaded_in_range, gallery_images, waiting_images]
+      properties:
+        storage: {type: string, enum: [r2, local]}
+        check: {type: string, enum: [ok, missing, error, empty], description: 'ok: the newest file was found; missing: it was not; error: the store did not answer; empty: no file to check.'}
+        checked_at: {type: string, format: date-time}
+        check_ms: {type: integer, format: int64}
+        stored_files: {type: integer, format: int64, description: Files a gallery of the Store names (every file without a Store).}
+        stored_bytes: {type: integer, format: int64}
+        uploaded_in_range: {type: integer, format: int64}
+        last_upload_at: {type: string, format: date-time}
+        gallery_images: {type: integer, format: int64}
+        waiting_images: {type: integer, format: int64, description: Gallery entries whose file has not arrived.}
     DashboardActivityList:
       type: object
       required: [items]
       properties:
+        offset: {type: integer, description: Present on paged reads.}
+        has_more: {type: boolean, description: Present on paged reads; false after 200 items.}
         store_id:
           type: string
           format: uuid

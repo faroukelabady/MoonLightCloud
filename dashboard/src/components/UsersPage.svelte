@@ -7,8 +7,8 @@
 	import { authApi, authErrorText, usersApi } from '../lib/api.js';
 	import type { AuthAuditRow, Me, StoreRow, UserView } from '../lib/api.js';
 
-	// Users & Security (ADR-0053). Everyone manages their own password and
-	// recovery codes; OWNERs administer accounts. There is no public
+	// Users & Security (ADR-0053). Everyone manages their own recovery codes
+	// here (the password changes from the account menu); OWNERs administer accounts. There is no public
 	// registration: an OWNER creates the account and conveys the one-time
 	// activation link out of band. Every action is re-authorized server-side;
 	// sensitive ones require an explicit confirmation here.
@@ -22,8 +22,6 @@
 	let busy = $state(false);
 
 	// ---- own account ----
-	let current = $state('');
-	let next = $state('');
 	let codes = $state<string[]>([]);
 
 	async function act(fn: () => Promise<void>) {
@@ -37,16 +35,6 @@
 		} finally {
 			busy = false;
 		}
-	}
-
-	function changePassword(e: Event) {
-		e.preventDefault();
-		void act(async () => {
-			await authApi.changePassword(current, next);
-			current = '';
-			next = '';
-			notice = { kind: 'ok', text: msg('usersPage.passwordChangedOtherSessionsWereSigned') };
-		});
 	}
 
 	function regenerateCodes() {
@@ -165,11 +153,6 @@
 
 	<section class="card panel">
 		<h3>{msg('usersPage.myAccount')} — {me.user.display_name} ({me.user.role})</h3>
-		<form class="row" onsubmit={changePassword}>
-			<label class="field">{msg('usersPage.currentPassword')}<input type="password" autocomplete="current-password" bind:value={current} required /></label>
-			<label class="field">{msg('usersPage.newPassword')}<input type="password" autocomplete="new-password" minlength="12" bind:value={next} required /></label>
-			<button class="btn-primary" type="submit" disabled={busy}>{msg('usersPage.change')}</button>
-		</form>
 		<div class="btn-row">
 			<button class="btn-secondary" type="button" onclick={regenerateCodes} disabled={busy} data-testid="regenerate-codes">
 				{msg('usersPage.regenerateRecoveryCodes')}

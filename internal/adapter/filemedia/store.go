@@ -92,4 +92,21 @@ func (s *Store) GetImage(ctx context.Context, sha256 string) ([]byte, error) {
 	return data, nil
 }
 
+// HasImage reports whether one file is stored.
+func (s *Store) HasImage(ctx context.Context, sha256 string) (bool, error) {
+	if !catalog.ValidSHA256(sha256) {
+		return false, errRead
+	}
+	if err := ctx.Err(); err != nil {
+		return false, errRead
+	}
+	if _, err := os.Stat(s.path(sha256)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, errRead
+	}
+	return true, nil
+}
+
 var _ media.ObjectStore = (*Store)(nil)

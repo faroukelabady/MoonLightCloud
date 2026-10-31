@@ -265,6 +265,60 @@ export interface LatestSale {
 	cashier_name?: string | null;
 }
 
+// One sale with its lines. Money is exact minor units in the sale currency;
+// a null cost means Retail did not record one.
+export interface SaleDetailLine {
+	sku: string;
+	product_name: string;
+	width_cm?: number;
+	height_cm?: number;
+	quantity: number;
+	unit_price_minor: string;
+	line_total_minor: string;
+	unit_cost_minor: string | null;
+	line_cost_minor: string | null;
+}
+
+export interface SaleDetail {
+	sale_id: string;
+	sale_number: string;
+	channel: string;
+	occurred_at: string;
+	currency: string;
+	subtotal_minor: string;
+	discount_minor: string;
+	tax_minor: string;
+	total_minor: string;
+	cashier_name?: string;
+	fx_rate_microrate?: string;
+	shop_name_ar: string;
+	shop_name_en: string;
+	lines: SaleDetailLine[];
+	cost_minor: string;
+	cost_complete: boolean;
+}
+
+export type SyncCategoryKey = 'sales' | 'returns' | 'catalog' | 'stock';
+
+export interface SyncSummary {
+	categories: { category: SyncCategoryKey; synced: number; last_received_at?: string }[];
+	total_synced: number;
+	last_received_at?: string;
+}
+
+export interface MediaStatus {
+	storage: string;
+	check: 'ok' | 'missing' | 'error' | 'empty';
+	checked_at: string;
+	check_ms: number;
+	stored_files: number;
+	stored_bytes: number;
+	uploaded_in_range: number;
+	last_upload_at?: string;
+	gallery_images: number;
+	waiting_images: number;
+}
+
 export interface DeviceCommandWire {
 	id: string;
 	type: string;

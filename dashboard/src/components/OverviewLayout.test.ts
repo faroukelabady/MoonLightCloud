@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import App from '../App.svelte';
 import Sidebar from './Sidebar.svelte';
 import CountsTable from './CountsTable.svelte';
@@ -90,12 +90,12 @@ describe('Sync health headline', () => {
 			freshness: { projection_backlog_count: 0, blocked_sale_event_count: 0, cloud_projection_complete: true, return_backlog_count: 0, return_blocked_count: 0, return_projection_complete: true, ...freshness },
 			pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0
 		}) as unknown as SyncHealth;
-	const base = { status: 'loaded', errStatus: null, onretry: () => {}, onrefresh: () => {} } as const;
+	const base = { status: 'loaded', errStatus: null, onretry: () => {}, onsync: () => {} } as const;
 
 	it.each([
-		[{}, 'ok', 'Connected · sales & returns up to date'],
-		[{ cloud_projection_complete: false, projection_backlog_count: 4 }, 'catching', 'Connected · catching up'],
-		[{ return_blocked_count: 1, return_projection_complete: false }, 'blocked', 'Needs attention · blocked events']
+		[{}, 'ok', 'Connected. Cloud has processed all data that it received.'],
+		[{ cloud_projection_complete: false, projection_backlog_count: 4 }, 'catching', 'Connected. Cloud is processing new data.'],
+		[{ return_blocked_count: 1, return_projection_complete: false }, 'blocked', 'Some data is blocked.']
 	])('reports the real state (%o)', (freshness, level, text) => {
 		setLang('en');
 		render(SyncHealthCard, { props: { ...base, health: health(freshness) } });
@@ -108,22 +108,14 @@ describe('Sync health headline', () => {
 describe('Sync health card', () => {
 	it('shows no shop configured yet on a yellow headline when no Store exists', () => {
 		setLang('en');
-		render(SyncHealthCard, { props: { health: null, status: 'loaded', errStatus: null, onretry: () => {}, onrefresh: () => {}, noShop: true } });
+		render(SyncHealthCard, { props: { health: null, status: 'loaded', errStatus: null, onretry: () => {}, onsync: () => {}, noShop: true } });
 		const hero = screen.getByTestId('sync-hero');
 		expect(hero.dataset.level).toBe('noshop');
-		expect(hero.textContent).toContain('No shop configured yet');
-		expect(screen.queryByTestId('sync-table')).toBeNull();
+		expect(hero.textContent).toContain('No shop is set up.');
+		expect(screen.queryByTestId('sync-categories')).toBeNull();
+		expect(screen.queryByTestId('sync-now')).toBeNull();
 	});
 
-	it('lays the sync figures out as a table of sales and returns', () => {
-		setLang('en');
-		const health = { freshness: { projection_backlog_count: 2, blocked_sale_event_count: 0, cloud_projection_complete: false, return_backlog_count: 0, return_blocked_count: 0, return_projection_complete: true }, pending_count: 1, retry_count: 1, return_pending_count: 0, return_retry_count: 0 } as unknown as SyncHealth;
-		render(SyncHealthCard, { props: { health, status: 'loaded', errStatus: null, onretry: () => {}, onrefresh: () => {} } });
-		const table = screen.getByTestId('sync-table');
-		expect(within(table).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['Sales', 'Returns']);
-		expect(within(table).getAllByRole('rowheader').map((h) => h.textContent?.trim())).toEqual(['Latest event', 'Backlog', 'Blocked', 'Status']);
-		expect(within(table).getByRole('row', { name: /Backlog/ }).textContent).toMatch(/2\s*1 pending · 1 retry/);
-	});
 });
 
 describe('Overview', () => {
@@ -147,7 +139,8 @@ describe('Overview', () => {
 		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
 		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
 		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
-		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.activityPage).mockResolvedValue({ items: [], offset: 0, has_more: false });
+		vi.mocked(dashboardApi.syncSummary).mockResolvedValue({ categories: [], total_synced: 0 });
 		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
 		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
 		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);
@@ -180,7 +173,8 @@ describe('Overview', () => {
 		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
 		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
 		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
-		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.activityPage).mockResolvedValue({ items: [], offset: 0, has_more: false });
+		vi.mocked(dashboardApi.syncSummary).mockResolvedValue({ categories: [], total_synced: 0 });
 		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
 		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
 		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);
@@ -205,7 +199,8 @@ describe('Overview', () => {
 		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
 		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
 		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
-		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.activityPage).mockResolvedValue({ items: [], offset: 0, has_more: false });
+		vi.mocked(dashboardApi.syncSummary).mockResolvedValue({ categories: [], total_synced: 0 });
 		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
 		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
 		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);
@@ -213,7 +208,8 @@ describe('Overview', () => {
 		const { getByRole } = render(App);
 		await waitFor(() => expect(dashboardApi.overview).toHaveBeenCalled());
 		expect(window.location.search).toContain(live);
-		getByRole('button', { name: /Logout/ }).click();
+		await fireEvent.click(getByRole('button', { name: /Account menu/ }));
+		await fireEvent.click(getByRole('menuitem', { name: /Log out/ }));
 		await waitFor(() => expect(window.location.search).not.toContain('store_id'));
 		expect(window.location.search).toContain('period=today');
 	});
@@ -231,7 +227,8 @@ describe('Overview', () => {
 		vi.mocked(dashboardApi.syncHealth).mockResolvedValue({ freshness: {}, pending_count: 0, retry_count: 0, return_pending_count: 0, return_retry_count: 0 } as never);
 		vi.mocked(dashboardApi.tags).mockResolvedValue({ rows: [] } as never);
 		vi.mocked(dashboardApi.orderSummary).mockResolvedValue({ currency_totals: [], status_counts: [], provider_totals: [] } as never);
-		vi.mocked(dashboardApi.activity).mockResolvedValue({ items: [] });
+		vi.mocked(dashboardApi.activityPage).mockResolvedValue({ items: [], offset: 0, has_more: false });
+		vi.mocked(dashboardApi.syncSummary).mockResolvedValue({ categories: [], total_synced: 0 });
 		vi.mocked(dashboardApi.latestSales).mockResolvedValue({ sales: [] });
 		vi.mocked(dashboardApi.orders).mockResolvedValue({ orders: [], next_cursor: null, status_counts: [], webhook_inbox: {} } as never);
 		vi.mocked(dashboardApi.catalogHealth).mockResolvedValue({ counts: [], detail: [] } as never);

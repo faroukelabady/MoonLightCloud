@@ -123,10 +123,11 @@ export async function uiLogin(page: Page, url = 'login', account: Account = owne
 	await expect(page.getByRole('heading', { name: /^(لوحة متابعة المبيعات|Sales dashboard)$/ })).toBeVisible({ timeout: 15000 });
 }
 
-// uiLogout signs out through the shell's Logout button (server-side
+// uiLogout signs out through the account menu's Log out item (server-side
 // revocation) and waits for the login screen.
 export async function uiLogout(page: Page) {
-	await page.getByRole('button', { name: /خروج|Logout/ }).click();
+	await page.getByRole('button', { name: /قائمة الحساب|Account menu/ }).click();
+	await page.getByRole('menuitem', { name: /تسجيل الخروج|Log out/ }).click();
 	await expect(page.getByRole('heading', { name: /^(تسجيل الدخول|Sign in)$/ })).toBeVisible();
 }
 

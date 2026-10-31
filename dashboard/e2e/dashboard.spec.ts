@@ -73,6 +73,29 @@ const LATEST = {
 	sales: [{ sale_id: 'aaaaaaaa-1111-4111-8111-111111111111', sale_number: 'MLR-A', channel: 'STORE', occurred_at: '2026-09-20T10:00:00Z', currency: 'EGP', total_minor: '200000', cashier_name: 'Amal' }]
 };
 
+const SYNC_SUMMARY = {
+	categories: [
+		{ category: 'sales', synced: 42, last_received_at: new Date(Date.now() - 3 * 60_000).toISOString() },
+		{ category: 'returns', synced: 2, last_received_at: new Date(Date.now() - 40 * 60_000).toISOString() },
+		{ category: 'catalog', synced: 15, last_received_at: new Date(Date.now() - 12 * 60_000).toISOString() },
+		{ category: 'stock', synced: 9, last_received_at: new Date(Date.now() - 15 * 60_000).toISOString() }
+	],
+	total_synced: 68,
+	last_received_at: new Date(Date.now() - 3 * 60_000).toISOString()
+};
+
+const SALE_DETAIL = {
+	...LATEST.sales[0],
+	subtotal_minor: '200000',
+	discount_minor: '0',
+	tax_minor: '0',
+	shop_name_ar: 'متجر مون لايت',
+	shop_name_en: 'MoonLight Store',
+	lines: [{ sku: 'PAP-002', product_name: 'Papyrus Scroll', quantity: 2, unit_price_minor: '100000', line_total_minor: '200000', unit_cost_minor: '30000', line_cost_minor: '60000' }],
+	cost_minor: '60000',
+	cost_complete: true
+};
+
 async function mockDashboard(page: Page, healthOver: Record<string, unknown> = {}) {
 	await page.route('**/api/v1/dashboard/overview*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(OVERVIEW) }));
 	// Mode-aware daily mock: All returns normalized EGP, native modes
@@ -91,6 +114,7 @@ async function mockDashboard(page: Page, healthOver: Record<string, unknown> = {
 	await page.route('**/api/v1/dashboard/sync-health', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(syncHealth(healthOver)) }));
 	await page.route('**/api/v1/dashboard/activity*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACTIVITY) }));
 	await page.route('**/api/v1/dashboard/sales/latest*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(LATEST) }));
+	await page.route('**/api/v1/dashboard/sync-summary*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SYNC_SUMMARY) }));
 }
 
 async function login(page: Page) {
@@ -173,7 +197,8 @@ test('full dashboard flow', async ({ page }) => {
 	await page.goto('sales?period=custom&from_date=2026-09-20&to_date=2026-09-20');
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	// Logout returns to login.
-	await page.getByRole('button', { name: /خروج/ }).click();
+	await page.getByRole('button', { name: /قائمة الحساب/ }).click();
+	await page.getByRole('menuitem', { name: 'تسجيل الخروج' }).click();
 	await expect(page.getByRole('heading', { name: 'تسجيل الدخول' })).toBeVisible({ timeout: 10000 });
 	assertCleanGates(gates);
 	assertCleanNetwork(net);
@@ -277,12 +302,12 @@ test('filter history restores applied state', async ({ page }) => {
 	await page.getByRole('button', { name: 'نطاق مخصص', exact: true }).click();
 	await page.getByLabel(/من/).fill('2026-09-20');
 	await page.getByLabel(/إلى/).fill('2026-09-20');
-	await page.getByRole('button', { name: /عرض/ }).click();
+	await page.getByRole('button', { name: 'عرض', exact: true }).click();
 	await expect(page).toHaveURL(/from_date=2026-09-20/);
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	await page.getByLabel(/من/).fill('2026-09-20');
 	await page.getByLabel(/إلى/).fill('2026-09-20');
-	await page.getByRole('button', { name: /عرض/ }).click();
+	await page.getByRole('button', { name: 'عرض', exact: true }).click();
 	await expect(page).toHaveURL(/from_date=2026-09-20/);
 	await page.goBack();
 	await expect(page).toHaveURL(/from_date=2026-09-20/);
@@ -413,4 +438,47 @@ test('sale and return diagnostics coexist independently', async ({ page }) => {
 	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
 	await expect(page.getByText('تعارض مبيعات')).toBeVisible({ timeout: 15000 });
 	await expect(page.getByText('تعارض مرتجعات')).toBeVisible({ timeout: 15000 });
+});
+
+test('sync card counts the period, a sale opens with its costs, and the account menu changes the password', async ({ page }) => {
+	await mockDashboard(page);
+	await page.route('**/api/v1/dashboard/sales/aaaaaaaa-1111-4111-8111-111111111111*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SALE_DETAIL) }));
+	await page.setViewportSize({ width: 1536, height: 1024 });
+	await login(page);
+	await expect(page.getByText(NET, { exact: true })).toBeVisible({ timeout: 15000 });
+	const categories = page.getByTestId('sync-categories');
+	await expect(categories).toContainText('42 في الفترة');
+	await expect(categories).toContainText('المنتجات');
+	await page.screenshot({ path: 'test-results/overview-sync.png' });
+	await page.getByRole('button', { name: 'عرض البيع MLR-A' }).click();
+	const sale = page.getByRole('dialog', { name: 'البيع MLR-A' });
+	await expect(sale.getByTestId('sale-line')).toContainText('Papyrus Scroll');
+	await expect(sale.getByTestId('sale-profit')).toContainText('1,400');
+	await page.screenshot({ path: 'test-results/sale-detail.png' });
+	await page.keyboard.press('Escape');
+	await expect(sale).toHaveCount(0);
+	await page.getByRole('button', { name: /قائمة الحساب/ }).click();
+	await expect(page.getByRole('menu')).toContainText('المالك');
+	await page.screenshot({ path: 'test-results/account-menu.png' });
+	await page.getByRole('menuitem', { name: 'تغيير كلمة المرور' }).click();
+	const dialog = page.getByRole('dialog', { name: 'تغيير كلمة المرور' });
+	await expect(dialog.getByLabel('تأكيد كلمة المرور الجديدة')).toBeVisible();
+	await page.screenshot({ path: 'test-results/change-password.png' });
+});
+
+test('sync page shows plain catalog checks and the image storage state', async ({ page }) => {
+	await mockDashboard(page);
+	await page.route('**/api/v1/dashboard/catalog-health*', (r) =>
+		r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ generated_at: '', store_id: null, provider_key: '', providers: [], reason_codes: [], counts: [{ reason_code: 'VARIANT_MISSING_SKU', products: 3 }, { reason_code: 'COMMERCE_MAPPING_MISSING', products: 1 }], detail: [{ reason_code: 'VARIANT_MISSING_SKU', provider_key: '', name: 'Papyrus', sku: null }], detail_limit: 50, detail_truncated: false }) })
+	);
+	await page.route('**/api/v1/dashboard/media-status*', (r) =>
+		r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ storage: 'r2', check: 'ok', checked_at: new Date().toISOString(), check_ms: 92, stored_files: 128, stored_bytes: 48_000_000, uploaded_in_range: 6, last_upload_at: new Date(Date.now() - 5 * 60_000).toISOString(), gallery_images: 131, waiting_images: 3 }) })
+	);
+	await page.setViewportSize({ width: 1536, height: 1024 });
+	await login(page);
+	await page.goto('sync');
+	await expect(page.getByTestId('media-check')).toContainText('Cloudflare R2');
+	await expect(page.getByTestId('catalog-issues')).toContainText('خيار بدون رقم SKU');
+	await expect(page.getByTestId('catalog-issues')).not.toContainText('VARIANT_MISSING_SKU');
+	await page.screenshot({ path: 'test-results/sync-page.png', fullPage: true });
 });

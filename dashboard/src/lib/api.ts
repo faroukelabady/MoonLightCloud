@@ -23,6 +23,9 @@ import type {
 	OrderDetail,
 	OrderListResponse,
 	LatestSale,
+	SaleDetail,
+	SyncSummary,
+	MediaStatus,
 	DeviceRow,
 	StoreRow,
 	IncidentRow,
@@ -93,6 +96,15 @@ export const dashboardApi = {
 	catalogHealth: (store: string, provider: string, s?: AbortSignal) =>
 		get<CatalogHealthResponse>(`/api/v1/dashboard/catalog-health?limit=50${storeQuery(store)}${providerQuery(provider)}`, s),
 	activity: (store: string, s?: AbortSignal) => get<{ items: ActivityItem[] }>(`/api/v1/dashboard/activity?limit=20${storeQuery(store)}`, s),
+	// One page of the feed; has_more is false after 200 items.
+	activityPage: (store: string, offset: number, s?: AbortSignal) =>
+		get<{ items: ActivityItem[]; offset: number; has_more: boolean }>(`/api/v1/dashboard/activity?limit=10&offset=${offset}${storeQuery(store)}`, s),
+	saleDetail: (store: string, id: string, s?: AbortSignal) =>
+		get<SaleDetail>(`/api/v1/dashboard/sales/${encodeURIComponent(id)}${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s),
+	syncSummary: (p: PeriodParams, store: string, s?: AbortSignal) =>
+		get<SyncSummary>(`/api/v1/dashboard/sync-summary?${query(p)}${storeQuery(store)}`, s),
+	mediaStatus: (p: PeriodParams, store: string, s?: AbortSignal) =>
+		get<MediaStatus>(`/api/v1/dashboard/media-status?${query(p)}${storeQuery(store)}`, s),
 	latestSales: (store: string, s?: AbortSignal) => get<{ sales: LatestSale[] }>(`/api/v1/dashboard/sales/latest?limit=8${storeQuery(store)}`, s),
 	orders: (status: string, provider: string, cursor: string | null | undefined, store: string, s?: AbortSignal) =>
 		get<OrderListResponse>(

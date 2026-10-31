@@ -177,3 +177,34 @@ func TestGetImageReadsBoundedObjectAndMapsMissing(t *testing.T) {
 		t.Fatal("invalid key read")
 	}
 }
+
+func TestHasImageUsesHeadAndMapsMissing(t *testing.T) {
+	blob := testBlob()
+	store := testStore(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead || !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 ") {
+			t.Errorf("unexpected probe %s", r.Method)
+		}
+		switch r.URL.Path {
+		case "/moonlight-media-dev/product-images/sha256/" + blob.SHA256[:2] + "/" + blob.SHA256:
+			w.Header().Set("Content-Length", "27")
+		case "/moonlight-media-dev/product-images/sha256/aa/" + strings.Repeat("a", 64):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	})
+	ctx := context.Background()
+	if found, err := store.HasImage(ctx, blob.SHA256); err != nil || !found {
+		t.Fatalf("stored object: %v %v", found, err)
+	}
+	if found, err := store.HasImage(ctx, strings.Repeat("a", 64)); err != nil || found {
+		t.Fatalf("missing object: %v %v", found, err)
+	}
+	var ae *apperr.Error
+	if _, err := store.HasImage(ctx, strings.Repeat("c", 64)); !errors.As(err, &ae) || ae.Kind != apperr.Unavailable {
+		t.Fatalf("denied probe: %v", err)
+	}
+	if _, err := store.HasImage(ctx, "../escape"); err == nil {
+		t.Fatal("invalid key probe")
+	}
+}

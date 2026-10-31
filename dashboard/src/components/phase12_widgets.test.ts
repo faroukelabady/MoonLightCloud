@@ -75,10 +75,10 @@ describe('Phase12 widgets', () => {
 		expect(text).toMatch(/cancelled/);
 	});
 
-	it('CatalogHealthCard is diagnostic-only and shows stable reason codes', () => {
+	it('CatalogHealthCard names each problem and its fix in plain words', () => {
 		const { container } = render(CatalogHealthCard, {
 			props: {
-				data: health,
+				data: { ...health, counts: [{ reason_code: 'VARIANT_MISSING_SKU', products: 3 }] },
 				status: 'loaded',
 				errStatus: null,
 				onretry: () => {},
@@ -87,7 +87,9 @@ describe('Phase12 widgets', () => {
 			}
 		});
 		const text = container.textContent ?? '';
-		expect(text).toMatch(/VARIANT_MISSING_SKU/);
-		expect(text).toMatch(/Diagnostic only/);
+		expect(text).not.toMatch(/VARIANT_MISSING_SKU/);
+		expect(text).toMatch(/Variant has no SKU/);
+		expect(text).toMatch(/Add a SKU to the variant./);
+		expect(text).toMatch(/It does not change data./);
 	});
 });

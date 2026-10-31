@@ -57,6 +57,7 @@ describe('SettingsPage', () => {
 		api.addRate.mockResolvedValue({ ...rate, id: 'r2', rate: '51', effective_at: '2026-10-28T08:00:00Z', note: '' });
 		render(SettingsPage, { canManage: true });
 		expect((await screen.findByTestId('current-rate')).textContent).toMatch(/50\.25/);
+		await fireEvent.click(screen.getByTestId('new-rate'));
 		const input = screen.getByTestId('rate-value');
 		await fireEvent.input(input, { target: { value: '-1' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add rate' }));

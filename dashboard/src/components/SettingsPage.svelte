@@ -23,6 +23,7 @@
 	let rateNote = $state('');
 	let rateError = $state('');
 	let confirmDelete = $state<string | null>(null);
+	let showRateForm = $state(false);
 
 	let dirty = $derived(
 		business !== null &&
@@ -100,6 +101,7 @@
 			rateNote = '';
 			rateAt = localNow();
 			notice = { kind: 'ok', text: msg('settingsPage.exchangeRateAdded') };
+			showRateForm = false;
 		} catch (err) {
 			rateError = errorText(err);
 		} finally {
@@ -169,49 +171,66 @@
 			{/if}
 		</section>
 
-		<section class="card" aria-labelledby="rates-title">
-			<h3 id="rates-title">{msg('settingsPage.usdExchangeRates')}</h3>
-			<p class="sub">
-				{msg('settingsPage.whenEgpSalesAreShownIn')}
-			</p>
+		<!-- Laid out like the MoonLightRetail rate card: title beside a short
+		     description, the rate in effect, one action, recent rates below. -->
+		<section class="card rates" aria-labelledby="rates-title">
+			<header class="rates-head">
+				<h3 id="rates-title">{msg('settingsPage.usdRateTitle')}</h3>
+				<p class="sub muted">{msg('settingsPage.usdRateSub')}</p>
+			</header>
 			{#if current}
-				<p class="current" data-testid="current-rate">{msg('settingsPage.currentRate')}: <bdi class="num">1 USD = {current.rate} EGP</bdi></p>
+				<p class="current" data-testid="current-rate">
+					<bdi class="num"><strong>1 USD = {current.rate} EGP</strong></bdi>
+					<span class="muted">{msg('settingsPage.rateSince', { time: absoluteTime(current.effective_at, lang()) })}</span>
+					{#if current.note}<span class="muted">· {msg('settingsPage.rateSource', { note: current.note })}</span>{/if}
+				</p>
+			{:else}
+				<p class="current muted">{msg('settingsPage.noCurrentRate')}</p>
 			{/if}
 			{#if canManage}
-				<form class="rate-form" onsubmit={addRate}>
-					<TextField id="rate-value" label={msg('settingsPage.egpPerUsd')} inputmode="decimal" dir="ltr" placeholder="50.25" error={rateError} bind:value={rateInput} data-testid="rate-value" />
-					<TextField id="rate-at" label={msg('settingsPage.effectiveFrom')} type="datetime-local" bind:value={rateAt} />
-					<TextField id="rate-note" label={msg('settingsPage.noteOptional')} maxlength={120} bind:value={rateNote} />
-					<button type="submit" class="btn-primary" disabled={busy}>{msg('settingsPage.addRate')}</button>
-				</form>
+				{#if showRateForm}
+					<form class="rate-form" onsubmit={addRate}>
+						<TextField id="rate-value" label={msg('settingsPage.egpPerUsd')} inputmode="decimal" dir="ltr" placeholder="50.25" error={rateError} bind:value={rateInput} data-testid="rate-value" />
+						<TextField id="rate-at" label={msg('settingsPage.effectiveFrom')} type="datetime-local" bind:value={rateAt} />
+						<TextField id="rate-note" label={msg('settingsPage.noteOptional')} maxlength={120} bind:value={rateNote} />
+						<div class="btn-row">
+							<button type="submit" class="btn-primary" disabled={busy}>{msg('settingsPage.addRate')}</button>
+							<button type="button" class="btn-secondary" disabled={busy} onclick={() => (showRateForm = false)}>{msg('settingsPage.hideForm')}</button>
+						</div>
+					</form>
+				{:else}
+					<button type="button" class="btn-primary new-rate" onclick={() => (showRateForm = true)} data-testid="new-rate">{msg('settingsPage.newRate')}</button>
+				{/if}
 			{/if}
+			<p class="muted small">{msg('settingsPage.whenEgpSalesAreShownIn')}</p>
 			{#if rates.length === 0}
 				<p class="muted">{msg('settingsPage.noRatesYetWithoutOneEgp')}</p>
 			{:else}
-				<div class="table-wrap">
-					<table class="data">
-						<thead><tr><th>{msg('settingsPage.effectiveFrom')}</th><th>{msg('settingsPage.rate')}</th><th>{msg('settingsPage.note')}</th>{#if canManage}<th></th>{/if}</tr></thead>
-						<tbody>
-							{#each rates as r (r.id)}
-								<tr data-testid="rate-row">
-									<td>{absoluteTime(r.effective_at, lang())}</td>
-									<td><bdi class="num">{r.rate}</bdi></td>
-									<td>{r.note || '—'}</td>
-									{#if canManage}
-										<td class="row-actions">
-											{#if confirmDelete === r.id}
-												<button type="button" class="btn-danger btn-sm" disabled={busy} onclick={() => deleteRate(r.id)}>{msg('settingsPage.confirmDelete')}</button>
-												<button type="button" class="btn-secondary btn-sm" onclick={() => (confirmDelete = null)}>{msg('settingsPage.cancel')}</button>
-											{:else}
-												<button type="button" class="btn-link" onclick={() => (confirmDelete = r.id)}>{msg('settingsPage.delete')}</button>
-											{/if}
-										</td>
-									{/if}
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
+				<details class="recent" open>
+					<summary>{msg('settingsPage.recentRates')}</summary>
+					<ul>
+						{#each rates as r (r.id)}
+							<li data-testid="rate-row">
+								<span class="line">
+									<bdi class="num">{r.rate}</bdi>
+									<span class="muted">·</span>
+									<span class="num">{absoluteTime(r.effective_at, lang())}</span>
+									{#if r.note}<span class="muted">· {r.note}</span>{/if}
+								</span>
+								{#if canManage}
+									<span class="row-actions">
+										{#if confirmDelete === r.id}
+											<button type="button" class="btn-danger btn-sm" disabled={busy} onclick={() => deleteRate(r.id)}>{msg('settingsPage.confirmDelete')}</button>
+											<button type="button" class="btn-secondary btn-sm" onclick={() => (confirmDelete = null)}>{msg('settingsPage.cancel')}</button>
+										{:else}
+											<button type="button" class="btn-link" onclick={() => (confirmDelete = r.id)}>{msg('settingsPage.delete')}</button>
+										{/if}
+									</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				</details>
 			{/if}
 		</section>
 	{/if}
@@ -259,9 +278,58 @@
 	.readonly {
 		margin: 0;
 	}
+	.rates-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 16px;
+		padding-bottom: 12px;
+		border-bottom: 1px solid var(--border);
+	}
+	.rates-head h3 {
+		font-size: 1.2rem;
+	}
+	.rates-head .sub {
+		margin: 0;
+		font-size: 0.84rem;
+	}
 	.current {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 6px;
+		margin: 16px 0;
+		font-size: 1rem;
+	}
+	.new-rate {
+		padding: 10px 18px;
+	}
+	.small {
+		font-size: 0.8rem;
+		margin: 14px 0 10px;
+	}
+	.recent summary {
+		cursor: pointer;
+		font-weight: 600;
+	}
+	.recent ul {
 		margin: 10px 0 0;
-		font-weight: 700;
+		padding-inline-start: 22px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.recent li {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 8px;
+	}
+	.recent .line {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 6px;
 	}
 	.rate-form {
 		display: grid;

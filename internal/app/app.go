@@ -185,7 +185,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	businessSettings := settings.NewService(postgres.NewBusinessSettings(pool, cfg.DBQueryTimeout), ids.System{}.New, time.Now)
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log).
-		WithPrintableReports(salesreport.NewService(reportingStore, businessSettings))
+		WithPrintableReports(salesreport.NewService(reportingStore, businessSettings)).
+		WithInsights(dashboard.NewInsights(reportingStore, cfg.Media.Storage, mediaSvc.HasImage, time.Now))
 	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
 	commerceStore := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)

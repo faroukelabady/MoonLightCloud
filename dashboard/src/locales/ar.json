@@ -14,14 +14,67 @@
 		"refunds": "مرتجعات"
 	},
 	"catalogHealthCard": {
-		"catalogHealthReflectsCurrentCatalogIntegration": "صحة الكتالوج تعكس الحالة الحالية للكتالوج والتكامل؛ فترة التقرير المختارة لا ترشح هذه النتائج.",
-		"reason": "السبب",
+		"title": "فحص الكتالوج",
+		"intro": "منتجات بها مشكلة تمنع البيع عبر الإنترنت. أصلحها في MoonLightRetail.",
+		"noIssues": "لا توجد مشاكل.",
+		"showProducts": "عرض المنتجات ({count})",
 		"product": "المنتج",
-		"provider": "المزود",
-		"diagnosticOnlyNoAutoFixRetail": "للتشخيص فقط — لا إصلاح تلقائي. مخزون المتجر هو المرجع؛ مخزون المزود حالة منشورة فقط.",
-		"truncated": "عرض أول {count} من النتائج؛ الأعداد في الملخص كاملة.",
-		"providerFilter": "فلتر المزود",
-		"allProviders": "كل المزودين"
+		"problem": "المشكلة",
+		"provider": "المتجر الإلكتروني",
+		"allProviders": "كل المتاجر الإلكترونية",
+		"providerFilter": "تصفية المتجر الإلكتروني",
+		"truncated": "تعرض القائمة أول {count} منتج. الأعداد تشمل كل المنتجات.",
+		"footnote": "هذه القائمة تعرض المشاكل فقط. لا تغيّر أي بيانات.",
+		"reasons": {
+			"CATALOG_MISSING_CATEGORY": {
+				"label": "بدون فئة",
+				"fix": "أضف فئة للمنتج."
+			},
+			"AVAILABILITY_NOT_READY": {
+				"label": "التوافر غير جاهز",
+				"fix": "انتظر المزامنة التالية."
+			},
+			"COMMERCE_MAPPING_MISSING": {
+				"label": "غير مربوط بالمتجر الإلكتروني",
+				"fix": "اربط المنتج بالمتجر الإلكتروني."
+			},
+			"COMMERCE_SYNC_AMBIGUOUS": {
+				"label": "نتيجة المتجر الإلكتروني غير معروفة",
+				"fix": "أعد المزامنة."
+			},
+			"COMMERCE_STORE_CONFLICT": {
+				"label": "مربوط بمتجر آخر",
+				"fix": "تأكد أن المنتج في المتجر الصحيح."
+			},
+			"CATEGORY_ONLINE_DISABLED": {
+				"label": "الفئة مغلقة للبيع عبر الإنترنت",
+				"fix": "فعّل البيع عبر الإنترنت للفئة."
+			},
+			"PRODUCT_NO_ACTIVE_VARIANTS": {
+				"label": "لا يوجد خيار نشط",
+				"fix": "فعّل خيارًا واحدًا."
+			},
+			"PRODUCT_NO_SELLABLE_VARIANT": {
+				"label": "لا يوجد خيار قابل للبيع",
+				"fix": "أعطِ خيارًا واحدًا سعرًا ومخزونًا."
+			},
+			"VARIANT_DUPLICATE_COMBINATION": {
+				"label": "خياران بنفس الصفات",
+				"fix": "غيّر صفات أحد الخيارين."
+			},
+			"VARIANT_MISSING_SKU": {
+				"label": "خيار بدون رقم SKU",
+				"fix": "أضف رقم SKU للخيار."
+			},
+			"VARIANT_MAPPING_MISSING": {
+				"label": "الخيار غير مربوط بالمتجر الإلكتروني",
+				"fix": "اربط الخيار بالمتجر الإلكتروني."
+			},
+			"VARIANT_INTENTIONALLY_OFFLINE": {
+				"label": "الخيار مغلق للبيع عبر الإنترنت",
+				"fix": "لا يلزم أي إجراء."
+			}
+		}
 	},
 	"categoryCard": {
 		"roots": "الفئات الرئيسية",
@@ -93,7 +146,8 @@
 		"number": "رقم البيع",
 		"channel": "القناة",
 		"cashier": "الكاشير",
-		"total": "الإجمالي"
+		"total": "الإجمالي",
+		"openSale": "عرض البيع {number}"
 	},
 	"loginPage": {
 		"passwordsDoNotMatch": "كلمتا المرور غير متطابقتين.",
@@ -405,7 +459,15 @@
 		"note": "ملاحظة",
 		"confirmDelete": "تأكيد الحذف",
 		"cancel": "إلغاء",
-		"delete": "حذف"
+		"delete": "حذف",
+		"usdRateTitle": "سعر صرف الدولار",
+		"usdRateSub": "تستخدم التقارير هذا السعر (جنيه لكل دولار) لعرض مبيعات الجنيه بالدولار.",
+		"rateSince": "منذ {time}",
+		"rateSource": "ملاحظة: {note}",
+		"noCurrentRate": "لا يوجد سعر ساري.",
+		"newRate": "إضافة سعر جديد",
+		"hideForm": "إغلاق",
+		"recentRates": "الأسعار الأخيرة"
 	},
 	"sidebar": {
 		"mainNavigation": "التنقل الرئيسي"
@@ -484,21 +546,34 @@
 		"storeScope": "نطاق المتجر"
 	},
 	"syncHealthCard": {
-		"refreshStatus": "تحديث الحالة",
+		"title": "حالة المزامنة",
+		"syncNow": "مزامنة الآن",
+		"syncing": "جارٍ الإرسال…",
 		"refresh": "تحديث",
-		"registerAShopsDeviceOnThe": "سجّل جهاز متجر من صفحة الأجهزة لتبدأ المزامنة.",
-		"sales": "مبيعات",
-		"returns": "مرتجعات",
-		"latestEvent": "آخر حدث",
-		"backlog": "متأخر",
+		"syncSent": "أُرسل طلب المزامنة إلى {count} جهاز.",
+		"syncNoDevice": "لا يوجد جهاز نشط لهذا المتجر. تم تحديث العرض.",
+		"syncFailed": "تعذّر إرسال طلب المزامنة. حاول مرة أخرى.",
+		"level": {
+			"ok": "متصل. عالجت السحابة كل البيانات التي استلمتها.",
+			"catching": "متصل. تعالج السحابة بيانات جديدة.",
+			"blocked": "بعض البيانات محظورة. اقرأ الخطأ أدناه.",
+			"noshop": "لا يوجد متجر مُعدّ."
+		},
+		"registerAShopsDeviceOnThe": "سجّل جهازًا في صفحة الأجهزة. بعدها يستطيع الجهاز إرسال البيانات.",
+		"category": {
+			"sales": "المبيعات",
+			"returns": "المرتجعات",
+			"catalog": "المنتجات",
+			"stock": "المخزون"
+		},
+		"inPeriod": "{count} في الفترة",
+		"never": "لم يُستلم",
+		"lastSync": "آخر مزامنة",
+		"inQueue": "في الانتظار",
+		"items": "{count} عناصر",
 		"blocked": "محظور",
-		"status": "الحالة",
-		"blocked2": "محظورة",
-		"complete": "مكتمل",
-		"catchingUp": "يلحق",
 		"lastError": "آخر خطأ",
-		"lastReturnError": "آخر خطأ مرتجعات",
-		"reportsIncludeProjectedReturnsPendingBlocked": "التقارير تشمل المرتجعات المسقطة؛ المعلقة أو المحظورة تظهر أعلاه. الاكتمال السحابي لا يعني فراغ درج المتجر."
+		"summaryUnavailable": "أعداد الفترة غير متاحة."
 	},
 	"tagCard": {
 		"tag": "الوسم",
@@ -900,5 +975,81 @@
 		"ackFailed": "فشل الإقرار.",
 		"stillActive": "الحالة ما زالت قائمة — لا يمكن الحل حتى تزول.",
 		"resolveFailed": "فشل الحل."
+	},
+	"activityCard": {
+		"previous": "السابق",
+		"next": "التالي",
+		"page": "صفحة {page}",
+		"loadFailed": "تعذّر تحميل الصفحة. حاول مرة أخرى."
+	},
+	"saleDetail": {
+		"title": "البيع {number}",
+		"close": "إغلاق",
+		"loading": "جارٍ التحميل…",
+		"failed": "تعذّر تحميل البيع. حاول مرة أخرى.",
+		"retry": "حاول مرة أخرى",
+		"cashier": "الكاشير",
+		"shop": "المتجر",
+		"date": "التاريخ",
+		"item": "الصنف",
+		"qty": "الكمية",
+		"soldFor": "سعر البيع",
+		"cost": "التكلفة",
+		"profit": "الربح",
+		"each": "{amount} للقطعة",
+		"unknown": "غير معروفة",
+		"subtotal": "المجموع الفرعي",
+		"discount": "الخصم",
+		"tax": "الضريبة",
+		"total": "الإجمالي",
+		"itemsSold": "قيمة الأصناف المباعة",
+		"totalCost": "إجمالي التكلفة",
+		"grossProfit": "الربح (قبل الخصم والضريبة)",
+		"costIncomplete": "بعض الأصناف بدون تكلفة في MoonLightRetail. لا يظهر الربح.",
+		"fxRate": "السعر: 1 USD = {rate} EGP"
+	},
+	"mediaStatusCard": {
+		"title": "تخزين الصور",
+		"storage": {
+			"r2": "Cloudflare R2",
+			"local": "قرص محلي (للتطوير)"
+		},
+		"check": {
+			"ok": "يعمل",
+			"missing": "ملف مفقود",
+			"error": "لا يستجيب",
+			"empty": "لا توجد صور بعد"
+		},
+		"hint": {
+			"ok": "وجدت السحابة أحدث صورة في التخزين.",
+			"missing": "لم تجد السحابة أحدث صورة. نفّذ إعادة مزامنة كاملة في MoonLightRetail.",
+			"error": "لا تستطيع السحابة الوصول إلى التخزين. راجع إعدادات R2.",
+			"empty": "لم يرفع MoonLightRetail أي صور بعد."
+		},
+		"checkedAt": "فُحص {time} ({ms} مللي ثانية)",
+		"stored": "الصور المخزنة",
+		"uploadedInPeriod": "رُفعت في الفترة",
+		"lastUpload": "آخر رفع",
+		"waiting": "في انتظار الرفع",
+		"none": "لا يوجد",
+		"recheck": "افحص مرة أخرى"
+	},
+	"userMenu": {
+		"account": "قائمة الحساب",
+		"changePassword": "تغيير كلمة المرور",
+		"logout": "تسجيل الخروج",
+		"role": {
+			"owner": "المالك",
+			"admin": "مسؤول"
+		},
+		"currentPassword": "كلمة المرور الحالية",
+		"newPassword": "كلمة المرور الجديدة",
+		"confirmPassword": "تأكيد كلمة المرور الجديدة",
+		"save": "تغيير كلمة المرور",
+		"cancel": "إلغاء",
+		"hint": "استخدم 12 حرفًا أو أكثر. ستُغلق الجلسات الأخرى.",
+		"mismatch": "كلمتا المرور الجديدتان غير متطابقتين.",
+		"tooShort": "استخدم 12 حرفًا أو أكثر.",
+		"changed": "تم تغيير كلمة المرور. أُغلقت الجلسات الأخرى."
 	}
 }

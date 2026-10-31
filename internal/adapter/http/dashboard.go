@@ -22,6 +22,8 @@ type DashboardDataHandlers struct {
 	log  *slog.Logger
 	// printable serves the Reports page; nil leaves its routes out.
 	printable *salesreport.Service
+	// insights serves the sync page reads; nil answers 404.
+	insights *dashboard.Insights
 }
 
 // NewDashboardDataHandlers wires BFF data handlers.
@@ -336,6 +338,28 @@ func (h DashboardDataHandlers) Activity(w http.ResponseWriter, r *http.Request) 
 	scope, err := report.ParseStoreScope(r.URL.Query().Get("store_id"))
 	if err != nil {
 		WriteError(w, r, err)
+		return
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			WriteError(w, r, apperr.New(apperr.InvalidInput, "invalid offset"))
+			return
+		}
+		offset = n
+	}
+	// Paged reads (offset given) return has_more; the plain feed is unchanged.
+	if r.URL.Query().Has("offset") {
+		items, more, err := h.dash.RecentActivityPage(r.Context(), report.Request{Store: scope}, offset, limit)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		h.log.Info("dashboard served", "request_id", RequestID(r),
+			"endpoint", "dashboard_activity",
+			"duration_ms", time.Since(start).Milliseconds())
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "offset": offset, "has_more": more, "store_id": scopeOrNullReq(r)})
 		return
 	}
 	items, err := h.dash.RecentActivity(r.Context(), report.Request{Store: scope}, limit)

@@ -16,6 +16,8 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	import SyncHealthCard from './components/SyncHealthCard.svelte';
 	import ActivityCard from './components/ActivityCard.svelte';
 	import LatestSalesCard from './components/LatestSalesCard.svelte';
+	import MediaStatusCard from './components/MediaStatusCard.svelte';
+	import UserMenu from './components/UserMenu.svelte';
 	import OrdersPage from './components/OrdersPage.svelte';
 	import DevicesPage from './components/DevicesPage.svelte';
 	import OperationsPage from './components/OperationsPage.svelte';
@@ -27,7 +29,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	import LoginPage from './components/LoginPage.svelte';
 	import { createRequestScope } from './lib/requestScope';
 	import { dashboardApi, ApiError, isStoreID, setCSRFToken } from './lib/api.js';
-	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
+	import type { PeriodParams, OverviewResponse, BranchRow, SyncHealth, ActivityItem, LatestSale, SyncSummary, MediaStatus, DailyMode, BreakdownMode, CategoryKind, OrderSummary, OrderDetail, OrderStatusCount, WebhookInboxStats, StoreRow, Me, AuthStage } from './lib/api.js';
 	import StoreSelector from './components/StoreSelector.svelte';
 	import { toChartNumber, subMinor } from './lib/money.js';
 	import { arabic, lang, msg, setLang, t } from './lib/i18n.svelte.js';
@@ -40,7 +42,6 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	// /auth/me, held in memory only. UX gating; the server re-checks all.
 	let me: Me | null = $state(null);
 	let pendingStage: AuthStage | null = $state(null);
-	let operatorName = $state('');
 	let route = $state('overview');
 	let params: PeriodParams = $state({ period: 'last_10_completed_days' });
 	let currency: 'all' | 'EGP' | 'USD' = $state('all');
@@ -50,7 +51,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 
 	let storesState: 'idle' | 'loading' | 'loaded' | 'error' = $state('idle');
 
-	const requests = createRequestScope<'widgets' | 'orders' | 'more' | 'detail'>();
+	const requests = createRequestScope<'widgets' | 'orders' | 'more' | 'detail' | 'media'>();
 	const sessionRequests = createRequestScope<'session'>();
 
 	function readRoute() {
@@ -146,7 +147,6 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 			const current = await dashboardApi.me(owner.signal);
 			if (!owner.current()) return false;
 			me = current;
-			operatorName = current.user.display_name;
 			pendingStage = current.stage === 'full' ? null : current.stage;
 			authed = current.stage === 'full';
 			return authed;
@@ -257,6 +257,14 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 	let syncHealth: SyncHealth | null = $state(null);
 	let syncState: WidgetState = $state('loading');
 	let activity: ActivityItem[] = $state([]);
+	let activityMore = $state(false);
+	// Sync page: events per kind in the period, and the image store.
+	let syncSummary: SyncSummary | null = $state(null);
+	let media: MediaStatus | null = $state(null);
+	let mediaState: WidgetState = $state('loading');
+	let mediaErr: number | null = $state(null);
+	let syncing = $state(false);
+	let syncNotice = $state('');
 	let activityState: WidgetState = $state('loading');
 	let latest: LatestSale[] = $state([]);
 	let latestState: WidgetState = $state('loading');
@@ -392,6 +400,7 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 		ordersMoreErr = null;
 		overviewState = dailyState = productsState = categoriesState = branchesState = syncState = activityState = latestState =
 			ordersState = tagState = onlineState = healthState = 'loading';
+		if (route === 'sync') mediaState = 'loading';
 		const done = async <T>(
 			p: Promise<T>,
 			apply: (v: T) => void,
@@ -478,10 +487,16 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 				syncHealth = v;
 				syncState = 'loaded';
 			}, (s) => (syncState = s), (n) => (syncErr = n)),
-			done(dashboardApi.activity(store, signal), (v) => {
+			done(dashboardApi.activityPage(store, 0, signal), (v) => {
 				activity = v.items;
+				activityMore = v.has_more;
 				activityState = emptyOf(v.items);
 			}, (s) => (activityState = s), (n) => (activityErr = n)),
+			// Period counts are extra detail: a failure leaves the health card up.
+			done(dashboardApi.syncSummary(params, store, signal), (v) => {
+				syncSummary = v;
+			}, () => (syncSummary = null), () => {}),
+			...(route === 'sync' ? [loadMedia()] : []),
 			done(dashboardApi.latestSales(store, signal), (v) => {
 				latest = v.sales;
 				latestState = emptyOf(v.sales);
@@ -510,6 +525,52 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 				healthState = total === 0 && v.detail.length === 0 ? 'empty' : 'loaded';
 			}, (s) => (healthState = s), (n) => (healthErr = n))
 		]);
+	}
+
+	// loadMedia checks the image store (a HEAD on the newest file) and counts
+	// the files of the selected scope.
+	async function loadMedia() {
+		const { signal, current } = requests.begin('media');
+		mediaState = 'loading';
+		try {
+			const v = await dashboardApi.mediaStatus(params, store, signal);
+			if (!current()) return;
+			media = v;
+			mediaErr = null;
+			mediaState = 'loaded';
+		} catch (err) {
+			if (!current()) return;
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			if (requireAuth(err)) return;
+			mediaErr = err instanceof ApiError ? err.status : 0;
+			mediaState = 'error';
+		}
+	}
+
+	// syncNow asks every active device of the selected scope to sync (when
+	// the user may manage devices), then reloads the view. Without that
+	// permission it only reloads.
+	let canSync = $derived.by(() => me?.permissions.includes('devices.manage') ?? false);
+	async function syncNow() {
+		if (syncing) return;
+		syncing = true;
+		syncNotice = '';
+		try {
+			if (canSync) {
+				const list = (await dashboardApi.devices()).devices ?? [];
+				const targets = list.filter((d) => d.lifecycle === 'active' && (!store || d.store_id === store) && !d.active_command);
+				const key = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `key-${Date.now()}-${Math.random()}`);
+				const sent = await Promise.allSettled(targets.map((d) => dashboardApi.syncRequest(d.device_id, key())));
+				const ok = sent.filter((r) => r.status === 'fulfilled').length;
+				syncNotice = targets.length === 0 ? msg('syncHealthCard.syncNoDevice') : ok > 0 ? msg('syncHealthCard.syncSent', { count: ok }) : msg('syncHealthCard.syncFailed');
+			}
+		} catch (err) {
+			if (requireAuth(err)) return;
+			syncNotice = msg('syncHealthCard.syncFailed');
+		} finally {
+			syncing = false;
+		}
+		void reloadAll();
 	}
 
 	function setHealthProvider(p: string) {
@@ -547,7 +608,6 @@ import CatalogHealthCard from './components/CatalogHealthCard.svelte';
 			authed = false;
 			me = null;
 			pendingStage = null;
-			operatorName = '';
 			// Do not leak one session's Store registry or scoped rows into the
 			// next login; re-authentication re-reads the URL and reloads. The
 			// epoch bump also drops a registry response still in flight.
@@ -643,29 +703,22 @@ let branchContext = $derived.by(() => {
 					<!-- Same row, at the end: compact account controls (names on hover). -->
 					<div class="actorblock">
 						<div class="actorrow">
-						{#if operatorName}
-							<div class="userchip" data-testid="current-user" role="img" aria-label={operatorName} title={operatorName}>
-								<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
-							</div>
-						{/if}
 						<button type="button" class="langswitch" lang={arabic() ? 'en' : 'ar'} aria-label={arabic() ? 'English' : 'العربية'} title={arabic() ? 'English' : 'العربية'} onclick={() => setLang(lang() === 'ar' ? 'en' : 'ar')}>
 							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
 							<span aria-hidden="true">{arabic() ? 'EN' : 'ع'}</span>
 						</button>
-						<button type="button" class="logout" disabled={loggingOut} aria-label={msg('app.logout')} title={msg('app.logout')} onclick={logout}>
-							<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h4v16h-4M10 16l4-4-4-4M14 12H4" /></svg>
-						</button>
+						{#if me}<UserMenu {me} {loggingOut} onlogout={logout} />{/if}
 						</div>
 					</div>
 				</div>
 			</header>
 			{#if fatal}<div role="alert">{fatal}</div>{/if}
-			<div class="dash" class:ov={route === 'overview'}>
+			<div class="dash" class:ov={route === 'overview'} class:syncpage={route === 'sync'}>
 				{#if route === 'overview' || route === 'sync'}
 					<!-- First in the grid: the reading-order start, so top right in
 					     Arabic and top left in English. -->
 					<div class="cell a-sync">
-						<SyncHealthCard health={syncHealth} status={syncState} errStatus={syncErr} onretry={retryAll} onrefresh={() => reloadAll()} noShop={storesState === 'loaded' && stores.length === 0} />
+						<SyncHealthCard health={syncHealth} summary={syncSummary} status={syncState} errStatus={syncErr} onretry={retryAll} onsync={() => void syncNow()} {canSync} {syncing} notice={syncNotice} noShop={storesState === 'loaded' && stores.length === 0} />
 					</div>
 				{/if}
 				{#if route === 'overview'}
@@ -674,8 +727,11 @@ let branchContext = $derived.by(() => {
 					</div>
 				{/if}
 				{#if route === 'sync'}
-					<div class="cell a-sync">
+					<div class="cell a-catalog">
 						<CatalogHealthCard data={health} status={healthState} errStatus={healthErr} onretry={retryAll} provider={healthProvider} onprovider={setHealthProvider} />
+					</div>
+					<div class="cell a-media">
+						<MediaStatusCard data={media} status={mediaState} errStatus={mediaErr} onretry={() => void loadMedia()} oncheck={() => void loadMedia()} />
 					</div>
 				{/if}
 				{#if route === 'overview'}
@@ -729,7 +785,7 @@ let branchContext = $derived.by(() => {
 				{/if}
 				{#if route === 'overview' || route === 'sync'}
 					<div class="cell a-latest">
-						<LatestSalesCard sales={latest} status={latestState} errStatus={latestErr} onretry={retryAll} />
+						<LatestSalesCard sales={latest} status={latestState} errStatus={latestErr} onretry={retryAll} {store} />
 					</div>
 				{/if}
 				{#if route === 'overview' || route === 'orders'}
@@ -799,7 +855,7 @@ let branchContext = $derived.by(() => {
 				{/if}
 				{#if route === 'overview' || route === 'sync'}
 					<div class="cell a-act">
-						<ActivityCard items={activity} status={activityState} errStatus={activityErr} onretry={retryAll} />
+						<ActivityCard items={activity} hasMore={activityMore} {store} status={activityState} errStatus={activityErr} onretry={retryAll} />
 					</div>
 				{/if}
 			</div>
@@ -899,19 +955,6 @@ let branchContext = $derived.by(() => {
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.userchip {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0 4px;
-		color: var(--text);
-		font-size: 0.82rem;
-		font-weight: 700;
-	}
-	.userchip svg {
-		flex-shrink: 0;
-		color: var(--primary);
-	}
 	/* Every top-bar control shares the language button's height, in both
 	   languages (Arabic glyphs would otherwise make some controls taller). */
 	.topbar :global(.modes),
@@ -919,9 +962,7 @@ let branchContext = $derived.by(() => {
 	.topbar :global(.periodbar input),
 	.topbar :global(.periodbar .apply),
 	.topbar :global(.single-select .trigger),
-	.userchip,
-	.langswitch,
-	.logout {
+	.langswitch {
 		height: var(--topbar-control-h);
 		min-height: 0;
 		box-sizing: border-box;
@@ -942,9 +983,8 @@ let branchContext = $derived.by(() => {
 	.topbar :global(.periodbar input) {
 		padding-block: 0;
 	}
-	/* Language and logout share one button shape: blue and red. */
-	.langswitch,
-	.logout {
+	/* The language button; the account menu sits beside it. */
+	.langswitch {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -961,16 +1001,6 @@ let branchContext = $derived.by(() => {
 	}
 	.langswitch:hover {
 		background: var(--color-primary-dark);
-	}
-	.logout {
-		background: var(--danger);
-	}
-	.logout:hover {
-		background: #991b1b;
-	}
-	.logout:disabled {
-		opacity: 0.6;
-		cursor: default;
 	}
 	/* Every row of the 12-column grid is filled and its cards stretch to the
 	same height, so no card leaves an empty band beside or below it. The
@@ -1006,6 +1036,8 @@ let branchContext = $derived.by(() => {
 	}
 	.cell { grid-column: span 6; }
 	.a-orders { grid-column: span 12; }
+	/* The Sync page opens with sync health across the full width. */
+	.dash.syncpage .a-sync { grid-column: span 12; }
 	/* Sync health opens the overview at the reading-order start (top right
 	   in Arabic, top left in English) and is raised so it is seen first. */
 	.dash.ov .a-sync > :global(.card) {
