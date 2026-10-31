@@ -172,6 +172,9 @@ type Config struct {
 	// the API is unaffected.
 	DashboardAssetsDir string
 	Media              MediaConfig
+	// ExchangeRateURL is the USD->EGP provider (EXCHANGE_RATE_URL). Absent
+	// uses open.er-api.com; empty turns fetching off.
+	ExchangeRateURL string
 	// envExplicit records whether ENVIRONMENT was set. Missing-environment
 	// defaults still apply for other settings, but never grant open access.
 	envExplicit   bool
@@ -200,6 +203,7 @@ func Load() (Config, error) {
 		AuthMFAEncryptionKey:     strings.TrimSpace(os.Getenv("AUTH_MFA_ENCRYPTION_KEY")),
 		ReleaseTrustedPublicKeys: strings.TrimSpace(os.Getenv("RELEASE_TRUSTED_PUBLIC_KEYS")),
 		DashboardAssetsDir:       envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
+		ExchangeRateURL:          exchangeRateURL(),
 		envExplicit:              strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",
 	}
 	allowOpen, err := parseBoolFlag("ALLOW_UNAUTHENTICATED_REPORTING")
@@ -317,6 +321,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid ENVIRONMENT %q: want development|staging|production", c.Environment)
 	}
 	if err := c.Media.resolve(c.Environment); err != nil {
+		return err
+	}
+	if err := validateExchangeRateURL(c.ExchangeRateURL, c.Environment); err != nil {
 		return err
 	}
 	if strings.TrimSpace(c.HTTPAddr) == "" {

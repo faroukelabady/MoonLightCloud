@@ -467,7 +467,17 @@
 		"noCurrentRate": "No rate is in effect.",
 		"newRate": "Add a new rate",
 		"hideForm": "Close",
-		"recentRates": "Recent rates"
+		"recentRates": "Recent rates",
+		"rateFetchAuto": "Cloud fetches the rate from {source} every {hours} hours. A rate you add by hand stays in use until a fetch brings a different rate.",
+		"rateFetchAttribution": "Rates by Exchange Rate API:",
+		"rateFetchOff": "Cloud does not fetch the rate (EXCHANGE_RATE_URL is empty). Add rates by hand.",
+		"rateFetchNow": "Fetch latest rate",
+		"rateFetching": "Fetching…",
+		"rateFetchedNew": "New rate saved:",
+		"rateFetchedSame": "The rate did not change:",
+		"rateFetchFailed": "The rate could not be fetched. Cloud still uses the stored rate.",
+		"sourceManual": "entered by hand",
+		"sourceFetched": "fetched from {source}"
 	},
 	"sidebar": {
 		"mainNavigation": "Main navigation"

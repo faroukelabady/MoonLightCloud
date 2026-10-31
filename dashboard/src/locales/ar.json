@@ -467,7 +467,17 @@
 		"noCurrentRate": "لا يوجد سعر ساري.",
 		"newRate": "إضافة سعر جديد",
 		"hideForm": "إغلاق",
-		"recentRates": "الأسعار الأخيرة"
+		"recentRates": "الأسعار الأخيرة",
+		"rateFetchAuto": "تجلب السحابة السعر من {source} كل {hours} ساعة. السعر الذي تضيفه يدويًا يبقى مستخدمًا حتى يأتي الجلب بسعر مختلف.",
+		"rateFetchAttribution": "الأسعار من Exchange Rate API:",
+		"rateFetchOff": "لا تجلب السحابة السعر (EXCHANGE_RATE_URL فارغ). أضف الأسعار يدويًا.",
+		"rateFetchNow": "جلب أحدث سعر",
+		"rateFetching": "جارٍ الجلب…",
+		"rateFetchedNew": "تم حفظ سعر جديد:",
+		"rateFetchedSame": "لم يتغير السعر:",
+		"rateFetchFailed": "تعذر جلب السعر. ما زالت السحابة تستخدم السعر المحفوظ.",
+		"sourceManual": "أُدخل يدويًا",
+		"sourceFetched": "مجلوب من {source}"
 	},
 	"sidebar": {
 		"mainNavigation": "التنقل الرئيسي"

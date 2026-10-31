@@ -2253,8 +2253,10 @@ CREATE TABLE business_settings (
 );
 INSERT INTO business_settings (id) VALUES (TRUE);
 
--- USD->EGP rates entered in Cloud. A report showing an EGP Sale in USD
--- uses the rate in effect when the Sale was made (else the earliest one).
+-- USD->EGP rates entered in Cloud (source manual) or fetched by Cloud from
+-- an outside provider (source is the provider host). A report showing an
+-- EGP Sale in USD uses the rate in effect when the Sale was made (else the
+-- earliest one).
 -- USD Sales always keep the rate saved with them in Retail.
 CREATE TABLE exchange_rates (
     id             UUID PRIMARY KEY,
@@ -2263,6 +2265,7 @@ CREATE TABLE exchange_rates (
     rate_microrate BIGINT NOT NULL CHECK (rate_microrate > 0),
     effective_at   TIMESTAMPTZ NOT NULL,
     note           TEXT CHECK (note IS NULL OR char_length(note) BETWEEN 1 AND 120),
+    source         TEXT NOT NULL DEFAULT 'manual' CHECK (source ~ '^[a-z0-9.-]{1,64}$'),
     created_by     UUID REFERENCES admin_users(id) ON DELETE SET NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (base, quote, effective_at)

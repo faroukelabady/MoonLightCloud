@@ -181,6 +181,9 @@ func serve(args []string) error {
 	if a.ReportRunner != nil {
 		go a.ReportRunner.Run(projCtx)
 	}
+	if a.RateFetcher != nil {
+		go a.RateFetcher.Run(projCtx)
+	}
 	if a.OperationsEngine != nil {
 		a.OperationsEngine.Start()
 		defer a.OperationsEngine.Stop()

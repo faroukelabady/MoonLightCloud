@@ -2754,6 +2754,48 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/exchange-rates/fetch:
+    post:
+      summary: Fetch the USD→EGP rate from the configured provider now (settings.manage, all Stores)
+      description: >-
+        ADR-0058. Cloud also fetches every 12 hours. A new row (source = the
+        provider host, effective now) is stored only when the rate in effect
+        differs. A second request within one minute returns the last answer
+        without calling the provider. No request body is read.
+      operationId: dashboardExchangeRateFetch
+      security:
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The provider rate and whether it was stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardExchangeRateFetchResult'}
+        '409':
+          description: RATE_FETCH_DISABLED (message) - EXCHANGE_RATE_URL is empty; rates are entered by hand.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: FORBIDDEN (missing permission), STORE_FORBIDDEN (not an all-Stores principal), MFA_REQUIRED / MFA_SETUP_REQUIRED or CSRF_REJECTED (mutations).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope. No internals.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '503':
+          description: RATE_PROVIDER_FAILED (message) - the provider failed or gave an unusable rate; the stored rate stays in use.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   /api/v1/dashboard/settings/exchange-rates/{id}:
     delete:
       summary: Delete an exchange rate (settings.manage, all Stores)
@@ -7071,13 +7113,14 @@ components:
         revision: {type: integer, description: The revision that was read.}
     DashboardExchangeRate:
       type: object
-      required: [id, rate, rate_microrate, effective_at, note, created_at]
+      required: [id, rate, rate_microrate, effective_at, note, source, created_at]
       properties:
         id: {type: string, format: uuid}
         rate: {type: string, description: 'EGP per USD, decimal.'}
         rate_microrate: {type: integer}
         effective_at: {type: string, format: date-time}
         note: {type: string}
+        source: {type: string, description: '"manual" for a rate a person entered, else the provider host it was fetched from (ADR-0058).'}
         created_at: {type: string, format: date-time}
     DashboardExchangeRateCreate:
       type: object
@@ -7088,10 +7131,27 @@ components:
         note: {type: string, maxLength: 120}
     DashboardSettings:
       type: object
-      required: [business, exchange_rates]
+      required: [business, exchange_rates, rate_fetch]
       properties:
         business: {$ref: '#/components/schemas/DashboardBusinessSettings'}
         exchange_rates: {type: array, items: {$ref: '#/components/schemas/DashboardExchangeRate'}}
+        rate_fetch:
+          type: object
+          description: Whether Cloud fetches the rate itself (ADR-0058).
+          required: [enabled, source, interval_hours]
+          properties:
+            enabled: {type: boolean, description: 'False when EXCHANGE_RATE_URL is empty.'}
+            source: {type: string, description: 'Provider host, empty when off.'}
+            interval_hours: {type: integer}
+    DashboardExchangeRateFetchResult:
+      type: object
+      required: [rate, rate_microrate, source, fetched_at, changed]
+      properties:
+        rate: {type: string, description: 'EGP per USD, decimal (rounded half up to 6 decimals).'}
+        rate_microrate: {type: integer}
+        source: {type: string}
+        fetched_at: {type: string, format: date-time}
+        changed: {type: boolean, description: 'True when a new rate row was stored.'}
     DashboardMessagingTemplate:
       type: object
       required: [provider_key, template_key, locale, external_name, language, params, enabled]

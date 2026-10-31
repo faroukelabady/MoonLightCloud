@@ -82,3 +82,14 @@ automatic recovery availability for prevention of uncertain mutation replay.
 The bucket is the only copy of the image bytes: database backups no longer
 contain them. Losing the bucket loses images until a Retail resync re-uploads
 the files Retail still holds; keep the token scoped and public access off.
+
+## USD→EGP rate fetching (ADR-0058)
+
+| Threat | Current mitigation and limitation |
+|---|---|
+| A wrong or hostile provider answer changes USD report values | Only `result=success`, `base_code=USD` and a plain decimal EGP rate between 1 and 10,000 are accepted; exponents and text over 32 characters are refused before `math/big` reads them; the body stops at 1 MiB. A fetched row starts now, so Sales already made keep their rate. Every row shows its source and a person with `settings.manage` can delete it. A provider that answers a plausible but wrong rate is still trusted until someone deletes the row. |
+| Requests sent somewhere else (SSRF, redirects) | The URL comes only from the server environment (`EXCHANGE_RATE_URL`), must be https outside development, and redirects are not followed. Requests carry no credentials or cookies. |
+| Provider outage or slow answers block selling or reports | 10-second timeout; failures keep the stored rate and are logged by error class only, never the body. Reports and Retail selling never wait on the provider. |
+| Dashboard users make Cloud hammer the provider | The fetch route needs `settings.manage` on all Stores, CSRF and MFA like every mutation; a repeat within one minute per instance reuses the last answer. The background fetch runs every 12 hours. |
+| Several Cloud instances store duplicate rows | One transaction-scoped advisory lock, then a single insert stamped with the database clock and skipped when the rate in effect is the same. |
+| Tests reach the internet | Test config and the E2E server set `EXCHANGE_RATE_URL=`; HTTP tests use a local server. |
