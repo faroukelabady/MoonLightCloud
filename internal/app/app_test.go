@@ -38,6 +38,11 @@ func testConfig(t *testing.T, url string) config.Config {
 	if _, set := os.LookupEnv("EXCHANGE_RATE_URL"); !set {
 		t.Setenv("EXCHANGE_RATE_URL", "")
 	}
+	// No messaging providers or report runner, even when .env.local (which
+	// check.sh loads) turns them on for local use.
+	t.Setenv("NOTIFICATIONS_TELEGRAM_ENABLED", "false")
+	t.Setenv("NOTIFICATIONS_WHATSAPP_ENABLED", "false")
+	t.Setenv("BUSINESS_REPORTS_ENABLED", "false")
 	c, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
