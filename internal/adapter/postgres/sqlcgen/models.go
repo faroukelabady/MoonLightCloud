@@ -709,6 +709,7 @@ type ExchangeRate struct {
 	RateMicrorate int64              `json:"rate_microrate"`
 	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
 	Note          pgtype.Text        `json:"note"`
+	Source        string             `json:"source"`
 	CreatedBy     pgtype.UUID        `json:"created_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }

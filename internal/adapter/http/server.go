@@ -76,6 +76,7 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		mux.Handle("GET /api/v1/dashboard/settings", g(humanauth.PermReportsRead, ScopeNone, settingsH.Business))
 		mux.Handle("PUT /api/v1/dashboard/settings/business", manage(settingsH.UpdateBusiness))
 		mux.Handle("POST /api/v1/dashboard/settings/exchange-rates", manage(settingsH.AddRate))
+		mux.Handle("POST /api/v1/dashboard/settings/exchange-rates/fetch", manage(settingsH.FetchRate))
 		mux.Handle("DELETE /api/v1/dashboard/settings/exchange-rates/{id}", manage(settingsH.DeleteRate))
 		if settingsH.Reports != nil {
 			mux.Handle("GET /api/v1/dashboard/settings/messaging", manage(settingsH.Messaging))

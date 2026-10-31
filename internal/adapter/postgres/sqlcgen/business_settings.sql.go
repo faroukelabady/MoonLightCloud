@@ -51,8 +51,8 @@ func (q *Queries) GetBusinessSettings(ctx context.Context) (GetBusinessSettingsR
 }
 
 const insertExchangeRate = `-- name: InsertExchangeRate :exec
-INSERT INTO exchange_rates (id, base, quote, rate_microrate, effective_at, note, created_by)
-VALUES ($1, 'USD', 'EGP', $2, $3, $4, $5::uuid)
+INSERT INTO exchange_rates (id, base, quote, rate_microrate, effective_at, note, source, created_by)
+VALUES ($1, 'USD', 'EGP', $2, $3, $4, $5, $6::uuid)
 `
 
 type InsertExchangeRateParams struct {
@@ -60,6 +60,7 @@ type InsertExchangeRateParams struct {
 	RateMicrorate int64              `json:"rate_microrate"`
 	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
 	Note          pgtype.Text        `json:"note"`
+	Source        string             `json:"source"`
 	CreatedBy     pgtype.UUID        `json:"created_by"`
 }
 
@@ -69,13 +70,41 @@ func (q *Queries) InsertExchangeRate(ctx context.Context, arg InsertExchangeRate
 		arg.RateMicrorate,
 		arg.EffectiveAt,
 		arg.Note,
+		arg.Source,
 		arg.CreatedBy,
 	)
 	return err
 }
 
+const insertFetchedExchangeRate = `-- name: InsertFetchedExchangeRate :execrows
+INSERT INTO exchange_rates (id, base, quote, rate_microrate, effective_at, source)
+SELECT $1, 'USD', 'EGP', $2::bigint, clock_timestamp(), $3
+WHERE $2::bigint IS DISTINCT FROM (
+    SELECT x.rate_microrate FROM exchange_rates x
+    WHERE x.base = 'USD' AND x.quote = 'EGP' AND x.effective_at <= clock_timestamp()
+    ORDER BY x.effective_at DESC, x.id
+    LIMIT 1)
+`
+
+type InsertFetchedExchangeRateParams struct {
+	ID            pgtype.UUID `json:"id"`
+	RateMicrorate int64       `json:"rate_microrate"`
+	Source        string      `json:"source"`
+}
+
+// A fetched rate starts at the database clock read after the lock, so
+// instances whose own clocks disagree still record one row per change. No
+// row is added when the rate in effect then has the same value.
+func (q *Queries) InsertFetchedExchangeRate(ctx context.Context, arg InsertFetchedExchangeRateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertFetchedExchangeRate, arg.ID, arg.RateMicrorate, arg.Source)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listExchangeRates = `-- name: ListExchangeRates :many
-SELECT id, rate_microrate, effective_at, note, created_at
+SELECT id, rate_microrate, effective_at, note, source, created_at
 FROM exchange_rates
 WHERE base = 'USD' AND quote = 'EGP'
 ORDER BY effective_at DESC, id
@@ -87,6 +116,7 @@ type ListExchangeRatesRow struct {
 	RateMicrorate int64              `json:"rate_microrate"`
 	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
 	Note          pgtype.Text        `json:"note"`
+	Source        string             `json:"source"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -104,6 +134,7 @@ func (q *Queries) ListExchangeRates(ctx context.Context, rowLimit int32) ([]List
 			&i.RateMicrorate,
 			&i.EffectiveAt,
 			&i.Note,
+			&i.Source,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -114,6 +145,16 @@ func (q *Queries) ListExchangeRates(ctx context.Context, rowLimit int32) ([]List
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockExchangeRateFetch = `-- name: LockExchangeRateFetch :exec
+SELECT pg_advisory_xact_lock(hashtext('exchange_rates.fetch'))
+`
+
+// One Cloud instance at a time records a fetched rate (ADR-0058).
+func (q *Queries) LockExchangeRateFetch(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockExchangeRateFetch)
+	return err
 }
 
 const updateBusinessSettings = `-- name: UpdateBusinessSettings :many

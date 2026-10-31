@@ -68,7 +68,9 @@ ENVS=(-e ENVIRONMENT=production -e "DATABASE_URL=postgres://cloud:$PGPW@$PG:5432
   # Production requires R2 (ADR-0057). Synthetic and never contacted: startup
   # does no network I/O and the dashboard suite uploads no images.
   -e MEDIA_STORAGE=r2 -e R2_ENDPOINT=https://00000000000000000000000000000000.r2.cloudflarestorage.com
-  -e R2_BUCKET=moonlight-e2e -e "R2_ACCESS_KEY_ID=$(rand 32)" -e "R2_SECRET_ACCESS_KEY=$(rand 64)")
+  -e R2_BUCKET=moonlight-e2e -e "R2_ACCESS_KEY_ID=$(rand 32)" -e "R2_SECRET_ACCESS_KEY=$(rand 64)"
+  # No outside rate provider in tests (ADR-0058): rates come from the suite.
+  -e EXCHANGE_RATE_URL=)
 podman run --rm --network "$NET" "${ENVS[@]}" "$IMG" migrate up >/dev/null
 podman run -d --name "$APP" --network "$NET" -p "127.0.0.1:$HTTP_PORT:8080" "${ENVS[@]}" "$IMG" serve >/dev/null
 HTTP="http://127.0.0.1:$HTTP_PORT"

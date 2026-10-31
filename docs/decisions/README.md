@@ -60,6 +60,7 @@ Concise, irreversible-or-important choices only.
 - [0056](0056-product-media-sync.md) — product media sync: Retail images in Cloud (gallery snapshot stream + content-addressed uploads) and on Shopify
 
 - [0057](0057-r2-media-uploads.md) — product image bytes in private R2 object storage (local directory in development); PostgreSQL keeps the file record only
+- [0058](0058-exchange-rate-fetch.md) — Cloud fetches the USD→EGP rate from open.er-api.com every 12 hours, like MoonLightRetail; manual rates stay
 
 ## Phase numbering gaps
 

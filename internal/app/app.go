@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/exchangerate"
 	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
@@ -90,6 +91,7 @@ type App struct {
 	ReportService                 *businessreports.Service
 	ReportPlanner                 *businessreports.Planner
 	ReportRunner                  *businessreports.Runner
+	RateFetcher                   *settings.Fetcher
 	DeviceControl                 *devicecontrol.Service
 	OperationsService             *operations.Service
 	OperationsReader              *operations.OpsReader
@@ -184,6 +186,15 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	a.HumanAuth = humanAuthSvc
 	humanAuth := &adapterhttp.HumanAuth{Svc: humanAuthSvc, Secure: cfg.SecureCookies(), Trusted: cfg.TrustedProxyCIDRs, Log: log}
 	businessSettings := settings.NewService(postgres.NewBusinessSettings(pool, cfg.DBQueryTimeout), ids.System{}.New, time.Now)
+	// USD->EGP rate fetching (ADR-0058): on unless EXCHANGE_RATE_URL is empty.
+	if cfg.ExchangeRateURL != "" {
+		provider, err := exchangerate.New(cfg.ExchangeRateURL, nil)
+		if err != nil {
+			pool.Close()
+			return nil, err
+		}
+		a.RateFetcher = settings.NewFetcher(businessSettings, provider, log)
+	}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log).
 		WithPrintableReports(salesreport.NewService(reportingStore, businessSettings)).
 		WithInsights(dashboard.NewInsights(reportingStore, cfg.Media.Storage, mediaSvc.HasImage, time.Now))
@@ -383,6 +394,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	settingsHandlers := &adapterhttp.SettingsHandlers{
 		Settings:  businessSettings,
+		Rates:     a.RateFetcher,
 		Reports:   a.ReportService,
 		Templates: notificationStore, Providers: messagingProviders,
 		SchedulerEnabled: cfg.BusinessReports.Enabled,

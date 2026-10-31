@@ -9,7 +9,25 @@ export interface ExchangeRate {
 	rate_microrate: number;
 	effective_at: string;
 	note: string;
+	// "manual" for a rate a person entered; else the provider host it was
+	// fetched from (ADR-0058).
+	source: string;
 	created_at: string;
+}
+
+// Whether Cloud fetches the rate itself, from where and how often.
+export interface RateFetch {
+	enabled: boolean;
+	source: string;
+	interval_hours: number;
+}
+
+export interface RateFetchResult {
+	rate: string;
+	rate_microrate: number;
+	source: string;
+	fetched_at: string;
+	changed: boolean;
 }
 
 export interface MessagingTemplate {
@@ -70,10 +88,11 @@ export interface Messaging {
 const base = '/api/v1/dashboard/settings';
 
 export const settingsApi = {
-	get: (s?: AbortSignal) => get<{ business: BusinessSettings; exchange_rates: ExchangeRate[] }>(base, s),
+	get: (s?: AbortSignal) => get<{ business: BusinessSettings; exchange_rates: ExchangeRate[]; rate_fetch: RateFetch }>(base, s),
 	saveBusiness: (b: Pick<BusinessSettings, 'tax_enabled' | 'discount_enabled' | 'returns_enabled' | 'revision'>) =>
 		sendJson<BusinessSettings>('PUT', `${base}/business`, b),
 	addRate: (r: { rate: string; effective_at?: string; note?: string }) => sendJson<ExchangeRate>('POST', `${base}/exchange-rates`, r),
+	fetchRate: () => sendJson<RateFetchResult>('POST', `${base}/exchange-rates/fetch`, {}),
 	deleteRate: (id: string) => sendJson<{ deleted: boolean }>('DELETE', `${base}/exchange-rates/${encodeURIComponent(id)}`, {}),
 	messaging: (s?: AbortSignal) => get<Messaging>(`${base}/messaging`, s),
 	addRecipient: (r: { label: string; provider_key: string; recipient: string; locale: string }) =>

@@ -482,3 +482,26 @@ test('sync page shows plain catalog checks and the image storage state', async (
 	await expect(page.getByTestId('catalog-issues')).not.toContainText('VARIANT_MISSING_SKU');
 	await page.screenshot({ path: 'test-results/sync-page.png', fullPage: true });
 });
+
+test('settings fetches the USD rate and shows where each rate came from', async ({ page }) => {
+	const manual = { id: 'aaaaaaaa-2222-4222-8222-222222222222', rate: '50.25', rate_microrate: 50_250_000, effective_at: '2026-10-01T09:00:00Z', note: 'bank', source: 'manual', created_at: '2026-10-01T09:00:00Z' };
+	const fetched = { id: 'aaaaaaaa-3333-4333-8333-333333333333', rate: '48.712346', rate_microrate: 48_712_346, effective_at: new Date(Date.now() - 60_000).toISOString(), note: '', source: 'open.er-api.com', created_at: new Date().toISOString() };
+	let rows = [manual];
+	await page.route('**/api/v1/dashboard/settings', (r) =>
+		r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ business: { tax_enabled: false, discount_enabled: false, returns_enabled: true, revision: 1, updated_at: '2026-10-01T09:00:00Z' }, exchange_rates: rows, rate_fetch: { enabled: true, source: 'open.er-api.com', interval_hours: 12 } }) })
+	);
+	await page.route('**/api/v1/dashboard/settings/exchange-rates/fetch', (r) => {
+		rows = [fetched, manual];
+		return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rate: fetched.rate, rate_microrate: fetched.rate_microrate, source: fetched.source, fetched_at: fetched.effective_at, changed: true }) });
+	});
+	await page.setViewportSize({ width: 1536, height: 1024 });
+	await login(page);
+	await page.goto('settings');
+	await expect(page.getByTestId('current-rate')).toContainText('50.25');
+	await expect(page.getByTestId('rate-fetch-info')).toContainText('open.er-api.com');
+	await page.getByTestId('fetch-rate').click();
+	await expect(page.getByTestId('rate-notice')).toContainText('48.712346');
+	await expect(page.getByTestId('current-rate')).toContainText('48.712346');
+	await expect(page.getByTestId('rate-row')).toHaveCount(2);
+	await page.locator('section.rates').screenshot({ path: 'test-results/settings-rate.png' });
+});

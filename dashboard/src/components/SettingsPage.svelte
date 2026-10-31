@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ApiError } from '../lib/http.js';
-	import { settingsApi, type ExchangeRate } from '../lib/settingsApi.js';
+	import { settingsApi, type ExchangeRate, type RateFetch } from '../lib/settingsApi.js';
 	import type { BusinessSettings } from '../lib/reportsApi.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { lang, msg } from '../lib/i18n.svelte.js';
@@ -24,6 +24,9 @@
 	let rateError = $state('');
 	let confirmDelete = $state<string | null>(null);
 	let showRateForm = $state(false);
+	let rateFetch = $state<RateFetch | null>(null);
+	let fetching = $state(false);
+	let rateNotice = $state<{ kind: 'ok' | 'err'; text: string; rate?: string } | null>(null);
 
 	let dirty = $derived(
 		business !== null &&
@@ -35,6 +38,8 @@
 		if (err instanceof ApiError) {
 			if (err.detail === 'SETTINGS_CHANGED') return msg('settingsPage.someoneElseJustChangedTheseSettings');
 			if (err.detail === 'RATE_TIME_TAKEN') return msg('settingsPage.aRateAlreadyStartsAtThat');
+			if (err.detail === 'RATE_PROVIDER_FAILED') return msg('settingsPage.rateFetchFailed');
+			if (err.detail === 'RATE_FETCH_DISABLED') return msg('settingsPage.rateFetchOff');
 			if (err.code === 'FORBIDDEN') return msg('settingsPage.youDoNotHavePermissionTo');
 			if (err.code === 'INVALID_INPUT' && err.detail) return err.detail;
 		}
@@ -54,6 +59,7 @@
 			business = res.business;
 			draft = { tax_enabled: res.business.tax_enabled, discount_enabled: res.business.discount_enabled, returns_enabled: res.business.returns_enabled };
 			rates = res.exchange_rates;
+			rateFetch = res.rate_fetch ?? null;
 			if (!rateAt) rateAt = localNow();
 		} catch (err) {
 			notice = { kind: 'err', text: errorText(err) };
@@ -107,6 +113,26 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	// Ask Cloud to fetch the provider rate now (it also does so every 12 hours).
+	async function fetchRate() {
+		if (fetching) return;
+		fetching = true;
+		rateNotice = null;
+		try {
+			const res = await settingsApi.fetchRate();
+			if (res.changed) rates = (await settingsApi.get()).exchange_rates;
+			rateNotice = { kind: 'ok', text: msg(res.changed ? 'settingsPage.rateFetchedNew' : 'settingsPage.rateFetchedSame'), rate: res.rate };
+		} catch (err) {
+			rateNotice = { kind: 'err', text: errorText(err) };
+		} finally {
+			fetching = false;
+		}
+	}
+
+	function sourceText(r: ExchangeRate): string {
+		return !r.source || r.source === 'manual' ? msg('settingsPage.sourceManual') : msg('settingsPage.sourceFetched', { source: r.source });
 	}
 
 	async function deleteRate(id: string) {
@@ -172,7 +198,7 @@
 		</section>
 
 		<!-- Laid out like the MoonLightRetail rate card: title beside a short
-		     description, the rate in effect, one action, recent rates below. -->
+		     description, the rate in effect, the actions, recent rates below. -->
 		<section class="card rates" aria-labelledby="rates-title">
 			<header class="rates-head">
 				<h3 id="rates-title">{msg('settingsPage.usdRateTitle')}</h3>
@@ -182,10 +208,19 @@
 				<p class="current" data-testid="current-rate">
 					<bdi class="num"><strong>1 USD = {current.rate} EGP</strong></bdi>
 					<span class="muted">{msg('settingsPage.rateSince', { time: absoluteTime(current.effective_at, lang()) })}</span>
+					<span class="muted" data-testid="current-rate-source">· {sourceText(current)}</span>
 					{#if current.note}<span class="muted">· {msg('settingsPage.rateSource', { note: current.note })}</span>{/if}
 				</p>
 			{:else}
 				<p class="current muted">{msg('settingsPage.noCurrentRate')}</p>
+			{/if}
+			{#if rateFetch?.enabled}
+				<p class="auto" data-testid="rate-fetch-info">
+					{msg('settingsPage.rateFetchAuto', { source: rateFetch.source, hours: rateFetch.interval_hours })}
+					<span class="muted">{msg('settingsPage.rateFetchAttribution')} <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer" dir="ltr">exchangerate-api.com</a></span>
+				</p>
+			{:else if rateFetch}
+				<p class="auto muted" data-testid="rate-fetch-info">{msg('settingsPage.rateFetchOff')}</p>
 			{/if}
 			{#if canManage}
 				{#if showRateForm}
@@ -199,7 +234,20 @@
 						</div>
 					</form>
 				{:else}
-					<button type="button" class="btn-primary new-rate" onclick={() => (showRateForm = true)} data-testid="new-rate">{msg('settingsPage.newRate')}</button>
+					<div class="rate-actions">
+						{#if rateFetch?.enabled}
+							<button type="button" class="btn-primary new-rate" disabled={fetching} onclick={fetchRate} data-testid="fetch-rate">
+								{fetching ? msg('settingsPage.rateFetching') : msg('settingsPage.rateFetchNow')}
+							</button>
+						{/if}
+						<button type="button" class="{rateFetch?.enabled ? 'btn-secondary' : 'btn-primary'} new-rate" onclick={() => (showRateForm = true)} data-testid="new-rate">{msg('settingsPage.newRate')}</button>
+					</div>
+				{/if}
+				{#if rateNotice}
+					<p class="rate-notice {rateNotice.kind}" role={rateNotice.kind === 'ok' ? 'status' : 'alert'} data-testid="rate-notice">
+						{rateNotice.text}
+						{#if rateNotice.rate}<bdi class="num" dir="ltr">1 USD = {rateNotice.rate} EGP</bdi>{/if}
+					</p>
 				{/if}
 			{/if}
 			<p class="muted small">{msg('settingsPage.whenEgpSalesAreShownIn')}</p>
@@ -215,6 +263,7 @@
 									<bdi class="num">{r.rate}</bdi>
 									<span class="muted">·</span>
 									<span class="num">{absoluteTime(r.effective_at, lang())}</span>
+									<span class="muted" data-testid="rate-row-source">· {sourceText(r)}</span>
 									{#if r.note}<span class="muted">· {r.note}</span>{/if}
 								</span>
 								{#if canManage}
@@ -301,8 +350,33 @@
 		margin: 16px 0;
 		font-size: 1rem;
 	}
+	.auto {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		margin: 0 0 14px;
+		font-size: 0.86rem;
+	}
+	.auto .muted {
+		font-size: 0.76rem;
+	}
+	.rate-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
 	.new-rate {
 		padding: 10px 18px;
+	}
+	.rate-notice {
+		margin: 10px 0 0;
+		font-size: 0.86rem;
+	}
+	.rate-notice.ok {
+		color: var(--success);
+	}
+	.rate-notice.err {
+		color: var(--danger);
 	}
 	.small {
 		font-size: 0.8rem;

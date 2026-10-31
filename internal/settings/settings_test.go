@@ -48,6 +48,13 @@ func (m *memRepo) AddRate(_ context.Context, r NewRate) error {
 	m.rates = append(m.rates, r)
 	return nil
 }
+func (m *memRepo) AddFetchedRate(_ context.Context, r NewRate) (bool, error) {
+	if n := len(m.rates); n > 0 && m.rates[n-1].RateMicrorate == r.RateMicrorate {
+		return false, nil
+	}
+	m.rates = append(m.rates, r)
+	return true, nil
+}
 func (m *memRepo) DeleteRate(context.Context, string) (bool, error) { return false, nil }
 
 func TestServiceRejectsStaleRevisionsAndDefaultsRateTime(t *testing.T) {
@@ -66,7 +73,7 @@ func TestServiceRejectsStaleRevisionsAndDefaultsRateTime(t *testing.T) {
 	}
 
 	rate, err := svc.AddRate(ctx, "50.5", time.Time{}, "  bank  ", "u")
-	if err != nil || rate.RateMicrorate != 50_500_000 || !rate.EffectiveAt.Equal(now) || rate.Note != "bank" {
+	if err != nil || rate.RateMicrorate != 50_500_000 || !rate.EffectiveAt.Equal(now) || rate.Note != "bank" || rate.Source != SourceManual || repo.rates[0].Source != SourceManual {
 		t.Fatalf("rate %+v %v", rate, err)
 	}
 	if _, err := svc.AddRate(ctx, "50", now.Add(400*24*time.Hour), "", "u"); err == nil {

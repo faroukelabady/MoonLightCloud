@@ -1,6 +1,7 @@
 // Package settings holds business-wide dashboard settings: which sales
 // features the business uses (tax, discounts, returns) and the USD->EGP
-// rates entered in Cloud. Both apply to every Store.
+// rates, entered in Cloud or fetched from a provider. Both apply to every
+// Store.
 package settings
 
 import (
@@ -22,13 +23,15 @@ type Business struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// ExchangeRate is one Cloud-entered USD->EGP rate.
+// ExchangeRate is one USD->EGP rate, entered in Cloud (Source "manual") or
+// fetched from an outside provider (Source is the provider host).
 type ExchangeRate struct {
 	ID            string    `json:"id"`
 	Rate          string    `json:"rate"`
 	RateMicrorate int64     `json:"rate_microrate"`
 	EffectiveAt   time.Time `json:"effective_at"`
 	Note          string    `json:"note"`
+	Source        string    `json:"source"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -38,18 +41,25 @@ type NewRate struct {
 	RateMicrorate int64
 	EffectiveAt   time.Time
 	Note          string
+	Source        string
 	CreatedBy     string
 }
 
 // Repository stores the settings. UpdateBusiness returns ok=false when
 // expectedRevision is stale; DeleteRate returns ok=false when absent.
+// AddFetchedRate stores a fetched rate starting now, unless the rate in
+// effect now is the same (stored=false); one Cloud instance at a time.
 type Repository interface {
 	GetBusiness(ctx context.Context) (Business, error)
 	UpdateBusiness(ctx context.Context, next Business, expectedRevision int64, actorID string) (Business, bool, error)
 	ListRates(ctx context.Context, limit int32) ([]ExchangeRate, error)
 	AddRate(ctx context.Context, rate NewRate) error
+	AddFetchedRate(ctx context.Context, rate NewRate) (stored bool, err error)
 	DeleteRate(ctx context.Context, id string) (bool, error)
 }
+
+// SourceManual marks a rate a person entered in Cloud.
+const SourceManual = "manual"
 
 // MaxRates bounds the rate history the dashboard reads at once.
 const MaxRates = 200
@@ -116,12 +126,12 @@ func (s Service) AddRate(ctx context.Context, rate string, effectiveAt time.Time
 	if effectiveAt.After(s.now().Add(366 * 24 * time.Hour)) {
 		return ExchangeRate{}, apperr.New(apperr.InvalidInput, "effective_at is too far in the future")
 	}
-	created := NewRate{ID: s.newID(), RateMicrorate: micro, EffectiveAt: effectiveAt.UTC(), Note: note, CreatedBy: actorID}
+	created := NewRate{ID: s.newID(), RateMicrorate: micro, EffectiveAt: effectiveAt.UTC(), Note: note, Source: SourceManual, CreatedBy: actorID}
 	if err := s.repo.AddRate(ctx, created); err != nil {
 		return ExchangeRate{}, err
 	}
 	return ExchangeRate{ID: created.ID, Rate: FormatMicrorate(micro), RateMicrorate: micro,
-		EffectiveAt: created.EffectiveAt, Note: note, CreatedAt: s.now().UTC()}, nil
+		EffectiveAt: created.EffectiveAt, Note: note, Source: SourceManual, CreatedAt: s.now().UTC()}, nil
 }
 
 // DeleteRate removes a rate entered by mistake.

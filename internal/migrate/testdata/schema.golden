@@ -537,6 +537,7 @@ exchange_rates.quote text NOT NULL
 exchange_rates.rate_microrate int8 NOT NULL
 exchange_rates.effective_at timestamptz NOT NULL
 exchange_rates.note text
+exchange_rates.source text NOT NULL DEFAULT 'manual'::text
 exchange_rates.created_by uuid
 exchange_rates.created_at timestamptz NOT NULL DEFAULT now()
 media_blobs.sha256 text NOT NULL
@@ -1641,6 +1642,8 @@ exchange_rates exchange_rates_quote_check CHECK ((quote = 'EGP'::text))
 exchange_rates exchange_rates_quote_not_null NOT NULL quote
 exchange_rates exchange_rates_rate_microrate_check CHECK ((rate_microrate > 0))
 exchange_rates exchange_rates_rate_microrate_not_null NOT NULL rate_microrate
+exchange_rates exchange_rates_source_check CHECK ((source ~ '^[a-z0-9.-]{1,64}$'::text))
+exchange_rates exchange_rates_source_not_null NOT NULL source
 media_blobs media_blobs_byte_size_check CHECK (((byte_size >= 1) AND (byte_size <= 5242880)))
 media_blobs media_blobs_byte_size_not_null NOT NULL byte_size
 media_blobs media_blobs_content_type_check CHECK ((content_type = ANY (ARRAY['image/jpeg'::text, 'image/png'::text])))

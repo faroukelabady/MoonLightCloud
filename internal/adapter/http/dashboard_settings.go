@@ -31,7 +31,9 @@ type TemplateStore interface {
 // SettingsHandlers serve the dashboard Settings page: business toggles,
 // exchange rates, and business-report delivery over WhatsApp/Telegram.
 type SettingsHandlers struct {
-	Settings         settings.Service
+	Settings settings.Service
+	// Rates fetches the USD->EGP rate; nil when EXCHANGE_RATE_URL is empty.
+	Rates            *settings.Fetcher
 	Reports          *businessreports.Service
 	Templates        TemplateStore
 	Providers        []MessagingProvider
@@ -56,7 +58,9 @@ func (h *SettingsHandlers) Business(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"business": business, "exchange_rates": rates})
+	writeJSON(w, http.StatusOK, map[string]any{"business": business, "exchange_rates": rates, "rate_fetch": rateFetchWire{
+		Enabled: h.Rates.Enabled(), Source: h.Rates.Source(), IntervalHours: int(settings.FetchInterval.Hours()),
+	}})
 }
 
 // UpdateBusiness serves PUT /api/v1/dashboard/settings/business.
@@ -107,6 +111,25 @@ func (h *SettingsHandlers) AddRate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, rate)
+}
+
+// rateFetchWire tells the Settings page whether Cloud fetches the rate.
+type rateFetchWire struct {
+	Enabled       bool   `json:"enabled"`
+	Source        string `json:"source"`
+	IntervalHours int    `json:"interval_hours"`
+}
+
+// FetchRate serves POST /api/v1/dashboard/settings/exchange-rates/fetch:
+// fetch the provider rate now. 409 RATE_FETCH_DISABLED when fetching is
+// off; 503 RATE_PROVIDER_FAILED keeps the stored rate.
+func (h *SettingsHandlers) FetchRate(w http.ResponseWriter, r *http.Request) {
+	res, err := h.Rates.RefreshNow(r.Context())
+	if err != nil {
+		WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // DeleteRate serves DELETE /api/v1/dashboard/settings/exchange-rates/{id}.

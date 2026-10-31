@@ -10,7 +10,7 @@ vi.mock('../lib/settingsApi.js', async (orig) => {
 	return {
 		...mod,
 		settingsApi: {
-			get: vi.fn(), saveBusiness: vi.fn(), addRate: vi.fn(), deleteRate: vi.fn(), messaging: vi.fn(),
+			get: vi.fn(), saveBusiness: vi.fn(), addRate: vi.fn(), fetchRate: vi.fn(), deleteRate: vi.fn(), messaging: vi.fn(),
 			addRecipient: vi.fn(), setRecipient: vi.fn(), addSchedule: vi.fn(), setSchedule: vi.fn(), runSchedule: vi.fn(), setTemplate: vi.fn()
 		}
 	};
@@ -18,12 +18,13 @@ vi.mock('../lib/settingsApi.js', async (orig) => {
 
 const api = settingsApi as unknown as Record<keyof typeof settingsApi, ReturnType<typeof vi.fn>>;
 const business = { tax_enabled: false, discount_enabled: false, returns_enabled: false, revision: 3, updated_at: '2026-10-27T10:00:00Z' };
-const rate = { id: 'r1', rate: '50.25', rate_microrate: 50_250_000, effective_at: '2026-10-01T00:00:00Z', note: 'bank', created_at: '2026-10-01T00:00:00Z' };
+const rate = { id: 'r1', rate: '50.25', rate_microrate: 50_250_000, effective_at: '2026-10-01T00:00:00Z', note: 'bank', source: 'manual', created_at: '2026-10-01T00:00:00Z' };
+const rateFetch = { enabled: true, source: 'open.er-api.com', interval_hours: 12 };
 const messaging = { scheduler_enabled: false, providers: [], recipients: [], schedules: [], runs: [] };
 
 beforeEach(() => {
 	setLang('en');
-	api.get.mockResolvedValue({ business, exchange_rates: [rate] });
+	api.get.mockResolvedValue({ business, exchange_rates: [rate], rate_fetch: rateFetch });
 	api.messaging.mockResolvedValue(messaging);
 });
 afterEach(() => {
@@ -68,12 +69,48 @@ describe('SettingsPage', () => {
 		expect(api.addRate).toHaveBeenCalledWith(expect.objectContaining({ rate: '51' }));
 	});
 
+	it('fetches the latest rate and labels where each rate came from', async () => {
+		const fetched = { ...rate, id: 'r2', rate: '48.712346', effective_at: '2026-10-28T08:00:00Z', note: '', source: 'open.er-api.com' };
+		api.fetchRate.mockResolvedValue({ rate: '48.712346', rate_microrate: 48_712_346, source: 'open.er-api.com', fetched_at: fetched.effective_at, changed: true });
+		render(SettingsPage, { canManage: true });
+		expect((await screen.findByTestId('current-rate')).textContent).toMatch(/entered by hand/);
+		const info = screen.getByTestId('rate-fetch-info').textContent ?? '';
+		expect(info).toMatch(/from open\.er-api\.com every 12 hours/);
+		expect(info).toMatch(/Rates by Exchange Rate API/);
+		api.get.mockResolvedValue({ business, exchange_rates: [fetched, rate], rate_fetch: rateFetch });
+		await fireEvent.click(screen.getByRole('button', { name: 'Fetch latest rate' }));
+		expect((await screen.findByRole('status')).textContent).toMatch(/New rate saved:\s*1 USD = 48\.712346 EGP/);
+		await waitFor(() => expect(screen.getAllByTestId('rate-row')).toHaveLength(2));
+		expect(screen.getAllByTestId('rate-row-source')[0].textContent).toMatch(/fetched from open\.er-api\.com/);
+		expect(screen.getByTestId('current-rate').textContent).toMatch(/48\.712346[\s\S]*fetched from open\.er-api\.com/);
+	});
+
+	it('keeps the stored rate when the provider fails or nothing changed', async () => {
+		api.fetchRate.mockRejectedValueOnce(new ApiError(503, 'UNAVAILABLE', 'request failed (503)', 'RATE_PROVIDER_FAILED'));
+		render(SettingsPage, { canManage: true });
+		await fireEvent.click(await screen.findByTestId('fetch-rate'));
+		expect((await screen.findByRole('alert')).textContent).toMatch(/could not be fetched. Cloud still uses the stored rate/);
+		api.fetchRate.mockResolvedValue({ rate: '50.25', rate_microrate: 50_250_000, source: 'open.er-api.com', fetched_at: '', changed: false });
+		await fireEvent.click(screen.getByTestId('fetch-rate'));
+		expect((await screen.findByRole('status')).textContent).toMatch(/did not change/);
+		expect(api.get).toHaveBeenCalledTimes(1);
+	});
+
+	it('says so when Cloud does not fetch the rate', async () => {
+		api.get.mockResolvedValue({ business, exchange_rates: [rate], rate_fetch: { enabled: false, source: '', interval_hours: 12 } });
+		render(SettingsPage, { canManage: true });
+		expect((await screen.findByTestId('rate-fetch-info')).textContent).toMatch(/EXCHANGE_RATE_URL is empty/);
+		expect(screen.queryByTestId('fetch-rate')).toBeNull();
+		expect(screen.getByTestId('new-rate').className).toMatch(/btn-primary/);
+	});
+
 	it('is read-only without settings.manage and hides report delivery', async () => {
 		render(SettingsPage, { canManage: false });
 		const tax = await screen.findByRole('switch', { name: 'Tax' });
 		expect(tax.hasAttribute('disabled')).toBe(true);
 		expect(screen.queryByTestId('save-toggles')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Add rate' })).toBeNull();
+		expect(screen.queryByTestId('fetch-rate')).toBeNull();
 		expect(api.messaging).not.toHaveBeenCalled();
 	});
 

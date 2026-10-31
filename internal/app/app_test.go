@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -33,6 +34,10 @@ func testConfig(t *testing.T, url string) config.Config {
 	t.Setenv("ALLOW_UNAUTHENTICATED_REPORTING", "true")
 	// Synthetic test-only MFA key (never a production value).
 	t.Setenv("AUTH_MFA_ENCRYPTION_KEY", testMFAKey)
+	// No outside rate provider unless a test points at its own (ADR-0058).
+	if _, set := os.LookupEnv("EXCHANGE_RATE_URL"); !set {
+		t.Setenv("EXCHANGE_RATE_URL", "")
+	}
 	c, err := config.Load()
 	if err != nil {
 		t.Fatal(err)

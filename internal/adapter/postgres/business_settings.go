@@ -78,7 +78,7 @@ func (d BusinessSettings) ListRates(ctx context.Context, limit int32) ([]setting
 	out := make([]settings.ExchangeRate, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, settings.ExchangeRate{ID: uuidString(r.ID), RateMicrorate: r.RateMicrorate,
-			EffectiveAt: r.EffectiveAt.Time, Note: r.Note.String, CreatedAt: r.CreatedAt.Time})
+			EffectiveAt: r.EffectiveAt.Time, Note: r.Note.String, Source: r.Source, CreatedAt: r.CreatedAt.Time})
 	}
 	return out, nil
 }
@@ -93,7 +93,7 @@ func (d BusinessSettings) AddRate(ctx context.Context, rate settings.NewRate) er
 	}
 	err = sqlcgen.New(d.pool).InsertExchangeRate(ctx, sqlcgen.InsertExchangeRateParams{
 		ID: id, RateMicrorate: rate.RateMicrorate, EffectiveAt: pgTime(rate.EffectiveAt),
-		Note: pgText(rate.Note), CreatedBy: optionalUUID(rate.CreatedBy),
+		Note: pgText(rate.Note), Source: rate.Source, CreatedBy: optionalUUID(rate.CreatedBy),
 	})
 	if isUniqueViolation(err) {
 		return apperr.New(apperr.Conflict, "RATE_TIME_TAKEN")
@@ -117,4 +117,39 @@ func (d BusinessSettings) DeleteRate(ctx context.Context, id string) (bool, erro
 		return false, reportErr("delete exchange rate", err)
 	}
 	return n > 0, nil
+}
+
+// AddFetchedRate stores a fetched rate, starting at the database clock,
+// unless the rate in effect then already has that value. The advisory
+// lock makes Cloud instances that fetch at the same time record one row,
+// not one each; rate.EffectiveAt is not used.
+func (d BusinessSettings) AddFetchedRate(ctx context.Context, rate settings.NewRate) (bool, error) {
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	id, err := parseUUID(rate.ID)
+	if err != nil {
+		return false, apperr.New(apperr.Internal, "exchange rate id")
+	}
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return false, reportErr("fetched exchange rate", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	q := sqlcgen.New(tx)
+	if err := q.LockExchangeRateFetch(ctx); err != nil {
+		return false, reportErr("fetched exchange rate", err)
+	}
+	added, err := q.InsertFetchedExchangeRate(ctx, sqlcgen.InsertFetchedExchangeRateParams{
+		ID: id, RateMicrorate: rate.RateMicrorate, Source: rate.Source,
+	})
+	if isUniqueViolation(err) {
+		return false, apperr.New(apperr.Conflict, "RATE_TIME_TAKEN")
+	}
+	if err != nil {
+		return false, reportErr("fetched exchange rate", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, reportErr("fetched exchange rate", err)
+	}
+	return added == 1, nil
 }
