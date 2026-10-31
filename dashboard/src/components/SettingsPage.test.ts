@@ -107,4 +107,32 @@ describe('SettingsPage', () => {
 		await waitFor(() => expect(api.runSchedule).toHaveBeenCalledWith('s1', expect.any(String)));
 		expect(await screen.findByText(/sent within about a minute/)).toBeTruthy();
 	});
+
+	it.each([
+		{ language: 'en' as const, status: 401, code: 'UNAUTHORIZED', message: 'Session expired, please sign in again.' },
+		{ language: 'ar' as const, status: 401, code: 'UNAUTHORIZED', message: 'انتهت الجلسة — سجّل الدخول مجددًا.' },
+		{ language: 'en' as const, status: 500, code: 'INTERNAL', message: 'Could not save. Try again.' }
+	])('explains a rejected schedule save ($status, $language) and keeps the draft', async ({ language, status, code, message }) => {
+		api.messaging.mockResolvedValue({
+			...messaging,
+			scheduler_enabled: true,
+			providers: [{ key: 'telegram-main', kind: 'telegram', templates: [] }],
+			recipients: [{ id: 'rc1', label: 'Owner', provider_key: 'telegram-main', recipient_masked: '…5678', locale: 'en', enabled: true }]
+		});
+		api.addSchedule.mockRejectedValue(new ApiError(status, code, `request failed (${status})`));
+		setLang(language);
+		render(SettingsPage, { canManage: true });
+		await screen.findByTestId('provider-telegram');
+		const name = document.getElementById('schedule-name') as HTMLInputElement;
+		await fireEvent.input(name, { target: { value: 'Telegram report' } });
+		await fireEvent.click(document.getElementById('schedule-recipients-trigger')!);
+		await fireEvent.click(screen.getByRole('checkbox'));
+		await fireEvent.submit(name.closest('form')!);
+		expect((await screen.findByRole('alert')).textContent).toBe(message);
+		expect(api.addSchedule).toHaveBeenCalledTimes(1);
+		expect(api.addSchedule).toHaveBeenCalledWith(expect.objectContaining({ name: 'Telegram report', recipient_ids: ['rc1'] }));
+		expect(name.value).toBe('Telegram report');
+		expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+		expect(api.runSchedule).not.toHaveBeenCalled();
+	});
 });

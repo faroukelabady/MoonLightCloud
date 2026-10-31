@@ -30,6 +30,7 @@
 
 	function errorText(err: unknown): string {
 		if (err instanceof ApiError) {
+			if (err.status === 401) return msg('authApi.sessionExpiredPleaseSignInAgain');
 			if (err.detail === 'INVALID_RECIPIENT')
 				return msg('messagingSettings.invalidAddressWhatsappNeedsAnInternational');
 			if (err.detail === 'REPORT_NO_RECIPIENTS') return msg('messagingSettings.chooseAtLeastOneRecipient');
