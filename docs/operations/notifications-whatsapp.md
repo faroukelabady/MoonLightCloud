@@ -37,6 +37,30 @@ Startup performs zero network calls: invalid syntax fails fast with
 value-free errors; wrong-but-valid credentials surface at send time.
 Enabling never requires Meta reachability.
 
+For local Compose, put these variables in `.env.local` and run
+`./scripts/dev-up.sh --no-setup`. The Compose service forwards all of
+the WhatsApp variables above. WhatsApp stays disabled unless explicitly
+enabled; Telegram configuration remains independent. Never put real
+credentials in `compose.yaml`.
+
+### Report text formatting
+
+Meta template text variables cannot contain line breaks, tabs, or long
+runs of spaces. The WhatsApp adapter flattens whitespace to single
+spaces in the outgoing BODY parameters only. It preserves words,
+Unicode, dates, amounts, and parameter order, and never truncates text.
+An empty or whitespace-only text parameter is rejected before sending.
+See the [provider's text parameter rules](https://developers.cm.com/messaging/docs/whatsapp-templates).
+
+Stored reports, notification snapshots, fingerprints, and idempotency
+keys keep their original values. Telegram keeps the original multi-line
+report. No migration or data rewrite is needed. Already accepted,
+blocked, or ambiguous notifications are not automatically replayed by
+this change; inspect their outcome before deliberately sending again.
+An approved Meta template with exactly one BODY text variable is still
+required for each report mapping. Live delivery depends on the token,
+sender, recipient, template approval, and language matching Meta.
+
 ## Webhook setup (manual, in Meta)
 
 1. Callback URL:

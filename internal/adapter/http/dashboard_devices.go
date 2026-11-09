@@ -24,10 +24,11 @@ type DeviceLister interface {
 // DashboardDeviceHandlers serves operator device connectivity + Sync Now.
 // Dashboard session auth only; device credentials never valid here.
 type DashboardDeviceHandlers struct {
-	Svc          *devicecontrol.Service
-	Auth         DeviceLister
-	Stores       StoreDirectory
-	OnlineWindow time.Duration
+	Svc             *devicecontrol.Service
+	Auth            DeviceLister
+	Stores          StoreDirectory
+	OnlineWindow    time.Duration
+	ControlDisabled bool
 }
 
 // StoreDirectory supplies authoritative Store context for display:
@@ -121,7 +122,7 @@ func (h *DashboardDeviceHandlers) Devices(w http.ResponseWriter, r *http.Request
 		}
 		rows = append(rows, row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"devices": rows})
+	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "control_enabled": !h.ControlDisabled})
 }
 
 // CreateSyncRequest queues sync_now.v1; Idempotency-Key required.
@@ -154,6 +155,10 @@ func (h *DashboardDeviceHandlers) CreateSyncRequest(w http.ResponseWriter, r *ht
 		if !RequireStore(w, r, storeID) {
 			return
 		}
+	}
+	if h.ControlDisabled {
+		WriteError(w, r, apperr.New(apperr.Unavailable, "DEVICE_CONTROL_DISABLED"))
+		return
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if err := devicecontrol.ValidateIdempotencyKey(key); err != nil {

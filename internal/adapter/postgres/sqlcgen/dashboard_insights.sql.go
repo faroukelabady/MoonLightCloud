@@ -187,22 +187,28 @@ SELECT CASE
         ELSE 'other'
     END::text AS category,
     count(*) FILTER (WHERE e.received_at >= $1 AND e.received_at < $2)::bigint AS synced,
+    count(*) FILTER (WHERE e.received_at >= $3 AND e.received_at < $4)::bigint AS received_last_7_days,
+    count(*)::bigint AS total_received,
     max(e.received_at)::timestamptz AS last_received_at
 FROM sync_events e
-WHERE $3::uuid IS NULL OR e.store_id = $3::uuid
+WHERE $5::uuid IS NULL OR e.store_id = $5::uuid
 GROUP BY 1
 `
 
 type DashboardSyncSummaryParams struct {
-	StartUtc pgtype.Timestamptz `json:"start_utc"`
-	EndUtc   pgtype.Timestamptz `json:"end_utc"`
-	StoreID  pgtype.UUID        `json:"store_id"`
+	StartUtc    pgtype.Timestamptz `json:"start_utc"`
+	EndUtc      pgtype.Timestamptz `json:"end_utc"`
+	RecentStart pgtype.Timestamptz `json:"recent_start"`
+	RecentEnd   pgtype.Timestamptz `json:"recent_end"`
+	StoreID     pgtype.UUID        `json:"store_id"`
 }
 
 type DashboardSyncSummaryRow struct {
-	Category       string             `json:"category"`
-	Synced         int64              `json:"synced"`
-	LastReceivedAt pgtype.Timestamptz `json:"last_received_at"`
+	Category          string             `json:"category"`
+	Synced            int64              `json:"synced"`
+	ReceivedLast7Days int64              `json:"received_last_7_days"`
+	TotalReceived     int64              `json:"total_received"`
+	LastReceivedAt    pgtype.Timestamptz `json:"last_received_at"`
 }
 
 // Sync page reads: what arrived in the selected period, one sale with its
@@ -211,7 +217,13 @@ type DashboardSyncSummaryRow struct {
 // Events Cloud received in [start, end) per kind, and the newest arrival of
 // each kind at any time.
 func (q *Queries) DashboardSyncSummary(ctx context.Context, arg DashboardSyncSummaryParams) ([]DashboardSyncSummaryRow, error) {
-	rows, err := q.db.Query(ctx, dashboardSyncSummary, arg.StartUtc, arg.EndUtc, arg.StoreID)
+	rows, err := q.db.Query(ctx, dashboardSyncSummary,
+		arg.StartUtc,
+		arg.EndUtc,
+		arg.RecentStart,
+		arg.RecentEnd,
+		arg.StoreID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +231,13 @@ func (q *Queries) DashboardSyncSummary(ctx context.Context, arg DashboardSyncSum
 	items := []DashboardSyncSummaryRow{}
 	for rows.Next() {
 		var i DashboardSyncSummaryRow
-		if err := rows.Scan(&i.Category, &i.Synced, &i.LastReceivedAt); err != nil {
+		if err := rows.Scan(
+			&i.Category,
+			&i.Synced,
+			&i.ReceivedLast7Days,
+			&i.TotalReceived,
+			&i.LastReceivedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

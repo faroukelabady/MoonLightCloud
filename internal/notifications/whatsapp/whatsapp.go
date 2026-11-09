@@ -156,7 +156,8 @@ func (p *Provider) SendTemplate(ctx context.Context, req notifications.TemplateS
 }
 
 // renderRequest builds the exact Graph body from the snapshotted
-// resolution. Parameter values travel verbatim as JSON text.
+// resolution. Whitespace is normalized only in outgoing WhatsApp text;
+// durable snapshots and other providers retain the original values.
 func (p *Provider) renderRequest(req notifications.TemplateSendRequest) ([]byte, error) {
 	if req.ProviderKey != p.key {
 		return nil, notifications.ValidationError("template request addressed to another provider instance")
@@ -175,6 +176,13 @@ func (p *Provider) renderRequest(req notifications.TemplateSendRequest) ([]byte,
 		value, ok := resolved.Parameters[name]
 		if !ok {
 			return nil, notifications.ValidationError("template parameter missing")
+		}
+		// Meta rejects line breaks, tabs, and long runs of spaces in
+		// template variables. Flatten whitespace without truncating or
+		// reformatting report content, dates, or monetary amounts.
+		value = strings.Join(strings.Fields(value), " ")
+		if value == "" {
+			return nil, notifications.ValidationError("template text parameter is empty")
 		}
 		parameters = append(parameters, templateParameter{Type: "text", Text: value})
 	}

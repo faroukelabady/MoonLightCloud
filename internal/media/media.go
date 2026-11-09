@@ -146,3 +146,23 @@ func (s Service) HasImage(ctx context.Context, hash string) (bool, error) {
 	}
 	return true, nil
 }
+
+// Usage is a bounded object-store listing, separate from Cloud's registered
+// image records. Complete=false is a lower bound, never a bucket total.
+type Usage struct {
+	Files    int64 `json:"files"`
+	Bytes    int64 `json:"bytes"`
+	Complete bool  `json:"complete"`
+}
+
+// Usage reads provider-wide metadata only; callers must restrict it to an
+// authorized all-Stores scope. It never downloads image bytes.
+func (s Service) Usage(ctx context.Context) (Usage, error) {
+	provider, ok := s.objects.(interface {
+		Usage(context.Context) (Usage, error)
+	})
+	if !ok {
+		return Usage{}, apperr.New(apperr.Unavailable, "storage usage unavailable")
+	}
+	return provider.Usage(ctx)
+}

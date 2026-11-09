@@ -20,6 +20,33 @@ schedules and recipients are local Cloud state.
 
 ## Dashboard Settings
 
+Report configuration is divided into separate panels:
+
+1. **Configure Telegram / Configure WhatsApp** opens a provider template dialog
+   with example report content and the relevant address-format notes. WhatsApp
+   uses the exact approved Meta template name/language and one BODY variable.
+2. **Recipients** lists masked addresses. Add, edit, enable/disable, or delete a
+   recipient. The editor retrieves its full address only when opened. Provider
+   identity is fixed during edits. WhatsApp addresses must start with the country
+   code, without a leading local zero (`01012345678` → `201012345678` in Egypt).
+   Telegram private recipients use numeric chat IDs, after starting the bot.
+3. **Create / Edit schedule** sets name, cadence, Cairo time, first cycle date,
+   and recipients. Edits use a revision check. Changing time/cadence selects the
+   next future slot; other edits preserve the locked cursor.
+4. **Configured schedules** supports edit, delete, pause/resume and send now.
+5. **Recent sends** has ten-row pages, Previous/Next, and Refresh. Names stay
+   readable after schedules are renamed or deleted.
+
+Delete removes a configuration from future use and retains past sends. Reports
+already queued keep their destination, language, period, name and report type,
+and can still be sent. If deleting a recipient leaves a schedule without a
+recipient, edit that schedule before its next run. Deleting configuration does
+not cancel queued notifications or erase notification history.
+
+The run label **Queued for delivery** describes preparation only. Check actual
+notification dispatch/delivery status or the recipient's messaging app for
+receipt. Example previews contain sample amounts, not live business figures.
+
 The dashboard Settings page (all-Stores owners and admins with
 `settings.manage`) manages everything below without the CLI: per-provider
 report templates (WhatsApp approved template name and language; Telegram
@@ -89,9 +116,9 @@ and never backfills history.
 ## Anchor semantics
 
 TEN_DAY business cycles are deterministic: slot dates are exactly
-`anchor + 10k` calendar days. Changing cadence means disabling the
-old schedule and creating a new one (no in-place edits, no
-historical ambiguity).
+`anchor + 10k` calendar days. The configuration editor can change future cadence
+in place. Runs keep immutable kind/name snapshots, periods and recipient
+snapshots, so previously queued work retains its meaning (ADR-0059).
 
 ## List schedules
 
@@ -186,3 +213,35 @@ instead. Stale completions are safe no-ops, never errors.
 `business_report_schedule_recipients`, `business_report_runs`, and
 `business_report_deliveries` are durable backup-required business
 state. No rebuild path deletes them; no retention purge exists.
+
+### Template settings and send history
+
+Settings keeps the WhatsApp/Telegram template actions beside Add recipient.
+Each provider dialog lists saved report/language mappings; Edit selects the
+existing mapping rather than creating a new identity. The spaced example is
+a layout preview. WhatsApp still sends each approved-template text variable
+on one line; put permanent line breaks in the approved Meta template itself.
+Telegram retains the report body's line breaks.
+
+Recent sends uses keyset pagination and shows how many older pages remain.
+The server counts older rows in the same query as the page; newer runs do not
+inflate the remaining count while navigating older history. Refresh starts
+again at the newest page. Completion here means queued for delivery, not a
+provider delivery receipt.
+
+### Actual message outcomes
+
+Recent sends now reads the current notification records for each report's
+recipients in one batched query. Report-run completion remains notification
+handoff only; it is never rewritten to pretend delivery succeeded. The UI
+shows queued, sending, retry scheduled, accepted/sent, delivered/read, failed,
+partial failure or uncertain outcomes separately. WhatsApp delivery/read
+states require its existing webhook. Telegram's sendMessage response proves
+provider acceptance, not that a person read it. An uncertain outcome is not
+safe to resend automatically.
+
+The current history page refreshes every five seconds while visible, retaining
+its keyset cursor. Refreshing status never sends/retries a message. Requests
+are aborted and polling stops when the component closes. Failed refreshes
+show a last-known-results notice. Full recipient addresses, report bodies,
+provider message IDs and credentials are excluded from the status response.

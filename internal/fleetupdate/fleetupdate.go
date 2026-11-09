@@ -34,7 +34,8 @@ const (
 	ReleaseRevoked = "revoked"
 
 	// Package delivered to updater protocol 1.
-	PackageTarGz = "tar.gz"
+	PackageTarGz   = "tar.gz"
+	PackageNSISExe = "nsis-exe"
 	// CommandType is the only device update intent (protocol v1).
 	CommandType     = "retail.update.install.v1"
 	UpdaterProtocol = 1
@@ -243,4 +244,16 @@ func (r RolloutRequest) Validate() error {
 		return ErrInvalid
 	}
 	return nil
+}
+
+// PackageForOS selects the protocol-1 installer without guessing for unknown OSes.
+func PackageForOS(os string) string {
+	switch os {
+	case "linux":
+		return PackageTarGz
+	case "windows":
+		return PackageNSISExe
+	default:
+		return ""
+	}
 }

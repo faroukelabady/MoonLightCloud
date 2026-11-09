@@ -54,6 +54,10 @@ export interface MessagingRecipient {
 	enabled: boolean;
 }
 
+export interface MessagingRecipientDetail extends Omit<MessagingRecipient, 'recipient_masked'> {
+	recipient: string;
+}
+
 export interface MessagingSchedule {
 	id: string;
 	name: string;
@@ -63,11 +67,28 @@ export interface MessagingSchedule {
 	enabled: boolean;
 	next_run_at: string;
 	recipient_ids: string[];
+	revision: number;
+}
+
+export interface MessagingDelivery {
+	id: string;
+	provider_key: string;
+	provider_kind: 'whatsapp' | 'telegram' | 'unknown';
+	recipient_label: string;
+	recipient_masked: string;
+	report_status: string;
+	dispatch_status: string;
+	delivery_status: string;
+	last_error_code: string;
+	attempt_count: number;
+	send_started: boolean;
+	updated_at: string;
 }
 
 export interface MessagingRun {
 	id: string;
 	schedule_id: string;
+	schedule_name: string;
 	kind: 'scheduled' | 'manual';
 	status: 'pending' | 'retry' | 'completed' | 'blocked';
 	scheduled_for: string;
@@ -75,6 +96,7 @@ export interface MessagingRun {
 	period_end: string;
 	attempt_count: number;
 	last_error_code: string;
+	deliveries?: MessagingDelivery[];
 }
 
 export interface Messaging {
@@ -83,6 +105,8 @@ export interface Messaging {
 	recipients: MessagingRecipient[];
 	schedules: MessagingSchedule[];
 	runs: MessagingRun[];
+	runs_next_cursor: string;
+	runs_remaining: number;
 }
 
 const base = '/api/v1/dashboard/settings';
@@ -97,10 +121,18 @@ export const settingsApi = {
 	messaging: (s?: AbortSignal) => get<Messaging>(`${base}/messaging`, s),
 	addRecipient: (r: { label: string; provider_key: string; recipient: string; locale: string }) =>
 		sendJson<MessagingRecipient>('POST', `${base}/messaging/recipients`, r),
+	getRecipient: (id: string) => get<MessagingRecipientDetail>(`${base}/messaging/recipients/${encodeURIComponent(id)}`),
+	updateRecipient: (id: string, r: { label: string; recipient: string; locale: string }) =>
+		sendJson<MessagingRecipient>('PUT', `${base}/messaging/recipients/${encodeURIComponent(id)}`, r),
+	deleteRecipient: (id: string) => sendJson<{ deleted: boolean }>('DELETE', `${base}/messaging/recipients/${encodeURIComponent(id)}`, {}),
 	setRecipient: (id: string, enabled: boolean) =>
 		sendJson<{ enabled: boolean }>('POST', `${base}/messaging/recipients/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {}),
 	addSchedule: (s: { name: string; kind: string; local_time: string; anchor_local_date: string; recipient_ids: string[] }) =>
 		sendJson<MessagingSchedule>('POST', `${base}/messaging/schedules`, s),
+	updateSchedule: (id: string, s: { name: string; kind: string; local_time: string; anchor_local_date: string; recipient_ids: string[]; revision: number }) =>
+		sendJson<MessagingSchedule>('PUT', `${base}/messaging/schedules/${encodeURIComponent(id)}`, s),
+	deleteSchedule: (id: string) => sendJson<{ deleted: boolean }>('DELETE', `${base}/messaging/schedules/${encodeURIComponent(id)}`, {}),
+	runPage: (before = '', signal?: AbortSignal) => get<{ runs: MessagingRun[]; next_cursor: string; remaining_runs: number }>(`${base}/messaging/runs?limit=10${before ? `&before=${encodeURIComponent(before)}` : ''}`, signal),
 	setSchedule: (id: string, enabled: boolean) =>
 		sendJson<{ enabled: boolean }>('POST', `${base}/messaging/schedules/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {}),
 	runSchedule: (id: string, requestKey: string) =>

@@ -11,11 +11,19 @@ DEVICE_COMMAND_LEASE_DURATION=60s   # 10s..10m
 DEVICE_ONLINE_WINDOW=60s            # 10s..10m
 ```
 
-Cloud schema is 18 (migration 00018 enforces the pending/lease
-invariant; see below). Migrations 00009–00017 are frozen.
+Use the current schema in [migration operations](migrations.md). The
+pending/lease constraint described below is retained in the consolidated
+baseline.
 
-Disabled (default): device-control poll/accept/status routes are 404; the
-dashboard device list still reads (all `never_seen` until enabled).
+Disabled (production default): device-control poll/accept/status routes
+are 404. The dashboard still shows authenticated contact and sync data;
+`control_enabled=false` disables new Sync Now requests (503
+`DEVICE_CONTROL_DISABLED`) instead of queuing unreachable work.
+
+The local development Compose service enables this flag by default,
+matching `scripts/dev-desktop.sh` on Retail. An explicit false still disables it.
+After changing either process configuration, restart that process; exporting
+a variable in a different terminal does not change a running service.
 
 ## Enable Retail polling
 
@@ -32,7 +40,8 @@ usable offline regardless of Cloud reachability.
 ## How Online/Offline is derived
 
 `last_seen_at` is Cloud server time from the last authenticated
-poll/ack/report. Failed or revoked authentication never updates it.
+sync upload, poll, ack or report. Failed or revoked authentication never
+updates it.
 
 `last_poll_at` is separate: only real polls refresh it (monotonically);
 accepted/running/terminal contact preserves it, and it stays NULL until
@@ -51,7 +60,7 @@ own (`control`) and when sync data last arrived (`last data`):
 - `poll_stale`: it polled before, but not within the window.
 - `never_polled`: no control poll yet.
 
-An `online` device that is not `polling` is flagged on the Devices page: it
+An `online` device that is not `polling` is flagged on the Stores page: it
 uploads data, but Sync Now reaches it only at its next poll.
 
 `online` means Cloud heard from the Retail application
@@ -134,3 +143,16 @@ regardless of device count. History per device is bounded to five newest
 (`requested_at` DESC, command ID tiebreak). Missing/invalid
 Idempotency-Key values are rejected with 400
 `DEVICE_COMMAND_INVALID_IDEMPOTENCY_KEY`; unknown devices answer 404.
+
+## Stores page
+
+A Store is a business data boundary; its devices are the registered Retail
+installations that upload and receive queued work. Expand a Store to see
+its devices. Store selection and server-side membership restrict visibility.
+Unbound devices are shown separately to authorized all-Store operators.
+
+Sync Now requests one canonical Retail sync cycle; it does not pull data
+directly from a PC. Queued work waits for an authenticated Retail poll.
+The page refreshes every five seconds while visible, keeps history and
+accordion choices, and shows control availability separately from online
+contact and last data. Read-only operators do not see mutation controls.

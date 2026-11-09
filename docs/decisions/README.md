@@ -73,3 +73,5 @@ The ADR sequence is not one-per-phase. These are intentional, not missing files:
   have no Cloud surface (MoonLightRetail `ADR-034`, `ADR-035`).
 - **Phase 9D** — dashboard scope selection; shipped without its own ADR
   (commit `408f388`), covered by ADR-0039 store registry intent.
+
+- [0059](0059-report-configuration-management.md) — editable report configuration and retained send history

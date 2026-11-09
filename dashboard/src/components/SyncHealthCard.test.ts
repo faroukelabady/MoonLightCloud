@@ -36,10 +36,10 @@ const now = Date.now();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 const summary: SyncSummary = {
 	categories: [
-		{ category: 'sales', synced: 12, last_received_at: ago(3) },
-		{ category: 'returns', synced: 1, last_received_at: ago(30) },
-		{ category: 'catalog', synced: 40, last_received_at: ago(12) },
-		{ category: 'stock', synced: 0 }
+		{ category: 'sales', synced: 12, received_last_7_days: 12, total_received: 12, last_received_at: ago(3) },
+		{ category: 'returns', synced: 1, received_last_7_days: 1, total_received: 1, last_received_at: ago(30) },
+		{ category: 'catalog', synced: 40, received_last_7_days: 40, total_received: 40, last_received_at: ago(12) },
+		{ category: 'stock', synced: 0, received_last_7_days: 0, total_received: 0 }
 	],
 	total_synced: 53,
 	last_received_at: ago(3)
@@ -55,9 +55,21 @@ describe('SyncHealthCard', () => {
 		render(SyncHealthCard, { props: { ...base, health, summary } });
 		const rows = within(screen.getByTestId('sync-categories')).getAllByRole('listitem');
 		expect(rows.map((r) => r.querySelector('.name')?.textContent)).toEqual(['Sales', 'Returns', 'Products', 'Stock']);
-		expect(rows[0].textContent).toContain('12 in period');
+		expect(rows[0].textContent).toContain('12 events received in the last 7 days');
 		expect(rows[0].textContent).toContain('3 minutes ago');
 		expect(rows[3].textContent).toContain('Not received');
+	});
+
+	it('shows useful weekly activity even when the selected completed period has no arrivals', () => {
+		setLang('en');
+		render(SyncHealthCard, { props: { ...base, health, summary: { ...summary, categories: [{ category: 'sales', synced: 0, received_last_7_days: 36, total_received: 50, last_received_at: ago(3) }] } } });
+		const row = within(screen.getByTestId('sync-categories')).getByRole('listitem');
+		expect(row.textContent).toContain('36 events received in the last 7 days');
+		expect(row.textContent).not.toContain('selected period');
+		const details = screen.getByTestId('sync-details') as HTMLDetailsElement;
+		expect(details.open).toBe(false);
+		expect(details.textContent).toContain('Selected period');
+		expect(details.textContent).toContain('50');
 	});
 
 	it('shows the last sync and the queue in the footer', () => {

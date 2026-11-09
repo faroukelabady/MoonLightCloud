@@ -4,6 +4,7 @@ sql:
     queries: "db/queries"
     schema:
       - "db/migrations/00115_baseline.sql"
+      - "db/migrations/00116_report_configuration.sql"
     gen:
       go:
         package: "sqlcgen"

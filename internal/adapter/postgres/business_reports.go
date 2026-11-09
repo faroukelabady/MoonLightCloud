@@ -192,23 +192,9 @@ func (d BusinessReports) CreateScheduleWithRecipients(ctx context.Context, sched
 	// enabled state are transaction-consistent, so a concurrent
 	// disable yields one deterministic outcome, never a link to an
 	// invalid recipient.
-	locked := make([]pgtype.UUID, 0, len(recipientIDs))
-	for _, recipientID := range recipientIDs {
-		recipient, err := parseUUID(recipientID)
-		if err != nil {
-			return apperr.New(apperr.InvalidInput, "invalid recipient id")
-		}
-		row, err := q.GetRecipientForUpdate(ctx, recipient)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return apperr.New(apperr.InvalidInput, "schedule recipient must exist and be enabled")
-			}
-			return apperr.Wrap(apperr.Internal, "report schedule", redact(err))
-		}
-		if !row.Enabled {
-			return apperr.New(apperr.InvalidInput, "schedule recipient must exist and be enabled")
-		}
-		locked = append(locked, recipient)
+	locked, err := lockReportRecipients(ctx, q, recipientIDs)
+	if err != nil {
+		return err
 	}
 	if err := q.CreateSchedule(ctx, sqlcgen.CreateScheduleParams{
 		ID: parsed, Name: schedule.Name, ReportKind: string(schedule.Kind),
@@ -249,9 +235,11 @@ func (d BusinessReports) GetSchedule(ctx context.Context, id string) (businessre
 		}
 		return businessreports.Schedule{}, false, apperr.Wrap(apperr.Internal, "report schedule", redact(err))
 	}
-	return mapScheduleFields(row.ID, row.Name, row.ReportKind, row.Timezone, row.LocalTime,
+	schedule := mapScheduleFields(row.ID, row.Name, row.ReportKind, row.Timezone, row.LocalTime,
 		row.AnchorLocalDate, row.Enabled, row.Revision,
-		row.NextRunLocalDate, row.NextRunAt), true, nil
+		row.NextRunLocalDate, row.NextRunAt)
+	schedule.Deleted = row.Deleted
+	return schedule, true, nil
 }
 
 // ListSchedules returns configured cadences in creation order.

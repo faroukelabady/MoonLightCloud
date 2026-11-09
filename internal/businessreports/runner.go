@@ -522,17 +522,9 @@ func notificationBlockedCode(err error) (string, bool) {
 	}
 }
 
-// reportKind resolves the immutable report kind for a claimed run
-// from its schedule. Kinds never change after creation.
+// reportKind comes from the immutable run snapshot, not editable configuration.
 func (w *Runner) reportKind(ctx context.Context, claimed Run) (ReportKind, error) {
-	schedule, found, err := w.schedules.GetSchedule(ctx, claimed.ScheduleID)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", apperr.New(apperr.Internal, "report schedule missing for run")
-	}
-	return schedule.Kind, nil
+	return ValidateReportKind(string(claimed.ReportKind))
 }
 
 // periodCivilDates recovers the custom-period civil bounds from a

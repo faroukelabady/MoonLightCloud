@@ -473,3 +473,35 @@ func TestDashboardStoresList(t *testing.T) {
 		t.Fatalf("store list: %v", body)
 	}
 }
+
+// Disabled control must not create work that this server cannot deliver.
+func TestDashboardDisabledControlDoesNotQueue(t *testing.T) {
+	h := dashSetup([]auth.Device{{ID: "dev-A", Status: "active"}})
+	h.ControlDisabled = true
+	req := ownerRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil)
+	req.Header.Set("Idempotency-Key", "disabled-1")
+	rec := httptest.NewRecorder()
+	h.CreateSyncRequest(rec, req)
+	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "DEVICE_CONTROL_DISABLED") {
+		t.Fatalf("disabled: %d %s", rec.Code, rec.Body.String())
+	}
+	overview, err := h.Svc.Overview(context.Background(), []string{"dev-A"})
+	if err != nil || overview["dev-A"].Active != nil || len(overview["dev-A"].Recent) != 0 || overview["dev-A"].Presence != nil {
+		t.Fatalf("disabled request mutated state: %+v %v", overview, err)
+	}
+	list := httptest.NewRecorder()
+	h.Devices(list, ownerRequest("GET", "/api/v1/dashboard/devices", nil))
+	var body struct {
+		ControlEnabled bool `json:"control_enabled"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &body); err != nil || list.Code != 200 || body.ControlEnabled {
+		t.Fatalf("disabled list: %d %s", list.Code, list.Body.String())
+	}
+	// Authorization still runs before exposing disabled-control state.
+	h.Stores = stubStores{}
+	denied := httptest.NewRecorder()
+	h.CreateSyncRequest(denied, httptest.NewRequest("POST", "/api/v1/dashboard/devices/dev-A/sync-requests", nil))
+	if denied.Code != 403 {
+		t.Fatalf("unauthorized store: %d", denied.Code)
+	}
+}

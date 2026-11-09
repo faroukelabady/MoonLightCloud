@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -144,3 +145,37 @@ func objectKey(sha256 string) string {
 }
 
 var _ media.ObjectStore = (*Store)(nil)
+
+// Usage counts at most 10,000 bucket objects in ten bounded pages. The result
+// is explicitly partial for larger buckets. No object bodies are downloaded.
+func (s *Store) Usage(ctx context.Context) (media.Usage, error) {
+	ctx, cancel := context.WithTimeout(ctx, uploadTimeout)
+	defer cancel()
+	var usage media.Usage
+	var token *string
+	for page := 0; page < 10; page++ {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(s.bucket), MaxKeys: aws.Int32(1000), ContinuationToken: token,
+		})
+		if err != nil || out.IsTruncated == nil || len(out.Contents) > 1000 {
+			return media.Usage{}, errDownload
+		}
+		for _, object := range out.Contents {
+			size := aws.ToInt64(object.Size)
+			if size < 0 || usage.Bytes > math.MaxInt64-size {
+				return media.Usage{}, errDownload
+			}
+			usage.Files++
+			usage.Bytes += size
+		}
+		if !aws.ToBool(out.IsTruncated) {
+			usage.Complete = true
+			return usage, nil
+		}
+		if aws.ToString(out.NextContinuationToken) == "" || aws.ToString(out.NextContinuationToken) == aws.ToString(token) {
+			return media.Usage{}, errDownload
+		}
+		token = out.NextContinuationToken
+	}
+	return usage, nil
+}

@@ -88,6 +88,59 @@ func TestWhatsAppSendArabic(t *testing.T) {
 	}
 }
 
+// Report text must fit Meta's BODY parameter rules without changing
+// the stored snapshot, word order, Unicode, dates, or money strings.
+func TestWhatsAppTextParameterFormatting(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"single line", "Gross sales: EGP 1250.00", "Gross sales: EGP 1250.00"},
+		{"English report", "10-Day Business Report\r\nPeriod: 2026-10-21 to 2026-10-30\nGross sales:\tEGP 90071992547409.93\nRefunds:     EGP 50.00\rNet sales: EGP 90071992547359.93", "10-Day Business Report Period: 2026-10-21 to 2026-10-30 Gross sales: EGP 90071992547409.93 Refunds: EGP 50.00 Net sales: EGP 90071992547359.93"},
+		{"Arabic report", "تقرير المبيعات (10 أيام)\nالفترة: 2026-10-21\nإجمالي المبيعات:\tEGP 1250.00\nالمرتجعات:     EGP 50.00", "تقرير المبيعات (10 أيام) الفترة: 2026-10-21 إجمالي المبيعات: EGP 1250.00 المرتجعات: EGP 50.00"},
+		{"whitespace edges", " \r\n\tGross\u2028sales:\u00a0EGP 1250.00\t ", "Gross sales: EGP 1250.00"},
+		{"maximum size remains complete", strings.Repeat("x", notifications.MaxParameterValueLen), strings.Repeat("x", notifications.MaxParameterValueLen)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newGraphHarness(t)
+			provider := testGraphProvider(t, harness)
+			request := testSendRequest()
+			request.Resolved.ParameterOrder = []string{"report_body"}
+			request.Resolved.Parameters = map[string]string{"report_body": tc.body}
+			if _, err := provider.SendTemplate(context.Background(), request); err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			template := harness.recorded()[0].Body["template"].(map[string]any)
+			component := template["components"].([]any)[0].(map[string]any)
+			parameter := component["parameters"].([]any)[0].(map[string]any)
+			if got := parameter["text"]; got != tc.want {
+				t.Fatalf("outgoing text: got %q, want %q", got, tc.want)
+			}
+			if request.Resolved.Parameters["report_body"] != tc.body {
+				t.Fatal("sending changed the original report snapshot")
+			}
+		})
+	}
+}
+
+func TestWhatsAppEmptyTextParameterDoesNotSend(t *testing.T) {
+	for _, body := range []string{"", " \r\n\t "} {
+		harness := newGraphHarness(t)
+		provider := testGraphProvider(t, harness)
+		request := testSendRequest()
+		request.Resolved.Parameters["message"] = body
+		_, err := provider.SendTemplate(context.Background(), request)
+		if err == nil {
+			t.Fatal("empty text must fail before sending")
+		}
+		if len(harness.recorded()) != 0 {
+			t.Fatal("invalid text reached the provider")
+		}
+		if request.Resolved.Parameters["message"] != body {
+			t.Fatal("validation changed the original snapshot")
+		}
+	}
+}
+
 // TestWhatsAppSendNoParameters omits components for zero-parameter
 // templates.
 func TestWhatsAppSendNoParameters(t *testing.T) {

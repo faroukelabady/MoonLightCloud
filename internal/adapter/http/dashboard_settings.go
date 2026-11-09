@@ -9,7 +9,6 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
 	"github.com/faroukelabady/MoonLightCloud/internal/notifications"
-	"github.com/faroukelabady/MoonLightCloud/internal/notifications/telegram"
 	"github.com/faroukelabady/MoonLightCloud/internal/settings"
 )
 
@@ -170,18 +169,51 @@ type scheduleWire struct {
 	Enabled      bool      `json:"enabled"`
 	NextRunAt    time.Time `json:"next_run_at"`
 	RecipientIDs []string  `json:"recipient_ids"`
+	Revision     int64     `json:"revision"`
+}
+
+type deliveryStateWire struct {
+	ID              string    `json:"id"`
+	ProviderKey     string    `json:"provider_key"`
+	ProviderKind    string    `json:"provider_kind"`
+	RecipientLabel  string    `json:"recipient_label"`
+	RecipientMasked string    `json:"recipient_masked"`
+	ReportStatus    string    `json:"report_status"`
+	DispatchStatus  string    `json:"dispatch_status"`
+	DeliveryStatus  string    `json:"delivery_status"`
+	LastErrorCode   string    `json:"last_error_code"`
+	AttemptCount    int32     `json:"attempt_count"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	SendStarted     bool      `json:"send_started"`
+}
+
+func (h *SettingsHandlers) deliveryStates(run businessreports.Run) []deliveryStateWire {
+	rows := make([]deliveryStateWire, 0, len(run.DeliveryStates))
+	for _, state := range run.DeliveryStates {
+		kind := "unknown"
+		if provider, ok := h.provider(state.ProviderKey); ok {
+			kind = provider.Kind
+		}
+		rows = append(rows, deliveryStateWire{ID: state.ID, ProviderKey: state.ProviderKey, ProviderKind: kind,
+			RecipientLabel: state.RecipientLabel, RecipientMasked: state.RecipientMasked,
+			ReportStatus: state.ReportStatus, DispatchStatus: state.DispatchStatus, DeliveryStatus: state.DeliveryStatus,
+			LastErrorCode: state.LastErrorCode, AttemptCount: state.AttemptCount, SendStarted: state.SendStarted, UpdatedAt: state.UpdatedAt})
+	}
+	return rows
 }
 
 type runWire struct {
-	ID            string    `json:"id"`
-	ScheduleID    string    `json:"schedule_id"`
-	Kind          string    `json:"kind"`
-	Status        string    `json:"status"`
-	ScheduledFor  time.Time `json:"scheduled_for"`
-	PeriodStart   time.Time `json:"period_start"`
-	PeriodEnd     time.Time `json:"period_end"`
-	AttemptCount  int32     `json:"attempt_count"`
-	LastErrorCode string    `json:"last_error_code"`
+	ID            string              `json:"id"`
+	ScheduleID    string              `json:"schedule_id"`
+	ScheduleName  string              `json:"schedule_name"`
+	Kind          string              `json:"kind"`
+	Status        string              `json:"status"`
+	ScheduledFor  time.Time           `json:"scheduled_for"`
+	PeriodStart   time.Time           `json:"period_start"`
+	PeriodEnd     time.Time           `json:"period_end"`
+	AttemptCount  int32               `json:"attempt_count"`
+	LastErrorCode string              `json:"last_error_code"`
+	Deliveries    []deliveryStateWire `json:"deliveries"`
 }
 
 func maskRecipient(value string) string {
@@ -244,22 +276,22 @@ func (h *SettingsHandlers) Messaging(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, rc.ID)
 		}
 		scheduleRows = append(scheduleRows, scheduleWire{ID: s.ID, Name: s.Name, Kind: string(s.Kind),
-			LocalTime: s.LocalTime, AnchorDate: s.AnchorLocalDate, Enabled: s.Enabled, NextRunAt: s.NextRunAt, RecipientIDs: ids})
+			LocalTime: s.LocalTime, AnchorDate: s.AnchorLocalDate, Enabled: s.Enabled, NextRunAt: s.NextRunAt, RecipientIDs: ids, Revision: s.Revision})
 	}
-	runs, err := h.Reports.ListRuns(ctx, 20)
+	page, err := h.Reports.ListRunPage(ctx, "", 10)
 	if err != nil {
 		WriteError(w, r, err)
 		return
 	}
-	runRows := make([]runWire, 0, len(runs))
-	for _, run := range runs {
-		runRows = append(runRows, runWire{ID: run.ID, ScheduleID: run.ScheduleID, Kind: string(run.Kind),
+	runRows := make([]runWire, 0, len(page.Runs))
+	for _, run := range page.Runs {
+		runRows = append(runRows, runWire{ID: run.ID, ScheduleID: run.ScheduleID, ScheduleName: run.ScheduleName, Kind: string(run.Kind),
 			Status: string(run.Status), ScheduledFor: run.ScheduledFor, PeriodStart: run.PeriodStart,
-			PeriodEnd: run.PeriodEnd, AttemptCount: run.AttemptCount, LastErrorCode: run.LastErrorCode})
+			PeriodEnd: run.PeriodEnd, AttemptCount: run.AttemptCount, LastErrorCode: run.LastErrorCode, Deliveries: h.deliveryStates(run)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"scheduler_enabled": h.SchedulerEnabled, "providers": providers,
-		"recipients": recipientRows, "schedules": scheduleRows, "runs": runRows,
+		"recipients": recipientRows, "schedules": scheduleRows, "runs": runRows, "runs_next_cursor": page.NextCursor, "runs_remaining": page.RemainingRuns,
 	})
 }
 
@@ -289,16 +321,9 @@ func (h *SettingsHandlers) AddRecipient(w http.ResponseWriter, r *http.Request) 
 		WriteError(w, r, apperr.New(apperr.InvalidInput, "UNKNOWN_PROVIDER"))
 		return
 	}
-	recipient := strings.TrimSpace(req.Recipient)
-	// Each provider accepts only its own address form.
-	if p.Kind == "whatsapp" {
-		recipient = strings.TrimPrefix(strings.NewReplacer(" ", "", "-", "").Replace(recipient), "+")
-		if err := notifications.ValidateWhatsAppRecipient(recipient); err != nil {
-			WriteError(w, r, apperr.New(apperr.InvalidInput, "INVALID_RECIPIENT"))
-			return
-		}
-	} else if _, err := telegram.ValidateRecipient(recipient); err != nil {
-		WriteError(w, r, apperr.New(apperr.InvalidInput, "INVALID_RECIPIENT"))
+	recipient, err := reportRecipientAddress(p.Kind, req.Recipient)
+	if err != nil {
+		WriteError(w, r, err)
 		return
 	}
 	created, err := h.Reports.AddRecipient(r.Context(), strings.TrimSpace(req.Label), p.Key, recipient, req.Locale)
@@ -344,7 +369,7 @@ func (h *SettingsHandlers) AddSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, scheduleWire{ID: s.ID, Name: s.Name, Kind: string(s.Kind), LocalTime: s.LocalTime,
-		AnchorDate: s.AnchorLocalDate, Enabled: s.Enabled, NextRunAt: s.NextRunAt, RecipientIDs: req.RecipientIDs})
+		AnchorDate: s.AnchorLocalDate, Enabled: s.Enabled, NextRunAt: s.NextRunAt, RecipientIDs: req.RecipientIDs, Revision: s.Revision})
 }
 
 // SetScheduleEnabled serves POST .../schedules/{id}/enable and /disable.

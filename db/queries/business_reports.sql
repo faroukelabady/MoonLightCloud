@@ -10,24 +10,24 @@ RETURNING id;
 -- name: GetRecipient :one
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE id = $1 AND purpose = 'business_report';
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL;
 
 -- name: GetRecipientForUpdate :one
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE id = $1 AND purpose = 'business_report'
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: ListRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE purpose = 'business_report'
+WHERE purpose = 'business_report' AND deleted_at IS NULL
 ORDER BY created_at, id;
 
 -- name: SetRecipientEnabled :exec
 UPDATE notification_recipients
 SET enabled = $2, updated_at = now()
-WHERE id = $1 AND purpose = 'business_report';
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL;
 
 -- name: CreateSchedule :exec
 INSERT INTO business_report_schedules (
@@ -37,7 +37,7 @@ INSERT INTO business_report_schedules (
 
 -- name: GetSchedule :one
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
-    enabled, revision, next_run_local_date, next_run_at
+    enabled, revision, next_run_local_date, next_run_at, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM business_report_schedules
 WHERE id = $1;
 
@@ -45,25 +45,26 @@ WHERE id = $1;
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
     enabled, revision, next_run_local_date, next_run_at
 FROM business_report_schedules
+WHERE deleted_at IS NULL
 ORDER BY created_at, id;
 
 -- name: UpdateScheduleEnablement :exec
 UPDATE business_report_schedules
 SET enabled = $2, revision = revision + 1,
     next_run_local_date = $3, next_run_at = $4, updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: EnableScheduleIfDisabled :one
 UPDATE business_report_schedules
 SET enabled = TRUE, revision = revision + 1,
     next_run_local_date = $2, next_run_at = $3, updated_at = now()
-WHERE id = $1 AND enabled = FALSE
+WHERE id = $1 AND enabled = FALSE AND deleted_at IS NULL
 RETURNING id, name, report_kind, timezone, local_time, anchor_local_date,
     enabled, revision, next_run_local_date, next_run_at;
 
 -- name: GetScheduleForUpdate :one
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
-    enabled, revision, next_run_local_date, next_run_at
+    enabled, revision, next_run_local_date, next_run_at, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM business_report_schedules
 WHERE id = $1
 FOR UPDATE;
@@ -72,7 +73,7 @@ FOR UPDATE;
 WITH candidate AS (
     SELECT id
     FROM business_report_schedules
-    WHERE enabled AND next_run_at <= now()
+    WHERE enabled AND deleted_at IS NULL AND next_run_at <= now()
     ORDER BY next_run_at, id
     LIMIT $1
     FOR UPDATE SKIP LOCKED
@@ -97,8 +98,9 @@ SELECT r.id, r.label, r.provider_key, r.recipient, r.locale, r.enabled
 FROM notification_recipients AS r
 JOIN business_report_schedule_recipients AS link
   ON link.recipient_id = r.id AND link.recipient_purpose = r.purpose
-WHERE link.schedule_id = $1
-ORDER BY r.created_at, r.id;
+WHERE link.schedule_id = $1 AND r.deleted_at IS NULL
+ORDER BY r.id
+FOR SHARE OF r;
 
 -- name: InsertScheduledRun :one
 INSERT INTO business_report_runs (
@@ -109,7 +111,7 @@ ON CONFLICT DO NOTHING
 RETURNING id;
 
 -- name: GetScheduledRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -125,7 +127,7 @@ ON CONFLICT DO NOTHING
 RETURNING id;
 
 -- name: GetManualRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -133,7 +135,7 @@ FROM business_report_runs
 WHERE schedule_id = $1 AND manual_idempotency_key = $2 AND run_kind = 'manual';
 
 -- name: GetRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -141,7 +143,7 @@ FROM business_report_runs
 WHERE id = $1;
 
 -- name: ListRuns :many
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -166,7 +168,7 @@ SET lease_owner = $1, lease_until = $2,
     attempt_count = run.attempt_count + 1, updated_at = now()
 FROM candidate
 WHERE run.id = candidate.id
-RETURNING run.id, run.schedule_id, run.run_kind, run.slot_local_date,
+RETURNING run.id, run.schedule_id, run.run_kind, run.report_kind, run.schedule_name, run.slot_local_date,
     run.manual_idempotency_key, run.scheduled_for, run.period_start,
     run.period_end, run.schedule_revision, run.status, run.attempt_count,
     run.lease_owner, run.lease_generation;
@@ -221,7 +223,7 @@ WHERE delivery.id = $1 AND delivery.report_body_snapshot IS NULL
       AND run.lease_until > clock_timestamp());
 
 -- name: GetRunForUpdate :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code

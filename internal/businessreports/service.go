@@ -166,7 +166,7 @@ func (s *Service) EnableSchedule(ctx context.Context, id string) (Schedule, erro
 	if err != nil {
 		return Schedule{}, err
 	}
-	if !found {
+	if !found || schedule.Deleted {
 		return Schedule{}, apperr.New(apperr.NotFound, "schedule not found")
 	}
 	if schedule.Enabled {
@@ -203,7 +203,7 @@ func (s *Service) DisableSchedule(ctx context.Context, id string) (Schedule, err
 	if err != nil {
 		return Schedule{}, err
 	}
-	if !found {
+	if !found || schedule.Deleted {
 		return Schedule{}, apperr.New(apperr.NotFound, "schedule not found")
 	}
 	if err := s.schedules.UpdateScheduleEnablement(ctx, id, false,
@@ -227,7 +227,7 @@ func (s *Service) RunNow(ctx context.Context, scheduleID, manualKey string) (str
 	if err != nil {
 		return "", false, err
 	}
-	if !found {
+	if !found || schedule.Deleted {
 		return "", false, apperr.New(apperr.NotFound, "schedule not found")
 	}
 	now := s.clock.Now()
@@ -244,7 +244,7 @@ func (s *Service) RunNow(ctx context.Context, scheduleID, manualKey string) (str
 		return "", false, err
 	}
 	run := Run{
-		ID: ids.System{}.New(), ScheduleID: scheduleID, Kind: RunManual,
+		ID: ids.System{}.New(), ScheduleID: scheduleID, Kind: RunManual, ReportKind: schedule.Kind, ScheduleName: schedule.Name,
 		ManualIdempotencyKey: manualKey, ScheduledFor: now,
 		PeriodStart: start.UTC(), PeriodEnd: end.UTC(),
 		ScheduleRevision: schedule.Revision, Status: RunPending,

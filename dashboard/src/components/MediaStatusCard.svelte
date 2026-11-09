@@ -62,6 +62,15 @@
 				{/if}
 			</div>
 		</div>
+		{#if data.storage === 'r2' && data.bucket_usage_state}
+			<section class="bucket" aria-label={msg('mediaStatusCard.bucketUsage')} data-testid="bucket-usage">
+				<strong>{msg('mediaStatusCard.bucketUsage')}</strong>
+				{#if data.bucket_usage}
+					<p class="num">{msg(data.bucket_usage.complete ? 'mediaStatusCard.bucketTotals' : 'mediaStatusCard.bucketPartial', { count: formatInt(data.bucket_usage.files) })} · <bdi dir="ltr">{bytes(data.bucket_usage.bytes)}</bdi>{#if !data.bucket_usage.complete} ({msg('mediaStatusCard.partialListing')}){/if}</p>
+				{:else}<p class="muted small">{msg(data.bucket_usage_state === 'scope_limited' ? 'mediaStatusCard.bucketScoped' : 'mediaStatusCard.bucketUnavailable')}</p>{/if}
+			</section>
+		{/if}
+		<details class="diagnostics" data-testid="media-details"><summary>{msg('mediaStatusCard.details')}</summary>
 		<dl class="tiles">
 			<div>
 				<dt>{msg('mediaStatusCard.stored')}</dt>
@@ -80,6 +89,7 @@
 				<dd class="num">{formatInt(data.waiting_images)} <span class="muted small">/ {formatInt(data.gallery_images)}</span></dd>
 			</div>
 		</dl>
+		</details>
 	{/if}
 </Card>
 
@@ -140,6 +150,10 @@
 		font-weight: 400;
 		margin: 2px 0 0;
 	}
+	.diagnostics { margin-top: 12px; }
+	.diagnostics summary { cursor: pointer; font-size: .8rem; font-weight: 600; }
+	.bucket { padding: 12px; margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+	.bucket p { margin: 4px 0 0; }
 	.tiles {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));

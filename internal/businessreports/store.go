@@ -22,6 +22,8 @@ type RecipientStore interface {
 	GetRecipient(ctx context.Context, id string) (Recipient, bool, error)
 	ListRecipients(ctx context.Context) ([]Recipient, error)
 	SetRecipientEnabled(ctx context.Context, id string, enabled bool) error
+	UpdateRecipient(ctx context.Context, id, label, recipient, locale string) (Recipient, error)
+	DeleteRecipient(ctx context.Context, id string) error
 }
 
 // Schedule is one durable report cadence with its materialization
@@ -37,6 +39,7 @@ type Schedule struct {
 	Revision         int64
 	NextRunLocalDate string
 	NextRunAt        time.Time
+	Deleted          bool
 }
 
 // ScheduleStore is the durable schedule boundary.
@@ -49,6 +52,8 @@ type ScheduleStore interface {
 	UpdateScheduleEnablement(ctx context.Context, id string, enabled bool, revision int64, nextDate string, nextAt time.Time) error
 	LinkScheduleRecipient(ctx context.Context, scheduleID, recipientID string) error
 	ListScheduleRecipients(ctx context.Context, scheduleID string) ([]Recipient, error)
+	UpdateScheduleWithRecipients(ctx context.Context, schedule Schedule, recipientIDs []string, expectedRevision int64) error
+	DeleteSchedule(ctx context.Context, id string) error
 }
 
 // MaterializeOutcome reports one planner transaction.
@@ -70,9 +75,22 @@ type SchedulePlannerStore interface {
 }
 
 // Run is one durable report execution: scheduled slot or manual run.
+// DeliveryState is a read-only report-history view of the real notification
+// outcome. It has no report body, full address, credential or retry operation.
+type DeliveryState struct {
+	ID, RunID, ProviderKey                                      string
+	RecipientLabel, RecipientMasked                             string
+	ReportStatus, DispatchStatus, DeliveryStatus, LastErrorCode string
+	AttemptCount                                                int32
+	UpdatedAt                                                   time.Time
+	SendStarted                                                 bool
+}
+
 type Run struct {
 	ID                   string
 	ScheduleID           string
+	ScheduleName         string
+	ReportKind           ReportKind
 	Kind                 RunKind
 	SlotLocalDate        string
 	ManualIdempotencyKey string
@@ -85,6 +103,7 @@ type Run struct {
 	LeaseOwner           string
 	LeaseGeneration      int64
 	LastErrorCode        string
+	DeliveryStates       []DeliveryState
 }
 
 // Delivery is one per-recipient report handoff with immutable
@@ -130,6 +149,7 @@ type RunStore interface {
 	CreateManualRun(ctx context.Context, run Run, deliveries []Delivery) (string, bool, error)
 	GetRun(ctx context.Context, id string) (Run, bool, error)
 	ListRuns(ctx context.Context, limit int32) ([]Run, error)
+	ListRunPage(ctx context.Context, beforeID string, limit int32) ([]Run, int64, error)
 	ListRunDeliveries(ctx context.Context, runID string) ([]Delivery, error)
 	ClaimRun(ctx context.Context, owner string, lease time.Duration, now time.Time) (Run, bool, error)
 	FinishRunCompleted(ctx context.Context, id, owner string, generation int64) (RunFinish, error)

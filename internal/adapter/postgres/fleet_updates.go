@@ -528,7 +528,7 @@ func (f FleetUpdates) RecordStatus(ctx context.Context, deviceID string, s fleet
 			return err
 		}
 		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, Os: s.OS,
-			Arch: s.Arch, Package: fleetupdate.PackageTarGz, Now: pgTime(now)}); err != nil {
+			Arch: s.Arch, Package: fleetupdate.PackageForOS(s.OS), Now: pgTime(now)}); err != nil {
 			return err
 		}
 		if s.ReleaseSequence > 0 {
@@ -559,11 +559,11 @@ func (f FleetUpdates) ClaimCommand(ctx context.Context, deviceID string, now tim
 			return nil
 		}
 		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, Os: status.Os,
-			Arch: status.Arch, Package: fleetupdate.PackageTarGz, Now: pgTime(now)}); err != nil {
+			Arch: status.Arch, Package: fleetupdate.PackageForOS(status.Os), Now: pgTime(now)}); err != nil {
 			return err
 		}
 		row, err := q.ClaimDeviceUpdateTarget(ctx, sqlcgen.ClaimDeviceUpdateTargetParams{DeviceID: did, Os: status.Os,
-			Arch: status.Arch, Package: fleetupdate.PackageTarGz, Now: pgTime(now)})
+			Arch: status.Arch, Package: fleetupdate.PackageForOS(status.Os), Now: pgTime(now)})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

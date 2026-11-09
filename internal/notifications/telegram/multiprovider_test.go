@@ -23,15 +23,21 @@ type graphStub struct {
 	server   *httptest.Server
 	mu       sync.Mutex
 	requests int
+	lastBody map[string]any
 }
 
 func newGraphStub(t *testing.T) *graphStub {
 	t.Helper()
 	stub := &graphStub{t: t}
 	stub.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Errorf("invalid Graph JSON: %v", err)
+		}
 		stub.mu.Lock()
 		stub.requests++
+		stub.lastBody = body
 		stub.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -87,11 +93,15 @@ func TestMultiProviderCoexistence(t *testing.T) {
 	}
 
 	store := newFakeTelegramStore()
+	// Both destinations share the same original snapshot. WhatsApp
+	// flattens it at the HTTP boundary; Telegram keeps every byte.
+	body := "10-Day Business Report\nGross sales:\tEGP 1250.00\nRefunds:     EGP 50.00"
+	parameters := map[string]string{"report_body": body}
 	store.addRow("wa-1", false, "whatsapp-main", "201012345678",
-		"daily_business_report_v1", map[string]string{"report_body": "wa body"},
+		"daily_business_report_v1", parameters,
 		"moonlight_daily_ar", []string{"report_body"})
 	store.addRow("tg-1", false, "telegram-main", "@operations",
-		"daily_business_report_v1", map[string]string{"report_body": "tg body"},
+		"daily_business_report_v1", parameters,
 		RendererBodyV1, []string{"report_body"})
 
 	dispatcher := notifications.NewDispatcher(store, registry,
@@ -107,8 +117,20 @@ func TestMultiProviderCoexistence(t *testing.T) {
 	if waStub.count() != 1 || tgHarness.count() != 1 {
 		t.Fatalf("one send per provider: whatsapp=%d telegram=%d", waStub.count(), tgHarness.count())
 	}
-	if got := tgHarness.recorded()[0].Body["text"]; got != "tg body" {
+	waStub.mu.Lock()
+	waBody := waStub.lastBody
+	waStub.mu.Unlock()
+	template := waBody["template"].(map[string]any)
+	component := template["components"].([]any)[0].(map[string]any)
+	parameter := component["parameters"].([]any)[0].(map[string]any)
+	if got := parameter["text"]; got != "10-Day Business Report Gross sales: EGP 1250.00 Refunds: EGP 50.00" {
+		t.Fatalf("WhatsApp text: %v", got)
+	}
+	if got := tgHarness.recorded()[0].Body["text"]; got != body {
 		t.Fatalf("telegram body: %v", got)
+	}
+	if parameters["report_body"] != body {
+		t.Fatal("sending changed the original report snapshot")
 	}
 }
 

@@ -32,7 +32,7 @@ func optionalTime(ts pgtype.Timestamptz) *time.Time {
 }
 
 // DashboardSyncSummary counts received events per kind for the sync page.
-func (d Reporting) DashboardSyncSummary(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]dashboard.SyncCategoryRow, error) {
+func (d Reporting) DashboardSyncSummary(ctx context.Context, storeID string, startUTC, endUTC, recentStart, recentEnd time.Time) ([]dashboard.SyncCategoryRow, error) {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	suid, err := optionalStore(storeID)
@@ -40,16 +40,18 @@ func (d Reporting) DashboardSyncSummary(ctx context.Context, storeID string, sta
 		return nil, err
 	}
 	rows, err := sqlcgen.New(d.pool).DashboardSyncSummary(ctx, sqlcgen.DashboardSyncSummaryParams{
-		StartUtc: pgtype.Timestamptz{Time: startUTC, Valid: true},
-		EndUtc:   pgtype.Timestamptz{Time: endUTC, Valid: true},
-		StoreID:  suid,
+		StartUtc:    pgtype.Timestamptz{Time: startUTC, Valid: true},
+		EndUtc:      pgtype.Timestamptz{Time: endUTC, Valid: true},
+		RecentStart: pgtype.Timestamptz{Time: recentStart, Valid: true},
+		RecentEnd:   pgtype.Timestamptz{Time: recentEnd, Valid: true},
+		StoreID:     suid,
 	})
 	if err != nil {
 		return nil, reportErr("dashboard sync summary", err)
 	}
 	out := make([]dashboard.SyncCategoryRow, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, dashboard.SyncCategoryRow{Category: row.Category, Synced: row.Synced, LastReceivedAt: optionalTime(row.LastReceivedAt)})
+		out = append(out, dashboard.SyncCategoryRow{Category: row.Category, Synced: row.Synced, ReceivedLast7Days: row.ReceivedLast7Days, TotalReceived: row.TotalReceived, LastReceivedAt: optionalTime(row.LastReceivedAt)})
 	}
 	return out, nil
 }

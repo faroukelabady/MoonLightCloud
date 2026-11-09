@@ -70,7 +70,7 @@ bootstrap and manual recovery runbook is MoonLightRetail
 | `rolled_back` | New release failed health; previous release and data restored. Investigate before re-releasing as a higher sequence. |
 | `manual_action_required` | Automation stopped deliberately; follow Retail `self-update.md` §8 on that PC |
 | `skipped_newer` | Device already has a newer release |
-| `unsupported` | Package-manager/AppImage/Windows install, no artifact for its platform, or a build without release keys |
+| `unsupported` | Package-manager/AppImage/legacy Windows install, no artifact for its platform, or a build without release keys |
 
 ## Verification and audit
 
@@ -80,3 +80,15 @@ bootstrap and manual recovery runbook is MoonLightRetail
   report history.
 - The pre-update SQLite backup never leaves the shop PC. Cloud stores only
   states and error codes.
+
+
+## Windows full-installer support
+
+For capable Windows devices, protocol 1 selects `windows` / the reported
+architecture / `nsis-exe`. Linux continues to select `tar.gz`. A Windows archive
+is never used as a substitute for the full installer. A missing matching
+artifact is reported as unsupported. No business schema change is required.
+Legacy Windows builds need one manual full-installer upgrade before they can
+advertise updater capability. Retail must also contain the reviewed public
+signing key and a positive release sequence. Production signing configuration
+is deferred; an R2 upload alone does not enable live self-updates.

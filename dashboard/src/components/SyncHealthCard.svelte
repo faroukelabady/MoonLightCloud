@@ -99,13 +99,13 @@
 			</div>
 			{#if health}
 				{#if summary}
-					<ul class="cats" data-testid="sync-categories">
+					<ul class="cats" data-testid="sync-categories" aria-label={msg('syncHealthCard.activityHelp')}>
 						{#each summary.categories as c (c.category)}
 							{@const bad = categoryBlocked(c.category)}
 							<li>
 								<span class="dot" class:bad aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d={bad ? icons.blocked : icons.ok} /></svg></span>
 								<span class="name">{msg(`syncHealthCard.category.${c.category}`)}</span>
-								<span class="count num">{msg('syncHealthCard.inPeriod', { count: formatInt(c.synced) })}</span>
+								<span class="count num">{#if c.received_last_7_days !== undefined}{msg('syncHealthCard.inLastWeek', { count: formatInt(c.received_last_7_days) })}{:else}{msg('syncHealthCard.weeklyUnavailable')}{/if}</span>
 								<span class="when muted">{c.last_received_at ? relativeTime(c.last_received_at, lang()) : msg('syncHealthCard.never')}</span>
 							</li>
 						{/each}
@@ -136,6 +136,14 @@
 					</div>
 				{/if}
 			</div>
+			{#if summary}<details class="diagnostics" data-testid="sync-details">
+				<summary>{msg('syncHealthCard.details')}</summary>
+				<p class="muted hint">{msg('syncHealthCard.activityHelp')}</p>
+				<table><thead><tr><th>{msg('syncHealthCard.categoryHeading')}</th><th>{msg('syncHealthCard.selectedPeriod')}</th><th>{msg('syncHealthCard.allTime')}</th></tr></thead><tbody>
+				{#each summary.categories as c (c.category)}<tr><th>{msg(`syncHealthCard.category.${c.category}`)}</th><td class="num">{formatInt(c.synced)}</td><td class="num">{c.total_received === undefined ? '—' : formatInt(c.total_received)}</td></tr>{/each}
+				</tbody></table>
+			</details>{/if}
+
 			{#each lastErrors as error, i (i)}<p class="errmsg">{msg('syncHealthCard.lastError')}: {error}</p>{/each}
 		{/if}
 	{/if}
@@ -280,6 +288,11 @@
 		font-size: 0.74rem;
 		color: var(--text-muted);
 	}
+	.diagnostics { margin-top: 12px; font-size: .8rem; }
+	.diagnostics summary { cursor: pointer; font-weight: 600; }
+	.diagnostics table { width: 100%; margin-top: 8px; border-collapse: collapse; }
+	.diagnostics th, .diagnostics td { text-align: start; padding: 6px; border-bottom: 1px solid var(--border); }
+	.diagnostics .hint { margin-top: 8px; }
 	.when {
 		grid-area: when;
 		font-size: 0.78rem;

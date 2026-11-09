@@ -136,6 +136,8 @@ type BusinessReportRun struct {
 	LastErrorCode        pgtype.Text        `json:"last_error_code"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 }
 
 type BusinessReportSchedule struct {
@@ -151,6 +153,7 @@ type BusinessReportSchedule struct {
 	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type BusinessReportScheduleRecipient struct {
@@ -773,6 +776,7 @@ type NotificationRecipient struct {
 	Enabled     bool               `json:"enabled"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type NotificationTemplateMapping struct {

@@ -2,6 +2,16 @@
 
 ## Pre-production baseline (ADR-0055)
 
+Current upgrade path: **00115 baseline → 00116 report configuration**.
+Migration 00116 preserves the installed database rather than requiring a reset.
+Back up and stop Cloud writers, run `./scripts/migrate.sh up`, then start the new
+binary. It adds configuration deletion state and backfills immutable report
+kind/name snapshots. Credentials, recipients, Sales, report bodies, and
+notification history are retained. Its rollback is tested before new semantics
+are used and refuses once deletion or a historical kind/name change makes
+downgrade unsafe. See ADR-0059. The older baseline-only description below records
+the pre-production reset workflow; do not reset an existing 115 database for 116.
+
 Until the first production install, `db/migrations` holds one migration,
 `00100_baseline.sql`: the Up bodies of the historical chain 00001–00045 in
 order, then the ADR-0055 changes. Each change edits that file and raises its

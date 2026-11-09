@@ -59,7 +59,7 @@ func TestDashboardInsightsSyncSummaryAndSaleDetail(t *testing.T) {
 	// The count is per period; the newest arrival is not.
 	earlier := report.Request{Period: report.Period{StartUTC: now.Add(-48 * time.Hour), EndUTC: now.Add(-24 * time.Hour)}}
 	old, err := insights.SyncSummary(ctx, earlier)
-	if err != nil || old.Categories[0].Synced != 0 || old.Categories[0].LastReceivedAt == "" {
+	if err != nil || old.Categories[0].Synced != 0 || old.Categories[0].ReceivedLast7Days != 1 || old.Categories[0].TotalReceived != 1 || old.Categories[0].LastReceivedAt == "" {
 		t.Fatalf("earlier period: %+v %v", old, err)
 	}
 	other := report.Request{Period: period.Period, Store: &report.StoreScope{StoreID: uuid.NewString()}}

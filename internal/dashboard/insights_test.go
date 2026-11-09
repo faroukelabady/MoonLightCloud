@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
@@ -18,7 +19,7 @@ type fakeInsights struct {
 	media   MediaStatusRow
 }
 
-func (f *fakeInsights) DashboardSyncSummary(_ context.Context, storeID string, _, _ time.Time) ([]SyncCategoryRow, error) {
+func (f *fakeInsights) DashboardSyncSummary(_ context.Context, storeID string, _, _, _, _ time.Time) ([]SyncCategoryRow, error) {
 	f.storeID = storeID
 	return f.sync, nil
 }
@@ -130,4 +131,28 @@ func TestMediaStatusChecksNewestFile(t *testing.T) {
 func isKind(err error, kind apperr.Kind) bool {
 	var ae *apperr.Error
 	return errors.As(err, &ae) && ae.Kind == kind
+}
+
+func TestBucketUsageIsExplicitAndNeverLeaksAcrossStores(t *testing.T) {
+	calls := 0
+	probe := func(context.Context) (media.Usage, error) {
+		calls++
+		return media.Usage{Files: 5, Bytes: 9000, Complete: true}, nil
+	}
+	svc := NewInsights(&fakeInsights{}, "r2", nil, time.Now).WithStorageUsage(probe)
+	got, err := svc.MediaStatus(context.Background(), report.Request{})
+	if err != nil || got.BucketUsage == nil || got.BucketUsage.Files != 5 || got.BucketUsageState != "complete" || got.Check != "ok" {
+		t.Fatalf("bucket contents hidden by empty DB: %+v %v", got, err)
+	}
+	scoped, err := svc.MediaStatus(context.Background(), report.Request{Store: &report.StoreScope{StoreID: "A"}})
+	if err != nil || scoped.BucketUsage != nil || scoped.BucketUsageState != "scope_limited" || calls != 1 {
+		t.Fatalf("cross-store bucket totals exposed: %+v %v calls=%d", scoped, err, calls)
+	}
+	svc = svc.WithStorageUsage(func(context.Context) (media.Usage, error) {
+		return media.Usage{}, errors.New("private-provider-message")
+	})
+	got, err = svc.MediaStatus(context.Background(), report.Request{})
+	if err != nil || got.BucketUsage != nil || got.BucketUsageState != "unavailable" || got.Check != "error" {
+		t.Fatalf("failed request shown as empty bucket: %+v %v", got, err)
+	}
 }

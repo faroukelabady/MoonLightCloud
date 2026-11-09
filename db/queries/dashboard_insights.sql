@@ -13,6 +13,8 @@ SELECT CASE
         ELSE 'other'
     END::text AS category,
     count(*) FILTER (WHERE e.received_at >= @start_utc AND e.received_at < @end_utc)::bigint AS synced,
+    count(*) FILTER (WHERE e.received_at >= @recent_start AND e.received_at < @recent_end)::bigint AS received_last_7_days,
+    count(*)::bigint AS total_received,
     max(e.received_at)::timestamptz AS last_received_at
 FROM sync_events e
 WHERE sqlc.narg(store_id)::uuid IS NULL OR e.store_id = sqlc.narg(store_id)::uuid

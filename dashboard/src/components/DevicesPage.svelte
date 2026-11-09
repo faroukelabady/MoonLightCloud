@@ -1,301 +1,176 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { lang, msg } from '../lib/i18n.svelte.js';
 	import { absoluteTime } from '../lib/time.js';
-	import { onMount } from 'svelte';
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { DeviceRow, DeviceCommandWire, StoreRow } from '../lib/api';
 
-	let devices: DeviceRow[] = [];
-	let stores: StoreRow[] | null = null;
-	let incidentSummary: Record<string, { open_count: number; max_severity: string }> = {};
-	let loading = true;
-	let error: string | null = null;
-	let requesting: Record<string, boolean> = {};
-	let notice: string | null = null;
-
+	let { store = '', canManage = true }: { store?: string; canManage?: boolean } = $props();
+	let devices = $state<DeviceRow[]>([]);
+	let stores = $state<StoreRow[] | null>(null);
+	let incidentSummary = $state<Record<string, { open_count: number; max_severity: string }>>({});
+	let incidentsAvailable = $state(false);
+	let controlEnabled = $state(true);
+	let loaded = $state(false);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+	let requesting = $state<Record<string, boolean>>({});
+	let notice = $state<string | null>(null);
+	let opened = $state<Record<string, boolean>>({});
+	let request: AbortController | undefined;
+	let epoch = 0;
+	let disposed = false;
+	type Group = { key: string; id: string; name: string; timezone?: string; status?: string; devices: DeviceRow[] };
+	let groups = $derived.by(() => {
+		const map = new Map<string, Group>();
+		for (const st of stores ?? []) map.set(st.store_id, { key: st.store_id, id: st.store_id, name: st.display_name, timezone: st.timezone, status: st.status, devices: [] });
+		for (const d of devices) {
+			const key = d.store_id || 'unassigned';
+			if (!map.has(key)) map.set(key, { key, id: d.store_id ?? '', name: d.store_name || d.store_id || '', devices: [] });
+			map.get(key)!.devices.push(d);
+		}
+		return [...map.values()].filter((group) => !store || group.id === store);
+	});
 	function userFacing(status: string): string {
-		switch (status) {
-			case 'pending':
-			case 'leased':
-			case 'accepted':
-			case 'running':
-			case 'completed':
-			case 'failed':
-				return msg(`devicesPage.command.${status}`);
-			default:
-				return status;
-		}
+		return ['pending', 'leased', 'accepted', 'running', 'completed', 'failed'].includes(status) ? msg(`devicesPage.command.${status}`) : msg('devicesPage.unknown');
 	}
-
-	function isTerminal(status: string): boolean {
-		return status === 'completed' || status === 'failed';
-	}
-
-	// Latest terminal outcome from the actual API shape: active_command is
-	// never terminal (one-active invariant covers non-terminal only), so
-	// history comes from recent_commands, newest first, excluding the row
-	// already shown as active.
 	function lastTerminal(d: DeviceRow): DeviceCommandWire | null {
-		const activeId = d.active_command?.id ?? null;
-		for (const c of d.recent_commands ?? []) {
-			if (c.id !== activeId && isTerminal(c.status)) return c;
-		}
-		return null;
+		return (d.recent_commands ?? []).find((c) => c.id !== d.active_command?.id && ['completed', 'failed'].includes(c.status)) ?? null;
 	}
-
-	function history(d: DeviceRow): DeviceCommandWire[] {
-		const activeId = d.active_command?.id ?? null;
-		return (d.recent_commands ?? []).filter((c) => c.id !== activeId).slice(0, 5);
-	}
-
-	function newKey(): string {
-		if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-		return `key-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+	function history(d: DeviceRow) { return (d.recent_commands ?? []).filter((c) => c.id !== d.active_command?.id).slice(0, 5); }
+	function errorText(e: unknown) {
+		if (e instanceof ApiError && e.detail === 'DEVICE_CONTROL_DISABLED') return msg('devicesPage.controlDisabled');
+		return msg('devicesPage.failed', { code: e instanceof ApiError ? e.code : 'INTERNAL' });
 	}
 
 	export async function refresh(signal?: AbortSignal) {
+		request?.abort();
+		const own = new AbortController(); request = own;
+		const abort = () => own.abort();
+		if (signal?.aborted) own.abort(); else signal?.addEventListener('abort', abort, { once: true });
+		const current = ++epoch;
 		loading = true;
-		error = null;
 		try {
-			const res = await dashboardApi.devices(signal);
-			devices = res.devices ?? [];
-			try {
-				const sres = await dashboardApi.stores(signal);
-				stores = sres.stores ?? [];
-			} catch {
-				stores = null;
-			}
-			try {
-				const sum = await dashboardApi.operationsSummary(signal);
-				incidentSummary = Object.fromEntries((sum.devices ?? []).map((d) => [d.device_id, d]));
-			} catch {
-				incidentSummary = {};
-			}
-		} catch (e) {
-			if (e instanceof ApiError) error = e.code;
-			else error = 'INTERNAL';
-		} finally {
-			loading = false;
-		}
+			const [dev, directory, incidents] = await Promise.allSettled([
+				dashboardApi.devices(own.signal), dashboardApi.stores(own.signal), dashboardApi.operationsSummary(own.signal)
+			]);
+			if (disposed || current !== epoch || own.signal.aborted) return;
+			if (dev.status === 'rejected') { error = errorText(dev.reason); return; }
+			devices = dev.value.devices ?? [];
+			controlEnabled = dev.value.control_enabled ?? true;
+			stores = directory.status === 'fulfilled' && directory.value ? directory.value.stores ?? [] : null;
+			incidentsAvailable = incidents.status === 'fulfilled' && !!incidents.value;
+			incidentSummary = incidents.status === 'fulfilled' && incidents.value ? Object.fromEntries((incidents.value.devices ?? []).map((d) => [d.device_id, d])) : {};
+			error = null; loaded = true;
+		} catch (e) { if (!disposed && current === epoch && !own.signal.aborted) error = errorText(e); }
+		finally { signal?.removeEventListener('abort', abort); if (!disposed && current === epoch) loading = false; }
 	}
-
 	onMount(() => {
 		void refresh();
+		const timer = window.setInterval(() => {
+			if (!loading && !Object.values(requesting).some(Boolean) && document.visibilityState === 'visible') void refresh();
+		}, 5000);
+		return () => { disposed = true; epoch++; request?.abort(); window.clearInterval(timer); };
 	});
-
-	async function syncNow(deviceId: string, hasActive: boolean) {
-		if (hasActive || requesting[deviceId]) return;
-		requesting[deviceId] = true;
-		notice = null;
+	async function syncNow(d: DeviceRow) {
+		if (!canManage || !controlEnabled || d.lifecycle !== 'active' || d.active_command || requesting[d.device_id]) return;
+		requesting[d.device_id] = true; notice = null;
 		try {
-			const res = await dashboardApi.syncRequest(deviceId, newKey());
-			notice = res.created ? msg('devicesPage.syncQueued') : msg('devicesPage.syncAlreadyActive');
+			const key = crypto.randomUUID();
+			const res = await dashboardApi.syncRequest(d.device_id, key);
+			if (disposed) return;
+			notice = msg(res.created ? 'devicesPage.syncQueued' : 'devicesPage.syncAlreadyActive');
 			await refresh();
-		} catch (e) {
-			if (e instanceof ApiError) notice = e.code;
-			else notice = 'INTERNAL';
-		} finally {
-			requesting[deviceId] = false;
-		}
+		} catch (e) { if (!disposed) notice = errorText(e); }
+		finally { if (!disposed) requesting[d.device_id] = false; }
 	}
 </script>
 
-<section class="card devices" aria-label={msg('devicesPage.devices')}>
-	<h2>{msg('devicesPage.devices')}</h2>
-	<p class="hint">{msg('devicesPage.onlineMeansCloudHeardFromThe')}</p>
-	{#if loading}<p>{msg('devicesPage.loading')}</p>
-	{:else if error}<p role="alert">{msg('devicesPage.failed', { code: error })}</p>
-	{:else if devices.length === 0}<p>{msg('devicesPage.noDevices')}</p>
-	{:else}
-		<div class="table-wrap">
-			<table class="grid-table" data-testid="devices-table">
-				<thead>
-					<tr>
-						<th scope="col">{msg('devicesPage.device')}</th>
-						<th scope="col">{msg('devicesPage.store')}</th>
-						<th scope="col">{msg('devicesPage.connection')}</th>
-						<th scope="col">{msg('devicesPage.lastSeen')}</th>
-						<th scope="col">{msg('devicesPage.lastData')}</th>
-						<th scope="col">{msg('devicesPage.incidents')}</th>
-						<th scope="col">{msg('devicesPage.sync')}</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each devices as d (d.device_id)}
-						{@const active = d.active_command ?? null}
-						{@const terminal = lastTerminal(d)}
-						{@const past = history(d)}
-						<tr data-testid="device-row" data-device={d.device_id}>
-							<th scope="row">
-								<div class="name">{d.name || d.device_id}</div>
-								{#if d.name}<div class="mono sub" dir="ltr">{d.device_id}</div>{/if}
-							</th>
-							<td>
-								{#if d.store_id}
-									<span data-testid="device-store" title={d.store_id}>{d.store_name || d.store_id}</span>
-								{:else}
-									<span class="muted" data-testid="device-store-unbound" title={msg('devicesPage.unboundTitle')}>{msg('devicesPage.unbound')}</span>
-								{/if}
-							</td>
-							<td>
-								<span class="pill" class:ok={d.connectivity === 'online'} data-testid="connectivity">{d.connectivity === 'online' || d.connectivity === 'offline' ? msg(`devicesPage.connectivity.${d.connectivity}`) : d.connectivity}</span>
-								{#if d.connectivity === 'online' && d.control && d.control !== 'polling'}
-									<div class="warn" data-testid="control-indicator" title={d.last_poll_at ? msg('devicesPage.lastPoll', { at: d.last_poll_at }) : msg('devicesPage.neverPolled')}>
-										{d.control === 'never_polled'
-											? msg('devicesPage.syncingNotPolledYetSyncNow')
-											: msg('devicesPage.syncingControlPollStaleSyncNow')}
-									</div>
-								{/if}
-							</td>
-							<td>{#if d.last_seen_at}<time datetime={d.last_seen_at} title={d.last_seen_at}>{absoluteTime(d.last_seen_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.never')}</span>{/if}</td>
-							<td data-testid="last-data">{#if d.last_data_at}<time datetime={d.last_data_at} title={d.last_data_at}>{absoluteTime(d.last_data_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.noneYet')}</span>{/if}</td>
-							<td>
-								{#if incidentSummary[d.device_id]}
-									<span class="pill warn-pill" data-testid="incident-badge" title={msg('devicesPage.openIncidents')}>{msg('devicesPage.incidentCount', { count: incidentSummary[d.device_id].open_count, severity: incidentSummary[d.device_id].max_severity })}</span>
-								{:else}<span class="muted">—</span>{/if}
-							</td>
-							<td><div class="sync">
-								{#if active}
-									<span data-testid="command-status">{userFacing(active.status)}</span>
-									<button class="btn-secondary btn-sm" disabled title={msg('devicesPage.syncAlreadyActive')}>{msg('devicesPage.syncNow')}</button>
-								{:else}
-									{#if terminal}
-										<span data-testid="last-sync">{msg('devicesPage.lastSync', { status: userFacing(terminal.status) })}</span>
-									{:else}
-										<span class="muted" data-testid="command-status">{msg('devicesPage.idle')}</span>
-									{/if}
-									<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!!requesting[d.device_id]} on:click={() => syncNow(d.device_id, false)}>{msg('devicesPage.syncNow')}</button>
-									{#if past.length > 0}
-										<details>
-											<summary>{msg('devicesPage.history')} ({past.length})</summary>
-											<ul data-testid="sync-history">
-												{#each past as c (c.id)}
-													<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time></li>
-												{/each}
-											</ul>
-										</details>
-									{/if}
-								{/if}
-							</div></td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
-	{#if notice}<p role="status">{notice}</p>{/if}
-	{#if stores !== null}
-		<h3>{msg('devicesPage.stores')}</h3>
-		{#if stores.length === 0}<p>{msg('devicesPage.noStores')}</p>
-		{:else}
-			<div class="table-wrap">
-				<table class="grid-table" data-testid="stores-table">
-					<thead>
-						<tr>
-							<th scope="col">{msg('devicesPage.store')}</th>
-							<th scope="col">{msg('devicesPage.storeId')}</th>
-							<th scope="col">{msg('devicesPage.devices')}</th>
-							<th scope="col">{msg('devicesPage.timeZone')}</th>
-							<th scope="col">{msg('devicesPage.status')}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each stores as st (st.store_id)}
-							<tr data-testid="store-row" data-store={st.store_id}>
-								<th scope="row">{st.display_name}</th>
-								<td class="mono" dir="ltr">{st.store_id}</td>
-								<td>{msg('devicesPage.deviceCount', { count: st.device_count })}</td>
-								<td dir="ltr">{st.timezone}</td>
-								<td>{st.status === 'active' ? msg('devicesPage.storeActive') : st.status}</td>
+<section class="stores-page" aria-labelledby="stores-title">
+	<header class="card page-head">
+		<div><h2 id="stores-title">{msg('devicesPage.stores')}</h2><p class="hint">{msg('devicesPage.storePurpose')}</p></div>
+		<button type="button" class="btn-secondary" disabled={loading} onclick={() => refresh()}>{msg('devicesPage.refresh')}</button>
+	</header>
+	<div class="card guide">
+		<div><h3>{msg('devicesPage.devicePurposeTitle')}</h3><p>{msg('devicesPage.devicePurpose')}</p></div>
+		<div><h3>{msg('devicesPage.syncPurposeTitle')}</h3><p>{msg('devicesPage.syncPurpose')}</p></div>
+	</div>
+	{#if !controlEnabled}<p class="warning" role="status" data-testid="control-disabled">{msg('devicesPage.controlDisabled')}</p>{/if}
+	{#if loaded && stores === null}<p class="warning" role="status">{msg('devicesPage.directoryUnavailable')}</p>{/if}
+	{#if error}<p class="warning" role="alert">{error}{#if loaded} {msg('devicesPage.lastKnown')}{/if}</p>{/if}
+	{#if notice}<p class="notice" role="status">{notice}</p>{/if}
+	{#if loading && !loaded}<p role="status">{msg('devicesPage.loading')}</p>{:else if loaded && groups.length === 0}<div class="card empty">{msg('devicesPage.noStores')}</div>{/if}
+	{#each groups as group (group.key)}
+		<details class="store-group" open={opened[group.key] ?? groups.length === 1} ontoggle={(event) => opened[group.key] = event.currentTarget.open} data-testid="store-group" data-store={group.id}>
+			<summary>
+				<span class="store-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10l2-6h14l2 6M4 10v10h16V10M3 10h18M9 20v-6h6v6" /></svg></span>
+				<span class="store-heading"><strong>{group.id ? group.name : msg('devicesPage.unassignedDevices')}</strong><span class="hint">{group.id ? msg('devicesPage.registeredStore') : msg('devicesPage.unboundTitle')}{#if group.timezone} · <bdi>{group.timezone}</bdi>{/if}</span></span>
+				{#if group.status}<span class="pill" class:ok={group.status === 'active'}>{msg(group.status === 'active' ? 'devicesPage.storeActive' : 'devicesPage.storeInactive')}</span>{/if}
+				<span class="device-count">{msg('devicesPage.deviceCount', { count: group.devices.length })}</span>
+				<svg class="chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+			</summary>
+			<div class="store-body">
+				{#if group.id}<p class="store-id">{msg('devicesPage.storeId')}: <bdi class="mono">{group.id}</bdi></p>{/if}
+				<p class="hint">{msg('devicesPage.onlineMeansCloudHeardFromThe')}</p>
+				{#if !group.devices.length}<p class="empty">{msg('devicesPage.noDevicesForStore')}</p>{:else}
+					<div class="table-wrap"><table class="grid-table" data-testid="devices-table">
+						<caption class="sr-only">{msg('devicesPage.devicesFor', { name: group.name || msg('devicesPage.unassignedDevices') })}</caption>
+						<thead><tr><th scope="col">{msg('devicesPage.device')}</th><th scope="col">{msg('devicesPage.connection')}</th><th scope="col">{msg('devicesPage.lastSeen')}</th><th scope="col">{msg('devicesPage.lastData')}</th><th scope="col">{msg('devicesPage.controlChannel')}</th><th scope="col">{msg('devicesPage.incidents')}</th><th scope="col">{msg('devicesPage.sync')}</th></tr></thead>
+						<tbody>{#each group.devices as d (d.device_id)}
+							{@const active = d.active_command ?? null}{@const terminal = lastTerminal(d)}{@const past = history(d)}
+							<tr data-testid="device-row" data-device={d.device_id}>
+								<th scope="row"><div class="name">{d.name || msg('devicesPage.unnamedDevice')}</div><bdi class="mono sub">{d.device_id}</bdi>{#if d.lifecycle !== 'active'}<div class="pill">{msg('devicesPage.revoked')}</div>{/if}</th>
+								<td><span class="pill" class:ok={d.connectivity === 'online'} data-testid="connectivity">{msg(`devicesPage.connectivity.${['online','offline','never_seen'].includes(d.connectivity) ? d.connectivity : 'unknown'}`)}</span></td>
+								<td>{#if d.last_seen_at}<time datetime={d.last_seen_at}>{absoluteTime(d.last_seen_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.never')}</span>{/if}</td>
+								<td data-testid="last-data">{#if d.last_data_at}<time datetime={d.last_data_at}>{absoluteTime(d.last_data_at, lang())}</time>{:else}<span class="muted">{msg('devicesPage.noneYet')}</span>{/if}</td>
+								<td><span class="pill" class:ok={d.control === 'polling' && controlEnabled}>{msg(!controlEnabled ? 'devicesPage.control.off' : `devicesPage.control.${d.control ?? 'never_polled'}`)}</span>{#if controlEnabled && d.control !== 'polling'}<p class="warn" data-testid="control-indicator">{msg(d.control === 'poll_stale' ? 'devicesPage.syncingControlPollStaleSyncNow' : 'devicesPage.syncingNotPolledYetSyncNow')}</p>{/if}</td>
+								<td>{#if incidentSummary[d.device_id]?.open_count}<span class="pill warn-pill" data-testid="incident-badge">{msg('devicesPage.incidentCount', { count: incidentSummary[d.device_id].open_count, severity: incidentSummary[d.device_id].max_severity })}</span>{:else}<span class="muted">{incidentsAvailable ? '—' : msg('devicesPage.unknown')}</span>{/if}</td>
+								<td><div class="sync">
+									{#if active}<span data-testid="command-status">{userFacing(active.status)}</span>{:else if terminal}<span data-testid="last-sync">{msg('devicesPage.lastSync', { status: userFacing(terminal.status) })}</span>{:else}<span class="muted" data-testid="command-status">{msg('devicesPage.idle')}</span>{/if}
+									{#if canManage}<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!controlEnabled || !!active || !!requesting[d.device_id] || d.lifecycle !== 'active'} onclick={() => syncNow(d)}>{msg('devicesPage.syncNow')}</button>{/if}
+									{#if !active && past.length}<details class="history"><summary>{msg('devicesPage.history')} ({past.length})</summary><ul data-testid="sync-history">{#each past as c (c.id)}<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time>{#if c.result_code}<bdi class="mono"> {c.result_code}</bdi>{/if}</li>{/each}</ul></details>{/if}
+								</div></td>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						{/each}</tbody>
+					</table></div>
+				{/if}
 			</div>
-		{/if}
-	{/if}
+		</details>
+	{/each}
 </section>
 
 <style>
-	.hint {
-		color: var(--muted, #666);
-		font-size: 0.82rem;
-	}
-	.table-wrap {
-		overflow-x: auto;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-control);
-		margin-block: 8px 16px;
-	}
-	.grid-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.82rem;
-	}
-	.grid-table th,
-	.grid-table td {
-		padding: 8px 10px;
-		text-align: start;
-		vertical-align: top;
-		border-bottom: 1px solid var(--border);
-	}
-	.grid-table tbody tr:last-child > * {
-		border-bottom: 0;
-	}
-	.grid-table thead th {
-		background: var(--surface-muted);
-		font-size: 0.76rem;
-		font-weight: 700;
-		white-space: nowrap;
-	}
-	.grid-table tbody th {
-		font-weight: 600;
-	}
-	.grid-table tbody tr:hover {
-		background: #f8fafd;
-	}
-	.name {
-		font-weight: 700;
-	}
-	.sub {
-		font-size: 0.7rem;
-		color: var(--text-muted);
-		font-weight: 400;
-	}
-	.mono {
-		font-family: ui-monospace, monospace;
-	}
-	.pill {
-		display: inline-block;
-		padding: 2px 8px;
-		border-radius: 999px;
-		background: var(--surface-muted);
-		font-size: 0.76rem;
-		font-weight: 600;
-	}
-	.pill.ok {
-		background: #e8f6ee;
-		color: #15803d;
-	}
-	.warn-pill {
-		background: #fdf4e7;
-		color: #92400e;
-	}
-	.warn {
-		color: var(--warning, #a15c00);
-		font-size: 0.74rem;
-		margin-top: 4px;
-	}
-	.sync {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 4px;
-		min-width: 140px;
-	}
-	.sync ul {
-		margin: 4px 0 0;
-		padding-inline-start: 16px;
-		font-size: 0.74rem;
-	}
+	.stores-page { display: grid; gap: 16px; }
+	.page-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+	h2, h3, p { margin: 0; }
+	h2 { font-size: 1.15rem; } h3 { font-size: .9rem; margin-bottom: 6px; }
+	.hint, .sub { color: var(--text-muted); font-size: .8rem; line-height: 1.65; font-weight: 400; }
+	.guide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; border-inline-start: 4px solid var(--primary); }
+	.guide p { color: var(--text-muted); font-size: .83rem; line-height: 1.7; }
+	.store-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+	.store-group > summary { display: flex; gap: 12px; align-items: center; padding: 16px; cursor: pointer; list-style: none; }
+	.store-group > summary::-webkit-details-marker { display: none; }
+	.store-group > summary:focus-visible { outline: 3px solid var(--primary); outline-offset: -3px; }
+	.store-icon { display: grid; place-items: center; width: 44px; height: 44px; background: var(--surface-muted); color: var(--primary); border-radius: 10px; flex: none; }
+	.store-heading { display: grid; gap: 3px; flex: 1; min-width: 0; }
+	.store-heading strong { overflow-wrap: anywhere; } .device-count { font-size: .8rem; white-space: nowrap; color: var(--text-muted); }
+	.chevron { flex: none; } .store-group[open] > summary .chevron { transform: rotate(180deg); }
+	.store-group[open] > summary { border-bottom: 1px solid var(--border); }
+	.store-body { padding: 16px; min-width: 0; } .store-id { font-size: .72rem; color: var(--text-muted); margin-bottom: 6px; overflow-wrap: anywhere; }
+	.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-control); margin-top: 14px; }
+	.grid-table { width: 100%; min-width: 940px; border-collapse: collapse; font-size: .82rem; }
+	.grid-table th, .grid-table td { padding: 12px; text-align: start; vertical-align: top; border-bottom: 1px solid var(--border); }
+	.grid-table tbody tr:last-child > * { border-bottom: 0; }
+	.grid-table thead th { background: var(--surface-muted); color: var(--text-muted); font-size: .76rem; white-space: nowrap; }
+	.name { font-weight: 700; } .sub { font-size: .68rem; overflow-wrap: anywhere; } .mono { font-family: ui-monospace, monospace; }
+	.pill { display: inline-block; padding: 3px 9px; border-radius: 999px; background: var(--surface-muted); font-size: .76rem; font-weight: 600; white-space: nowrap; }
+	.pill.ok { background: #e8f6ee; color: #15803d; } .warn-pill { background: #fdf4e7; color: #92400e; }
+	.warn { color: #92400e; font-size: .74rem; margin-top: 6px; max-width: 26ch; line-height: 1.6; }
+	.warning { padding: 12px 16px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: var(--radius-control); font-size: .84rem; }
+	.notice { padding: 12px 16px; background: var(--surface-muted); border-radius: var(--radius-control); font-size: .84rem; }
+	.sync { display: grid; justify-items: start; gap: 8px; min-width: 120px; font-size: .8rem; }
+	.history { max-width: 260px; } .history ul { padding-inline-start: 16px; margin: 6px 0 0; font-size: .74rem; }
+	.empty { padding: 20px; color: var(--text-muted); }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+	@media (max-width: 700px) { .guide { grid-template-columns: 1fr; } .store-group > summary { flex-wrap: wrap; } }
 </style>

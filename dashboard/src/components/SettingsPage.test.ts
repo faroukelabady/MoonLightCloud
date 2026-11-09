@@ -11,7 +11,7 @@ vi.mock('../lib/settingsApi.js', async (orig) => {
 		...mod,
 		settingsApi: {
 			get: vi.fn(), saveBusiness: vi.fn(), addRate: vi.fn(), fetchRate: vi.fn(), deleteRate: vi.fn(), messaging: vi.fn(),
-			addRecipient: vi.fn(), setRecipient: vi.fn(), addSchedule: vi.fn(), setSchedule: vi.fn(), runSchedule: vi.fn(), setTemplate: vi.fn()
+			addRecipient: vi.fn(), getRecipient: vi.fn(), updateRecipient: vi.fn(), deleteRecipient: vi.fn(), updateSchedule: vi.fn(), deleteSchedule: vi.fn(), runPage: vi.fn(), setRecipient: vi.fn(), addSchedule: vi.fn(), setSchedule: vi.fn(), runSchedule: vi.fn(), setTemplate: vi.fn()
 		}
 	};
 });
@@ -120,6 +120,23 @@ describe('SettingsPage', () => {
 		expect(screen.getByTestId('scheduler-off')).toBeTruthy();
 	});
 
+	it.each([
+		{ language: 'en' as const, label: 'Status unavailable' },
+		{ language: 'ar' as const, label: 'الحالة غير متاحة' }
+	])('does not invent delivery evidence from report completion ($language)', async ({ language, label }) => {
+		api.messaging.mockResolvedValue({
+			...messaging,
+			scheduler_enabled: true,
+			providers: [{ key: 'telegram-main', kind: 'telegram', templates: [] }],
+			runs: [{ id: 'run1', schedule_id: 's1', kind: 'manual', scheduled_for: '2026-11-08T05:51:00Z', status: 'completed', attempt_count: 1, last_error_code: '' }]
+		});
+		setLang(language);
+		render(SettingsPage, { canManage: true });
+		expect(await screen.findAllByRole('cell', { name: label })).toHaveLength(2);
+		expect(screen.queryByRole('cell', { name: language === 'en' ? 'Sent' : 'أُرسل' })).toBeNull();
+		expect(screen.getByTestId('report-queue-explanation')).toBeTruthy();
+	});
+
 	it('adds a WhatsApp recipient and sends a schedule now', async () => {
 		api.messaging.mockResolvedValue({
 			scheduler_enabled: true,
@@ -131,7 +148,7 @@ describe('SettingsPage', () => {
 		api.addRecipient.mockResolvedValue({});
 		api.runSchedule.mockResolvedValue({ run_id: 'run1', created: true, scheduler_enabled: true });
 		render(SettingsPage, { canManage: true });
-		await screen.findByTestId('provider-whatsapp');
+		await fireEvent.click(await screen.findByRole('button', { name: 'Add recipient' }));
 		await fireEvent.input(screen.getByLabelText('Name', { selector: '#recipient-label' }), { target: { value: 'Manager' } });
 		await fireEvent.input(screen.getByLabelText('WhatsApp number (international)'), { target: { value: '201098765432' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
@@ -142,7 +159,7 @@ describe('SettingsPage', () => {
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Send now' }).hasAttribute('disabled')).toBe(false));
 		await fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
 		await waitFor(() => expect(api.runSchedule).toHaveBeenCalledWith('s1', expect.any(String)));
-		expect(await screen.findByText(/sent within about a minute/)).toBeTruthy();
+		expect(await screen.findByText(/Report queued/)).toBeTruthy();
 	});
 
 	it.each([
@@ -159,7 +176,7 @@ describe('SettingsPage', () => {
 		api.addSchedule.mockRejectedValue(new ApiError(status, code, `request failed (${status})`));
 		setLang(language);
 		render(SettingsPage, { canManage: true });
-		await screen.findByTestId('provider-telegram');
+		await screen.findByTestId('schedule-form');
 		const name = document.getElementById('schedule-name') as HTMLInputElement;
 		await fireEvent.input(name, { target: { value: 'Telegram report' } });
 		await fireEvent.click(document.getElementById('schedule-recipients-trigger')!);

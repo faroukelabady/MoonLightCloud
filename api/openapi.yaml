@@ -1154,6 +1154,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Cloud device control is disabled (DEVICE_CONTROL_DISABLED); no command is queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/device/ping:
     get:
       summary: Authenticated device ping (proves device auth end to end)
@@ -2914,6 +2920,298 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
         '503':
           description: Temporary dependency unavailable. Generic envelope. Retry with backoff.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/recipients/{id}:
+    get:
+      summary: Read one recipient for editing; no-store.
+      operationId: dashboardMessagingRecipientGet
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Read one recipient for editing; no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingRecipientDetail'}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    put:
+      summary: Edit a recipient; queued destinations remain unchanged.
+      operationId: dashboardMessagingRecipientUpdate
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardMessagingRecipientUpdate'}
+      responses:
+        '200':
+          description: Edit a recipient; queued destinations remain unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingRecipient'}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    delete:
+      summary: Remove a recipient from future reports; keep history.
+      operationId: dashboardMessagingRecipientDelete
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Remove a recipient from future reports; keep history.
+          content:
+            application/json:
+              schema: {type: object, required: [deleted], properties: {deleted: {type: boolean}}}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/schedules/{id}:
+    put:
+      summary: Edit future schedule settings with a revision check.
+      operationId: dashboardMessagingScheduleUpdate
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DashboardMessagingScheduleUpdate'}
+      responses:
+        '200':
+          description: Edit future schedule settings with a revision check.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingSchedule'}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+    delete:
+      summary: Remove a schedule from future planning; keep queued reports and history.
+      operationId: dashboardMessagingScheduleDelete
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Remove a schedule from future planning; keep queued reports and history.
+          content:
+            application/json:
+              schema: {type: object, required: [deleted], properties: {deleted: {type: boolean}}}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  /api/v1/dashboard/settings/messaging/runs:
+    get:
+      summary: Read send history with stable keyset pagination.
+      operationId: dashboardMessagingRunPage
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 10}
+        - name: before
+          in: query
+          description: ID of the last run on the preceding page.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Read send history with stable keyset pagination.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DashboardMessagingRunPage'}
+        '400':
+          description: Invalid input or cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '401':
+          description: No valid session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '403':
+          description: Requires settings.manage on all Stores; mutations require CSRF.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '404':
+          description: Configuration not found or deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '409':
+          description: Configuration changed or active name already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+        '500':
+          description: Unexpected internal failure. Generic envelope.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorEnvelope'}
@@ -5669,8 +5967,11 @@ components:
               has_pending: {type: boolean}
     DashboardDeviceList:
       type: object
-      required: [devices]
+      required: [devices, control_enabled]
       properties:
+        control_enabled:
+          type: boolean
+          description: Whether this Cloud instance exposes authenticated device control. False disables new Sync Now requests, without changing observed connectivity.
         devices:
           type: array
           items:
@@ -7020,7 +7321,11 @@ components:
             properties:
               category: {type: string, enum: [sales, returns, catalog, stock]}
               synced: {type: integer, format: int64, description: Events received in the period.}
+              received_last_7_days: {type: integer, format: int64, minimum: 0, description: Events received in the rolling last seven days including today.}
+              total_received: {type: integer, format: int64, minimum: 0, description: All retained accepted events of this category in scope.}
               last_received_at: {type: string, format: date-time, description: Newest arrival of this kind at any time; absent when none.}
+        recent_start_utc: {type: string, format: date-time}
+        recent_end_utc: {type: string, format: date-time}
         total_synced: {type: integer, format: int64}
         last_received_at: {type: string, format: date-time}
     DashboardSaleDetail:
@@ -7061,8 +7366,18 @@ components:
       type: object
       required: [storage, check, checked_at, check_ms, stored_files, stored_bytes, uploaded_in_range, gallery_images, waiting_images]
       properties:
+        bucket_usage_state: {type: string, enum: [complete, partial, unavailable, scope_limited, not_applicable]}
+        bucket_usage:
+          type: object
+          description: Bucket-wide metadata only for an authorized all-Stores scope. Absent on failure or Store-scoped reads. A capped listing has complete=false and is a lower bound.
+          required: [files, bytes, complete]
+          properties:
+            files: {type: integer, format: int64, minimum: 0}
+            bytes: {type: integer, format: int64, minimum: 0}
+            complete: {type: boolean}
+
         storage: {type: string, enum: [r2, local]}
-        check: {type: string, enum: [ok, missing, error, empty], description: 'ok: the newest file was found; missing: it was not; error: the store did not answer; empty: no file to check.'}
+        check: {type: string, enum: [ok, missing, error, empty], description: 'ok: storage answered a bucket listing or the newest registered file was found; missing: the newest registered file was not found; error: storage did not answer; empty: no registered file or listed bucket object to check.'}
         checked_at: {type: string, format: date-time}
         check_ms: {type: integer, format: int64}
         stored_files: {type: integer, format: int64, description: Files a gallery of the Store names (every file without a Store).}
@@ -7183,7 +7498,7 @@ components:
         locale: {type: string, enum: [ar, en]}
     DashboardMessagingSchedule:
       type: object
-      required: [id, name, kind, local_time, anchor_local_date, enabled, next_run_at, recipient_ids]
+      required: [id, name, kind, local_time, anchor_local_date, enabled, next_run_at, recipient_ids, revision]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -7193,6 +7508,7 @@ components:
         enabled: {type: boolean}
         next_run_at: {type: string, format: date-time}
         recipient_ids: {type: array, items: {type: string, format: uuid}}
+        revision: {type: integer, format: int64, minimum: 1}
     DashboardMessagingScheduleCreate:
       type: object
       required: [name, kind, local_time, recipient_ids]
@@ -7202,6 +7518,71 @@ components:
         local_time: {type: string}
         anchor_local_date: {type: string, format: date, description: Required for ten_day.}
         recipient_ids: {type: array, items: {type: string, format: uuid}}
+    DashboardMessagingRecipientDetail:
+      type: object
+      required: [id, label, provider_key, recipient, locale, enabled]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        provider_key: {type: string}
+        recipient: {type: string, description: Full address for the guarded editor only.}
+        locale: {type: string, enum: [ar, en]}
+        enabled: {type: boolean}
+    DashboardMessagingRecipientUpdate:
+      type: object
+      additionalProperties: false
+      required: [label, recipient, locale]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 64}
+        recipient: {type: string}
+        locale: {type: string, enum: [ar, en]}
+    DashboardMessagingScheduleUpdate:
+      allOf:
+        - {$ref: '#/components/schemas/DashboardMessagingScheduleCreate'}
+        - type: object
+          required: [revision]
+          properties:
+            revision: {type: integer, format: int64, minimum: 1}
+    DashboardMessagingRunPage:
+      type: object
+      required: [runs, next_cursor, remaining_runs]
+      properties:
+        runs: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingRun'}}
+        remaining_runs: {type: integer, format: int64, minimum: 0, description: Older runs remaining after this page; newer concurrent inserts do not affect this count.}
+        next_cursor: {type: string, description: Last run ID; empty when there are no more pages.}
+    DashboardMessagingRun:
+      type: object
+      required: [id, schedule_id, schedule_name, kind, status, scheduled_for, period_start, period_end, attempt_count, last_error_code]
+      properties:
+        id: {type: string, format: uuid}
+        schedule_id: {type: string, format: uuid}
+        schedule_name: {type: string, description: Name saved when this run was created.}
+        kind: {type: string, enum: [scheduled, manual]}
+        status: {type: string, enum: [pending, retry, completed, blocked]}
+        scheduled_for: {type: string, format: date-time}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        attempt_count: {type: integer}
+        last_error_code: {type: string}
+        deliveries:
+          type: array
+          description: Live notification outcomes; a completed report run means handoff only, not successful message delivery. Addresses are masked.
+          items:
+            type: object
+            required: [id, provider_key, provider_kind, recipient_label, recipient_masked, report_status, dispatch_status, delivery_status, last_error_code, attempt_count, send_started, updated_at]
+            properties:
+              id: {type: string, format: uuid}
+              provider_key: {type: string}
+              provider_kind: {type: string, enum: [whatsapp, telegram, unknown]}
+              recipient_label: {type: string}
+              recipient_masked: {type: string}
+              report_status: {type: string, enum: [pending, enqueued, blocked]}
+              dispatch_status: {type: string, enum: ['', pending, retry, accepted, blocked, ambiguous]}
+              delivery_status: {type: string, enum: ['', unknown, accepted, sent, delivered, read, failed]}
+              last_error_code: {type: string}
+              attempt_count: {type: integer, minimum: 0}
+              send_started: {type: boolean}
+              updated_at: {type: string, format: date-time}
     DashboardMessaging:
       type: object
       required: [scheduler_enabled, providers, recipients, schedules, runs]
@@ -7218,21 +7599,9 @@ components:
               templates: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingTemplate'}}
         recipients: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingRecipient'}}
         schedules: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingSchedule'}}
-        runs:
-          type: array
-          items:
-            type: object
-            required: [id, schedule_id, kind, status, scheduled_for, period_start, period_end, attempt_count, last_error_code]
-            properties:
-              id: {type: string, format: uuid}
-              schedule_id: {type: string, format: uuid}
-              kind: {type: string, enum: [scheduled, manual]}
-              status: {type: string, enum: [pending, retry, completed, blocked]}
-              scheduled_for: {type: string, format: date-time}
-              period_start: {type: string, format: date-time}
-              period_end: {type: string, format: date-time}
-              attempt_count: {type: integer}
-              last_error_code: {type: string}
+        runs_next_cursor: {type: string, description: Cursor for the next page of recent sends.}
+        runs_remaining: {type: integer, format: int64, minimum: 0}
+        runs: {type: array, items: {$ref: '#/components/schemas/DashboardMessagingRun'}}
     DashboardReportShop:
       type: object
       nullable: true
@@ -7499,7 +7868,7 @@ components:
       properties:
         os: {type: string, enum: [linux, windows]}
         arch: {type: string, example: amd64}
-        package: {type: string, enum: [tar.gz]}
+        package: {type: string, enum: [tar.gz, nsis-exe]}
         file_name: {type: string}
         size: {type: integer, format: int64, minimum: 1}
         sha256: {type: string, pattern: '^[0-9a-f]{64}$'}

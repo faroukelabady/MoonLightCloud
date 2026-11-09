@@ -15,7 +15,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/businessreports"
 )
 
-func mapRunFields(id pgtype.UUID, scheduleID pgtype.UUID, kind string, slotDate pgtype.Date,
+func mapRunFields(id pgtype.UUID, scheduleID pgtype.UUID, kind, reportKind, scheduleName string, slotDate pgtype.Date,
 	manualKey pgtype.Text, scheduledFor pgtype.Timestamptz, periodStart, periodEnd pgtype.Timestamptz,
 	revision int64, status string, attempts int32, owner pgtype.Text, generation int64,
 	code pgtype.Text) businessreports.Run {
@@ -28,7 +28,7 @@ func mapRunFields(id pgtype.UUID, scheduleID pgtype.UUID, kind string, slotDate 
 	}
 	return businessreports.Run{
 		ID: uuidString(id), ScheduleID: uuidString(scheduleID),
-		Kind: businessreports.RunKind(kind), SlotLocalDate: slot,
+		Kind: businessreports.RunKind(kind), ReportKind: businessreports.ReportKind(reportKind), ScheduleName: scheduleName, SlotLocalDate: slot,
 		ManualIdempotencyKey: manual, ScheduledFor: scheduledFor.Time,
 		PeriodStart: periodStart.Time, PeriodEnd: periodEnd.Time,
 		ScheduleRevision: revision, Status: businessreports.RunStatus(status),
@@ -78,6 +78,31 @@ func (d BusinessReports) CreateManualRun(ctx context.Context, run businessreport
 	scheduleID, err := parseUUID(run.ScheduleID)
 	if err != nil {
 		return "", false, apperr.New(apperr.InvalidInput, "invalid schedule id")
+	}
+	schedule, err := q.GetScheduleForUpdate(ctx, scheduleID)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && schedule.Deleted {
+		return "", false, apperr.New(apperr.NotFound, "schedule not found")
+	}
+	if err != nil {
+		return "", false, apperr.Wrap(apperr.Internal, "report schedule", redact(err))
+	}
+	if schedule.Revision != run.ScheduleRevision {
+		return "", false, apperr.New(apperr.Conflict, "SCHEDULE_CHANGED")
+	}
+	ordered := append([]businessreports.Delivery(nil), deliveries...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].RecipientID < ordered[j].RecipientID })
+	for _, delivery := range ordered {
+		id, err := parseUUID(delivery.RecipientID)
+		if err != nil {
+			return "", false, apperr.New(apperr.InvalidInput, "invalid recipient id")
+		}
+		r, err := q.GetRecipientForUpdate(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && (!r.Enabled || r.Recipient != delivery.Recipient || r.Locale != delivery.Locale || r.ProviderKey != delivery.ProviderKey) {
+			return "", false, apperr.New(apperr.Conflict, "RECIPIENT_CHANGED")
+		}
+		if err != nil {
+			return "", false, apperr.Wrap(apperr.Internal, "report recipient", redact(err))
+		}
 	}
 	returned, err := q.InsertManualRun(ctx, sqlcgen.InsertManualRunParams{
 		ID: runID, ScheduleID: scheduleID, ManualIdempotencyKey: pgText(run.ManualIdempotencyKey),
@@ -217,7 +242,7 @@ func (d BusinessReports) MaterializeNextSlot(ctx context.Context, scheduleID str
 		}
 		return none, apperr.Wrap(apperr.Internal, "report schedule", redact(err))
 	}
-	if !row.Enabled || row.NextRunAt.Time.After(now) {
+	if row.Deleted || !row.Enabled || row.NextRunAt.Time.After(now) {
 		_ = tx.Rollback(ctx)
 		return none, nil
 	}
@@ -312,7 +337,7 @@ func (d BusinessReports) GetRun(ctx context.Context, id string) (businessreports
 		}
 		return businessreports.Run{}, false, apperr.Wrap(apperr.Internal, "report run", redact(err))
 	}
-	return mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.SlotLocalDate,
+	return mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.ReportKind, row.ScheduleName, row.SlotLocalDate,
 		row.ManualIdempotencyKey, row.ScheduledFor, row.PeriodStart, row.PeriodEnd,
 		row.ScheduleRevision, row.Status, row.AttemptCount, row.LeaseOwner,
 		row.LeaseGeneration, row.LastErrorCode), true, nil
@@ -331,7 +356,7 @@ func (d BusinessReports) ListRuns(ctx context.Context, limit int32) ([]businessr
 	}
 	runs := make([]businessreports.Run, 0, len(rows))
 	for _, row := range rows {
-		runs = append(runs, mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.SlotLocalDate,
+		runs = append(runs, mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.ReportKind, row.ScheduleName, row.SlotLocalDate,
 			row.ManualIdempotencyKey, row.ScheduledFor, row.PeriodStart, row.PeriodEnd,
 			row.ScheduleRevision, row.Status, row.AttemptCount, row.LeaseOwner,
 			row.LeaseGeneration, row.LastErrorCode))
@@ -377,7 +402,7 @@ func (d BusinessReports) ClaimRun(ctx context.Context, owner string, lease time.
 		}
 		return businessreports.Run{}, false, apperr.Wrap(apperr.Internal, "report run", redact(err))
 	}
-	return mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.SlotLocalDate,
+	return mapRunFields(row.ID, row.ScheduleID, row.RunKind, row.ReportKind, row.ScheduleName, row.SlotLocalDate,
 		row.ManualIdempotencyKey, row.ScheduledFor, row.PeriodStart, row.PeriodEnd,
 		row.ScheduleRevision, row.Status, row.AttemptCount, row.LeaseOwner,
 		row.LeaseGeneration, pgtype.Text{}), true, nil

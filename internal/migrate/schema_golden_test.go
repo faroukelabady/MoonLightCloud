@@ -61,7 +61,7 @@ func TestSchemaMatchesReviewedTarget(t *testing.T) {
 		ORDER BY tablename, indexname`)
 	section("views", `SELECT viewname || ': ' || regexp_replace(definition, '\s+', ' ', 'g')
 		FROM pg_views WHERE schemaname = 'public' ORDER BY viewname`)
-	section("functions", `SELECT p.proname || ': ' || regexp_replace(pg_get_functiondef(p.oid), '\s+', ' ', 'g')
+	section("functions", `SELECT p.proname || ': ' || btrim(regexp_replace(pg_get_functiondef(p.oid), '\s+', ' ', 'g'))
 		FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace ORDER BY p.proname`)
 	section("triggers", `SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t
 		WHERE NOT t.tgisinternal ORDER BY t.tgrelid::regclass::text, t.tgname`)

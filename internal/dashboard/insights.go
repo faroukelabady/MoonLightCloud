@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
+	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
 )
 
@@ -21,15 +22,19 @@ var SyncCategories = []string{"sales", "returns", "catalog", "stock"}
 // SyncCategory is one kind of event: how many arrived in the period and when
 // the newest one arrived at any time ("" when never).
 type SyncCategory struct {
-	Category       string `json:"category"`
-	Synced         int64  `json:"synced"`
-	LastReceivedAt string `json:"last_received_at,omitempty"`
+	Category          string `json:"category"`
+	Synced            int64  `json:"synced"`
+	ReceivedLast7Days int64  `json:"received_last_7_days"`
+	TotalReceived     int64  `json:"total_received"`
+	LastReceivedAt    string `json:"last_received_at,omitempty"`
 }
 
 // SyncSummary is the period view of synchronized events.
 type SyncSummary struct {
 	Categories     []SyncCategory `json:"categories"`
 	TotalSynced    int64          `json:"total_synced"`
+	RecentStartUTC string         `json:"recent_start_utc"`
+	RecentEndUTC   string         `json:"recent_end_utc"`
 	LastReceivedAt string         `json:"last_received_at,omitempty"`
 }
 
@@ -96,8 +101,10 @@ type SaleDetailRow struct {
 // files Cloud holds for the selected scope.
 type MediaStatus struct {
 	// Storage is "r2" (Cloudflare R2) or "local" (development only).
-	Storage string `json:"storage"`
-	// Check is "ok" (the newest file was found), "missing" (it was not),
+	Storage          string       `json:"storage"`
+	BucketUsage      *media.Usage `json:"bucket_usage,omitempty"`
+	BucketUsageState string       `json:"bucket_usage_state"`
+	// Check is "ok" (storage answered or the newest file was found), "missing" (it was not),
 	// "error" (the store did not answer) or "empty" (no file to check).
 	Check           string `json:"check"`
 	CheckedAt       string `json:"checked_at"`
@@ -120,14 +127,15 @@ type MediaStatusRow struct {
 
 // SyncCategoryRow is the adapter row for one event kind.
 type SyncCategoryRow struct {
-	Category       string
-	Synced         int64
-	LastReceivedAt *time.Time
+	Category                         string
+	Synced                           int64
+	ReceivedLast7Days, TotalReceived int64
+	LastReceivedAt                   *time.Time
 }
 
 // InsightsRepository reads the sync page data.
 type InsightsRepository interface {
-	DashboardSyncSummary(ctx context.Context, storeID string, startUTC, endUTC time.Time) ([]SyncCategoryRow, error)
+	DashboardSyncSummary(ctx context.Context, storeID string, startUTC, endUTC, recentStart, recentEnd time.Time) ([]SyncCategoryRow, error)
 	DashboardSaleDetail(ctx context.Context, storeID, saleID string) (SaleDetailRow, []SaleDetailLineRow, error)
 	DashboardMediaStatus(ctx context.Context, storeID string, startUTC, endUTC time.Time) (MediaStatusRow, error)
 }
@@ -141,12 +149,19 @@ type Insights struct {
 	storage string
 	probe   MediaProbe
 	now     func() time.Time
+	usage   func(context.Context) (media.Usage, error)
 }
 
 // NewInsights builds the sync page reads. storage names the configured
 // image store; probe checks one stored object without reading its bytes.
 func NewInsights(repo InsightsRepository, storage string, probe MediaProbe, now func() time.Time) Insights {
 	return Insights{repo: repo, storage: storage, probe: probe, now: now}
+}
+
+// WithStorageUsage enables provider-wide usage for the all-Stores dashboard.
+func (s Insights) WithStorageUsage(probe func(context.Context) (media.Usage, error)) Insights {
+	s.usage = probe
+	return s
 }
 
 func scopeID(req report.Request) string {
@@ -158,7 +173,9 @@ func scopeID(req report.Request) string {
 
 // SyncSummary counts events received in the request period per kind.
 func (s Insights) SyncSummary(ctx context.Context, req report.Request) (SyncSummary, error) {
-	rows, err := s.repo.DashboardSyncSummary(ctx, scopeID(req), req.Period.StartUTC, req.Period.EndUTC)
+	recentEnd := s.now().UTC()
+	recentStart := recentEnd.Add(-7 * 24 * time.Hour)
+	rows, err := s.repo.DashboardSyncSummary(ctx, scopeID(req), req.Period.StartUTC, req.Period.EndUTC, recentStart, recentEnd)
 	if err != nil {
 		return SyncSummary{}, err
 	}
@@ -166,11 +183,11 @@ func (s Insights) SyncSummary(ctx context.Context, req report.Request) (SyncSumm
 	for _, row := range rows {
 		byCategory[row.Category] = row
 	}
-	out := SyncSummary{Categories: make([]SyncCategory, 0, len(SyncCategories))}
+	out := SyncSummary{Categories: make([]SyncCategory, 0, len(SyncCategories)), RecentStartUTC: recentStart.Format(time.RFC3339), RecentEndUTC: recentEnd.Format(time.RFC3339)}
 	var newest time.Time
 	for _, category := range SyncCategories {
 		row := byCategory[category]
-		item := SyncCategory{Category: category, Synced: row.Synced}
+		item := SyncCategory{Category: category, Synced: row.Synced, ReceivedLast7Days: row.ReceivedLast7Days, TotalReceived: row.TotalReceived}
 		if row.LastReceivedAt != nil {
 			item.LastReceivedAt = row.LastReceivedAt.UTC().Format(time.RFC3339)
 			if row.LastReceivedAt.After(newest) {
@@ -235,6 +252,9 @@ func (s Insights) SaleDetail(ctx context.Context, req report.Request, saleID str
 // MediaStatus checks the image store with the newest file of the scope and
 // reports the file counts.
 func (s Insights) MediaStatus(ctx context.Context, req report.Request) (MediaStatus, error) {
+	// One shared budget covers DB reads, HEAD and the paged bucket check.
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
 	row, err := s.repo.DashboardMediaStatus(ctx, scopeID(req), req.Period.StartUTC, req.Period.EndUTC)
 	if err != nil {
 		return MediaStatus{}, err
@@ -259,6 +279,28 @@ func (s Insights) MediaStatus(ctx context.Context, req report.Request) (MediaSta
 			out.Check = "ok"
 		default:
 			out.Check = "missing"
+		}
+	}
+	out.BucketUsageState = "not_applicable"
+	if s.storage == "r2" {
+		out.BucketUsageState = "scope_limited"
+		if req.Store == nil {
+			out.BucketUsageState = "unavailable"
+			if s.usage != nil {
+				usage, err := s.usage(ctx)
+				if err == nil {
+					out.BucketUsage = &usage
+					out.BucketUsageState = "complete"
+					if !usage.Complete {
+						out.BucketUsageState = "partial"
+					}
+					if out.Check == "empty" && usage.Files > 0 {
+						out.Check = "ok"
+					}
+				} else if out.Check == "empty" {
+					out.Check = "error"
+				}
+			}
 		}
 	}
 	finished := s.now()

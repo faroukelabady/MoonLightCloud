@@ -5,6 +5,15 @@ is solved for features that do not exist yet.
 
 ## In scope now
 
+Report configuration management (ADR-0059): recipient lists remain masked. The
+full-address editor requires a full human session, `settings.manage`, all-Stores
+scope, and `Cache-Control: no-store`; new mutations retain same-origin and CSRF
+checks. Provider tokens stay on the server. Deletion disables future use while
+retaining historical snapshots and already queued notifications; confirmation
+text explains this. Schedule revision checks and row locks prevent stale editors
+from overwriting a newer configuration or planner cursor. Keyset pagination is
+bounded to 50 rows and returns no message bodies or recipient addresses.
+
 | Threat | Current mitigation |
 |---|---|
 | Stolen device secret | 256-bit random; HMAC-SHA256 salted verifier at rest; 32B base64 pepper required outside dev; revocation immediate; rotation bounds exposure window |

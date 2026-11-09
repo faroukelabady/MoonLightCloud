@@ -1,11 +1,15 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, render, screen, fireEvent, within } from '@testing-library/svelte';
+import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/svelte';
 import DevicesPage from './DevicesPage.svelte';
 import { dashboardApi } from '../lib/api.js';
 import { setLang } from '../lib/i18n.svelte.js';
 
 // These tests read the English interface; each language is shown alone.
-beforeEach(() => setLang('en'));
+beforeEach(() => {
+ setLang('en');
+ api.stores.mockResolvedValue({ stores: [] });
+ api.operationsSummary.mockResolvedValue({ devices: [] });
+});
 
 vi.mock('../lib/api.js', async (orig) => {
 	const mod = (await orig()) as Record<string, unknown>;
@@ -39,9 +43,9 @@ describe('DevicesPage', () => {
 			]
 		});
 		render(DevicesPage);
-		expect(await screen.findByText('online')).toBeTruthy();
-		expect(await screen.findByText('offline')).toBeTruthy();
-		expect(await screen.findByText('never_seen')).toBeTruthy();
+		expect(await screen.findByText('Online')).toBeTruthy();
+		expect(await screen.findByText('Offline')).toBeTruthy();
+		expect(await screen.findByText('No contact yet')).toBeTruthy();
 		expect(await screen.findByText('Syncing')).toBeTruthy();
 	});
 
@@ -55,9 +59,9 @@ describe('DevicesPage', () => {
 		});
 		render(DevicesPage);
 		const rows = await screen.findAllByTestId('device-row');
-		expect(within(rows[0]).getByTestId('control-indicator').textContent).toMatch(/not polled yet/);
+		expect(within(rows[0]).getByTestId('control-indicator').textContent).toMatch(/No control poll recorded/);
 		expect(within(rows[0]).getByTestId('last-data').querySelector('time')?.getAttribute('datetime')).toBe('2026-09-29T09:58:00Z');
-		expect(within(rows[1]).getByTestId('control-indicator').textContent).toMatch(/control poll stale/);
+		expect(within(rows[1]).getByTestId('control-indicator').textContent).toMatch(/The last control poll is old/);
 		expect(within(rows[2]).queryByTestId('control-indicator')).toBeNull();
 	});
 
@@ -159,7 +163,95 @@ describe('DevicesPage store display', () => {
 		});
 		render(DevicesPage);
 		expect(await screen.findByText('Cairo Gallery')).toBeTruthy();
-		expect(await screen.findByText('unbound')).toBeTruthy();
-		expect(await screen.findByText('1 device(s)')).toBeTruthy();
+		expect(await screen.findByText('Unassigned devices')).toBeTruthy();
+		expect(await screen.findAllByText('1 device(s)')).toHaveLength(2);
 	});
+});
+
+
+describe('Stores grouping and availability', () => {
+ const row = (id: string, store_id = 's1') => ({ device_id: id, name: 'Device '+id, store_id, lifecycle: 'active', connectivity: 'online', control: 'polling', recent_commands: [] });
+ const directory = [
+  { store_id: 's1', display_name: 'Cairo Gallery', status: 'active', timezone: 'Africa/Cairo' },
+  { store_id: 's2', display_name: 'Luxor Gallery', status: 'active', timezone: 'Africa/Cairo' },
+  { store_id: 's3', display_name: 'Empty Gallery', status: 'inactive', timezone: 'Africa/Cairo' }
+ ];
+ it('nests each device under its Store and keeps empty Stores visible', async () => {
+  api.stores.mockResolvedValue({ stores: directory });
+  api.devices.mockResolvedValue({ devices: [row('cairo-1'), row('cairo-2'), row('luxor-1', 's2')] });
+  render(DevicesPage);
+  const groups = await screen.findAllByTestId('store-group');
+  expect(groups).toHaveLength(3);
+  expect(within(groups[0]).getAllByTestId('device-row').map(r => r.getAttribute('data-device'))).toEqual(['cairo-1', 'cairo-2']);
+  expect(within(groups[1]).getAllByTestId('device-row').map(r => r.getAttribute('data-device'))).toEqual(['luxor-1']);
+  expect(within(groups[2]).getByText('No Retail devices are registered for this Store.')).toBeTruthy();
+  expect(groups.every(g => !(g as HTMLDetailsElement).open)).toBe(true);
+  (groups[0] as HTMLDetailsElement).open = true;
+  await fireEvent(groups[0], new Event('toggle'));
+ });
+ it('filters Store selection immediately without displaying another Store', async () => {
+  api.stores.mockResolvedValue({ stores: directory });
+  api.devices.mockResolvedValue({ devices: [row('cairo-1'), row('luxor-1', 's2')] });
+  const view = render(DevicesPage, { store: 's1' });
+  expect(await screen.findByText('Device cairo-1')).toBeTruthy();
+  expect(screen.queryByText('Device luxor-1')).toBeNull();
+  await view.rerender({ store: 's2' });
+  expect(screen.queryByText('Device cairo-1')).toBeNull();
+  expect(screen.getByText('Device luxor-1')).toBeTruthy();
+ });
+ it('disables Sync Now when Cloud control is disabled and never calls creation', async () => {
+  api.devices.mockResolvedValue({ control_enabled: false, devices: [row('d1')] });
+  render(DevicesPage);
+  expect(await screen.findByTestId('control-disabled')).toBeTruthy();
+  const button = await screen.findByTestId('sync-now') as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  await fireEvent.click(button);
+  expect(api.syncRequest).not.toHaveBeenCalled();
+ });
+ it('hides mutation controls from read-only operators', async () => {
+  api.devices.mockResolvedValue({ devices: [row('d1')] });
+  render(DevicesPage, { canManage: false });
+  expect(await screen.findByText('Device d1')).toBeTruthy();
+  expect(screen.queryByTestId('sync-now')).toBeNull();
+ });
+ it('does not drop bound devices if the Store directory is unavailable', async () => {
+  api.stores.mockRejectedValue(new Error('unavailable'));
+  api.devices.mockResolvedValue({ devices: [{ ...row('d1'), store_name: 'Cairo Gallery' }] });
+  render(DevicesPage);
+  expect(await screen.findByText('Cairo Gallery')).toBeTruthy();
+  expect(screen.getByText('Device d1')).toBeTruthy();
+  expect(screen.getByText(/Store details could not load/)).toBeTruthy();
+ });
+ it('refreshes queued work into its terminal result and preserves accordion choice', async () => {
+  api.devices.mockResolvedValueOnce({ devices: [{ ...row('d1'), active_command: cmd('c1', 'pending') }] })
+   .mockResolvedValue({ devices: [{ ...row('d1'), active_command: null, recent_commands: [cmd('c1', 'completed')] }] });
+  render(DevicesPage);
+  expect(await screen.findByText('Queued')).toBeTruthy();
+  const group = screen.getByTestId('store-group') as HTMLDetailsElement;
+  group.open = false;
+  await fireEvent(group, new Event('toggle'));
+  await fireEvent.click(screen.getByText('Refresh'));
+  expect(await screen.findByText('Last sync: Completed')).toBeTruthy();
+  expect(group.open).toBe(false);
+ });
+ it('does not attach a late response after a newer refresh', async () => {
+  let resolveOld!: (value: unknown) => void;
+  api.devices.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+   .mockResolvedValue({ devices: [row('current')] });
+  const view = render(DevicesPage);
+  await waitFor(() => expect(api.devices).toHaveBeenCalledOnce());
+  await view.component.refresh();
+  expect(await screen.findByText('Device current')).toBeTruthy();
+  resolveOld({ devices: [row('old')] });
+  await Promise.resolve();
+  expect(screen.queryByText('Device old')).toBeNull();
+ });
+ it('aborts the active request when leaving the page', async () => {
+  api.devices.mockImplementation(() => new Promise(() => {}));
+  const view = render(DevicesPage);
+  await waitFor(() => expect(api.devices).toHaveBeenCalledOnce());
+  const signal = api.devices.mock.calls[0][0] as AbortSignal;
+  view.unmount();
+  expect(signal.aborted).toBe(true);
+ });
 });

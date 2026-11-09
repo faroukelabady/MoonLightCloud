@@ -113,7 +113,7 @@ export const dashboardApi = {
 		),
 	orderDetail: (provider: string, id: string, store: string, s?: AbortSignal) =>
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s),
-	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[] }>('/api/v1/dashboard/devices', s),
+	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[]; control_enabled?: boolean }>('/api/v1/dashboard/devices', s),
 	stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
 	adminProducts: (store: string, search: string, cursor: string | null, s?: AbortSignal) =>
 		get<{ products: AdminProductRow[]; next_cursor: string }>(

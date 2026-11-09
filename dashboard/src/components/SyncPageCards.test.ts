@@ -104,11 +104,28 @@ describe('MediaStatusCard', () => {
 		expect(state.textContent).toContain(text);
 	});
 
+	it('separates actual bucket usage from empty Cloud image records', () => {
+		render(MediaStatusCard, { props: { data: { ...base, stored_files: 0, stored_bytes: 0, bucket_usage: { files: 42, bytes: 2097152, complete: true }, bucket_usage_state: 'complete' }, status: 'loaded', errStatus: null, onretry: () => {}, oncheck: () => {} } });
+		expect(screen.getByTestId('bucket-usage').textContent).toContain('42 objects · 2.0 MB');
+		expect((screen.getByTestId('media-details') as HTMLDetailsElement).open).toBe(false);
+		expect(screen.getByText('Cloud-registered images').closest('details')).toBe(screen.getByTestId('media-details'));
+	});
+	it.each(['unavailable','scope_limited'] as const)('does not report unavailable or private bucket usage as zero (%s)', (state) => {
+		render(MediaStatusCard, { props: { data: { ...base, bucket_usage_state: state }, status: 'loaded', errStatus: null, onretry: () => {}, oncheck: () => {} } });
+		const text = screen.getByTestId('bucket-usage').textContent ?? '';
+		expect(text).not.toContain('0 B');
+		expect(text).toMatch(state === 'unavailable' ? /unavailable/ : /all-Stores/);
+	});
+	it('labels a capped bucket listing as a lower bound', () => {
+		render(MediaStatusCard, { props: { data: { ...base, bucket_usage: { files: 10000, bytes: 2097152, complete: false }, bucket_usage_state: 'partial' }, status: 'loaded', errStatus: null, onretry: () => {}, oncheck: () => {} } });
+		expect(screen.getByTestId('bucket-usage').textContent).toContain('partial listing');
+	});
+
 	it('shows the counts and checks again on request', async () => {
 		const oncheck = vi.fn();
 		const { container } = render(MediaStatusCard, { props: { data: base, status: 'loaded', errStatus: null, onretry: () => {}, oncheck } });
 		const text = container.textContent ?? '';
-		expect(text).toMatch(/Stored images\s*12\s*3\.0 MB/);
+		expect(text).toMatch(/Cloud-registered images\s*12\s*3\.0 MB/);
 		expect(text).toMatch(/Waiting for upload\s*2\s*\/ 14/);
 		await fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
 		expect(oncheck).toHaveBeenCalled();

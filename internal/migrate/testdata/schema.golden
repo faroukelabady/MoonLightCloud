@@ -96,6 +96,8 @@ business_report_runs.lease_generation int8 NOT NULL DEFAULT 0
 business_report_runs.last_error_code text
 business_report_runs.created_at timestamptz NOT NULL DEFAULT now()
 business_report_runs.updated_at timestamptz NOT NULL DEFAULT now()
+business_report_runs.report_kind text NOT NULL
+business_report_runs.schedule_name text NOT NULL
 business_report_schedule_recipients.schedule_id uuid NOT NULL
 business_report_schedule_recipients.recipient_id uuid NOT NULL
 business_report_schedule_recipients.recipient_purpose text NOT NULL DEFAULT 'business_report'::text
@@ -112,6 +114,7 @@ business_report_schedules.next_run_local_date date NOT NULL
 business_report_schedules.next_run_at timestamptz NOT NULL
 business_report_schedules.created_at timestamptz NOT NULL DEFAULT now()
 business_report_schedules.updated_at timestamptz NOT NULL DEFAULT now()
+business_report_schedules.deleted_at timestamptz
 business_settings.id bool NOT NULL DEFAULT true
 business_settings.tax_enabled bool NOT NULL DEFAULT false
 business_settings.discount_enabled bool NOT NULL DEFAULT false
@@ -589,6 +592,7 @@ notification_recipients.locale text NOT NULL
 notification_recipients.enabled bool NOT NULL DEFAULT true
 notification_recipients.created_at timestamptz NOT NULL DEFAULT now()
 notification_recipients.updated_at timestamptz NOT NULL DEFAULT now()
+notification_recipients.deleted_at timestamptz
 notification_template_mappings.provider_key text NOT NULL
 notification_template_mappings.template_key text NOT NULL
 notification_template_mappings.locale text NOT NULL
@@ -1003,16 +1007,19 @@ business_report_runs business_report_runs_manual_idempotency_key_check CHECK (((
 business_report_runs business_report_runs_period_end_not_null NOT NULL period_end
 business_report_runs business_report_runs_period_start_not_null NOT NULL period_start
 business_report_runs business_report_runs_pkey PRIMARY KEY (id)
+business_report_runs business_report_runs_report_kind_not_null NOT NULL report_kind
 business_report_runs business_report_runs_run_kind_check CHECK ((run_kind = ANY (ARRAY['scheduled'::text, 'manual'::text])))
 business_report_runs business_report_runs_run_kind_not_null NOT NULL run_kind
 business_report_runs business_report_runs_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES business_report_schedules(id)
 business_report_runs business_report_runs_schedule_id_not_null NOT NULL schedule_id
+business_report_runs business_report_runs_schedule_name_not_null NOT NULL schedule_name
 business_report_runs business_report_runs_schedule_revision_check CHECK ((schedule_revision >= 1))
 business_report_runs business_report_runs_schedule_revision_not_null NOT NULL schedule_revision
 business_report_runs business_report_runs_scheduled_for_not_null NOT NULL scheduled_for
 business_report_runs business_report_runs_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'retry'::text, 'completed'::text, 'blocked'::text])))
 business_report_runs business_report_runs_status_not_null NOT NULL status
 business_report_runs business_report_runs_updated_at_not_null NOT NULL updated_at
+business_report_runs report_run_kind_valid CHECK ((report_kind = ANY (ARRAY['daily'::text, 'ten_day'::text])))
 business_report_schedule_recipients business_report_schedule_reci_recipient_id_recipient_purpo_fkey FOREIGN KEY (recipient_id, recipient_purpose) REFERENCES notification_recipients(id, purpose)
 business_report_schedule_recipients business_report_schedule_recipients_created_at_not_null NOT NULL created_at
 business_report_schedule_recipients business_report_schedule_recipients_pkey PRIMARY KEY (schedule_id, recipient_id)
@@ -1028,7 +1035,6 @@ business_report_schedules business_report_schedules_id_not_null NOT NULL id
 business_report_schedules business_report_schedules_local_time_check CHECK ((local_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'::text))
 business_report_schedules business_report_schedules_local_time_not_null NOT NULL local_time
 business_report_schedules business_report_schedules_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 64)))
-business_report_schedules business_report_schedules_name_key UNIQUE (name)
 business_report_schedules business_report_schedules_name_not_null NOT NULL name
 business_report_schedules business_report_schedules_next_run_at_not_null NOT NULL next_run_at
 business_report_schedules business_report_schedules_next_run_local_date_not_null NOT NULL next_run_local_date
@@ -2159,8 +2165,8 @@ CREATE INDEX idx_report_runs_due ON public.business_report_runs USING btree (sta
 CREATE UNIQUE INDEX idx_report_runs_manual ON public.business_report_runs USING btree (schedule_id, manual_idempotency_key) WHERE (run_kind = 'manual'::text)
 CREATE UNIQUE INDEX idx_report_runs_slot ON public.business_report_runs USING btree (schedule_id, slot_local_date) WHERE (run_kind = 'scheduled'::text)
 CREATE UNIQUE INDEX business_report_schedule_recipients_pkey ON public.business_report_schedule_recipients USING btree (schedule_id, recipient_id)
-CREATE UNIQUE INDEX business_report_schedules_name_key ON public.business_report_schedules USING btree (name)
 CREATE UNIQUE INDEX business_report_schedules_pkey ON public.business_report_schedules USING btree (id)
+CREATE UNIQUE INDEX idx_report_schedule_active_name ON public.business_report_schedules USING btree (name) WHERE (deleted_at IS NULL)
 CREATE INDEX idx_report_schedules_due ON public.business_report_schedules USING btree (enabled, next_run_at)
 CREATE UNIQUE INDEX business_settings_pkey ON public.business_settings USING btree (id)
 CREATE UNIQUE INDEX catalog_admin_command_targets_command_id_device_id_key ON public.catalog_admin_command_targets USING btree (command_id, device_id)
@@ -2352,14 +2358,16 @@ catalog_product_online_state:  WITH RECURSIVE classification(product_id, categor
 catalog_product_stock:  SELECT p.product_id, p.store_id, CASE WHEN ((count(v.variant_id) > 0) AND (count(i.variant_id) FILTER (WHERE i.ready) = count(v.variant_id))) THEN (sum(i.stock_quantity))::bigint ELSE NULL::bigint END AS stock_quantity FROM ((catalog_products p LEFT JOIN catalog_product_variants v ON (((v.product_id = p.product_id) AND v.is_active AND (NOT v.deleted)))) LEFT JOIN catalog_product_variant_inventory i ON (((i.variant_id = v.variant_id) AND (i.product_id = v.product_id) AND (i.sku = v.sku) AND (v.store_id = p.store_id) AND (i.store_id = p.store_id)))) GROUP BY p.product_id, p.store_id;
 
 -- functions
-admin_users_keep_owner: CREATE OR REPLACE FUNCTION public.admin_users_keep_owner() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF EXISTS (SELECT 1 FROM admin_users) AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'owner' AND status = 'active') THEN RAISE EXCEPTION 'at least one active OWNER must remain' USING ERRCODE = 'check_violation'; END IF; RETURN NULL; END; $function$ 
-auth_audit_append_only: CREATE OR REPLACE FUNCTION public.auth_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'auth audit events are append-only' USING ERRCODE = 'restrict_violation'; END; $function$ 
-release_artifacts_immutable: CREATE OR REPLACE FUNCTION public.release_artifacts_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'release artifacts are immutable' USING ERRCODE = 'check_violation'; END $function$ 
-releases_immutable: CREATE OR REPLACE FUNCTION public.releases_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'releases are never deleted; revoke instead' USING ERRCODE = 'restrict_violation'; END IF; IF NEW.id IS DISTINCT FROM OLD.id OR NEW.manifest_digest IS DISTINCT FROM OLD.manifest_digest OR NEW.release_sequence IS DISTINCT FROM OLD.release_sequence OR NEW.version IS DISTINCT FROM OLD.version OR NEW.build_commit IS DISTINCT FROM OLD.build_commit OR NEW.min_installed_sequence IS DISTINCT FROM OLD.min_installed_sequence OR NEW.key_id IS DISTINCT FROM OLD.key_id OR NEW.envelope IS DISTINCT FROM OLD.envelope OR NEW.imported_by IS DISTINCT FROM OLD.imported_by OR NEW.imported_at IS DISTINCT FROM OLD.imported_at THEN RAISE EXCEPTION 'release identity is immutable' USING ERRCODE = 'check_violation'; END IF; RETURN NEW; END $function$ 
+admin_users_keep_owner: CREATE OR REPLACE FUNCTION public.admin_users_keep_owner() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF EXISTS (SELECT 1 FROM admin_users) AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'owner' AND status = 'active') THEN RAISE EXCEPTION 'at least one active OWNER must remain' USING ERRCODE = 'check_violation'; END IF; RETURN NULL; END; $function$
+auth_audit_append_only: CREATE OR REPLACE FUNCTION public.auth_audit_append_only() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'auth audit events are append-only' USING ERRCODE = 'restrict_violation'; END; $function$
+release_artifacts_immutable: CREATE OR REPLACE FUNCTION public.release_artifacts_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'release artifacts are immutable' USING ERRCODE = 'check_violation'; END $function$
+releases_immutable: CREATE OR REPLACE FUNCTION public.releases_immutable() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'releases are never deleted; revoke instead' USING ERRCODE = 'restrict_violation'; END IF; IF NEW.id IS DISTINCT FROM OLD.id OR NEW.manifest_digest IS DISTINCT FROM OLD.manifest_digest OR NEW.release_sequence IS DISTINCT FROM OLD.release_sequence OR NEW.version IS DISTINCT FROM OLD.version OR NEW.build_commit IS DISTINCT FROM OLD.build_commit OR NEW.min_installed_sequence IS DISTINCT FROM OLD.min_installed_sequence OR NEW.key_id IS DISTINCT FROM OLD.key_id OR NEW.envelope IS DISTINCT FROM OLD.envelope OR NEW.imported_by IS DISTINCT FROM OLD.imported_by OR NEW.imported_at IS DISTINCT FROM OLD.imported_at THEN RAISE EXCEPTION 'release identity is immutable' USING ERRCODE = 'check_violation'; END IF; RETURN NEW; END $function$
+snapshot_business_report_run: CREATE OR REPLACE FUNCTION public.snapshot_business_report_run() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN SELECT s.report_kind, s.name INTO NEW.report_kind, NEW.schedule_name FROM business_report_schedules s WHERE s.id=NEW.schedule_id; RETURN NEW; END; $function$
 
 -- triggers
 CREATE TRIGGER admin_users_keep_owner AFTER DELETE OR UPDATE ON public.admin_users FOR EACH STATEMENT EXECUTE FUNCTION admin_users_keep_owner()
 CREATE TRIGGER auth_audit_append_only BEFORE DELETE OR UPDATE ON public.auth_audit_events FOR EACH ROW EXECUTE FUNCTION auth_audit_append_only()
+CREATE TRIGGER snapshot_business_report_run BEFORE INSERT ON public.business_report_runs FOR EACH ROW EXECUTE FUNCTION snapshot_business_report_run()
 CREATE TRIGGER release_artifacts_immutable BEFORE DELETE OR UPDATE ON public.release_artifacts FOR EACH ROW EXECUTE FUNCTION release_artifacts_immutable()
 CREATE TRIGGER releases_immutable BEFORE DELETE OR UPDATE ON public.releases FOR EACH ROW EXECUTE FUNCTION releases_immutable()
 

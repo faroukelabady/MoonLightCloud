@@ -301,12 +301,20 @@ export interface SaleDetail {
 export type SyncCategoryKey = 'sales' | 'returns' | 'catalog' | 'stock';
 
 export interface SyncSummary {
-	categories: { category: SyncCategoryKey; synced: number; last_received_at?: string }[];
+	categories: {
+		category: SyncCategoryKey;
+		synced: number;
+		received_last_7_days?: number;
+		total_received?: number;
+		last_received_at?: string;
+	}[];
 	total_synced: number;
 	last_received_at?: string;
 }
 
 export interface MediaStatus {
+	bucket_usage?: { files: number; bytes: number; complete: boolean };
+	bucket_usage_state?: 'complete' | 'partial' | 'unavailable' | 'scope_limited' | 'not_applicable';
 	storage: string;
 	check: 'ok' | 'missing' | 'error' | 'empty';
 	checked_at: string;

@@ -197,7 +197,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	dashData := adapterhttp.NewDashboardDataHandlers(a.Dashboard, a.Reports, log).
 		WithPrintableReports(salesreport.NewService(reportingStore, businessSettings)).
-		WithInsights(dashboard.NewInsights(reportingStore, cfg.Media.Storage, mediaSvc.HasImage, time.Now))
+		WithInsights(dashboard.NewInsights(reportingStore, cfg.Media.Storage, mediaSvc.HasImage, time.Now).WithStorageUsage(mediaSvc.Usage))
 	commerceOrders := postgres.NewCommerceOrders(pool, cfg.DBQueryTimeout)
 	commerceStore := postgres.NewCommercePersistence(pool, cfg.DBQueryTimeout)
 	dashOrders := adapterhttp.NewDashboardOrderHandlers(commerceOrders, log)
@@ -349,7 +349,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ctlHandlers = &adapterhttp.DeviceControlHandlers{Svc: a.DeviceControl, Log: log}
 	}
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
-		Svc: a.DeviceControl, Auth: a.Devices, Stores: storeRegistry, OnlineWindow: cfg.DeviceControl.OnlineWindow,
+		Svc: a.DeviceControl, Auth: a.Devices, Stores: storeRegistry, OnlineWindow: cfg.DeviceControl.OnlineWindow, ControlDisabled: !cfg.DeviceControl.Enabled,
 	}
 	// Phase 16 catalog admin: durable operator intent + Retail pull.
 	// Always wired (routes registered unconditionally): authorization

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -74,6 +75,11 @@ func r1Providers(t *testing.T, fail string) (*notifications.Registry, *[]string,
 		waBodies = append(waBodies, text)
 		count := len(waBodies)
 		mu.Unlock()
+		if text == "" || strings.ContainsAny(text, "\r\n\t") || strings.Contains(text, "     ") {
+			w.WriteHeader(400)
+			io.WriteString(w, `{"error":{"code":100,"message":"invalid template text formatting"}}`)
+			return
+		}
 		if fail == "whatsapp-main" {
 			w.WriteHeader(403)
 			io.WriteString(w, `{"error":{"code":131030,"message":"private raw provider description"}}`)
@@ -139,6 +145,18 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 					if deliveries[0].Body != deliveries[1].Body || !strings.Contains(deliveries[0].Body, "EGP 90071992547409.93") || !strings.Contains(deliveries[0].Body, "USD 25.00") {
 						t.Fatal("financial basis/money/currency mismatch")
 					}
+					fingerprints := make(map[string][]byte, len(deliveries))
+					for _, d := range deliveries {
+						var body string
+						var fingerprint []byte
+						if err := env.pool.QueryRow(ctx, `SELECT parameters->>'report_body', semantic_fingerprint FROM notification_messages WHERE id=$1`, d.NotificationID).Scan(&body, &fingerprint); err != nil {
+							t.Fatal(err)
+						}
+						if body != d.Body {
+							t.Fatal("notification must store the original report")
+						}
+						fingerprints[d.NotificationID] = fingerprint
+					}
 					registry, tgBodies, waBodies, mu := r1Providers(t, fail)
 					notifications.NewDispatcher(notificationStore(env), registry, notifications.SystemClock{}, "matrix", nilLogger()).DrainForTest(ctx)
 					for _, d := range deliveries {
@@ -152,16 +170,32 @@ func TestTelegramR1ReportMatrix(t *testing.T) {
 						}
 					}
 					mu.Lock()
-					if len(*tgBodies) != 1 || len(*waBodies) != 1 || (*tgBodies)[0] != deliveries[0].Body || (*waBodies)[0] != deliveries[0].Body {
+					// Composed reports use line breaks only. The wire copy for
+					// WhatsApp replaces them with spaces; Telegram stays exact.
+					waExpected := strings.ReplaceAll(deliveries[0].Body, "\n", " ")
+					if len(*tgBodies) != 1 || len(*waBodies) != 1 || (*tgBodies)[0] != deliveries[0].Body || (*waBodies)[0] != waExpected {
 						mu.Unlock()
-						t.Fatal("wire body differs from immutable snapshot")
+						t.Fatal("provider-specific wire formatting differs")
 					}
 					mu.Unlock()
 					source.ReportSource = &stubReportSummary{summary: cannedSummary()}
 					drainRunner(t, testRunnerNoSeed(t, env, source))
 					again := runDeliveries(t, service, run)
-					if again[0].Body != deliveries[0].Body || source.calls.Load() != 1 {
+					if len(again) != len(deliveries) || source.calls.Load() != 1 {
 						t.Fatal("completed snapshot recomputed")
+					}
+					for i, d := range again {
+						if d.ID != deliveries[i].ID || d.Body != deliveries[i].Body || !bytes.Equal(d.Fingerprint, deliveries[i].Fingerprint) {
+							t.Fatal("sending changed the stored report snapshot")
+						}
+						var body string
+						var fingerprint []byte
+						if err := env.pool.QueryRow(ctx, `SELECT parameters->>'report_body', semantic_fingerprint FROM notification_messages WHERE id=$1`, d.NotificationID).Scan(&body, &fingerprint); err != nil {
+							t.Fatal(err)
+						}
+						if body != d.Body || !bytes.Equal(fingerprint, fingerprints[d.NotificationID]) {
+							t.Fatal("sending changed the stored notification snapshot")
+						}
 					}
 				})
 			}

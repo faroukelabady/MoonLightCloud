@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -206,5 +207,61 @@ func TestHasImageUsesHeadAndMapsMissing(t *testing.T) {
 	}
 	if _, err := store.HasImage(ctx, "../escape"); err == nil {
 		t.Fatal("invalid key probe")
+	}
+}
+
+func TestUsageReadsAllPagesWithoutDownloadingObjects(t *testing.T) {
+	var calls atomic.Int32
+	store := testStore(t, func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if r.Method != "GET" || r.URL.Query().Get("list-type") != "2" || r.URL.Query().Get("max-keys") != "1000" || !strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256 ") {
+			t.Errorf("not a bounded signed bucket listing")
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		if n == 1 {
+			io.WriteString(w, `<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>page2</NextContinuationToken><Contents><Key>a</Key><Size>1024</Size></Contents></ListBucketResult>`)
+		} else {
+			if r.URL.Query().Get("continuation-token") != "page2" {
+				t.Error("cursor not forwarded")
+			}
+			io.WriteString(w, `<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>b</Key><Size>2048</Size></Contents></ListBucketResult>`)
+		}
+	})
+	got, err := store.Usage(context.Background())
+	if err != nil || got.Files != 2 || got.Bytes != 3072 || !got.Complete || calls.Load() != 2 {
+		t.Fatalf("usage %+v, calls %d, err %v", got, calls.Load(), err)
+	}
+}
+
+func TestUsageFailsClosedAndCapsLargeBuckets(t *testing.T) {
+	for _, mode := range []string{"denied", "malformed", "bad_cursor", "partial"} {
+		t.Run(mode, func(t *testing.T) {
+			var calls atomic.Int32
+			store := testStore(t, func(w http.ResponseWriter, r *http.Request) {
+				n := calls.Add(1)
+				if mode == "denied" {
+					w.WriteHeader(403)
+					io.WriteString(w, `<Error><Code>AccessDenied</Code><Message>secret-provider-detail</Message></Error>`)
+					return
+				}
+				if mode == "malformed" {
+					io.WriteString(w, `<ListBucketResult/>`)
+					return
+				}
+				token := ""
+				if mode == "partial" {
+					token = fmt.Sprint(n)
+				}
+				io.WriteString(w, `<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>`+token+`</NextContinuationToken><Contents><Key>a</Key><Size>7</Size></Contents></ListBucketResult>`)
+			})
+			got, err := store.Usage(context.Background())
+			if mode == "partial" {
+				if err != nil || got.Complete || got.Files != 10 || got.Bytes != 70 || calls.Load() != 10 {
+					t.Fatalf("unbounded/inexact listing: %+v %v calls=%d", got, err, calls.Load())
+				}
+			} else if err == nil || got.Files != 0 || strings.Contains(err.Error(), "secret-provider-detail") {
+				t.Fatalf("failed usage falsely succeeded/leaked detail: %+v %v", got, err)
+			}
+		})
 	}
 }

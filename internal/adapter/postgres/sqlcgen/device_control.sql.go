@@ -325,12 +325,13 @@ func (q *Queries) GetControlCommandForDevice(ctx context.Context, arg GetControl
 }
 
 const getPresence = `-- name: GetPresence :one
-SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
-    p.last_command_finished_at, p.created_at, p.updated_at,
-    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = p.device_id)::timestamptz AS last_data_at
-FROM device_control_presence p
-JOIN devices d ON d.id = p.device_id
-WHERE p.device_id = $1
+SELECT d.id AS device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, COALESCE(p.created_at, d.created_at)::timestamptz AS created_at,
+    COALESCE(p.updated_at, d.updated_at)::timestamptz AS updated_at,
+    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = d.id)::timestamptz AS last_data_at
+FROM devices d
+LEFT JOIN device_control_presence p ON p.device_id = d.id
+WHERE d.id = $1 AND (d.last_seen_at IS NOT NULL OR p.device_id IS NOT NULL)
 `
 
 type GetPresenceRow struct {
@@ -346,8 +347,10 @@ type GetPresenceRow struct {
 
 // last_data_at is the newest event the device uploaded (sync data
 // freshness), read through idx_sync_events_device_received.
-func (q *Queries) GetPresence(ctx context.Context, deviceID pgtype.UUID) (GetPresenceRow, error) {
-	row := q.db.QueryRow(ctx, getPresence, deviceID)
+// Authentication/sync can establish contact before the first control poll.
+// Read the canonical device clock without inventing control history.
+func (q *Queries) GetPresence(ctx context.Context, id pgtype.UUID) (GetPresenceRow, error) {
+	row := q.db.QueryRow(ctx, getPresence, id)
 	var i GetPresenceRow
 	err := row.Scan(
 		&i.DeviceID,
@@ -456,12 +459,14 @@ func (q *Queries) ListActiveControlCommands(ctx context.Context) ([]DeviceContro
 }
 
 const listPresence = `-- name: ListPresence :many
-SELECT p.device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
-    p.last_command_finished_at, p.created_at, p.updated_at,
-    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = p.device_id)::timestamptz AS last_data_at
-FROM device_control_presence p
-JOIN devices d ON d.id = p.device_id
-ORDER BY p.device_id
+SELECT d.id AS device_id, d.last_seen_at, p.last_poll_at, p.last_command_accepted_at,
+    p.last_command_finished_at, COALESCE(p.created_at, d.created_at)::timestamptz AS created_at,
+    COALESCE(p.updated_at, d.updated_at)::timestamptz AS updated_at,
+    (SELECT max(e.received_at) FROM sync_events e WHERE e.device_id = d.id)::timestamptz AS last_data_at
+FROM devices d
+LEFT JOIN device_control_presence p ON p.device_id = d.id
+WHERE d.last_seen_at IS NOT NULL OR p.device_id IS NOT NULL
+ORDER BY d.id
 `
 
 type ListPresenceRow struct {

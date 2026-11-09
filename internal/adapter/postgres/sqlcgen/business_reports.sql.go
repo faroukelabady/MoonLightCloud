@@ -63,7 +63,7 @@ const claimDueSchedules = `-- name: ClaimDueSchedules :many
 WITH candidate AS (
     SELECT id
     FROM business_report_schedules
-    WHERE enabled AND next_run_at <= now()
+    WHERE enabled AND deleted_at IS NULL AND next_run_at <= now()
     ORDER BY next_run_at, id
     LIMIT $1
     FOR UPDATE SKIP LOCKED
@@ -135,7 +135,7 @@ SET lease_owner = $1, lease_until = $2,
     attempt_count = run.attempt_count + 1, updated_at = now()
 FROM candidate
 WHERE run.id = candidate.id
-RETURNING run.id, run.schedule_id, run.run_kind, run.slot_local_date,
+RETURNING run.id, run.schedule_id, run.run_kind, run.report_kind, run.schedule_name, run.slot_local_date,
     run.manual_idempotency_key, run.scheduled_for, run.period_start,
     run.period_end, run.schedule_revision, run.status, run.attempt_count,
     run.lease_owner, run.lease_generation
@@ -150,6 +150,8 @@ type ClaimRunRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -169,6 +171,8 @@ func (q *Queries) ClaimRun(ctx context.Context, arg ClaimRunParams) (ClaimRunRow
 		&i.ID,
 		&i.ScheduleID,
 		&i.RunKind,
+		&i.ReportKind,
+		&i.ScheduleName,
 		&i.SlotLocalDate,
 		&i.ManualIdempotencyKey,
 		&i.ScheduledFor,
@@ -252,7 +256,7 @@ const enableScheduleIfDisabled = `-- name: EnableScheduleIfDisabled :one
 UPDATE business_report_schedules
 SET enabled = TRUE, revision = revision + 1,
     next_run_local_date = $2, next_run_at = $3, updated_at = now()
-WHERE id = $1 AND enabled = FALSE
+WHERE id = $1 AND enabled = FALSE AND deleted_at IS NULL
 RETURNING id, name, report_kind, timezone, local_time, anchor_local_date,
     enabled, revision, next_run_local_date, next_run_at
 `
@@ -491,7 +495,7 @@ func (q *Queries) GetDeliveryForUpdate(ctx context.Context, id pgtype.UUID) (Get
 }
 
 const getManualRun = `-- name: GetManualRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -508,6 +512,8 @@ type GetManualRunRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -530,6 +536,8 @@ func (q *Queries) GetManualRun(ctx context.Context, arg GetManualRunParams) (Get
 		&i.ID,
 		&i.ScheduleID,
 		&i.RunKind,
+		&i.ReportKind,
+		&i.ScheduleName,
 		&i.SlotLocalDate,
 		&i.ManualIdempotencyKey,
 		&i.ScheduledFor,
@@ -550,7 +558,7 @@ func (q *Queries) GetManualRun(ctx context.Context, arg GetManualRunParams) (Get
 const getRecipient = `-- name: GetRecipient :one
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE id = $1 AND purpose = 'business_report'
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL
 `
 
 type GetRecipientRow struct {
@@ -579,7 +587,7 @@ func (q *Queries) GetRecipient(ctx context.Context, id pgtype.UUID) (GetRecipien
 const getRecipientForUpdate = `-- name: GetRecipientForUpdate :one
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE id = $1 AND purpose = 'business_report'
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL
 FOR UPDATE
 `
 
@@ -607,7 +615,7 @@ func (q *Queries) GetRecipientForUpdate(ctx context.Context, id pgtype.UUID) (Ge
 }
 
 const getRun = `-- name: GetRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -619,6 +627,8 @@ type GetRunRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -641,6 +651,8 @@ func (q *Queries) GetRun(ctx context.Context, id pgtype.UUID) (GetRunRow, error)
 		&i.ID,
 		&i.ScheduleID,
 		&i.RunKind,
+		&i.ReportKind,
+		&i.ScheduleName,
 		&i.SlotLocalDate,
 		&i.ManualIdempotencyKey,
 		&i.ScheduledFor,
@@ -659,7 +671,7 @@ func (q *Queries) GetRun(ctx context.Context, id pgtype.UUID) (GetRunRow, error)
 }
 
 const getRunForUpdate = `-- name: GetRunForUpdate :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -672,6 +684,8 @@ type GetRunForUpdateRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -694,6 +708,8 @@ func (q *Queries) GetRunForUpdate(ctx context.Context, id pgtype.UUID) (GetRunFo
 		&i.ID,
 		&i.ScheduleID,
 		&i.RunKind,
+		&i.ReportKind,
+		&i.ScheduleName,
 		&i.SlotLocalDate,
 		&i.ManualIdempotencyKey,
 		&i.ScheduledFor,
@@ -713,7 +729,7 @@ func (q *Queries) GetRunForUpdate(ctx context.Context, id pgtype.UUID) (GetRunFo
 
 const getSchedule = `-- name: GetSchedule :one
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
-    enabled, revision, next_run_local_date, next_run_at
+    enabled, revision, next_run_local_date, next_run_at, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM business_report_schedules
 WHERE id = $1
 `
@@ -729,6 +745,7 @@ type GetScheduleRow struct {
 	Revision         int64              `json:"revision"`
 	NextRunLocalDate pgtype.Date        `json:"next_run_local_date"`
 	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
+	Deleted          bool               `json:"deleted"`
 }
 
 func (q *Queries) GetSchedule(ctx context.Context, id pgtype.UUID) (GetScheduleRow, error) {
@@ -745,13 +762,14 @@ func (q *Queries) GetSchedule(ctx context.Context, id pgtype.UUID) (GetScheduleR
 		&i.Revision,
 		&i.NextRunLocalDate,
 		&i.NextRunAt,
+		&i.Deleted,
 	)
 	return i, err
 }
 
 const getScheduleForUpdate = `-- name: GetScheduleForUpdate :one
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
-    enabled, revision, next_run_local_date, next_run_at
+    enabled, revision, next_run_local_date, next_run_at, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM business_report_schedules
 WHERE id = $1
 FOR UPDATE
@@ -768,6 +786,7 @@ type GetScheduleForUpdateRow struct {
 	Revision         int64              `json:"revision"`
 	NextRunLocalDate pgtype.Date        `json:"next_run_local_date"`
 	NextRunAt        pgtype.Timestamptz `json:"next_run_at"`
+	Deleted          bool               `json:"deleted"`
 }
 
 func (q *Queries) GetScheduleForUpdate(ctx context.Context, id pgtype.UUID) (GetScheduleForUpdateRow, error) {
@@ -784,12 +803,13 @@ func (q *Queries) GetScheduleForUpdate(ctx context.Context, id pgtype.UUID) (Get
 		&i.Revision,
 		&i.NextRunLocalDate,
 		&i.NextRunAt,
+		&i.Deleted,
 	)
 	return i, err
 }
 
 const getScheduledRun = `-- name: GetScheduledRun :one
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -806,6 +826,8 @@ type GetScheduledRunRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -828,6 +850,8 @@ func (q *Queries) GetScheduledRun(ctx context.Context, arg GetScheduledRunParams
 		&i.ID,
 		&i.ScheduleID,
 		&i.RunKind,
+		&i.ReportKind,
+		&i.ScheduleName,
 		&i.SlotLocalDate,
 		&i.ManualIdempotencyKey,
 		&i.ScheduledFor,
@@ -965,7 +989,7 @@ func (q *Queries) LinkScheduleRecipient(ctx context.Context, arg LinkScheduleRec
 const listRecipients = `-- name: ListRecipients :many
 SELECT id, label, provider_key, recipient, locale, enabled
 FROM notification_recipients
-WHERE purpose = 'business_report'
+WHERE purpose = 'business_report' AND deleted_at IS NULL
 ORDER BY created_at, id
 `
 
@@ -1065,7 +1089,7 @@ func (q *Queries) ListRunDeliveries(ctx context.Context, runID pgtype.UUID) ([]L
 }
 
 const listRuns = `-- name: ListRuns :many
-SELECT id, schedule_id, run_kind, slot_local_date, manual_idempotency_key,
+SELECT id, schedule_id, run_kind, report_kind, schedule_name, slot_local_date, manual_idempotency_key,
     scheduled_for, period_start, period_end, schedule_revision,
     status, attempt_count, next_attempt_at,
     lease_owner, lease_until, lease_generation, last_error_code
@@ -1078,6 +1102,8 @@ type ListRunsRow struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ScheduleID           pgtype.UUID        `json:"schedule_id"`
 	RunKind              string             `json:"run_kind"`
+	ReportKind           string             `json:"report_kind"`
+	ScheduleName         string             `json:"schedule_name"`
 	SlotLocalDate        pgtype.Date        `json:"slot_local_date"`
 	ManualIdempotencyKey pgtype.Text        `json:"manual_idempotency_key"`
 	ScheduledFor         pgtype.Timestamptz `json:"scheduled_for"`
@@ -1106,6 +1132,8 @@ func (q *Queries) ListRuns(ctx context.Context, limit int32) ([]ListRunsRow, err
 			&i.ID,
 			&i.ScheduleID,
 			&i.RunKind,
+			&i.ReportKind,
+			&i.ScheduleName,
 			&i.SlotLocalDate,
 			&i.ManualIdempotencyKey,
 			&i.ScheduledFor,
@@ -1135,8 +1163,9 @@ SELECT r.id, r.label, r.provider_key, r.recipient, r.locale, r.enabled
 FROM notification_recipients AS r
 JOIN business_report_schedule_recipients AS link
   ON link.recipient_id = r.id AND link.recipient_purpose = r.purpose
-WHERE link.schedule_id = $1
-ORDER BY r.created_at, r.id
+WHERE link.schedule_id = $1 AND r.deleted_at IS NULL
+ORDER BY r.id
+FOR SHARE OF r
 `
 
 type ListScheduleRecipientsRow struct {
@@ -1179,6 +1208,7 @@ const listSchedules = `-- name: ListSchedules :many
 SELECT id, name, report_kind, timezone, local_time, anchor_local_date,
     enabled, revision, next_run_local_date, next_run_at
 FROM business_report_schedules
+WHERE deleted_at IS NULL
 ORDER BY created_at, id
 `
 
@@ -1264,7 +1294,7 @@ func (q *Queries) PersistDeliverySnapshot(ctx context.Context, arg PersistDelive
 const setRecipientEnabled = `-- name: SetRecipientEnabled :exec
 UPDATE notification_recipients
 SET enabled = $2, updated_at = now()
-WHERE id = $1 AND purpose = 'business_report'
+WHERE id = $1 AND purpose = 'business_report' AND deleted_at IS NULL
 `
 
 type SetRecipientEnabledParams struct {
@@ -1281,7 +1311,7 @@ const updateScheduleEnablement = `-- name: UpdateScheduleEnablement :exec
 UPDATE business_report_schedules
 SET enabled = $2, revision = revision + 1,
     next_run_local_date = $3, next_run_at = $4, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 `
 
 type UpdateScheduleEnablementParams struct {

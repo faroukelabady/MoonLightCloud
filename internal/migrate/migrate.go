@@ -17,10 +17,9 @@ import (
 )
 
 // TargetVersion is the required schema version: startup refuses to
-// boot on mismatch. Before the first production install it is the version
-// of the single baseline migration, which increases whenever the baseline
-// changes (ADR-0055).
-const TargetVersion int64 = 115
+// boot on mismatch. The installed 115 baseline advances through the additive
+// report-configuration migration (ADR-0059); existing data is retained.
+const TargetVersion int64 = 116
 
 func provider(conn *sql.DB) (*goose.Provider, error) {
 	p, err := goose.NewProvider(goose.DialectPostgres, conn, db.Migrations())

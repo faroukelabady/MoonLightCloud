@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
+	"github.com/faroukelabady/MoonLightCloud/internal/devicecontrol"
 	"testing"
 	"time"
 
@@ -177,5 +178,56 @@ func TestStoreCatalogAdminPermissions(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO device_capabilities (device_id, capability) VALUES ($1, 'catalog_admin_scope_everything_v1')`, first.Device.ID); err == nil {
 		t.Fatal("unknown capability names must be refused by the schema")
+	}
+}
+
+// A real authenticated sync client can contact Cloud before it ever polls
+// control. Presence must read canonical device contact without inventing a poll.
+func TestPresenceIncludesAuthenticatedDeviceWithoutControlRow(t *testing.T) {
+	pool, authSvc := openTestRepo(t)
+	ctx := context.Background()
+	p, err := authSvc.Create(ctx, "upload-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl := NewDeviceControl(pool, 5*time.Second)
+	if _, found, err := ctl.GetPresence(ctx, p.Device.ID); err != nil || found {
+		t.Fatalf("unseen device: found=%v %v", found, err)
+	}
+	if _, _, err := authSvc.Authenticate(ctx, p.Device.ID, p.Credential.ID, "invalid"); err == nil {
+		t.Fatal("invalid auth accepted")
+	}
+	if _, found, err := ctl.GetPresence(ctx, p.Device.ID); err != nil || found {
+		t.Fatalf("invalid auth created presence: %v %v", found, err)
+	}
+	dev, _, err := authSvc.Authenticate(ctx, p.Device.ID, p.Credential.ID, p.RawSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeID := bindTestStore(t, NewDevices(pool, 5*time.Second), p.Device.ID)
+	received := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `INSERT INTO sync_events (event_id, device_id, event_type, occurred_at, received_at, payload, payload_hash, store_id)
+ VALUES ($1, $2, 'sale.finalized.v3', now(), $3, '{}', '\x00', $4)`, uuid.NewString(), p.Device.ID, received, storeID); err != nil {
+		t.Fatal(err)
+	}
+	check := func(presence devicecontrol.Presence) {
+		t.Helper()
+		if presence.LastSeenAt == nil || dev.LastSeenAt == nil || presence.LastSeenAt.Sub(*dev.LastSeenAt).Abs() > time.Microsecond || presence.LastPollAt != nil || presence.LastDataAt == nil || !presence.LastDataAt.Equal(received) {
+			t.Fatalf("authenticated-only presence: %+v", presence)
+		}
+	}
+	presence, found, err := ctl.GetPresence(ctx, p.Device.ID)
+	if err != nil || !found {
+		t.Fatalf("presence missing: %v %v", found, err)
+	}
+	check(presence)
+	all, err := ctl.ListPresence(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("batched presence: %+v %v", all, err)
+	}
+	check(all[0])
+	var controls int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM device_control_presence WHERE device_id=$1`, p.Device.ID).Scan(&controls); err != nil || controls != 0 {
+		t.Fatalf("read fabricated a control row: %d %v", controls, err)
 	}
 }
