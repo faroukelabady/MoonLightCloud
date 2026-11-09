@@ -121,6 +121,10 @@ func Router(log *slog.Logger, health Health, version Version, devices auth.Servi
 		if dashDevices.Stores != nil {
 			mux.Handle("GET /api/v1/dashboard/stores", g(humanauth.PermDevicesRead, ScopeHandler, (&StoreHandlers{Stores: dashDevices.Stores}).ListStores))
 		}
+		mux.Handle("POST /api/v1/dashboard/stores", g(humanauth.PermDevicesManage, ScopeAllStores, dashDevices.CreateStore))
+		mux.Handle("POST /api/v1/dashboard/devices", g(humanauth.PermDevicesManage, ScopeHandler, dashDevices.CreateDevice))
+		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/credentials/rotate", g(humanauth.PermDevicesManage, ScopeHandler, dashDevices.RotateDevice))
+		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/revoke", g(humanauth.PermDevicesManage, ScopeHandler, dashDevices.RevokeDevice))
 		mux.Handle("POST /api/v1/dashboard/devices/{device_id}/sync-requests", g(humanauth.PermDevicesManage, ScopeHandler, dashDevices.CreateSyncRequest))
 	}
 	// Phase 16 catalog admin: Retail pulls targets over its outbound

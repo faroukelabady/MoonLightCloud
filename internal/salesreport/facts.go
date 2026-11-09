@@ -8,6 +8,8 @@ package salesreport
 import (
 	"context"
 	"time"
+
+	saledomain "github.com/faroukelabady/MoonLightCloud/internal/sale"
 )
 
 // Sale is one projected Sale in the report's sale set.
@@ -32,6 +34,10 @@ type Sale struct {
 
 // Line is one Sale line; UnitCost is nil when Retail had no cost.
 type Line struct {
+	UnitPrice    int64
+	CatalogPrice *int64
+	Attributes   []saledomain.SaleLineVariantAttribute
+
 	SaleID      string
 	ItemID      string
 	ProductID   string

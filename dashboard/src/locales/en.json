@@ -384,7 +384,10 @@
 		"mapped": "Mapped",
 		"viewOrder": "View order {number}",
 		"webhookInbox": "webhook inbox (pending/retry/blocked)",
-		"inbox": "inbox"
+		"inbox": "inbox",
+		"frame": "Recorded frame",
+		"frameCharge": "Recorded frame charge per unit",
+		"frameUnresolved": "Frame selection could not be resolved"
 	},
 	"periodSelector": {
 		"enterTwoValidYyyyMmDd": "Enter two valid YYYY-MM-DD dates",
@@ -428,7 +431,7 @@
 		"itemsReturned": "Items returned",
 		"sales": "Sales",
 		"attributedSales": "Attributed sales",
-		"originalCost": "Original cost",
+		"originalCost": "Purchase cost",
 		"refunds": "Refunds",
 		"netSales": "Net sales",
 		"nothingInThisPeriod": "Nothing in this period.",
@@ -519,7 +522,18 @@
 		"text": ", ",
 		"at": "at",
 		"previous": "Previous",
-		"next": "Next"
+		"next": "Next",
+		"convertedTotal": "All sales after conversion ({currency})",
+		"convertedHint": "Includes every filtered sale before refunds, across all pages. Separate-currency mode keeps each currency separate.",
+		"lineContext": {
+			"title": "Line prices and options",
+			"notRecorded": "Not recorded",
+			"unitCost": "Purchase cost per unit",
+			"catalogPrice": "Variant selling price per unit at sale time",
+			"agreedPrice": "Agreed selling price per unit",
+			"hint": "These are the recorded sale-currency values. The variant selling price includes its price override, when set. The agreed price is what the customer paid before sale-level adjustments. Missing historical values are not filled from current prices.",
+			"costHint": "Purchase cost uses the cost recorded at sale time, including a variant cost override when set. A selling-price override does not change purchase cost."
+		}
 	},
 	"settingsPage": {
 		"someoneElseJustChangedTheseSettings": "Someone else just changed these settings. They were reloaded; review and save again.",
@@ -1108,7 +1122,7 @@
 		"item": "Item",
 		"qty": "Qty",
 		"soldFor": "Sold for",
-		"cost": "Cost",
+		"cost": "Purchase cost",
 		"profit": "Profit",
 		"each": "{amount} each",
 		"unknown": "Not known",
@@ -1172,5 +1186,43 @@
 		"mismatch": "The new passwords are not the same.",
 		"tooShort": "Use 12 characters or more.",
 		"changed": "Password changed. Other sessions signed out."
+	},
+	"deviceManagement": {
+		"store": "Create store",
+		"device": "Create device",
+		"rotate": "Regenerate credentials",
+		"revoke": "Revoke device",
+		"actions": "Device access",
+		"storeName": "Store name",
+		"retailID": "Retail Store ID",
+		"retailIDHint": "Copy the Store ID from Retail → Settings → Store. Use that ID here so the device connects to the same shop.",
+		"timezone": "Store timezone",
+		"deviceName": "Device name",
+		"otp": "Authenticator code",
+		"otpHint": "Enter a fresh six-digit code. Each code approves one action. Wait for the next code before another action.",
+		"rotateHint": "The old credential will stop working. Copy the new credential into Retail to reconnect.",
+		"revokeHint": "This device and all its credentials will stop working. To connect again, create a new device. Existing shop data and history are kept.",
+		"credentialsTitle": "Copy your new device credential",
+		"once": "Shown once. Copy this credential now. After closing, you cannot view it again.",
+		"credential": "Device credential",
+		"pasteInRetail": "Paste into Retail → Settings → Cloud sync → Device credential. Test the connection, then store it.",
+		"copy": "Copy credential",
+		"copied": "Copied",
+		"done": "I have copied it",
+		"close": "Close",
+		"cancel": "Cancel",
+		"working": "Saving…",
+		"saved": "Store/device settings updated.",
+		"copyFailed": "Could not copy. Select and copy the credential manually.",
+		"errors": {
+			"MFA_REQUIRED": "An authenticator code is required.",
+			"MFA_INVALID": "The code is invalid or already used. Wait for a fresh code and try again.",
+			"RATE_LIMITED": "Too many attempts. Wait one minute and try a fresh code.",
+			"STORE_ALREADY_EXISTS": "This Store ID is already registered. Create a device in its existing store.",
+			"STORE_NOT_ACTIVE": "This store is inactive.",
+			"DEVICE_NOT_ACTIVE": "This device is revoked. Create a new device.",
+			"failed": "Could not save. Check the details and try again."
+		},
+		"selectedStore": "Store"
 	}
 }

@@ -74,9 +74,12 @@ WITH sale_set AS (
       AND (sqlc.narg('store_id')::uuid IS NULL OR r.store_id = sqlc.narg('store_id')::uuid)
 )
 SELECT l.sale_id, l.sale_item_id, l.position, l.product_id, l.sku, l.product_name,
-    l.quantity, l.line_total_minor, l.cost_minor
+    l.quantity, l.line_total_minor, l.cost_minor, l.unit_price_minor,
+    l.variant_attributes,
+    l.variant_price_usd_minor, l.variant_price_egp_minor, s.currency AS sale_currency
 FROM sale_lines_projection l
 JOIN sale_set USING (sale_id)
+JOIN sales_projection s ON s.sale_id=l.sale_id
 ORDER BY l.sale_id, l.position;
 
 -- name: PrintableReportLineClassifications :many

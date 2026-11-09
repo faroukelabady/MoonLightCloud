@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { msg } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
@@ -137,7 +137,7 @@
 					<div><dt>{msg('ordersPage.payment')}</dt><dd>{selected.payment_method_title || selected.payment_method || '—'}</dd></div>
 				</dl>
 				<table class="data">
-					<thead><tr><th>{msg('ordersPage.item')}</th><th>SKU</th><th>{msg('ordersPage.qty')}</th><th>{msg('ordersPage.total')}</th><th>{msg('ordersPage.mapped')}</th></tr></thead>
+					<thead><tr><th>{msg('ordersPage.item')}</th><th>SKU</th><th>{msg('ordersPage.qty')}</th><th>{msg('ordersPage.total')}</th><th>{msg('ordersPage.mapped')}</th>{#if selected.lines.some(l=>l.configuration_id||l.configuration_unresolved)}<th>{msg('ordersPage.frame')}</th>{/if}</tr></thead>
 					<tbody>
 						{#each selected.lines as line}
 							<tr>
@@ -146,6 +146,10 @@
 								<td class="num">{line.quantity}</td>
 								<td class="num">{lineMoney(line.total_minor, selected.summary.currency)}</td>
 								<td>{#if line.mapped}<span class="ok">✓</span>{:else}<span class="warn">—</span>{/if}</td>
+ {#if selected.lines.some(l=>l.configuration_id||l.configuration_unresolved)}<td>
+ {#if line.configuration_id}<div>{t(line.frame_style_name_ar??line.frame_style_code??'',line.frame_style_name_en??line.frame_style_name_ar??line.frame_style_code??'')} · {t(line.frame_color_name_ar??line.frame_color_code??'',line.frame_color_name_en??line.frame_color_name_ar??line.frame_color_code??'')}</div><small>{msg('ordersPage.frameCharge')}: {line.configuration_price_delta_minor==null?msg('salesReportView.lineContext.notRecorded'):lineMoney(line.configuration_price_delta_minor,selected.summary.currency)}</small>
+ {:else if line.configuration_unresolved}<span class="warn">{msg('ordersPage.frameUnresolved')}</span>{:else}—{/if}
+ </td>{/if}
 							</tr>
 						{/each}
 					</tbody>

@@ -232,3 +232,29 @@ func (d StoreRegistry) CatalogAdminBindingStore(ctx context.Context, deviceID st
 	}
 	return uuidString(binding.StoreID), nil
 }
+
+// CreateStore registers the identity copied from Retail, without a binding.
+func (d StoreRegistry) CreateStore(ctx context.Context, req store.RegistrationRequest) (store.Store, error) {
+	if err := store.ValidateRegistration(req); err != nil {
+		return store.Store{}, err
+	}
+	ctx, cancel := d.ctx(ctx)
+	defer cancel()
+	id, err := parseUUID(req.StoreID)
+	if err != nil {
+		return store.Store{}, apperr.New(apperr.InvalidInput, "invalid store_id")
+	}
+	q := sqlcgen.New(d.pool)
+	n, err := q.InsertStore(ctx, sqlcgen.InsertStoreParams{ID: id, DisplayName: strings.TrimSpace(req.DisplayName), Timezone: strings.TrimSpace(req.Timezone)})
+	if err != nil {
+		return store.Store{}, apperr.Wrap(apperr.Unavailable, "store creation unavailable", redact(err))
+	}
+	if n != 1 {
+		return store.Store{}, apperr.New(apperr.Conflict, "STORE_ALREADY_EXISTS")
+	}
+	row, err := q.StoreByID(ctx, id)
+	if err != nil {
+		return store.Store{}, apperr.Wrap(apperr.Unavailable, "store unavailable", redact(err))
+	}
+	return store.Store{ID: uuidString(row.ID), DisplayName: row.DisplayName, Timezone: row.Timezone, Status: row.Status, CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time}, nil
+}

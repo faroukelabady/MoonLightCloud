@@ -77,6 +77,7 @@ func (d Reporting) SalesReportFacts(ctx context.Context, storeID string, startUT
 			SaleID: uuidString(r.SaleID), ItemID: uuidString(r.SaleItemID), ProductID: product,
 			SKU: r.Sku, ProductName: r.ProductName, Quantity: int64(r.Quantity),
 			LineTotal: r.LineTotalMinor, UnitCost: int8Ptr(r.CostMinor),
+			UnitPrice: r.UnitPriceMinor, CatalogPrice: saleCatalogPrice(r.SaleCurrency, r.VariantPriceEgpMinor, r.VariantPriceUsdMinor), Attributes: saleAttributeSnapshot(r.VariantAttributes),
 		})
 	}
 	classes, err := q.PrintableReportLineClassifications(ctx, sqlcgen.PrintableReportLineClassificationsParams{StartUtc: start, EndUtc: end, StoreID: store})

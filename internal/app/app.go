@@ -349,7 +349,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		ctlHandlers = &adapterhttp.DeviceControlHandlers{Svc: a.DeviceControl, Log: log}
 	}
 	dashDevices := &adapterhttp.DashboardDeviceHandlers{
-		Svc: a.DeviceControl, Auth: a.Devices, Stores: storeRegistry, OnlineWindow: cfg.DeviceControl.OnlineWindow, ControlDisabled: !cfg.DeviceControl.Enabled,
+		Svc: a.DeviceControl, Auth: a.Devices, Stores: storeRegistry, Manager: a.Devices, StepUp: humanAuthSvc, ClientIP: humanAuth.ClientIP, Audit: humanAuthSvc, OnlineWindow: cfg.DeviceControl.OnlineWindow, ControlDisabled: !cfg.DeviceControl.Enabled,
 	}
 	// Phase 16 catalog admin: durable operator intent + Retail pull.
 	// Always wired (routes registered unconditionally): authorization

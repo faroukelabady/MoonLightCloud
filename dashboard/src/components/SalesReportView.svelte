@@ -5,6 +5,7 @@
 	import { absoluteTime } from '../lib/time.js';
 	import { lang, msg, t } from '../lib/i18n.svelte.js';
 	import { parseMajor } from '../lib/zakat.js';
+	import ReportSaleLines from './ReportSaleLines.svelte';
 	import ReportLetterhead from './ReportLetterhead.svelte';
 	import SingleSelect from './ui/SingleSelect.svelte';
 	import MultiSelect from './ui/MultiSelect.svelte';
@@ -451,6 +452,10 @@
 											</td>
 										</tr>
 									{/each}
+                                    {#each summary as total}
+                                      <tr class="report-total-row"><th scope="row">{msg('salesReportView.convertedTotal', { currency: total.currency })}</th>
+                                        <td><bdi class="num">{money(total.sales_minor, total.currency)}</bdi><small>{t(`عدد عمليات البيع: ${formatInt(total.sales_count)}`, `Sales: ${formatInt(total.sales_count)}`)}</small></td></tr>
+                                    {/each}
 									<tr>
 										<th scope="row">{msg('salesReportView.latestUsdRate')}</th>
 										<td>
@@ -473,7 +478,7 @@
 									{/if}
 								</tbody>
 							</table>
-							<p class="report-note">{msg('salesReportView.eachSaleConvertsAtTheUsd')}</p>
+							<p class="report-note">{msg('salesReportView.convertedHint')}</p><p class="report-note">{msg('salesReportView.eachSaleConvertsAtTheUsd')}</p>
 						</div>
 					</div>
 					{#if showRefunds}
@@ -597,7 +602,7 @@
 
 			<div class="report-panel" class:active={panel === 'details'}>
 				<section class="card report-section report-details" aria-labelledby="report-sales-heading">
-					<h2 id="report-sales-heading">{msg('salesReportView.salesDetails')}</h2>
+					<h2 id="report-sales-heading">{msg('salesReportView.salesDetails')}</h2><p>{msg('salesReportView.lineContext.costHint')}</p>
 					<div class="table-scroll">
 						<table>
 							<thead>
@@ -624,6 +629,7 @@
 											<td>{#if row.rate_microrate !== null}<bdi class="num">{money(row.original_total_minor, row.original_currency)}</bdi><small>{msg('salesReportView.at')} <bdi class="num">{formatMicrorate(row.rate_microrate)}</bdi></small>{:else}—{/if}</td>
 										{/if}
 									</tr>
+ {#if row.lines?.length}<tr><td class="sale-line-context-cell" colspan={showRecorded?10:9}><ReportSaleLines lines={row.lines} saleID={row.sale_id} saleNumber={row.sale_number} /></td></tr>{/if}
 								{/each}
 							</tbody>
 						</table>

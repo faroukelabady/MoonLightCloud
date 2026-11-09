@@ -830,7 +830,7 @@ let branchContext = $derived.by(() => {
 				{/if}
 				{#if route === 'devices'}
 					<div class="cell a-orders">
-						<DevicesPage {store} canManage={!!me?.permissions.includes('devices.manage')} />
+						<DevicesPage {store} canManage={!!me?.permissions.includes('devices.manage')} allStores={me?.all_stores ?? false} onstoreschange={(value)=>stores=value} />
 					</div>
 				{/if}
 				{#if route === 'operations'}

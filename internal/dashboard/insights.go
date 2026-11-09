@@ -10,6 +10,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/media"
 	"github.com/faroukelabady/MoonLightCloud/internal/report"
+	saledomain "github.com/faroukelabady/MoonLightCloud/internal/sale"
 )
 
 // Sync page reads: what arrived in the selected period, one sale with its
@@ -64,6 +65,9 @@ type SaleDetail struct {
 // SaleDetailLine is one sold item: the price it sold for and the unit cost
 // Retail recorded at sale time (nil when unknown).
 type SaleDetailLine struct {
+	CatalogPriceMinor *string                               `json:"catalog_price_minor"`
+	Attributes        []saledomain.SaleLineVariantAttribute `json:"attributes"`
+
 	SKU            string  `json:"sku"`
 	ProductName    string  `json:"product_name"`
 	WidthCM        *int    `json:"width_cm,omitempty"`
@@ -77,6 +81,9 @@ type SaleDetailLine struct {
 
 // SaleDetailLineRow is the adapter row; money stays int64 until mapped.
 type SaleDetailLineRow struct {
+	CatalogPriceMinor *int64
+	Attributes        []saledomain.SaleLineVariantAttribute
+
 	SKU            string
 	ProductName    string
 	WidthCM        *int
@@ -227,8 +234,11 @@ func (s Insights) SaleDetail(ctx context.Context, req report.Request, saleID str
 	for _, line := range lines {
 		item := SaleDetailLine{
 			SKU: line.SKU, ProductName: line.ProductName, WidthCM: line.WidthCM, HeightCM: line.HeightCM,
-			Quantity: line.Quantity, UnitPriceMinor: minorString(line.UnitPriceMinor),
+			Quantity: line.Quantity, UnitPriceMinor: minorString(line.UnitPriceMinor), Attributes: line.Attributes,
 			LineTotalMinor: minorString(line.LineTotalMinor),
+		}
+		if line.CatalogPriceMinor != nil {
+			item.CatalogPriceMinor = ptrStr(minorString(*line.CatalogPriceMinor))
 		}
 		if line.UnitCostMinor == nil {
 			out.CostComplete = false

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import DeviceManagementDialog from './DeviceManagementDialog.svelte';
 	import { lang, msg } from '../lib/i18n.svelte.js';
 	import { absoluteTime } from '../lib/time.js';
 	import { dashboardApi, ApiError } from '../lib/api';
 	import type { DeviceRow, DeviceCommandWire, StoreRow } from '../lib/api';
 
-	let { store = '', canManage = true }: { store?: string; canManage?: boolean } = $props();
+	let { store = '', canManage = true, allStores = false, onstoreschange = (_stores:StoreRow[])=>{} }: { store?: string; canManage?: boolean; allStores?:boolean; onstoreschange?:(stores:StoreRow[])=>void } = $props();
+ let management = $state<{kind:'store'|'device'|'rotate'|'revoke';storeID?:string;storeName?:string;deviceID?:string;deviceName?:string}|null>(null);
 	let devices = $state<DeviceRow[]>([]);
 	let stores = $state<StoreRow[] | null>(null);
 	let incidentSummary = $state<Record<string, { open_count: number; max_severity: string }>>({});
@@ -59,6 +61,7 @@
 			devices = dev.value.devices ?? [];
 			controlEnabled = dev.value.control_enabled ?? true;
 			stores = directory.status === 'fulfilled' && directory.value ? directory.value.stores ?? [] : null;
+			if(stores)onstoreschange(stores);
 			incidentsAvailable = incidents.status === 'fulfilled' && !!incidents.value;
 			incidentSummary = incidents.status === 'fulfilled' && incidents.value ? Object.fromEntries((incidents.value.devices ?? []).map((d) => [d.device_id, d])) : {};
 			error = null; loaded = true;
@@ -89,7 +92,7 @@
 <section class="stores-page" aria-labelledby="stores-title">
 	<header class="card page-head">
 		<div><h2 id="stores-title">{msg('devicesPage.stores')}</h2><p class="hint">{msg('devicesPage.storePurpose')}</p></div>
-		<button type="button" class="btn-secondary" disabled={loading} onclick={() => refresh()}>{msg('devicesPage.refresh')}</button>
+		<div class="page-actions">{#if canManage && allStores}<button type="button" class="btn-primary" onclick={() => management={kind:'store'}}>{msg('deviceManagement.store')}</button>{/if}<button type="button" class="btn-secondary" disabled={loading} onclick={() => refresh()}>{msg('devicesPage.refresh')}</button></div>
 	</header>
 	<div class="card guide">
 		<div><h3>{msg('devicesPage.devicePurposeTitle')}</h3><p>{msg('devicesPage.devicePurpose')}</p></div>
@@ -111,11 +114,12 @@
 			</summary>
 			<div class="store-body">
 				{#if group.id}<p class="store-id">{msg('devicesPage.storeId')}: <bdi class="mono">{group.id}</bdi></p>{/if}
+                {#if canManage && group.id && group.status === 'active'}<button type="button" class="btn-primary btn-sm" onclick={() => management={kind:'device',storeID:group.id,storeName:group.name}}>{msg('deviceManagement.device')}</button>{/if}
 				<p class="hint">{msg('devicesPage.onlineMeansCloudHeardFromThe')}</p>
 				{#if !group.devices.length}<p class="empty">{msg('devicesPage.noDevicesForStore')}</p>{:else}
 					<div class="table-wrap"><table class="grid-table" data-testid="devices-table">
 						<caption class="sr-only">{msg('devicesPage.devicesFor', { name: group.name || msg('devicesPage.unassignedDevices') })}</caption>
-						<thead><tr><th scope="col">{msg('devicesPage.device')}</th><th scope="col">{msg('devicesPage.connection')}</th><th scope="col">{msg('devicesPage.lastSeen')}</th><th scope="col">{msg('devicesPage.lastData')}</th><th scope="col">{msg('devicesPage.controlChannel')}</th><th scope="col">{msg('devicesPage.incidents')}</th><th scope="col">{msg('devicesPage.sync')}</th></tr></thead>
+						<thead><tr><th scope="col">{msg('devicesPage.device')}</th><th scope="col">{msg('devicesPage.connection')}</th><th scope="col">{msg('devicesPage.lastSeen')}</th><th scope="col">{msg('devicesPage.lastData')}</th><th scope="col">{msg('devicesPage.controlChannel')}</th><th scope="col">{msg('devicesPage.incidents')}</th><th scope="col">{msg('devicesPage.sync')}</th>{#if canManage}<th scope="col">{msg('deviceManagement.actions')}</th>{/if}</tr></thead>
 						<tbody>{#each group.devices as d (d.device_id)}
 							{@const active = d.active_command ?? null}{@const terminal = lastTerminal(d)}{@const past = history(d)}
 							<tr data-testid="device-row" data-device={d.device_id}>
@@ -130,6 +134,7 @@
 									{#if canManage}<button class="btn-primary btn-sm" data-testid="sync-now" disabled={!controlEnabled || !!active || !!requesting[d.device_id] || d.lifecycle !== 'active'} onclick={() => syncNow(d)}>{msg('devicesPage.syncNow')}</button>{/if}
 									{#if !active && past.length}<details class="history"><summary>{msg('devicesPage.history')} ({past.length})</summary><ul data-testid="sync-history">{#each past as c (c.id)}<li>{userFacing(c.status)} — <time datetime={c.requested_at}>{absoluteTime(c.requested_at, lang())}</time>{#if c.result_code}<bdi class="mono"> {c.result_code}</bdi>{/if}</li>{/each}</ul></details>{/if}
 								</div></td>
+                            {#if canManage}<td>{#if d.lifecycle === 'active' && (d.store_id || allStores)}<div class="device-actions">{#if d.store_id}<button type="button" class="btn-secondary btn-sm" onclick={() => management={kind:'rotate',deviceID:d.device_id,deviceName:d.name}}>{msg('deviceManagement.rotate')}</button>{/if}<button type="button" class="btn-secondary btn-sm revoke" onclick={() => management={kind:'revoke',deviceID:d.device_id,deviceName:d.name}}>{msg('deviceManagement.revoke')}</button></div>{/if}</td>{/if}
 							</tr>
 						{/each}</tbody>
 					</table></div>
@@ -139,7 +144,10 @@
 	{/each}
 </section>
 
+{#if management}<DeviceManagementDialog {...management} onclose={() => management=null} onchanged={() => {notice=msg('deviceManagement.saved');void refresh();}} />{/if}
 <style>
+ .page-actions,.device-actions{display:flex;gap:8px;flex-wrap:wrap;} .device-actions{flex-direction:column;align-items:start;}.revoke{color:#b91c1c;}
+
 	.stores-page { display: grid; gap: 16px; }
 	.page-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 	h2, h3, p { margin: 0; }

@@ -30,11 +30,12 @@ WHERE s.sale_id = @sale_id
 
 -- name: DashboardSaleDetailLines :many
 -- cost_minor is the unit cost Retail recorded at sale time (NULL: unknown).
-SELECT position, sku, product_name, width_cm, height_cm, quantity,
-    unit_price_minor, cost_minor, line_total_minor
-FROM sale_lines_projection
-WHERE sale_id = $1
-ORDER BY position, sale_item_id;
+SELECT l.position, l.sku, l.product_name, l.width_cm, l.height_cm, l.quantity,
+    l.unit_price_minor, l.cost_minor, l.line_total_minor, l.variant_attributes,
+    l.variant_price_usd_minor, l.variant_price_egp_minor, s.currency AS sale_currency
+FROM sale_lines_projection l JOIN sales_projection s ON s.sale_id=l.sale_id
+WHERE l.sale_id = $1
+ORDER BY l.position, l.sale_item_id;
 
 -- name: DashboardMediaStatus :one
 -- Stored files are the ones a gallery of the Store names (every file when

@@ -9,6 +9,7 @@ import (
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/auth"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -116,23 +117,56 @@ func (d Devices) RevokeDevice(ctx context.Context, id string, at time.Time) erro
 
 // Provision inserts device + first credential in one transaction.
 func (d Devices) Provision(ctx context.Context, dev auth.Device, cred auth.Credential) error {
+	return d.provision(ctx, dev, cred, "")
+}
+
+// ProvisionForStore commits the device, verifier and immutable Store binding
+// together. Invalid/disabled Stores cannot leave an unbound device behind.
+func (d Devices) ProvisionForStore(ctx context.Context, dev auth.Device, cred auth.Credential, storeID string) error {
+	return d.provision(ctx, dev, cred, storeID)
+}
+
+func (d Devices) provision(ctx context.Context, dev auth.Device, cred auth.Credential, storeID string) error {
 	ctx, cancel := d.ctx(ctx)
 	defer cancel()
 	return d.inTx(ctx, func(q *sqlcgen.Queries) error {
+		var storeUUID pgtype.UUID
+		if storeID != "" {
+			parsed, err := parseUUID(storeID)
+			if err != nil {
+				return apperr.New(apperr.InvalidInput, "invalid store_id")
+			}
+			storeUUID = parsed
+			row, err := q.StoreByID(ctx, storeUUID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return apperr.New(apperr.NotFound, "store not found")
+			}
+			if err != nil {
+				return apperr.Wrap(apperr.Unavailable, "store unavailable", redact(err))
+			}
+			if row.Status != "active" {
+				return apperr.New(apperr.Conflict, "STORE_NOT_ACTIVE")
+			}
+		}
 		uid, err := parseUUID(dev.ID)
 		if err != nil {
 			return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 		}
-		if err := q.CreateDevice(ctx, sqlcgen.CreateDeviceParams{
-			ID: uid, Name: dev.Name, Status: dev.Status,
-			CreatedAt: pgTime(dev.CreatedAt), UpdatedAt: pgTime(dev.UpdatedAt),
-		}); err != nil {
+		if err := q.CreateDevice(ctx, sqlcgen.CreateDeviceParams{ID: uid, Name: dev.Name, Status: dev.Status, CreatedAt: pgTime(dev.CreatedAt), UpdatedAt: pgTime(dev.UpdatedAt)}); err != nil {
 			if isUniqueViolation(err) {
 				return apperr.New(apperr.Conflict, "device already exists")
 			}
 			return apperr.Wrap(apperr.Internal, "create device", redact(err))
 		}
-		return insertCredential(ctx, q, cred)
+		if err := insertCredential(ctx, q, cred); err != nil {
+			return err
+		}
+		if storeID != "" {
+			if err := q.InsertDeviceBinding(ctx, sqlcgen.InsertDeviceBindingParams{DeviceID: uid, StoreID: storeUUID}); err != nil {
+				return apperr.Wrap(apperr.Internal, "bind device", redact(err))
+			}
+		}
+		return nil
 	})
 }
 
@@ -148,11 +182,15 @@ func (d Devices) Rotate(ctx context.Context, cred auth.Credential) error {
 		if err != nil {
 			return apperr.New(apperr.InvalidInput, "device id must be a UUID")
 		}
-		if _, err := q.LockDevice(ctx, duid); err != nil {
+		status, err := q.LockStoreRegistrationDevice(ctx, duid)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return apperr.New(apperr.NotFound, "device not found")
 			}
 			return apperr.Wrap(apperr.Internal, "lock device", redact(err))
+		}
+		if status != "active" {
+			return apperr.New(apperr.Conflict, "DEVICE_NOT_ACTIVE")
 		}
 		if err := insertCredential(ctx, q, cred); err != nil {
 			return err

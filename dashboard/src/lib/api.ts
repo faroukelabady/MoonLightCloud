@@ -66,6 +66,7 @@ export function isStoreID(value: string): boolean {
 
 
 
+export type DeviceProvision = { device_id: string; credential_id: string; name: string; store_id: string; credential: string };
 export const dashboardApi = {
 	me: async (s?: AbortSignal): Promise<Me> => {
 		const me = await get<Me>('/api/v1/dashboard/auth/me', s);
@@ -114,7 +115,11 @@ export const dashboardApi = {
 	orderDetail: (provider: string, id: string, store: string, s?: AbortSignal) =>
 		get<OrderDetail>(`/api/v1/dashboard/orders/${encodeURIComponent(provider)}/${encodeURIComponent(id)}${store ? `?store_id=${encodeURIComponent(store)}` : ''}`, s),
 	devices: (s?: AbortSignal) => get<{ devices: DeviceRow[]; control_enabled?: boolean }>('/api/v1/dashboard/devices', s),
-	stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
+	createStore: (req: {store_id:string;display_name:string;timezone:string;mfa_code:string}) => postJson<StoreRow>('/api/v1/dashboard/stores',req),
+ createDevice: (req: {store_id:string;name:string;mfa_code:string}) => postJson<DeviceProvision>('/api/v1/dashboard/devices',req),
+ rotateDevice: (id:string,mfa_code:string) => postJson<DeviceProvision>(`/api/v1/dashboard/devices/${encodeURIComponent(id)}/credentials/rotate`,{mfa_code}),
+ revokeDevice: (id:string,mfa_code:string) => postJson<{revoked:boolean}>(`/api/v1/dashboard/devices/${encodeURIComponent(id)}/revoke`,{mfa_code}),
+ stores: (s?: AbortSignal) => get<{ stores: StoreRow[] }>('/api/v1/dashboard/stores', s),
 	adminProducts: (store: string, search: string, cursor: string | null, s?: AbortSignal) =>
 		get<{ products: AdminProductRow[]; next_cursor: string }>(
 			`/api/v1/dashboard/catalog-admin/products?store_id=${encodeURIComponent(store)}&search=${encodeURIComponent(search)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}&limit=20`,

@@ -29,6 +29,10 @@ type DashboardDeviceHandlers struct {
 	Stores          StoreDirectory
 	OnlineWindow    time.Duration
 	ControlDisabled bool
+	Manager         DeviceManager
+	StepUp          StepUpVerifier
+	ClientIP        func(*http.Request) string
+	Audit           DeviceManagementAudit
 }
 
 // StoreDirectory supplies authoritative Store context for display:

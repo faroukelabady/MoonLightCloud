@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	saledomain "github.com/faroukelabady/MoonLightCloud/internal/sale"
+
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 )
 
@@ -101,7 +103,23 @@ type PaymentRow struct {
 }
 
 // SaleRow is one Sale on the details table.
+// RecordedLine keeps sale-currency snapshots beside converted report totals.
+type RecordedLine struct {
+	ID           string                                `json:"id"`
+	ProductName  string                                `json:"product_name"`
+	SKU          string                                `json:"sku"`
+	Currency     string                                `json:"currency"`
+	Quantity     int64                                 `json:"quantity"`
+	UnitPrice    Money                                 `json:"unit_price_minor"`
+	LineTotal    Money                                 `json:"line_total_minor"`
+	UnitCost     *Money                                `json:"unit_cost_minor"`
+	CatalogPrice *Money                                `json:"catalog_price_minor"`
+	Attributes   []saledomain.SaleLineVariantAttribute `json:"attributes"`
+}
+
 type SaleRow struct {
+	Lines []RecordedLine `json:"lines"`
+
 	SaleID           string    `json:"sale_id"`
 	SaleNumber       string    `json:"sale_number"`
 	OccurredAt       time.Time `json:"occurred_at"`
@@ -496,6 +514,16 @@ func Build(f Facts, o Options) (Sections, error) {
 			g.MissingCostItems += missing
 		}
 		detail := &details[detailIndex[l.SaleID]]
+		recorded := RecordedLine{ID: l.ItemID, ProductName: l.ProductName, SKU: l.SKU, Currency: s.Currency, Quantity: l.Quantity, UnitPrice: Money(l.UnitPrice), LineTotal: Money(l.LineTotal), Attributes: l.Attributes}
+		if l.UnitCost != nil {
+			value := Money(*l.UnitCost)
+			recorded.UnitCost = &value
+		}
+		if l.CatalogPrice != nil {
+			value := Money(*l.CatalogPrice)
+			recorded.CatalogPrice = &value
+		}
+		detail.Lines = append(detail.Lines, recorded)
 		detail.ItemsSold += l.Quantity
 		b.add(&detail.Cost, lf.cost)
 		detail.MissingCostItems += missing

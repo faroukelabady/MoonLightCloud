@@ -129,6 +129,7 @@ describe('ReportsPage', () => {
 		expect(card.textContent).toMatch(/Sales recorded in USD\s*\$2\.00\s*Sales: 2\s*In this report: 104 EGP/);
 		expect(card.textContent).toMatch(/Latest USD rate\s*1 USD = 52\.50 EGP/);
 		expect(card.textContent).toMatch(/From Cloud settings/);
+        expect(card.textContent).toMatch(/All sales after conversion \(EGP\)\s*1,140 EGP\s*Sales: 2/);
 		expect(card.textContent).toMatch(/50\.00 – 52\.00 EGP per USD/);
 		expect(card.textContent).toMatch(/past sales can use a different rate/);
 

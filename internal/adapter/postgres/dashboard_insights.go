@@ -100,6 +100,7 @@ func (d Reporting) DashboardSaleDetail(ctx context.Context, storeID, saleID stri
 		item := dashboard.SaleDetailLineRow{
 			SKU: line.Sku, ProductName: line.ProductName, Quantity: int(line.Quantity),
 			UnitPriceMinor: line.UnitPriceMinor, LineTotalMinor: line.LineTotalMinor,
+			CatalogPriceMinor: saleCatalogPrice(line.SaleCurrency, line.VariantPriceEgpMinor, line.VariantPriceUsdMinor), Attributes: saleAttributeSnapshot(line.VariantAttributes),
 		}
 		if line.WidthCm.Valid {
 			w := int(line.WidthCm.Int32)

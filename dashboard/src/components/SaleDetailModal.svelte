@@ -65,11 +65,13 @@
 						<tr data-testid="sale-line">
 							<td>
 								<div class="pname">{line.product_name}</div>
+ {#each line.attributes??[] as a}<div class="muted sub">{lang()==='ar'?a.definition_name_ar:a.definition_name_en||a.definition_name_ar}: {lang()==='ar'?a.name_ar:a.name_en||a.name_ar}</div>{/each}
 								<div class="muted sub" dir="ltr">{line.sku}{size(line) ? ` · ${size(line)}` : ''}</div>
 							</td>
 							<td class="num end">{line.quantity}</td>
 							<td class="num end">
 								<strong>{money(line.line_total_minor)}</strong>
+ <div class="muted sub">{msg('salesReportView.lineContext.catalogPrice')}: {line.catalog_price_minor==null?msg('salesReportView.lineContext.notRecorded'):money(line.catalog_price_minor)}</div>
 								{#if line.quantity > 1}<div class="muted sub">{msg('saleDetail.each', { amount: money(line.unit_price_minor) })}</div>{/if}
 							</td>
 							<td class="num end">
@@ -89,6 +91,7 @@
 				</tbody>
 			</table>
 		</div>
+		<p class="muted note">{msg('salesReportView.lineContext.costHint')}</p>
 		<div class="totals">
 			<dl>
 				<div><dt>{msg('saleDetail.subtotal')}</dt><dd class="num">{money(sale.subtotal_minor)}</dd></div>

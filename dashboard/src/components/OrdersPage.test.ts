@@ -182,3 +182,9 @@ describe('OrdersPage pagination', () => {
 		expect(onloadmore).toHaveBeenCalledTimes(1);
 	});
 });
+
+it('shows only the frame labels and charge captured on the online order',()=>{
+ setLang('en');const detail={summary:order,discount_minor:'0',shipping_minor:'0',cart_tax_minor:'0',total_tax_minor:'0',prices_include_tax:false,paid_at:null,completed_at:null,customer_first_name:'A',customer_last_name:'B',customer_email:'',customer_phone:'',payment_method:'cash',payment_method_title:'Cash',addresses:[],status_history:[],lines:[{external_line_id:1,external_product_id:'1',variation_id:1,sku:'F-1',name:'Papyrus',quantity:1,total_minor:'2000',moonlight_product_id:'p',mapped:true,configuration_id:'frame',frame_style_name_ar:'كلاسيكي',frame_style_name_en:'Classic (at order)',frame_color_name_ar:'ذهبي',frame_color_name_en:'Gold',configuration_price_delta_minor:'250'}]};
+ render(OrdersPage,{...base,selected:detail,detailStatus:'loaded',onstatus:()=>{},onprovider:()=>{},onloadmore:()=>{},onselect:()=>{},onretry:()=>{}});
+ expect(screen.getByRole('columnheader',{name:'Recorded frame'})).toBeTruthy();expect(screen.getByText('Classic (at order) · Gold')).toBeTruthy();expect(screen.getByText(/Recorded frame charge per unit/).textContent).toContain('2.50 EGP');
+});

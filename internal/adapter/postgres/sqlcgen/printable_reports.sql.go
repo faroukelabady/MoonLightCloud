@@ -335,9 +335,12 @@ WITH sale_set AS (
       AND ($3::uuid IS NULL OR r.store_id = $3::uuid)
 )
 SELECT l.sale_id, l.sale_item_id, l.position, l.product_id, l.sku, l.product_name,
-    l.quantity, l.line_total_minor, l.cost_minor
+    l.quantity, l.line_total_minor, l.cost_minor, l.unit_price_minor,
+    l.variant_attributes,
+    l.variant_price_usd_minor, l.variant_price_egp_minor, s.currency AS sale_currency
 FROM sale_lines_projection l
 JOIN sale_set USING (sale_id)
+JOIN sales_projection s ON s.sale_id=l.sale_id
 ORDER BY l.sale_id, l.position
 `
 
@@ -348,15 +351,20 @@ type PrintableReportSaleLinesParams struct {
 }
 
 type PrintableReportSaleLinesRow struct {
-	SaleID         pgtype.UUID `json:"sale_id"`
-	SaleItemID     pgtype.UUID `json:"sale_item_id"`
-	Position       int32       `json:"position"`
-	ProductID      pgtype.UUID `json:"product_id"`
-	Sku            string      `json:"sku"`
-	ProductName    string      `json:"product_name"`
-	Quantity       int32       `json:"quantity"`
-	LineTotalMinor int64       `json:"line_total_minor"`
-	CostMinor      pgtype.Int8 `json:"cost_minor"`
+	SaleID               pgtype.UUID `json:"sale_id"`
+	SaleItemID           pgtype.UUID `json:"sale_item_id"`
+	Position             int32       `json:"position"`
+	ProductID            pgtype.UUID `json:"product_id"`
+	Sku                  string      `json:"sku"`
+	ProductName          string      `json:"product_name"`
+	Quantity             int32       `json:"quantity"`
+	LineTotalMinor       int64       `json:"line_total_minor"`
+	CostMinor            pgtype.Int8 `json:"cost_minor"`
+	UnitPriceMinor       int64       `json:"unit_price_minor"`
+	VariantAttributes    []byte      `json:"variant_attributes"`
+	VariantPriceUsdMinor pgtype.Int8 `json:"variant_price_usd_minor"`
+	VariantPriceEgpMinor pgtype.Int8 `json:"variant_price_egp_minor"`
+	SaleCurrency         string      `json:"sale_currency"`
 }
 
 func (q *Queries) PrintableReportSaleLines(ctx context.Context, arg PrintableReportSaleLinesParams) ([]PrintableReportSaleLinesRow, error) {
@@ -378,6 +386,11 @@ func (q *Queries) PrintableReportSaleLines(ctx context.Context, arg PrintableRep
 			&i.Quantity,
 			&i.LineTotalMinor,
 			&i.CostMinor,
+			&i.UnitPriceMinor,
+			&i.VariantAttributes,
+			&i.VariantPriceUsdMinor,
+			&i.VariantPriceEgpMinor,
+			&i.SaleCurrency,
 		); err != nil {
 			return nil, err
 		}

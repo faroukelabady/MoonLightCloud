@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/apperr"
 	"github.com/faroukelabady/MoonLightCloud/internal/catalogadmin"
@@ -97,32 +95,7 @@ func (h *CatalogAdminHandlers) CreateCommand(w http.ResponseWriter, r *http.Requ
 // writes the refusal. Refusals are 403 (never 401): the session is still
 // valid, only this change is not approved.
 func (h *CatalogAdminHandlers) stepUp(w http.ResponseWriter, r *http.Request, code, commandType string) bool {
-	code = strings.TrimSpace(code)
-	if code == "" {
-		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFARequired))
-		return false
-	}
-	a, ok := AuthOf(r)
-	if !ok || h.StepUp == nil {
-		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFARequired))
-		return false
-	}
-	ip := ""
-	if h.ClientIP != nil {
-		ip = h.ClientIP(r)
-	}
-	switch err := h.StepUp.ConfirmStepUp(r.Context(), a, code, ip, commandType); {
-	case err == nil:
-		return true
-	case errors.Is(err, humanauth.ErrThrottled):
-		w.Header().Set("Retry-After", "60")
-		WriteError(w, r, apperr.New(apperr.TooManyRequests, "RATE_LIMITED"))
-	case errors.Is(err, humanauth.ErrInvalidMFACode), errors.Is(err, humanauth.ErrStage):
-		WriteError(w, r, apperr.New(apperr.Forbidden, catalogadmin.CodeMFAInvalid))
-	default:
-		WriteError(w, r, apperr.Wrap(apperr.Internal, "internal error", err))
-	}
-	return false
+	return requireFreshStepUp(w, r, h.StepUp, h.ClientIP, code, commandType)
 }
 
 // Permissions serves GET /api/v1/dashboard/catalog-admin/permissions?store_id=:

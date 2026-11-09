@@ -182,6 +182,17 @@ export interface OrderSummary {
 }
 
 export interface OrderLineView {
+ configuration_id?: string | null;
+ frame_style_code?: string | null;
+ frame_style_name_ar?: string | null;
+ frame_style_name_en?: string | null;
+ frame_color_code?: string | null;
+ frame_color_name_ar?: string | null;
+ frame_color_name_en?: string | null;
+ configuration_price_delta_minor?: string | null;
+ configuration_unresolved?: boolean;
+ variant_attributes?: RecordedVariantAttribute[] | null;
+
 	external_line_id: number;
 	external_product_id: string;
 	variation_id: number;
@@ -267,7 +278,12 @@ export interface LatestSale {
 
 // One sale with its lines. Money is exact minor units in the sale currency;
 // a null cost means Retail did not record one.
+export type RecordedVariantAttribute = { definition_code:string;value_code:string;name_ar:string;name_en?:string|null;definition_name_ar:string;definition_name_en?:string|null };
+
 export interface SaleDetailLine {
+ catalog_price_minor?: string | null;
+ attributes?: RecordedVariantAttribute[] | null;
+
 	sku: string;
 	product_name: string;
 	width_cm?: number;

@@ -74,7 +74,16 @@ export interface ReportPaymentRow {
 	net_minor: string;
 }
 
+export interface RecordedSaleLine {
+ id:string;product_name:string;sku:string;currency:Currency;quantity:number;
+ unit_price_minor:string;line_total_minor:string;unit_cost_minor:string|null;
+ catalog_price_minor:string|null;
+ attributes?: import('./apiTypes').RecordedVariantAttribute[] | null;
+}
+
 export interface ReportSaleRow {
+ lines?: RecordedSaleLine[];
+
 	sale_id: string;
 	sale_number: string;
 	occurred_at: string;

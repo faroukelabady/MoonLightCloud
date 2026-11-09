@@ -127,23 +127,28 @@ func (q *Queries) DashboardSaleDetail(ctx context.Context, arg DashboardSaleDeta
 }
 
 const dashboardSaleDetailLines = `-- name: DashboardSaleDetailLines :many
-SELECT position, sku, product_name, width_cm, height_cm, quantity,
-    unit_price_minor, cost_minor, line_total_minor
-FROM sale_lines_projection
-WHERE sale_id = $1
-ORDER BY position, sale_item_id
+SELECT l.position, l.sku, l.product_name, l.width_cm, l.height_cm, l.quantity,
+    l.unit_price_minor, l.cost_minor, l.line_total_minor, l.variant_attributes,
+    l.variant_price_usd_minor, l.variant_price_egp_minor, s.currency AS sale_currency
+FROM sale_lines_projection l JOIN sales_projection s ON s.sale_id=l.sale_id
+WHERE l.sale_id = $1
+ORDER BY l.position, l.sale_item_id
 `
 
 type DashboardSaleDetailLinesRow struct {
-	Position       int32       `json:"position"`
-	Sku            string      `json:"sku"`
-	ProductName    string      `json:"product_name"`
-	WidthCm        pgtype.Int4 `json:"width_cm"`
-	HeightCm       pgtype.Int4 `json:"height_cm"`
-	Quantity       int32       `json:"quantity"`
-	UnitPriceMinor int64       `json:"unit_price_minor"`
-	CostMinor      pgtype.Int8 `json:"cost_minor"`
-	LineTotalMinor int64       `json:"line_total_minor"`
+	Position             int32       `json:"position"`
+	Sku                  string      `json:"sku"`
+	ProductName          string      `json:"product_name"`
+	WidthCm              pgtype.Int4 `json:"width_cm"`
+	HeightCm             pgtype.Int4 `json:"height_cm"`
+	Quantity             int32       `json:"quantity"`
+	UnitPriceMinor       int64       `json:"unit_price_minor"`
+	CostMinor            pgtype.Int8 `json:"cost_minor"`
+	LineTotalMinor       int64       `json:"line_total_minor"`
+	VariantAttributes    []byte      `json:"variant_attributes"`
+	VariantPriceUsdMinor pgtype.Int8 `json:"variant_price_usd_minor"`
+	VariantPriceEgpMinor pgtype.Int8 `json:"variant_price_egp_minor"`
+	SaleCurrency         string      `json:"sale_currency"`
 }
 
 // cost_minor is the unit cost Retail recorded at sale time (NULL: unknown).
@@ -166,6 +171,10 @@ func (q *Queries) DashboardSaleDetailLines(ctx context.Context, saleID pgtype.UU
 			&i.UnitPriceMinor,
 			&i.CostMinor,
 			&i.LineTotalMinor,
+			&i.VariantAttributes,
+			&i.VariantPriceUsdMinor,
+			&i.VariantPriceEgpMinor,
+			&i.SaleCurrency,
 		); err != nil {
 			return nil, err
 		}

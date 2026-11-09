@@ -5,6 +5,15 @@ is solved for features that do not exist yet.
 
 ## In scope now
 
+Store/device dashboard management: all mutations require a full human session,
+`devices.manage`, same-origin CSRF evidence and a fresh, one-use authenticator
+code. Store creation is all-Stores only; other actions enforce current immutable
+Store bindings. Creating a device atomically inserts its verifier and binding.
+Rotation rechecks active device status under the same lock as revocation. No
+raw credential readback exists. Secret-bearing responses are no-store and the
+UI clears them on close/unmount; audits and metadata lists contain no secret.
+Retail remains the Store ID authority; dashboard registration uses its ID.
+
 Report configuration management (ADR-0059): recipient lists remain masked. The
 full-address editor requires a full human session, `settings.manage`, all-Stores
 scope, and `Cache-Control: no-store`; new mutations retain same-origin and CSRF

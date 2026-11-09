@@ -406,6 +406,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      summary: Create a Store-bound device and show its first credential once
+      operationId: dashboardCreateDevice
+      security:
+        - dashboardSession: []
+      description: >-
+        Requires devices.manage, allowed Store scope, a FULL human session,
+        same-origin CSRF evidence and a fresh one-use authenticator code.
+        Credential responses are no-store and are never available again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [store_id, name, mfa_code]
+              properties:
+                store_id: {type: string, format: uuid}
+                name: {type: string, minLength: 1, maxLength: 200}
+                mfa_code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '201':
+          description: Device, hashed credential and Store binding committed atomically.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCredentialIssued'
+        '400':
+          description: Invalid request fields.
+        '401':
+          description: Missing or invalid session.
+        '403':
+          description: Permission, Store scope, CSRF or fresh OTP refused.
+        '404':
+          description: Store or device not found.
+        '409':
+          description: Store exists, inactive Store or revoked device.
+        '429':
+          description: Authenticator attempts throttled; Retry-After applies.
+        '503':
+          description: Operation unavailable.
+
   /api/v1/dashboard/catalog-admin/commands:
     get:
       summary: Store-scoped catalog command history (newest first)
@@ -1089,6 +1132,138 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+    post:
+      summary: Create a Store using the Store ID copied from Retail
+      operationId: dashboardCreateStore
+      security:
+        - dashboardSession: []
+      description: >-
+        Requires devices.manage, allowed Store scope, a FULL human session,
+        same-origin CSRF evidence and a fresh one-use authenticator code.
+        Credential responses are no-store and are never available again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [store_id, display_name, timezone, mfa_code]
+              properties:
+                store_id: {type: string, format: uuid}
+                display_name: {type: string, minLength: 1, maxLength: 200}
+                timezone: {type: string, maxLength: 64}
+                mfa_code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '201':
+          description: Store created without changing existing Store metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStoreCreated'
+        '400':
+          description: Invalid request fields.
+        '401':
+          description: Missing or invalid session.
+        '403':
+          description: Permission, Store scope, CSRF or fresh OTP refused.
+        '404':
+          description: Store or device not found.
+        '409':
+          description: Store exists, inactive Store or revoked device.
+        '429':
+          description: Authenticator attempts throttled; Retry-After applies.
+        '503':
+          description: Operation unavailable.
+
+  /api/v1/dashboard/devices/{device_id}/credentials/rotate:
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: Replace an active device credential and show it once
+      operationId: dashboardRotateDeviceCredential
+      security:
+        - dashboardSession: []
+      description: >-
+        Requires devices.manage, allowed Store scope, a FULL human session,
+        same-origin CSRF evidence and a fresh one-use authenticator code.
+        Credential responses are no-store and are never available again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mfa_code]
+              properties:
+                mfa_code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '200':
+          description: New credential issued; every previous credential revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCredentialIssued'
+        '400':
+          description: Invalid request fields.
+        '401':
+          description: Missing or invalid session.
+        '403':
+          description: Permission, Store scope, CSRF or fresh OTP refused.
+        '404':
+          description: Store or device not found.
+        '409':
+          description: Store exists, inactive Store or revoked device.
+        '429':
+          description: Authenticator attempts throttled; Retry-After applies.
+        '503':
+          description: Operation unavailable.
+  /api/v1/dashboard/devices/{device_id}/revoke:
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: Revoke a device and every credential
+      operationId: dashboardRevokeDevice
+      security:
+        - dashboardSession: []
+      description: >-
+        Requires devices.manage, allowed Store scope, a FULL human session,
+        same-origin CSRF evidence and a fresh one-use authenticator code.
+        Credential responses are no-store and are never available again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mfa_code]
+              properties:
+                mfa_code: {type: string, pattern: '^[0-9]{6}$'}
+      responses:
+        '200':
+          description: Device access revoked; business records and binding retained.
+        '400':
+          description: Invalid request fields.
+        '401':
+          description: Missing or invalid session.
+        '403':
+          description: Permission, Store scope, CSRF or fresh OTP refused.
+        '404':
+          description: Store or device not found.
+        '409':
+          description: Store exists, inactive Store or revoked device.
+        '429':
+          description: Authenticator attempts throttled; Retry-After applies.
+        '503':
+          description: Operation unavailable.
   /api/v1/dashboard/devices/{device_id}/sync-requests:
     post:
       summary: Queue sync_now.v1 (Idempotency-Key required, one active per device)
@@ -6210,6 +6385,30 @@ components:
       properties:
         incident:
           $ref: '#/components/schemas/OperationsIncident'
+    DashboardStoreCreated:
+      type: object
+      required: [store_id, display_name, timezone, status, device_count, created_at, updated_at]
+      properties:
+        store_id: {type: string, format: uuid}
+        display_name: {type: string}
+        timezone: {type: string}
+        status: {type: string, enum: [active, disabled]}
+        device_count: {type: integer, minimum: 0}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    DeviceCredentialIssued:
+      type: object
+      required: [device_id, credential_id, name, store_id, credential]
+      properties:
+        device_id: {type: string, format: uuid}
+        credential_id: {type: string, format: uuid}
+        name: {type: string}
+        store_id: {type: string, format: uuid}
+        credential:
+          type: string
+          readOnly: true
+          description: One-time ready-to-paste device_id.credential_id.secret. Never logged or returned by list/read routes.
+
     ErrorEnvelope:
       type: object
       required: [error]
@@ -7362,6 +7561,11 @@ components:
               line_total_minor: {type: string}
               unit_cost_minor: {type: string, nullable: true}
               line_cost_minor: {type: string, nullable: true}
+              catalog_price_minor: {type: string, nullable: true, description: Effective variant selling price frozen at sale time; unknown for legacy lines.}
+              attributes:
+                type: array
+                nullable: true
+                items: {$ref: '#/components/schemas/SaleLineVariantAttribute'}
     DashboardMediaStatus:
       type: object
       required: [storage, check, checked_at, check_ms, stored_files, stored_bytes, uploaded_in_range, gallery_images, waiting_images]
@@ -7630,6 +7834,24 @@ components:
         missing_cost_items: {type: integer, description: Units sold without a cost snapshot (not in cost_minor).}
         refund_minor: {type: string, description: Exact minor units as a decimal string.}
         net_sales_minor: {type: string, description: Exact minor units as a decimal string.}
+    RecordedSaleReportLine:
+      type: object
+      description: Frozen line values in the original sale currency, independent of report display conversion. No current-catalog enrichment.
+      required: [id, product_name, sku, currency, quantity, unit_price_minor, line_total_minor, unit_cost_minor, catalog_price_minor, attributes]
+      properties:
+        id: {type: string, format: uuid}
+        product_name: {type: string}
+        sku: {type: string}
+        currency: {type: string, enum: [EGP, USD]}
+        quantity: {type: integer}
+        unit_price_minor: {type: string, description: Agreed selling price per unit at sale time.}
+        line_total_minor: {type: string}
+        unit_cost_minor: {type: string, nullable: true, description: Purchase cost per unit; includes a cost override if recorded.}
+        catalog_price_minor: {type: string, nullable: true, description: Effective variant selling price at sale time; unknown for legacy lines.}
+        attributes:
+          type: array
+          nullable: true
+          items: {$ref: '#/components/schemas/SaleLineVariantAttribute'}
     DashboardSalesReport:
       type: object
       required: [generated_at, period, store_id, display_currency, shop, settings, filter, filter_options, summary, base, daily, categories, subcategories, tags, products, payments, sales, sales_total_count, unclassified_items, detail_offset, detail_limit, currency_mix, exchange_rate]
@@ -7755,6 +7977,10 @@ components:
               original_currency: {type: string, enum: [EGP, USD], description: The currency the Sale was recorded in.}
               original_total_minor: {type: string, description: The Sale total as recorded (exact minor units).}
               rate_microrate: {type: string, nullable: true, description: 'USD->EGP rate x 1,000,000 that converted the Sale into the report currency; null when it is shown in its own currency.'}
+              lines:
+                type: array
+                nullable: true
+                items: {$ref: '#/components/schemas/RecordedSaleReportLine'}
         sales_total_count: {type: integer}
         unclassified_items: {type: integer}
         detail_offset: {type: integer}

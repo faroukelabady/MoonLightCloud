@@ -28,6 +28,19 @@ func NewService(s Store, h Hasher, pepperRaw string, pepperVer int, c clock.Cloc
 // Create provisions a device with its first credential. The raw secret is
 // returned once; only salt + verifier persist. Name is 1..200 chars.
 func (s Service) Create(ctx context.Context, name string) (Provisioned, error) {
+	return s.create(ctx, name, "")
+}
+
+// CreateForStore atomically provisions and binds a new device. Secrets never
+// survive outside the returned provisioning result; list APIs remain metadata-only.
+func (s Service) CreateForStore(ctx context.Context, name, storeID string) (Provisioned, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return Provisioned{}, apperr.New(apperr.InvalidInput, "store_id is required")
+	}
+	return s.create(ctx, name, storeID)
+}
+
+func (s Service) create(ctx context.Context, name, storeID string) (Provisioned, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 200 {
 		return Provisioned{}, apperr.New(apperr.InvalidInput, "device name must be 1..200 chars")
@@ -48,8 +61,20 @@ func (s Service) Create(ctx context.Context, name string) (Provisioned, error) {
 		VerifierVersion: VerifierV1, PepperVersion: s.pepperVer,
 		Status: CredentialActive, CreatedAt: now, ActivatedAt: now,
 	}
-	if err := s.store.Provision(ctx, d, c); err != nil {
-		return Provisioned{}, err
+	if storeID == "" {
+		if err := s.store.Provision(ctx, d, c); err != nil {
+			return Provisioned{}, err
+		}
+	} else {
+		bound, ok := s.store.(interface {
+			ProvisionForStore(context.Context, Device, Credential, string) error
+		})
+		if !ok {
+			return Provisioned{}, apperr.New(apperr.Unavailable, "bound provisioning unavailable")
+		}
+		if err := bound.ProvisionForStore(ctx, d, c, storeID); err != nil {
+			return Provisioned{}, err
+		}
 	}
 	return Provisioned{Device: d, Credential: c, RawSecret: raw}, nil
 }
