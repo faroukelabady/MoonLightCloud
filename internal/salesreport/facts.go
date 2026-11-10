@@ -67,7 +67,8 @@ type Tag struct {
 	NameEn string
 }
 
-// Payment is one Sale payment; the applied amount is Amount - Change.
+// Payment is one Sale payment. Amount is the applied contribution; Change
+// is receipt metadata and must not be subtracted from Amount again.
 type Payment struct {
 	SaleID string
 	Method string

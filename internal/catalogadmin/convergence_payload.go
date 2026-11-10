@@ -19,6 +19,7 @@ type variantExpectation struct {
 	usd                     *string
 	attributesPresent       bool
 	attributes              []attributeExpectation
+	egpPresent              bool
 }
 
 type attributeExpectation struct {
@@ -61,12 +62,16 @@ func decodeVariantExpectation(entry map[string]any) (variantExpectation, bool) {
 		return wanted, false
 	}
 	if raw, present := entry["price_egp_cents"]; present {
-		value, valid := minorExpectation(raw)
-		if !valid {
-			return wanted, false
+		wanted.egpPresent = true
+		if raw != nil {
+			value, valid := minorExpectation(raw)
+			if !valid {
+				return wanted, false
+			}
+			wanted.egp = &value
 		}
-		wanted.egp = &value
 	}
+
 	if raw, present := entry["price_usd_cents"]; present {
 		wanted.usdPresent = true
 		if raw != nil {
@@ -117,8 +122,14 @@ func (wanted variantExpectation) matches(row AdminProductVariant) bool {
 	if wanted.position != nil && *wanted.position != float64(row.Position) {
 		return false
 	}
-	if wanted.egp != nil && *wanted.egp != row.PriceEGPMinor {
-		return false
+	if wanted.egpPresent {
+		if wanted.egp == nil {
+			if row.PriceEGPMinor != nil {
+				return false
+			}
+		} else if row.PriceEGPMinor == nil || *wanted.egp != *row.PriceEGPMinor {
+			return false
+		}
 	}
 	if wanted.usdPresent {
 		if wanted.usd == nil {

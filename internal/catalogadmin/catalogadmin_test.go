@@ -156,3 +156,78 @@ func TestStringMoneyEnforcedAtCreation(t *testing.T) {
 		}
 	}
 }
+
+// These cases mirror Retail's nullable variantPrice/optMoney wire decoder.
+// Full envelopes exercise both single commands and every entry in a bulk set.
+func TestVariantMoneySingleAndBulkParity(t *testing.T) {
+	store, product, variant := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, key := range []string{"price_egp_cents", "price_usd_cents"} {
+		for _, tc := range []struct {
+			name  string
+			wire  json.RawMessage
+			valid bool
+		}{
+			{"omitted inherits", nil, true},
+			{"null inherits", json.RawMessage(`null`), true},
+			{"zero overrides", json.RawMessage(`"0"`), true},
+			{"leading zeroes", json.RawMessage(`"000000000000000000000000000000000000001"`), true},
+			{"trimmed digits", json.RawMessage(`"  123  "`), true},
+			{"beyond JS exact number", json.RawMessage(`"9007199254740993"`), true},
+			{"int64 maximum", json.RawMessage(`"9223372036854775807"`), true},
+			{"int64 overflow", json.RawMessage(`"9223372036854775808"`), false},
+			{"nineteen digits overflow", json.RawMessage(`"9999999999999999999"`), false},
+			{"long overflow", json.RawMessage(`"10000000000000000000"`), false},
+			{"JSON integer", json.RawMessage(`0`), false},
+			{"JSON unsafe integer", json.RawMessage(`9007199254740993`), false},
+			{"JSON decimal", json.RawMessage(`1.5`), false},
+			{"JSON exponent", json.RawMessage(`1e2`), false},
+			{"boolean", json.RawMessage(`false`), false},
+			{"object", json.RawMessage(`{}`), false},
+			{"array", json.RawMessage(`[]`), false},
+			{"empty", json.RawMessage(`""`), false},
+			{"blank", json.RawMessage(`" "`), false},
+			{"negative", json.RawMessage(`"-1"`), false},
+			{"plus sign", json.RawMessage(`"+1"`), false},
+			{"fraction", json.RawMessage(`"1.5"`), false},
+			{"exponent string", json.RawMessage(`"1e2"`), false},
+			{"non ASCII digits", json.RawMessage(`"١٢"`), false},
+		} {
+			for _, bulk := range []bool{false, true} {
+				t.Run(key+"/"+tc.name+map[bool]string{false: "/single", true: "/bulk"}[bulk], func(t *testing.T) {
+					entry := map[string]any{"sku": "OPTION-2", "is_active": true, "attributes": []any{}}
+					if tc.wire != nil {
+						entry[key] = tc.wire
+					}
+					typ, entity := TypeProductVariantUpdateV1, variant
+					payload := entry
+					if bulk {
+						typ, entity = TypeProductVariantsUpdateV1, product
+						payload = map[string]any{"product_id": product, "variants": []any{
+							map[string]any{"sku": "OPTION-1", "is_active": true, "attributes": []any{}, "price_egp_cents": "10"}, entry,
+						}}
+					} else {
+						entry["variant_id"] = variant
+					}
+					payload[ExpectedRevisionKeyOf(typ)] = 1
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					got, err := ValidateNewCommand(typ, store, entity, 1, raw)
+					if (err == nil) != tc.valid {
+						t.Fatalf("valid=%v want %v: %v", err == nil, tc.valid, err)
+					}
+					if tc.valid {
+						encoded, err := json.Marshal(got)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if string(encoded) != string(raw) {
+							t.Fatalf("validation changed immutable payload: got %s want %s", encoded, raw)
+						}
+					}
+				})
+			}
+		}
+	}
+}

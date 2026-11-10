@@ -6019,8 +6019,12 @@ components:
         sku: {type: string, description: Variant SKU identity. Read-only here; Phase 17 commands update it through catalog.product.variant.update.v1.}
         is_active: {type: boolean}
         deleted: {type: boolean, description: Tombstone flag. Deleted variants keep their rows for historical safety.}
-        price_egp_minor: {type: string, description: Exact minor units. Never a JSON number.}
-        price_usd_minor: {type: string, nullable: true, description: Null means unpriced in USD; zero is an explicit zero price.}
+        price_egp_minor: {type: string, nullable: true, description: Raw override in exact minor units. Null inherits the product price; zero is explicit.}
+        price_usd_minor: {type: string, nullable: true, description: Raw override. Null inherits the product price; zero is explicit.}
+        cost_egp_minor: {type: string, nullable: true, description: Raw EGP purchase-cost override. Null inherits the product cost.}
+        effective_price_egp_minor: {type: string, nullable: true, description: EGP override or product selling price.}
+        effective_price_usd_minor: {type: string, nullable: true, description: USD override or product selling price.}
+        effective_cost_egp_minor: {type: string, nullable: true, description: EGP override or product purchase cost. New USD sales convert this cost at the saved sale rate.}
         stock_quantity: {type: integer, format: int64, description: Read-only last-known variant stock.}
         position: {type: integer}
         combination_key: {type: string, description: Normalized stable option identity (entries joined with U+001F).}

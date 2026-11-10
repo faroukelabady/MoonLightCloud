@@ -267,6 +267,64 @@ func (b *builder) convert(c conversion, amount int64) int64 {
 	return quo.Int64()
 }
 
+type paymentWeight struct {
+	amount int64
+	count  int64
+}
+
+// A document's applied amounts determine only the method weights. Its whole
+// tax-adjusted target is converted once, so splits never gain or lose a cent.
+type documentPayments struct {
+	methods map[string]paymentWeight
+	total   int64
+}
+
+func (p *documentPayments) add(method string, amount int64) error {
+	if amount < 0 {
+		return apperr.New(apperr.Internal, "projection integrity: negative applied payment")
+	}
+	if p.methods == nil {
+		p.methods = map[string]paymentWeight{}
+	}
+	row := p.methods[method]
+	if p.total > math.MaxInt64-amount || row.amount > math.MaxInt64-amount || row.count == math.MaxInt64 {
+		return errOverflow()
+	}
+	p.total += amount
+	row.amount += amount
+	row.count++
+	p.methods[method] = row
+	return nil
+}
+
+func (p *documentPayments) allocate(target int64) (map[string]int64, []string, error) {
+	if target < 0 || (p.total == 0 && target > 0) {
+		return nil, nil, apperr.New(apperr.Internal, "projection integrity: payment target without applied amount")
+	}
+	methods := make([]string, 0, len(p.methods))
+	for method := range p.methods {
+		methods = append(methods, method)
+	}
+	sort.Strings(methods)
+	allocated := make(map[string]int64, len(methods))
+	var cumulative, previous int64
+	for _, method := range methods {
+		cumulative += p.methods[method].amount // add already checked the document sum.
+		var next int64
+		if p.total > 0 {
+			part := new(big.Int).Mul(big.NewInt(target), big.NewInt(cumulative))
+			part.Quo(part, big.NewInt(p.total))
+			if !part.IsInt64() {
+				return nil, nil, errOverflow()
+			}
+			next = part.Int64()
+		}
+		allocated[method] = next - previous
+		previous = next
+	}
+	return allocated, methods, nil
+}
+
 type lineKey struct{ sale, item string }
 
 type groupKey struct{ id, currency string }
@@ -550,24 +608,52 @@ func Build(f Facts, o Options) (Sections, error) {
 		payments[k] = row
 		return row
 	}
+	salePayments := map[string]*documentPayments{}
 	for _, p := range f.Payments {
-		c, ok := conv[p.SaleID]
+		_, ok := conv[p.SaleID]
 		if !ok || !sales[p.SaleID].InPeriod || !keep[p.SaleID] {
 			continue
 		}
-		applied := b.convert(c, p.Amount-p.Change)
-		row := payment(p.Method, c.currency)
-		row.PaymentCount++
-		b.add(&row.Amount, applied)
-		b.add(&row.Net, applied)
-		if i, ok := detailIndex[p.SaleID]; ok && !contains(details[i].PaymentMethods, p.Method) {
-			details[i].PaymentMethods = append(details[i].PaymentMethods, p.Method)
+		// The wire contract and Retail already define Amount as the applied
+		// contribution. Change is receipt metadata, never subtracted again.
+		if p.Amount < 0 || p.Change < 0 {
+			return Sections{}, apperr.New(apperr.Internal, "projection integrity: invalid applied payment")
+		}
+		doc := salePayments[p.SaleID]
+		if doc == nil {
+			doc = &documentPayments{}
+			salePayments[p.SaleID] = doc
+		}
+		if err := doc.add(p.Method, p.Amount); err != nil {
+			return Sections{}, err
+		}
+	}
+	for saleID, doc := range salePayments {
+		c := conv[saleID]
+		target := doc.total
+		if o.ExcludeTax {
+			s := sales[saleID]
+			target = withoutTax(s.Total, s.Tax)
+		}
+		allocated, methods, err := doc.allocate(b.convert(c, target))
+		if err != nil {
+			return Sections{}, err
+		}
+		for _, method := range methods {
+			row := payment(method, c.currency)
+			row.PaymentCount += doc.methods[method].count
+			b.add(&row.Amount, allocated[method])
+			b.add(&row.Net, allocated[method])
+			if i, ok := detailIndex[saleID]; ok {
+				details[i].PaymentMethods = append(details[i].PaymentMethods, method)
+			}
 		}
 	}
 
 	// Returns use the original Sale's conversion, so a refund offsets
 	// exactly what the Sale contributed.
 	returnConv := map[string]conversion{}
+	returnTargets := map[string]int64{}
 	for _, r := range f.Returns {
 		c, ok := conv[r.SaleID]
 		if !ok {
@@ -578,6 +664,7 @@ func Build(f Facts, o Options) (Sections, error) {
 		}
 		returnConv[r.ID] = c
 		refund := b.convert(c, withoutTax(r.Total, r.Tax))
+		returnTargets[r.ID] = refund
 		row := sum(c.currency)
 		row.ReturnCount++
 		b.add(&row.Refund, refund)
@@ -614,15 +701,33 @@ func Build(f Facts, o Options) (Sections, error) {
 			b.add(&g.NetSales, -refund)
 		}
 	}
+	refundPayments := map[string]*documentPayments{}
 	for _, rp := range f.ReturnPayments {
-		c, ok := returnConv[rp.ReturnID]
+		_, ok := returnConv[rp.ReturnID]
 		if !ok {
 			continue
 		}
-		refund := b.convert(c, rp.Amount)
-		row := payment(rp.Method, c.currency)
-		b.add(&row.Refund, refund)
-		b.add(&row.Net, -refund)
+		doc := refundPayments[rp.ReturnID]
+		if doc == nil {
+			doc = &documentPayments{}
+			refundPayments[rp.ReturnID] = doc
+		}
+		if err := doc.add(rp.Method, rp.Amount); err != nil {
+			return Sections{}, err
+		}
+	}
+	for returnID, doc := range refundPayments {
+		c := returnConv[returnID]
+		allocated, methods, err := doc.allocate(returnTargets[returnID])
+		if err != nil {
+			return Sections{}, err
+		}
+		for _, method := range methods {
+			refund := allocated[method]
+			row := payment(method, c.currency)
+			b.add(&row.Refund, refund)
+			b.add(&row.Net, -refund)
+		}
 	}
 
 	out := Sections{

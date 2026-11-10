@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
+import { act, cleanup, render, screen, fireEvent, within } from '@testing-library/svelte';
 import CatalogAdminPage from './CatalogAdminPage.svelte';
 import { dashboardApi, ApiError } from '../lib/api.js';
 import { setLang } from '../lib/i18n.svelte.js';
@@ -237,11 +237,160 @@ it('shows product and variant images with list thumbnails (ADR-0056)', async()=>
  expect(container.querySelectorAll('table.data span.thumb.empty').length).toBe(1);
  await fireEvent.click(screen.getByRole('button',{name:'Product pic'}));
  const gallery=await screen.findByTestId('product-images');
- // The Product gallery's main image is shown first; the Variant gallery is labelled by its SKU.
+ // Shared images show first; the base gallery has the friendly Original label.
  expect(gallery.querySelector('figure img')?.getAttribute('src')).toBe('/media/A/main');
  expect(screen.getByText('Waiting for upload')).toBeTruthy();
- await fireEvent.click(screen.getByRole('button',{name:'SKU-pic — Image 1'}));
+ await fireEvent.click(screen.getByRole('button',{name:'Original — Image 1'}));
  expect(gallery.querySelector('figure img')?.getAttribute('src')).toBe('/media/A/red');
  // The variant row carries its own main image.
  expect([...container.querySelectorAll('td.thumb-cell img')].map(e=>e.getAttribute('src'))).toEqual(['/media/A/red']);
+});
+
+
+const frameChoice = {id:'cfg-1',style_code:'classic',style_name_ar:'كلاسيكي',style_name_en:'Classic',color_code:'black',color_name_ar:'أسود',color_name_en:'Black',egp_delta_minor:'30000',usd_delta_minor:'600',enabled:true,position:0};
+it('shows a frame-read error instead of a false empty result and retries without losing product edits',async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue(productDetail('ready'));
+ api.adminConfigurations.mockRejectedValueOnce(new Error('private SQL path')).mockResolvedValue({configurations:[frameChoice]});
+ render(CatalogAdminPage,{store:'A'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ expect(await screen.findByText('Loading failed.')).toBeTruthy();
+ expect(screen.queryByText('No frame options.')).toBeNull();
+ expect(screen.queryByText('private SQL path')).toBeNull();
+ const name=screen.getByLabelText('Arabic name');
+ await fireEvent.input(name,{target:{value:'Unsent edit'}});
+ const region=screen.getByRole('region',{name:'Frame options'});
+ await fireEvent.click(within(region).getByRole('button',{name:'Retry'}));
+ expect((await screen.findByTestId('frame-configurations')).textContent).toContain('Classic / Black');
+ expect((name as HTMLInputElement).value).toBe('Unsent edit');
+ expect(api.adminProduct).toHaveBeenCalledTimes(1);
+ expect(api.adminConfigurations).toHaveBeenNthCalledWith(2,'A','p-ready');
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+});
+it('shows frame loading separately and reports empty only after a successful frame read',async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue(productDetail('ready'));
+ let finish!: (value:unknown)=>void;
+ api.adminConfigurations.mockImplementation(()=>new Promise(resolve=>finish=resolve));
+ render(CatalogAdminPage,{store:'A'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await screen.findByLabelText('Arabic name');
+ const region=await screen.findByRole('region',{name:'Frame options'});
+ expect(region.getAttribute('aria-busy')).toBe('true');
+ expect(within(region).getByRole('status').textContent).toBe('Loading…');
+ expect(screen.queryByText('No frame options.')).toBeNull();
+ expect(screen.queryByText('Loading product…')).toBeNull();
+ await act(async()=>{finish({configurations:[]});});
+ expect(within(region).getByText('No frame options.')).toBeTruthy();
+ expect(region.getAttribute('aria-busy')).toBe('false');
+});
+it('ignores a late frame result after selecting a different product',async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:[productRow('ready'),productRow('other')],next_cursor:''});
+ api.adminProduct.mockImplementation((_store:string,id:string)=>Promise.resolve(productDetail(id==='p-ready'?'ready':'other')));
+ let finish!: (value:unknown)=>void;
+ api.adminConfigurations.mockImplementation((_store:string,id:string)=>id==='p-ready'?new Promise(resolve=>finish=resolve):Promise.resolve({configurations:[{...frameChoice,style_name_en:'Modern'}]}));
+ render(CatalogAdminPage,{store:'A'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await vi.waitFor(()=>expect(api.adminConfigurations).toHaveBeenCalledWith('A','p-ready'));
+ await fireEvent.click(screen.getByRole('button',{name:'Product other'}));
+ expect((await screen.findByTestId('frame-configurations')).textContent).toContain('Modern / Black');
+ await act(async()=>{finish({configurations:[frameChoice]});});
+ expect(screen.getByTestId('frame-configurations').textContent).toContain('Modern / Black');
+ expect(screen.queryByText(/Classic \/ Black/)).toBeNull();
+});
+it('ignores a failed retry from the previous Store and retains the new Store frame choices',async()=>{
+ defaults();
+ api.adminProducts.mockImplementation((store:string)=>Promise.resolve({products:fixtures(store).products,next_cursor:''}));
+ api.adminProduct.mockImplementation((store:string)=>Promise.resolve(productDetail(store)));
+ let failOld!: (error:Error)=>void;
+ api.adminConfigurations.mockRejectedValueOnce(new Error('first read')).mockImplementationOnce(()=>new Promise((_resolve,reject)=>failOld=reject)).mockResolvedValue({configurations:[{...frameChoice,style_name_en:'Modern'}]});
+ const page=render(CatalogAdminPage,{store:'A'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product A'}));
+ await screen.findByText('Loading failed.');
+ await fireEvent.click(within(screen.getByRole('region',{name:'Frame options'})).getByRole('button',{name:'Retry'}));
+ await page.rerender({store:'B'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product B'}));
+ expect((await screen.findByTestId('frame-configurations')).textContent).toContain('Modern / Black');
+ await act(async()=>{failOld(new Error('private late failure'));});
+ expect(screen.queryByText('Loading failed.')).toBeNull();
+ expect(screen.queryByText('private late failure')).toBeNull();
+ expect(screen.getByTestId('frame-configurations').textContent).toContain('Modern / Black');
+});
+
+it.each([['',null],['   ',null],['0','0']])('queues a name edit with purchase cost %j as %j only after OTP',async(input,expected)=>{
+ defaults();
+ api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ const detail={...productDetail('ready'),cost_minor:null};
+ api.adminProduct.mockResolvedValue(detail);
+ api.adminConfigurations.mockResolvedValue({configurations:[]});
+ api.adminCreateCommand.mockResolvedValue({id:'command-unknown-cost'});
+ render(CatalogAdminPage,{store:'store-A'});
+ await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ const cost=await screen.findByLabelText('Cost (EGP)');
+ expect((cost as HTMLInputElement).value).toBe('');
+ expect(cost.getAttribute('aria-describedby')).toBe('pd-cost-hint');
+ await fireEvent.input(document.querySelector('#pd-ar')!,{target:{value:'Renamed product'}});
+ await fireEvent.input(cost,{target:{value:input}});
+ await fireEvent.click(screen.getByRole('button',{name:'Queue details change'}));
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+ await confirmCode();
+ await vi.waitFor(()=>expect(api.adminCreateCommand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({store_id:'store-A',type:'catalog.product.details.update.v1',payload:expect.objectContaining({arabic_name:'Renamed product',cost_cents:expected})}),'123456'));
+ expect(detail.cost_minor).toBeNull();
+ expect(detail.name_ar).toBe('Product ready');
+ expect(api.adminProduct).toHaveBeenCalledTimes(1);
+});
+
+it.each(['-1','1.001','not-money'])('rejects malformed nonblank purchase cost %j before opening OTP',async(value)=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue({...productDetail('ready'),cost_minor:null});api.adminConfigurations.mockResolvedValue({configurations:[]});
+ render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ await fireEvent.input(document.querySelector('#pd-cost')!,{target:{value}});
+ await fireEvent.click(screen.getByRole('button',{name:'Queue details change'}));
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+ expect(screen.queryByLabelText('Authenticator code')).toBeNull();
+ expect(screen.getByText(/Enter prices in pounds or dollars/)).toBeTruthy();
+});
+
+function costVariantDetails(){
+ const base=productDetail('ready').variants[0];
+ const attr={definition_code:'color',value_code:'gold',definition_name_ar:'اللون',definition_name_en:'Color',name_ar:'ذهبي',name_en:'Gold',position:0};
+ return {...productDetail('ready'),variant_count:3,variants:[
+  {...base,variant_id:'base',sku:'ML-ORIGINAL',combination_key:'',attributes:[],price_egp_minor:null,price_usd_minor:null,cost_egp_minor:null,effective_price_egp_minor:'50000',effective_price_usd_minor:'1000',effective_cost_egp_minor:'30000'},
+  {...base,variant_id:'gold',sku:'ML-GOLD',attributes:[attr],price_egp_minor:'0',price_usd_minor:'9007199254740993',cost_egp_minor:'0',effective_price_egp_minor:'0',effective_price_usd_minor:'9007199254740993',effective_cost_egp_minor:'0'},
+  {...base,variant_id:'unknown',sku:'ML-UNKNOWN',attributes:[{...attr,value_code:'blue',name_ar:'أزرق',name_en:'Blue'}],price_egp_minor:null,price_usd_minor:null,cost_egp_minor:null,effective_price_egp_minor:null,effective_price_usd_minor:null,effective_cost_egp_minor:null}
+ ]};
+}
+it('shows effective variant selling prices and purchase cost with raw inheritance, explicit zero and exact cents',async()=>{
+ defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue(costVariantDetails());api.adminConfigurations.mockResolvedValue({configurations:[]});
+ render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ const table=await screen.findByRole('table',{name:'Variants'});
+ expect(within(table).getByRole('columnheader',{name:'Purchase cost (EGP)'})).toBeTruthy();
+ expect(within(table).getByRole('columnheader',{name:'Selling price (EGP)'})).toBeTruthy();
+ expect(within(table).getByRole('columnheader',{name:'Selling price (USD)'})).toBeTruthy();
+ const original=within(table).getByText('ML-ORIGINAL').closest('tr')!;
+ expect(within(original).getByText('Original')).toBeTruthy();
+ expect(original.textContent).toContain('300 EGP');expect(original.textContent).toContain('500 EGP');expect(original.textContent).toContain('$10.00');
+ expect(within(original).getAllByText('Uses product value')).toHaveLength(3);
+ const gold=within(table).getByText('ML-GOLD').closest('tr')!;
+ expect(within(gold).getAllByText('0 EGP')).toHaveLength(2);
+ expect(within(gold).getAllByText('Custom value')).toHaveLength(3);
+ expect(within(gold).getByText('$90,071,992,547,409.93')).toBeTruthy();
+ const unknown=within(table).getByText('ML-UNKNOWN').closest('tr')!;
+ expect(within(unknown).getAllByText('Not recorded')).toHaveLength(3);
+ expect(within(unknown).queryByText('0 EGP')).toBeNull();
+ expect(api.adminCreateCommand).not.toHaveBeenCalled();
+});
+it('localizes Original and price inheritance labels in Arabic while keeping SKUs and money LTR',async()=>{
+ setLang('ar');defaults();api.adminProducts.mockResolvedValue({products:fixtures('ready').products,next_cursor:''});
+ api.adminProduct.mockResolvedValue(costVariantDetails());api.adminConfigurations.mockResolvedValue({configurations:[]});
+ render(CatalogAdminPage,{store:'A'});await fireEvent.click(await screen.findByRole('button',{name:'Product ready'}));
+ const table=await screen.findByRole('table',{name:'الخيارات'});
+ expect(within(table).getByText('الأصلي')).toBeTruthy();
+ expect(within(table).getByRole('columnheader',{name:'تكلفة الشراء (جنيه)'})).toBeTruthy();
+ expect(within(table).getByRole('columnheader',{name:'سعر البيع (دولار)'})).toBeTruthy();
+ expect(within(table).getAllByText('قيمة خاصة')).toHaveLength(3);
+ expect(within(table).getByText('ML-GOLD').getAttribute('dir')).toBe('ltr');
+ expect(within(table).getByText('$90,071,992,547,409.93').getAttribute('dir')).toBe('ltr');
+ expect(table.textContent).not.toContain('Uses product value');
 });

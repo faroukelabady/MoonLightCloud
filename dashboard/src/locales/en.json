@@ -528,11 +528,17 @@
 		"lineContext": {
 			"title": "Line prices and options",
 			"notRecorded": "Not recorded",
-			"unitCost": "Purchase cost per unit",
-			"catalogPrice": "Variant selling price per unit at sale time",
-			"agreedPrice": "Agreed selling price per unit",
+			"unitCost": "Purchase cost (each)",
+			"catalogPrice": "Selling price (each)",
+			"agreedPrice": "Sold for (each)",
 			"hint": "These are the recorded sale-currency values. The variant selling price includes its price override, when set. The agreed price is what the customer paid before sale-level adjustments. Missing historical values are not filled from current prices.",
-			"costHint": "Purchase cost uses the cost recorded at sale time, including a variant cost override when set. A selling-price override does not change purchase cost."
+			"costHint": "Purchase cost uses the cost recorded at sale time, including a variant cost override when set. A selling-price override does not change purchase cost.",
+			"variant": "Variant value",
+			"sku": "SKU",
+			"originalItem": "Original",
+			"lineTotal": "Item total",
+			"saleTotal": "Sale total",
+			"flatHint": "Each row is one sold item. The same sale reference groups its items. The sale total appears once in the report currency. Item prices stay in the original sale currency."
 		}
 	},
 	"settingsPage": {
@@ -1062,7 +1068,14 @@
 		"commandDetail": "Command detail",
 		"created": "Created",
 		"createWaiting": "Create “{key}” — waiting for Retail",
-		"cancelPending": "Cancel pending command"
+		"cancelPending": "Cancel pending command",
+		"originalVariant": "Original",
+		"variantCostEgp": "Purchase cost (EGP)",
+		"variantPriceEgp": "Selling price (EGP)",
+		"variantPriceUsd": "Selling price (USD)",
+		"valueFromProduct": "Uses product value",
+		"valueCustom": "Custom value",
+		"costUnknownHint": "Leave blank when the purchase cost is not known. Enter 0 only for a known zero cost. USD sales convert the EGP purchase cost at the saved sale rate."
 	},
 	"operationsPage": {
 		"title": "Operations",

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { lang, msg } from '../lib/i18n.svelte.js';
 	import {
 		commandScope,
@@ -37,6 +37,7 @@
 	let tab: Tab = $state('products');
 
 	let epoch = 0;
+	onDestroy(() => { epoch++; });
 	const requests: Record<string, number> = {};
 	let notice = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
 	// Unsaved choices in the editors' selectors, keyed by field and entity.
@@ -187,20 +188,16 @@
 		const my = epoch;
 		const request = requests.openProduct = (requests.openProduct ?? 0) + 1;
 		productState = 'loading';
+		requests.configurations = (requests.configurations ?? 0) + 1;
+		configurations = [];
+		configurationsState = 'idle';
 		try {
 			const v = await dashboardApi.adminProduct(store, id);
 			if (my !== epoch || request !== requests.openProduct) return;
 			selectedProduct = v;
 			previewImage = null;
-			try {
-				const cfgs = await dashboardApi.adminConfigurations(store, id);
-				if (my !== epoch || request !== requests.openProduct) return;
-				configurations = cfgs.configurations;
-			} catch {
-				if (my !== epoch || request !== requests.openProduct) return;
-				configurations = [];
-			}
 			productState = 'loaded';
+			void loadConfigurations(id);
 		} catch {
 			if (my !== epoch || request !== requests.openProduct) return;
 			productState = 'error';
@@ -218,9 +215,10 @@
 		// Prices are typed in pounds/dollars; the command carries exact minor units.
 		const egp = decimalToMinor(field('pd-egp'));
 		const usd = decimalToMinor(field('pd-usd'));
-		const cost = decimalToMinor(field('pd-cost'));
+		const costInput = field('pd-cost').trim();
+		const cost = costInput === '' ? null : decimalToMinor(costInput);
 		if (!ar) return say('err', k('errors.arabicNameRequired'));
-		if (egp === null || usd === null || cost === null) return say('err', k('errors.priceFormat'));
+		if (egp === null || usd === null || (costInput !== '' && cost === null)) return say('err', k('errors.priceFormat'));
 		void submit(productDetailsCommand(store, selectedProduct, { arabic_name: ar, english_name: en, egp_price_cents: egp, usd_price_cents: usd, cost_cents: cost }));
 	}
 
@@ -240,6 +238,23 @@
 	// Frame choices are shared and edited in Retail (ADR-049 1g); Cloud
 	// shows the product's projected choices read-only.
 	let configurations: AdminConfiguration[] = $state([]);
+	let configurationsState = $state<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+	async function loadConfigurations(id: string) {
+		const my = epoch;
+		const productRequest = requests.openProduct;
+		const request = requests.configurations = (requests.configurations ?? 0) + 1;
+		const current = () => my === epoch && productRequest === requests.openProduct && request === requests.configurations;
+		configurations = [];
+		configurationsState = 'loading';
+		try {
+			const result = await dashboardApi.adminConfigurations(store, id);
+			if (!current()) return;
+			configurations = result.configurations;
+			configurationsState = 'loaded';
+		} catch {
+			if (current()) configurationsState = 'error';
+		}
+	}
 
 	// Images (ADR-0056) are edited in Retail; Cloud shows the Product
 	// gallery and each Variant gallery read-only, main image first.
@@ -252,7 +267,7 @@
 	}
 
 	function variantLabel(v: AdminProductVariant): string {
-		return v.attributes.map((a) => pick(a.name_ar, a.name_en)).join(' · ') || v.sku;
+		return v.attributes.map((a) => pick(a.name_ar, a.name_en)).join(' · ') || k('originalVariant');
 	}
 
 	function galleries(p: AdminProductDetail): Gallery[] {
@@ -489,6 +504,7 @@
 		permissions = null;
 		permissionsState = 'loading';
 		productState = 'idle';
+		configurationsState = 'idle';
 		configurations = [];
 		previewImage = null;
 		products = [];
@@ -525,6 +541,11 @@
 	const tabs: Tab[] = ['products', 'types', 'categories', 'tags', 'commands'];
 	const scopes: CommandScope[] = ['online_selling', 'products', 'catalog'];
 </script>
+
+{#snippet variantAmount(value: string | null | undefined, rawOverride: string | null | undefined, currency: 'EGP' | 'USD')}
+    {#if value == null}<span>{msg('salesReportView.lineContext.notRecorded')}</span>{:else}<bdi dir="ltr">{formatMinor(value,currency)}</bdi>{/if}
+    <small class="muted">{rawOverride == null ? k('valueFromProduct') : k('valueCustom')}</small>
+{/snippet}
 
 {#snippet yesNo(on: boolean)}
 	<span class="pill" class:on>{on ? k('yes') : k('no')}</span>
@@ -661,20 +682,25 @@
 						{/if}
 						{#if p.variants && p.variants.length > 0}
 							<h4>{k('variants')}</h4>
-							<table class="data">
-								<thead><tr><th><span class="sr-only">{k('image')}</span></th><th>{k('sku')}</th><th>{k('option')}</th><th>{k('stock')}</th><th>{k('state')}</th></tr></thead>
+							<div class="variant-table-scroll">
+							<table class="data variant-table" aria-label={k('variants')}>
+								<thead><tr><th scope="col"><span class="sr-only">{k('image')}</span></th><th scope="col">{k('sku')}</th><th scope="col">{k('option')}</th><th scope="col">{k('stock')}</th><th scope="col">{k('state')}</th><th scope="col">{k('variantCostEgp')}</th><th scope="col">{k('variantPriceEgp')}</th><th scope="col">{k('variantPriceUsd')}</th></tr></thead>
 								<tbody>
 									{#each p.variants as v (v.variant_id)}
 										<tr>
 											<td class="thumb-cell">{@render thumb(variantThumbnail(p, v.variant_id))}</td>
 											<td class="num" dir="ltr">{v.sku}</td>
-											<td>{v.attributes.map((a) => `${pick(a.definition_name_ar, a.definition_name_en)}: ${pick(a.name_ar, a.name_en)}`).join(' · ') || '—'}</td>
+											<td>{v.attributes.map((a) => `${pick(a.definition_name_ar, a.definition_name_en)}: ${pick(a.name_ar, a.name_en)}`).join(' · ') || k('originalVariant')}</td>
 											<td class="num" dir="ltr">{v.stock_quantity}</td>
 											<td><span class="pill" class:on={!v.deleted && v.is_active}>{v.deleted ? k('deleted') : v.is_active ? k('active') : k('inactive')}</span></td>
+											<td class="variant-money num">{@render variantAmount(v.effective_cost_egp_minor,v.cost_egp_minor,'EGP')}</td>
+											<td class="variant-money num">{@render variantAmount(v.effective_price_egp_minor,v.price_egp_minor,'EGP')}</td>
+											<td class="variant-money num">{@render variantAmount(v.effective_price_usd_minor,v.price_usd_minor,'USD')}</td>
 										</tr>
 									{/each}
 								</tbody>
 							</table>
+							</div>
 						{/if}
 						{#if p.has_pending}<p class="notice pending-note" role="status">{k('pendingProductNote')}</p>{/if}
 						<h4>{k('detailsAndPrices')}</h4>
@@ -685,7 +711,7 @@
 								<label class="field">{k('englishName')} <input id="pd-en" type="text" value={p.name_en ?? ''} dir="ltr" /></label>
 								<label class="field">{k('priceEgp')} <input id="pd-egp" type="text" inputmode="decimal" value={minorToDecimal(p.egp_price_minor)} dir="ltr" /></label>
 								<label class="field">{k('priceUsd')} <input id="pd-usd" type="text" inputmode="decimal" value={minorToDecimal(p.usd_price_minor ?? '0')} dir="ltr" /></label>
-								<label class="field">{k('costEgp')} <input id="pd-cost" type="text" inputmode="decimal" value={minorToDecimal(p.cost_minor)} dir="ltr" /></label>
+								<div class="field"><label for="pd-cost">{k('costEgp')}</label><input id="pd-cost" type="text" inputmode="decimal" value={p.cost_minor == null ? '' : minorToDecimal(p.cost_minor)} dir="ltr" aria-describedby="pd-cost-hint" /><small class="muted" id="pd-cost-hint">{k('costUnknownHint')}</small></div>
 							</div>
 							<button class="btn-primary btn-sm" type="button" disabled={saving} onclick={saveProductDetails}>{k('queueDetails')}</button>
 						</fieldset>
@@ -733,16 +759,25 @@
 							</fieldset>
 							<div><button class="btn-primary btn-sm" type="button" disabled={saving} onclick={saveProductClassification}>{k('queueClassification')}</button></div>
 						</fieldset>
-						<h4>{k('frameOptions')}</h4>
-						<p class="muted">{k('frameOptionsReadOnly')}</p>
-						{#if configurations.length === 0}<p class="muted">{k('noFrameOptions')}</p>
-						{:else}
-							<ul data-testid="frame-configurations">
-								{#each configurations as c (c.id)}
-									<li>{pick(c.style_name_ar, c.style_name_en)} / {pick(c.color_name_ar, c.color_name_en)} <span class="num">+{formatMinor(c.egp_delta_minor, 'EGP')}</span>{#if c.usd_delta_minor !== null}{' · '}<span class="num">+{formatMinor(c.usd_delta_minor, 'USD')}</span>{/if}{c.enabled ? '' : ` · ${k('inactive')}`}</li>
-								{/each}
-							</ul>
-						{/if}
+						<section aria-labelledby="frame-options-title" aria-busy={configurationsState === 'loading'}>
+							<h4 id="frame-options-title">{k('frameOptions')}</h4>
+							<p class="muted">{k('frameOptionsReadOnly')}</p>
+							{#if configurationsState === 'loading'}
+								<p class="muted" role="status">{k('loading')}</p>
+							{:else if configurationsState === 'error'}
+								<p class="muted" role="alert">{k('loadingFailed')}</p>
+								<button class="btn-secondary btn-sm" type="button" onclick={() => void loadConfigurations(p.product_id)}>{k('retry')}</button>
+							{:else if configurationsState === 'loaded'}
+								{#if configurations.length === 0}<p class="muted">{k('noFrameOptions')}</p>
+								{:else}
+									<ul data-testid="frame-configurations">
+										{#each configurations as c (c.id)}
+											<li>{pick(c.style_name_ar, c.style_name_en)} / {pick(c.color_name_ar, c.color_name_en)} <span class="num">+{formatMinor(c.egp_delta_minor, 'EGP')}</span>{#if c.usd_delta_minor !== null}{' · '}<span class="num">+{formatMinor(c.usd_delta_minor, 'USD')}</span>{/if}{c.enabled ? '' : ` · ${k('inactive')}`}</li>
+										{/each}
+									</ul>
+								{/if}
+							{/if}
+						</section>
 					</section>
 				{/if}
 			</div>
@@ -1032,6 +1067,10 @@
 	fieldset.plain:disabled { opacity: 0.6; }
 	.muted { opacity: 0.75; }
 	.num { font-variant-numeric: tabular-nums; }
+    .variant-table-scroll { overflow-x: auto; }
+    .variant-table { min-width: 48rem; }
+    .variant-money { white-space: nowrap; }
+    .variant-money small { display: block; margin-block-start: 0.2rem; }
 	.permissions { display: grid; grid-template-columns: minmax(12rem, auto) minmax(0, 1fr); gap: 0.25rem 1rem; align-items: center; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 0.6rem 0.9rem; background: var(--surface-muted); }
 	.permissions-head h3 { margin: 0; font-size: 0.9rem; }
 	.permissions-head p { margin: 0.1rem 0 0; font-size: 0.78rem; }

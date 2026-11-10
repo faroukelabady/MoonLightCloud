@@ -218,21 +218,25 @@ type AdminProductVariantAttribute struct {
 // identity, exact minor-unit prices, last-known stock, and options.
 // Tombstones keep their rows (deleted=true) for historical safety.
 type AdminProductVariant struct {
-	VariantID         string                         `json:"variant_id"`
-	ProductID         string                         `json:"product_id"`
-	SKU               string                         `json:"sku"`
-	IsActive          bool                           `json:"is_active"`
-	Deleted           bool                           `json:"deleted"`
-	PriceEGPMinor     string                         `json:"price_egp_minor"`
-	PriceUSDMinor     *string                        `json:"price_usd_minor"`
-	StockQuantity     int64                          `json:"stock_quantity"`
-	Position          int                            `json:"position"`
-	CombinationKey    string                         `json:"combination_key"`
-	VariantRevision   int64                          `json:"variant_revision"`
-	CatalogRevision   int64                          `json:"catalog_revision"`
-	InventoryRevision int64                          `json:"inventory_revision"`
-	HasPending        bool                           `json:"has_pending"`
-	Attributes        []AdminProductVariantAttribute `json:"attributes"`
+	VariantID              string                         `json:"variant_id"`
+	ProductID              string                         `json:"product_id"`
+	SKU                    string                         `json:"sku"`
+	IsActive               bool                           `json:"is_active"`
+	Deleted                bool                           `json:"deleted"`
+	PriceEGPMinor          *string                        `json:"price_egp_minor"`
+	PriceUSDMinor          *string                        `json:"price_usd_minor"`
+	StockQuantity          int64                          `json:"stock_quantity"`
+	Position               int                            `json:"position"`
+	CombinationKey         string                         `json:"combination_key"`
+	VariantRevision        int64                          `json:"variant_revision"`
+	CatalogRevision        int64                          `json:"catalog_revision"`
+	InventoryRevision      int64                          `json:"inventory_revision"`
+	HasPending             bool                           `json:"has_pending"`
+	Attributes             []AdminProductVariantAttribute `json:"attributes"`
+	CostEGPMinor           *string                        `json:"cost_egp_minor"`
+	EffectivePriceEGPMinor *string                        `json:"effective_price_egp_minor"`
+	EffectivePriceUSDMinor *string                        `json:"effective_price_usd_minor"`
+	EffectiveCostEGPMinor  *string                        `json:"effective_cost_egp_minor"`
 }
 
 // Store persists commands, targets and capabilities plus projection

@@ -426,11 +426,13 @@ func boundPayload(typ string, payload map[string]any) error {
 			return err
 		}
 	}
-	// Money travels as digit strings (never JSON numbers): float64
-	// cannot represent values above 2^53, so the string-only rule is
-	// enforced at creation as well as at Retail apply time. Null is
-	// allowed only for explicitly nullable USD deltas.
-	for _, key := range []string{"egp_price_cents", "usd_price_cents", "cost_cents", "egp_delta_cents", "price_egp_cents", "price_usd_cents"} {
+	return boundMinorMoney(payload)
+}
+
+// Money travels as nullable exact digit strings, including within bulk
+// variant entries. Retail still owns canonical business acceptance.
+func boundMinorMoney(payload map[string]any) error {
+	for _, key := range []string{"egp_price_cents", "usd_price_cents", "cost_cents", "egp_delta_cents", "price_egp_cents", "price_usd_cents", "usd_delta_cents"} {
 		raw, present := payload[key]
 		if !present || raw == nil {
 			continue
@@ -439,28 +441,30 @@ func boundPayload(typ string, payload map[string]any) error {
 			return err
 		}
 	}
-	if raw, present := payload["usd_delta_cents"]; present && raw != nil {
-		if err := checkMinorString("usd_delta_cents", raw); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// checkMinorString enforces non-empty ASCII digits (int64 range is
-// rechecked at Retail; creation only guards shape).
+// checkMinorString matches Retail's exact, non-negative int64 decoder without
+// changing the immutable payload. Leading zeroes and outer space are accepted.
 func checkMinorString(key string, raw any) error {
 	s, ok := raw.(string)
-	if !ok || s == "" {
+	if !ok {
 		return fmt.Errorf("invalid %s: want minor-unit digit string", key)
 	}
-	if len(s) > 19 {
-		return fmt.Errorf("invalid %s: exceeds int64 range", key)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("invalid %s: want minor-unit digit string", key)
 	}
+	var value int64
 	for i := 0; i < len(s); i++ {
 		if s[i] < '0' || s[i] > '9' {
 			return fmt.Errorf("invalid %s: want minor-unit digit string", key)
 		}
+		digit := int64(s[i] - '0')
+		if value > (math.MaxInt64-digit)/10 {
+			return fmt.Errorf("invalid %s: exceeds int64 range", key)
+		}
+		value = value*10 + digit
 	}
 	return nil
 }
@@ -476,9 +480,11 @@ func boundVariantPayload(payload map[string]any) error {
 		return err
 	}
 	if raw, present := payload["attributes"]; present && raw != nil {
-		return boundVariantAttributes(raw)
+		if err := boundVariantAttributes(raw); err != nil {
+			return err
+		}
 	}
-	return nil
+	return boundMinorMoney(payload)
 }
 
 // variantStrLen bounds one optional string field of a variant object.

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ApiError, type PeriodParams } from '../lib/http.js';
 	import { emptyFilter, reportsApi, type CurrencyMixRow, type FilterOption, type ReportDisplay, type ReportFilter, type ReportShop, type ReportSummaryRow, type SalesReport } from '../lib/reportsApi.js';
 		import { formatInt, formatMicrorate, formatMinor } from '../lib/money.js';
@@ -33,6 +34,28 @@
 	let costsError = $state(false);
 
 	let generation = 0;
+	let previousScope: { store: string; period: string; from: string; to: string } | null = null;
+	$effect.pre(() => {
+		const next = { store, period: params.period, from: params.from_date ?? '', to: params.to_date ?? '' };
+		untrack(() => {
+			const changedStore = previousScope !== null && previousScope.store !== next.store;
+			const changedPeriod = previousScope !== null && (previousScope.period !== next.period || previousScope.from !== next.from || previousScope.to !== next.to);
+			if (changedStore || changedPeriod) {
+				// Reset before the next read: an old page or report-only expense must
+				// never be applied to a different header scope. Currency/payment stay;
+				// classification IDs stay only while their Store remains the same.
+				generation++;
+				offset = 0;
+				if (changedStore) filter = { ...emptyFilter(), payment_method: filter.payment_method };
+				drafts = [];
+				costs = [];
+				costsError = false;
+				report = null;
+				error = '';
+			}
+			previousScope = next;
+		});
+	});
 	$effect(() => {
 		// Reload when the header period or Store, the currency or the page changes.
 		const request = { params: { ...params }, store, currency, filter: $state.snapshot(filter) as ReportFilter, offset };
@@ -116,7 +139,6 @@
 	);
 	let rates = $derived(report?.exchange_rate);
 	// The column appears only when some Sale on the page was converted.
-	let showRecorded = $derived((report?.sales ?? []).some((row) => row.rate_microrate !== null));
 	function rateText(microrate: string) {
 		return t(`الدولار = ${formatMicrorate(microrate)} جنيه`, `1 USD = ${formatMicrorate(microrate)} EGP`);
 	}
@@ -603,37 +625,7 @@
 			<div class="report-panel" class:active={panel === 'details'}>
 				<section class="card report-section report-details" aria-labelledby="report-sales-heading">
 					<h2 id="report-sales-heading">{msg('salesReportView.salesDetails')}</h2><p>{msg('salesReportView.lineContext.costHint')}</p>
-					<div class="table-scroll">
-						<table>
-							<thead>
-								<tr>
-									<th>{msg('salesReportView.reference')}</th><th>{msg('salesReportView.date')}</th><th>{msg('salesReportView.product')}</th>
-									<th>{msg('salesReportView.category')}</th><th>{msg('salesReportView.subcategory')}</th><th>{msg('salesReportView.items')}</th>
-									<th>{msg('salesReportView.payment')}</th><th>{msg('salesReportView.originalCost')}</th><th>{msg('salesReportView.sales')}</th>
-									{#if showRecorded}<th>{msg('salesReportView.recordedAs')}</th>{/if}
-								</tr>
-							</thead>
-							<tbody>
-								{#each report.sales as row (row.sale_id)}
-									<tr>
-										<td class="mono"><bdi dir="ltr">{row.sale_number}</bdi></td>
-										<td>{absoluteTime(row.occurred_at, lang())}</td>
-										<td>{row.products}<small class="mono" dir="ltr">{row.skus}</small></td>
-										<td>{(lang() === 'ar' ? row.root_names_ar : row.root_names_en) || msg('salesReportView.classificationUnavailable')}</td>
-										<td>{(lang() === 'ar' ? row.subcategory_names_ar : row.subcategory_names_en) || '—'}</td>
-										<td><bdi class="num">{formatInt(row.items_sold)}</bdi></td>
-										<td>{row.payment_methods.map(method).join(msg('salesReportView.text'))}</td>
-										{@render cost(row)}
-										<td><bdi class="num">{money(row.total_minor, row.currency)}</bdi></td>
-										{#if showRecorded}
-											<td>{#if row.rate_microrate !== null}<bdi class="num">{money(row.original_total_minor, row.original_currency)}</bdi><small>{msg('salesReportView.at')} <bdi class="num">{formatMicrorate(row.rate_microrate)}</bdi></small>{:else}—{/if}</td>
-										{/if}
-									</tr>
- {#if row.lines?.length}<tr><td class="sale-line-context-cell" colspan={showRecorded?10:9}><ReportSaleLines lines={row.lines} saleID={row.sale_id} saleNumber={row.sale_number} /></td></tr>{/if}
-								{/each}
-							</tbody>
-						</table>
-					</div>
+                    <ReportSaleLines sales={report.sales} {offset} />
 					{#if report.sales_total_count > PAGE}
 						<div class="pager">
 							<span class="num">{offset + 1}–{Math.min(offset + report.sales.length, report.sales_total_count)} / {report.sales_total_count}</span>

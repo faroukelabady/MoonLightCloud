@@ -12,7 +12,7 @@ func TestReportConfigurationUpgradePreservesExistingData(t *testing.T) {
 	if err := migrate.Up(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate.DownTo(ctx, conn, 115); err != nil {
+	if err := migrate.DownTo(ctx, conn, 117); err != nil {
 		t.Fatal(err)
 	}
 	// Seed exactly the previous writer's shape, before snapshot columns exist.
@@ -46,7 +46,7 @@ VALUES ('33333333-3333-4333-8333-333333333333','22222222-2222-4222-8222-22222222
 		t.Fatal("upgrade changed recipient")
 	}
 	// A safe rollback and re-upgrade retain the same original rows.
-	if err := migrate.DownTo(ctx, conn, 115); err != nil {
+	if err := migrate.DownTo(ctx, conn, 117); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate.Up(ctx, conn); err != nil {
@@ -60,11 +60,11 @@ VALUES ('44444444-4444-4444-8444-444444444444','22222222-2222-4222-8222-22222222
 	if _, err := conn.Exec(`UPDATE notification_recipients SET deleted_at=now(),enabled=false`); err != nil {
 		t.Fatal(err)
 	}
-	err = migrate.DownTo(ctx, conn, 115)
+	err = migrate.DownTo(ctx, conn, 117)
 	if err == nil || !strings.Contains(err.Error(), "would discard retained configuration or history") {
 		t.Fatalf("unsafe downgrade was not refused: %v", err)
 	}
-	if version(t, conn, ctx) != 116 {
+	if version(t, conn, ctx) != 118 {
 		t.Fatal("refused downgrade changed schema version")
 	}
 	var count int

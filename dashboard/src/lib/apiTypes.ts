@@ -607,7 +607,7 @@ export interface AdminProductVariant {
 	sku: string;
 	is_active: boolean;
 	deleted: boolean;
-	price_egp_minor: string;
+	price_egp_minor: string | null;
 	price_usd_minor: string | null;
 	stock_quantity: number;
 	position: number;
@@ -617,6 +617,11 @@ export interface AdminProductVariant {
 	inventory_revision: number;
 	has_pending: boolean;
 	attributes: AdminProductVariantAttribute[];
+ cost_egp_minor?: string | null;
+ effective_price_egp_minor?: string | null;
+ effective_price_usd_minor?: string | null;
+ effective_cost_egp_minor?: string | null;
+
 }
 
 export interface AdminCategoryRow {

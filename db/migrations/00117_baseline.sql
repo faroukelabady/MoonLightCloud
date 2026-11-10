@@ -533,7 +533,6 @@ CREATE TABLE commerce_online_order_lines (
     unsupported_reason  TEXT NOT NULL DEFAULT '' CHECK (char_length(unsupported_reason) <= 32),
     PRIMARY KEY (provider_key, external_order_id, external_line_id)
 );
-CREATE INDEX idx_commerce_online_order_lines_order ON commerce_online_order_lines (provider_key, external_order_id);
 
 CREATE TABLE commerce_online_order_addresses (
     provider_key      TEXT NOT NULL,
@@ -766,7 +765,6 @@ CREATE TABLE business_report_deliveries (
     UNIQUE (run_id, recipient_id),
     UNIQUE (notification_idempotency_key)
 );
-CREATE INDEX idx_report_deliveries_run ON business_report_deliveries (run_id);
 
 -- ==== 00017_device_connectivity_control ====
 -- Phase 7C: durable device connectivity + remote sync control plane.
@@ -997,7 +995,6 @@ CREATE TABLE sale_item_tag_snapshots (
     PRIMARY KEY (sale_id, sale_item_id, tag_id)
 );
 CREATE INDEX idx_sale_item_tag_snapshots_tag ON sale_item_tag_snapshots (tag_id, sale_id, sale_item_id);
-CREATE INDEX idx_sale_item_tag_snapshots_item ON sale_item_tag_snapshots (sale_id, sale_item_id);
 
 
 -- ==== 00022_store_identity ====

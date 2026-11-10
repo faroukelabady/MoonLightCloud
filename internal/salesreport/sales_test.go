@@ -3,6 +3,8 @@ package salesreport
 import (
 	"encoding/json"
 	"errors"
+	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -38,7 +40,7 @@ func fixture() Facts {
 			{SaleID: "usd", ItemID: "l2", Kind: "root", ID: "c1", NameAr: "بردي", NameEn: "Papyrus"},
 		},
 		Tags:     []Tag{{SaleID: "egp", ItemID: "l1", ID: "t1", NameAr: "ذهبي", NameEn: "Gold"}},
-		Payments: []Payment{{SaleID: "egp", Method: "cash", Amount: 1100, Change: 100}, {SaleID: "usd", Method: "card", Amount: 200}},
+		Payments: []Payment{{SaleID: "egp", Method: "cash", Amount: 1000, Change: 100}, {SaleID: "usd", Method: "card", Amount: 200}},
 		Returns:  []Return{{ID: "r1", SaleID: "egp", OccurredAt: at.Add(24 * time.Hour), Currency: "EGP", Total: 500}},
 		ReturnLines: []ReturnLine{
 			{ReturnID: "r1", SaleID: "egp", SaleLineID: "l1", Quantity: 1, Restocked: true, Refund: 500, Cost: ptr(260)},
@@ -250,6 +252,211 @@ func TestBuildExcludesTaxWhenTheBusinessDoesNotUseIt(t *testing.T) {
 	opts.ExcludeTax = false
 	if got, _ = Build(f, opts); got.Summary[0].Sales != 1140 || got.Summary[0].Tax != 140 {
 		t.Fatalf("tax kept: %+v", got.Summary[0])
+	}
+}
+
+func splitTaxPaymentFacts() Facts {
+	at := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	return Facts{
+		Sales: []Sale{{ID: "sale", Number: "S-1", Currency: "EGP", Subtotal: 90, Tax: 11, Total: 101, USDRateMicrorate: 2_000_000, InPeriod: true, OccurredAt: at}},
+		Lines: []Line{{SaleID: "sale", ItemID: "line", SKU: "SKU", Quantity: 1, LineTotal: 90, UnitCost: ptr(10)}},
+		Payments: []Payment{
+			{SaleID: "sale", Method: "cash", Amount: 51, Change: 10},
+			{SaleID: "sale", Method: "card", Amount: 30},
+			{SaleID: "sale", Method: "card", Amount: 20},
+		},
+		Returns:        []Return{{ID: "return", SaleID: "sale", Currency: "EGP", Total: 51, Tax: 6, OccurredAt: at.Add(time.Hour)}},
+		ReturnPayments: []ReturnPayment{{ReturnID: "return", Method: "cash", Amount: 26}, {ReturnID: "return", Method: "card", Amount: 25}},
+	}
+}
+
+func TestBuildPaymentTaxAndFXAllocationReconcilesEachDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name, display                              string
+		taxOff                                     bool
+		cardPaid, cashPaid, cardRefund, cashRefund int64
+	}{
+		{"native tax on", DisplayAll, false, 50, 51, 25, 26},
+		{"native tax off", DisplayAll, true, 44, 46, 22, 23},
+		{"converted tax on", DisplayUSD, false, 25, 26, 12, 14},
+		{"converted tax off", DisplayUSD, true, 22, 23, 11, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := splitTaxPaymentFacts()
+			opts := Options{Display: tc.display, ExcludeTax: tc.taxOff, Loc: time.UTC, Limit: 50}
+			got, err := Build(f, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]PaymentRow{
+				"card": {Method: "card", Currency: got.Summary[0].Currency, PaymentCount: 2, Amount: Money(tc.cardPaid), Refund: Money(tc.cardRefund), Net: Money(tc.cardPaid - tc.cardRefund)},
+				"cash": {Method: "cash", Currency: got.Summary[0].Currency, PaymentCount: 1, Amount: Money(tc.cashPaid), Refund: Money(tc.cashRefund), Net: Money(tc.cashPaid - tc.cashRefund)},
+			}
+			var paid, refunded, net Money
+			for _, row := range got.Payments {
+				if row != want[row.Method] {
+					t.Fatalf("%s: %+v want %+v", row.Method, row, want[row.Method])
+				}
+				paid += row.Amount
+				refunded += row.Refund
+				net += row.Net
+			}
+			if len(got.Payments) != 2 || paid != got.Summary[0].Sales || refunded != got.Summary[0].Refund || net != got.Summary[0].NetSales {
+				t.Fatalf("payments do not reconcile: %+v summary=%+v", got.Payments, got.Summary)
+			}
+			// Method allocation cannot depend on private payment IDs, wire order,
+			// or whether one method is split into several original tender rows.
+			f.Payments[0], f.Payments[2] = f.Payments[2], f.Payments[0]
+			f.ReturnPayments[0], f.ReturnPayments[1] = f.ReturnPayments[1], f.ReturnPayments[0]
+			reordered, err := Build(f, opts)
+			if err != nil || !reflect.DeepEqual(got.Payments, reordered.Payments) || !reflect.DeepEqual(got.Sales[0].PaymentMethods, reordered.Sales[0].PaymentMethods) {
+				t.Fatalf("payment order changed result: %+v %v", reordered.Payments, err)
+			}
+			f.Payments = []Payment{{SaleID: "sale", Method: "card", Amount: 50}, {SaleID: "sale", Method: "cash", Amount: 51}}
+			coalesced, err := Build(f, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range coalesced.Payments {
+				w := want[row.Method]
+				w.PaymentCount = 1
+				if row != w {
+					t.Fatalf("same-method splits changed allocation: %+v want %+v", row, w)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildRefundOnlyPaymentAllocationUsesOriginalSaleRate(t *testing.T) {
+	f := splitTaxPaymentFacts()
+	f.Sales[0].InPeriod = false
+	got, err := Build(f, Options{Display: DisplayUSD, ExcludeTax: true, Loc: time.UTC, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Sales) != 0 || got.Summary[0].SalesCount != 0 || got.Summary[0].Refund != 23 {
+		t.Fatalf("refund-only summary: %+v", got.Summary)
+	}
+	var refund, net Money
+	for _, row := range got.Payments {
+		if row.PaymentCount != 0 || row.Amount != 0 {
+			t.Fatalf("out-of-period tender counted as sale: %+v", row)
+		}
+		refund += row.Refund
+		net += row.Net
+	}
+	if refund != 23 || net != -23 {
+		t.Fatalf("refund-only allocation %+v", got.Payments)
+	}
+}
+
+func TestBuildChangeMetadataDoesNotReduceAppliedPayments(t *testing.T) {
+	for _, display := range []string{DisplayAll, DisplayEGP, DisplayUSD} {
+		for _, taxOff := range []bool{false, true} {
+			opts := Options{Display: display, ExcludeTax: taxOff, Loc: time.UTC, Limit: 50}
+			base := splitTaxPaymentFacts()
+			for n := range base.Payments {
+				base.Payments[n].Change = 0
+			}
+			want, err := Build(base, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, change := range []int64{10, 5000, math.MaxInt64} {
+				f := splitTaxPaymentFacts()
+				for n := range f.Payments {
+					f.Payments[n].Change = change
+				}
+				got, err := Build(f, opts)
+				if err != nil || !reflect.DeepEqual(got.Payments, want.Payments) || !reflect.DeepEqual(got.Summary, want.Summary) {
+					t.Fatalf("%s taxOff=%t change=%d altered applied contributions: got=%+v want=%+v err=%v", display, taxOff, change, got.Payments, want.Payments, err)
+				}
+			}
+		}
+	}
+}
+
+func TestBuildPaymentAllocationZeroTargetsAndAmounts(t *testing.T) {
+	for _, zeroWeights := range []bool{false, true} {
+		f := splitTaxPaymentFacts()
+		f.Sales[0].Subtotal = 0
+		f.Sales[0].Tax = f.Sales[0].Total
+		f.Returns[0].Tax = f.Returns[0].Total
+		if zeroWeights {
+			f.Sales[0].Total = 0
+			f.Sales[0].Tax = 0
+			f.Returns[0].Total = 0
+			f.Returns[0].Tax = 0
+			for n := range f.Payments {
+				f.Payments[n].Amount = 0
+				f.Payments[n].Change = 0
+			}
+			for n := range f.ReturnPayments {
+				f.ReturnPayments[n].Amount = 0
+			}
+		}
+		got, err := Build(f, Options{Display: DisplayUSD, ExcludeTax: true, Loc: time.UTC, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Payments) != 2 {
+			t.Fatalf("zero allocations lost tender methods: %+v", got.Payments)
+		}
+		for _, row := range got.Payments {
+			if row.Amount != 0 || row.Refund != 0 || row.Net != 0 || row.PaymentCount < 1 {
+				t.Fatalf("zero result: %+v", row)
+			}
+		}
+	}
+}
+
+func TestDocumentPaymentAllocationUsesCheckedWideArithmetic(t *testing.T) {
+	doc := &documentPayments{}
+	if err := doc.add("cash", math.MaxInt64-1); err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.add("card", 1); err != nil {
+		t.Fatal(err)
+	}
+	got, methods, err := doc.allocate(math.MaxInt64)
+	if err != nil || !reflect.DeepEqual(methods, []string{"card", "cash"}) || got["card"] != 1 || got["cash"] != math.MaxInt64-1 {
+		t.Fatalf("wide allocation: %+v %v %v", got, methods, err)
+	}
+	if err := doc.add("other", 1); err == nil {
+		t.Fatal("document amount overflow accepted")
+	}
+	if _, _, err := doc.allocate(-1); err == nil {
+		t.Fatal("negative target accepted")
+	}
+	zero := &documentPayments{}
+	if err := zero.add("cash", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := zero.allocate(1); err == nil {
+		t.Fatal("positive target without weights accepted")
+	}
+	if err := zero.add("cash", -1); err == nil {
+		t.Fatal("negative payment accepted")
+	}
+}
+
+func TestBuildRejectsPaymentAndConversionOverflow(t *testing.T) {
+	for _, mode := range []string{"sum", "convert", "negative change"} {
+		f := splitTaxPaymentFacts()
+		switch mode {
+		case "sum":
+			f.Payments = []Payment{{SaleID: "sale", Method: "cash", Amount: math.MaxInt64}, {SaleID: "sale", Method: "card", Amount: 1}}
+		case "convert":
+			f.Sales[0].Currency = "USD"
+			f.Sales[0].FxMicrorate = 2_000_000
+			f.Payments = []Payment{{SaleID: "sale", Method: "cash", Amount: math.MaxInt64}}
+		case "negative change":
+			f.Payments = []Payment{{SaleID: "sale", Method: "cash", Amount: 1, Change: -1}}
+		}
+		if _, err := Build(f, Options{Display: DisplayEGP, Loc: time.UTC, Limit: 50}); err == nil {
+			t.Fatalf("%s invalid payment/overflow accepted", mode)
+		}
 	}
 }
 

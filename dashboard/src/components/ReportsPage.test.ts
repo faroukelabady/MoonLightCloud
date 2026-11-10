@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/svelte';
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import ReportsPage from './ReportsPage.svelte';
 import { reportsApi, type SalesReport, type StockReport } from '../lib/reportsApi.js';
 import { ApiError } from '../lib/http.js';
@@ -140,7 +140,7 @@ describe('ReportsPage', () => {
 		expect(screen.getByText('R-0002').closest('tr')!.textContent).toMatch(/—$/);
 		// The reference stays in the cell's direction: only the code is LTR.
 		expect(screen.getByText('R-0001').tagName).toBe('BDI');
-		expect(screen.getByText('R-0001').closest('td')!.hasAttribute('dir')).toBe(false);
+		expect(screen.getByText('R-0001').closest('th')!.hasAttribute('dir')).toBe(false);
 	});
 
 	it('says when no USD rate is known and lists USD even without USD sales', async () => {
@@ -163,4 +163,88 @@ describe('ReportsPage', () => {
 		expect(screen.getByTestId('zakat-due').textContent).toMatch(/15,000/);
 		expect(screen.getByRole('status').textContent).toMatch(/reaches nisab/);
 	});
+});
+
+
+// Header scope changes must not reuse another Store's hidden choices or page.
+function pagedReport(label = 'Current item'): SalesReport {
+ const report = salesReport([summary('EGP', '114000')]);
+ report.filter_options.subcategories = [{ id: 'sub1', name_ar: 'فن', name_en: 'Art' }];
+ report.sales_total_count = 60;
+ report.sales = [{sale_id:'sale-1',sale_number:'MLR-20261110-12345678',occurred_at:'2026-11-10T09:00:00Z',currency:'EGP',products:label,skus:'ML-123456789ABC',root_names_ar:'',root_names_en:'',subcategory_names_ar:'',subcategory_names_en:'',items_sold:1,payment_methods:['card'],cost_minor:'52000',missing_cost_items:0,total_minor:'114000',original_currency:'EGP',original_total_minor:'114000',rate_microrate:null}];
+ return report;
+}
+async function chooseClassifications() {
+ for (const [id, value] of [['report-categories','c1'],['report-subcategories','sub1'],['report-tags','t1']]) {
+  await fireEvent.click(screen.getByTestId(id));
+  await fireEvent.click(document.querySelector<HTMLInputElement>(`#${id}-popup input[data-value="${value}"]`)!);
+  await fireEvent.click(screen.getByTestId(id));
+ }
+}
+async function addScopeCost() {
+ await fireEvent.click(screen.getByRole('button',{name:/Add cost/}));
+ await fireEvent.input(screen.getByLabelText('Short description 1'),{target:{value:'Store A delivery'}});
+ await fireEvent.input(screen.getByLabelText(/^Amount 1/),{target:{value:'10'}});
+ await fireEvent.click(screen.getByRole('button',{name:'Update report costs'}));
+ const profit=screen.getByRole('rowheader',{name:'Net profit after extra costs'}).closest('tr')!;
+ expect(within(profit).getByText('610 EGP')).toBeTruthy();
+}
+async function laterPage() {
+ await fireEvent.click(screen.getByRole('tab',{name:'Sales details'}));
+ await fireEvent.click(screen.getByRole('button',{name:'Next'}));
+ await waitFor(()=>expect(api.sales.mock.lastCall?.[4]).toBe(50));
+}
+it('clears Store-specific filters, page and temporary costs on Store change while retaining currency and payment',async()=>{
+ api.sales.mockResolvedValue(pagedReport());
+ const view=render(ReportsPage,{params,store:store.store_id,stores:[store]});
+ await screen.findByText('Business totals · EGP');
+ await chooseClassifications();
+ await choose(screen.getByTestId('report-payment'),'card');
+ await choose(screen.getByTestId('report-currency'),'USD');
+ await addScopeCost();
+ await laterPage();
+ const second={...store,store_id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',display_name:'Cairo Shop'};
+ await view.rerender({params,store:second.store_id,stores:[store,second]});
+ await waitFor(()=>expect(api.sales).toHaveBeenLastCalledWith(params,'USD',{...noFilter,payment_method:'card'},second.store_id,0,50,expect.anything()));
+ expect(screen.queryByLabelText('Short description 1')).toBeNull();
+ expect(screen.getByText('No extra costs added.')).toBeTruthy();
+ for(const label of ['Root categories: Pharaonic ×','Subcategories: Art ×','Tags: Gold ×'])expect(screen.queryByRole('button',{name:label})).toBeNull();
+ await fireEvent.click(screen.getByRole('tab',{name:'Overview'}));
+ const profit=screen.getByRole('rowheader',{name:'Net profit after extra costs'}).closest('tr')!;
+ expect(within(profit).getByText('620 EGP')).toBeTruthy();
+});
+it.each([
+ [{period:'last_10_completed_days'},{period:'today'}],
+ [{period:'custom',from_date:'2026-10-17',to_date:'2026-10-26'},{period:'custom',from_date:'2026-10-20',to_date:'2026-10-26'}],
+])('resets page and costs when the header period changes, retaining same-Store filters',async(before,after)=>{
+ api.sales.mockResolvedValue(pagedReport());
+ const view=render(ReportsPage,{params:before,store:store.store_id,stores:[store]});
+ await screen.findByText('Business totals · EGP');
+ await chooseClassifications();
+ await choose(screen.getByTestId('report-payment'),'card');
+ await addScopeCost();
+ await laterPage();
+ await view.rerender({params:after,store:store.store_id,stores:[store]});
+ await waitFor(()=>expect(api.sales).toHaveBeenLastCalledWith(after,'EGP',{root_category_ids:['c1'],subcategory_ids:['sub1'],tag_ids:['t1'],payment_method:'card'},store.store_id,0,50,expect.anything()));
+ expect(screen.queryByLabelText('Short description 1')).toBeNull();
+ expect(screen.getByText('No extra costs added.')).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Tags: Gold ×'})).toBeTruthy();
+ await fireEvent.click(screen.getByRole('tab',{name:'Overview'}));
+ const profit=screen.getByRole('rowheader',{name:'Net profit after extra costs'}).closest('tr')!;
+ expect(within(profit).getByText('620 EGP')).toBeTruthy();
+});
+it('aborts the old scope request and ignores its late result after a Store change',async()=>{
+ let finishOld!: (report:SalesReport)=>void;
+ api.sales.mockResolvedValueOnce(pagedReport('First Store item')).mockImplementationOnce(()=>new Promise(resolve=>finishOld=resolve)).mockResolvedValue(pagedReport('Second Store item'));
+ const view=render(ReportsPage,{params,store:store.store_id,stores:[store]});
+ await screen.findByText('Business totals · EGP');
+ await laterPage();
+ const signal=api.sales.mock.lastCall?.[6] as AbortSignal;
+ const second={...store,store_id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',display_name:'Cairo Shop'};
+ await view.rerender({params,store:second.store_id,stores:[store,second]});
+ await screen.findByText('Second Store item');
+ expect(signal.aborted).toBe(true);
+ await act(async()=>{finishOld(pagedReport('Late first Store item'));});
+ expect(screen.getByText('Second Store item')).toBeTruthy();
+ expect(screen.queryByText('Late first Store item')).toBeNull();
 });

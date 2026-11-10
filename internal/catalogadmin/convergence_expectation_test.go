@@ -7,7 +7,7 @@ import (
 
 func TestConvergenceExpectationFieldSemantics(t *testing.T) {
 	usd := "0"
-	row := AdminProductVariant{VariantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SKU: "Raw SKU", CombinationKey: "color=blue", IsActive: true, Position: 2, PriceEGPMinor: "9007199254740993", PriceUSDMinor: &usd}
+	row := AdminProductVariant{VariantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SKU: "Raw SKU", CombinationKey: "color=blue", IsActive: true, Position: 2, PriceEGPMinor: new("9007199254740993"), PriceUSDMinor: &usd}
 	for _, tc := range []struct {
 		name, payload string
 		want          bool
@@ -75,5 +75,19 @@ func TestConvergenceIdentityPriority(t *testing.T) {
 		if got := sameVariantIdentity(row, tc.payload); got != tc.want {
 			t.Fatalf("identity %v =%v want %v", tc.payload, got, tc.want)
 		}
+	}
+}
+
+func TestEGPExpectationDistinguishesInheritanceFromZero(t *testing.T) {
+	inherited, ok := decodeVariantExpectation(map[string]any{"price_egp_cents": nil})
+	if !ok || !inherited.matches(AdminProductVariant{}) {
+		t.Fatal("null EGP should match inheritance")
+	}
+	if inherited.matches(AdminProductVariant{PriceEGPMinor: new("0")}) {
+		t.Fatal("zero is not inheritance")
+	}
+	zero, ok := decodeVariantExpectation(map[string]any{"price_egp_cents": "0"})
+	if !ok || !zero.matches(AdminProductVariant{PriceEGPMinor: new("0")}) || zero.matches(AdminProductVariant{}) {
+		t.Fatal("zero override must stay explicit")
 	}
 }

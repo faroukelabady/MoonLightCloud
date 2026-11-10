@@ -162,3 +162,12 @@ on all money-bearing documents.
   `TestSchemaMatchesReviewedTarget` fails on any drift.
 - Every model step in the paired Retail baseline plan is done except the
   enum-casing confirmation noted under step 2f.
+
+## S04 cleanup — 2026-11-10
+
+The three overlapping non-unique prefix indexes are reviewed against a disposable
+PostgreSQL workload before removal. All primary and unique constraints stay.
+The changed pre-production baseline is `00117_baseline.sql`; the existing report
+configuration migration is retained as `00118_report_configuration.sql`, target
+118. Its SQL behavior is unchanged. Existing development databases are recreated
+explicitly; this cleanup does not migrate or reset a local/hosted database.

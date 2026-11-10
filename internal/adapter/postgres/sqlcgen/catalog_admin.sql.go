@@ -683,7 +683,12 @@ func (q *Queries) AdminProductVariantAttributes(ctx context.Context, variantID p
 
 const adminProductVariantByVariantID = `-- name: AdminProductVariantByVariantID :one
 SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
-    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents,
+    egp.cost_minor AS cost_egp_cents,
+    base_egp.price_minor AS base_price_egp_cents,
+    base_usd.price_minor AS base_price_usd_cents,
+    base_egp.cost_minor AS base_cost_egp_cents,
+    v.position, v.combination_key,
     v.variant_revision, v.catalog_revision,
     COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
     COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
@@ -695,6 +700,9 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
           AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
+LEFT JOIN catalog_products p ON p.product_id=v.product_id AND p.store_id=v.store_id
+LEFT JOIN catalog_product_prices base_egp ON base_egp.product_id=p.product_id AND base_egp.currency='EGP'
+LEFT JOIN catalog_product_prices base_usd ON base_usd.product_id=p.product_id AND base_usd.currency='USD'
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
 LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
 LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
@@ -714,6 +722,10 @@ type AdminProductVariantByVariantIDRow struct {
 	Deleted           bool        `json:"deleted"`
 	PriceEgpCents     pgtype.Int8 `json:"price_egp_cents"`
 	PriceUsdCents     pgtype.Int8 `json:"price_usd_cents"`
+	CostEgpCents      pgtype.Int8 `json:"cost_egp_cents"`
+	BasePriceEgpCents pgtype.Int8 `json:"base_price_egp_cents"`
+	BasePriceUsdCents pgtype.Int8 `json:"base_price_usd_cents"`
+	BaseCostEgpCents  pgtype.Int8 `json:"base_cost_egp_cents"`
 	Position          int32       `json:"position"`
 	CombinationKey    string      `json:"combination_key"`
 	VariantRevision   int64       `json:"variant_revision"`
@@ -734,6 +746,10 @@ func (q *Queries) AdminProductVariantByVariantID(ctx context.Context, arg AdminP
 		&i.Deleted,
 		&i.PriceEgpCents,
 		&i.PriceUsdCents,
+		&i.CostEgpCents,
+		&i.BasePriceEgpCents,
+		&i.BasePriceUsdCents,
+		&i.BaseCostEgpCents,
 		&i.Position,
 		&i.CombinationKey,
 		&i.VariantRevision,
@@ -747,7 +763,12 @@ func (q *Queries) AdminProductVariantByVariantID(ctx context.Context, arg AdminP
 
 const adminProductVariants = `-- name: AdminProductVariants :many
 SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
-    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents, v.position, v.combination_key,
+    egp.price_minor AS price_egp_cents, usd.price_minor AS price_usd_cents,
+    egp.cost_minor AS cost_egp_cents,
+    base_egp.price_minor AS base_price_egp_cents,
+    base_usd.price_minor AS base_price_usd_cents,
+    base_egp.cost_minor AS base_cost_egp_cents,
+    v.position, v.combination_key,
     v.variant_revision, v.catalog_revision,
     COALESCE(inv.stock_quantity, 0)::bigint AS stock_quantity,
     COALESCE(inv.source_revision, 0)::bigint AS inventory_revision,
@@ -759,6 +780,9 @@ SELECT v.variant_id, v.product_id, v.sku, v.is_active, v.deleted,
           AND c.status = 'pending' AND t.status IN ('pending','delivered')
     ) AS has_pending
 FROM catalog_product_variants v
+LEFT JOIN catalog_products p ON p.product_id=v.product_id AND p.store_id=v.store_id
+LEFT JOIN catalog_product_prices base_egp ON base_egp.product_id=p.product_id AND base_egp.currency='EGP'
+LEFT JOIN catalog_product_prices base_usd ON base_usd.product_id=p.product_id AND base_usd.currency='USD'
 LEFT JOIN catalog_product_variant_inventory inv ON inv.variant_id = v.variant_id
 LEFT JOIN catalog_product_variant_prices egp ON egp.variant_id = v.variant_id AND egp.currency = 'EGP'
 LEFT JOIN catalog_product_variant_prices usd ON usd.variant_id = v.variant_id AND usd.currency = 'USD'
@@ -779,6 +803,10 @@ type AdminProductVariantsRow struct {
 	Deleted           bool        `json:"deleted"`
 	PriceEgpCents     pgtype.Int8 `json:"price_egp_cents"`
 	PriceUsdCents     pgtype.Int8 `json:"price_usd_cents"`
+	CostEgpCents      pgtype.Int8 `json:"cost_egp_cents"`
+	BasePriceEgpCents pgtype.Int8 `json:"base_price_egp_cents"`
+	BasePriceUsdCents pgtype.Int8 `json:"base_price_usd_cents"`
+	BaseCostEgpCents  pgtype.Int8 `json:"base_cost_egp_cents"`
 	Position          int32       `json:"position"`
 	CombinationKey    string      `json:"combination_key"`
 	VariantRevision   int64       `json:"variant_revision"`
@@ -805,6 +833,10 @@ func (q *Queries) AdminProductVariants(ctx context.Context, arg AdminProductVari
 			&i.Deleted,
 			&i.PriceEgpCents,
 			&i.PriceUsdCents,
+			&i.CostEgpCents,
+			&i.BasePriceEgpCents,
+			&i.BasePriceUsdCents,
+			&i.BaseCostEgpCents,
 			&i.Position,
 			&i.CombinationKey,
 			&i.VariantRevision,

@@ -54,7 +54,7 @@ export function categoryOnlinePolicyCommand(
 export function productDetailsCommand(
  store: string,
  product: Pick<AdminProductDetail, 'product_id' | 'catalog_revision' | 'description_ar' | 'description_en' | 'width_cm' | 'height_cm' | 'top_category_id' | 'subcategory_ids' | 'tag_ids'>,
- details: { arabic_name: string; english_name: string; egp_price_cents: string; usd_price_cents: string; cost_cents: string },
+ details: { arabic_name: string; english_name: string; egp_price_cents: string; usd_price_cents: string; cost_cents: string | null },
 ) {
  return {
   store_id: store, type: 'catalog.product.details.update.v1' as const,

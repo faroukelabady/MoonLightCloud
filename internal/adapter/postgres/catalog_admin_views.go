@@ -308,6 +308,10 @@ type adminVariantRow struct {
 	Deleted           bool
 	PriceEgpCents     pgtype.Int8
 	PriceUsdCents     pgtype.Int8
+	CostEgpCents      pgtype.Int8
+	BasePriceEgpCents pgtype.Int8
+	BasePriceUsdCents pgtype.Int8
+	BaseCostEgpCents  pgtype.Int8
 	Position          int32
 	CombinationKey    string
 	VariantRevision   int64
@@ -320,23 +324,35 @@ type adminVariantRow struct {
 // adminVariantToDomain renders one variant row with exact minor-unit
 // money strings (never floats).
 func adminVariantToDomain(row adminVariantRow) catalogadmin.AdminProductVariant {
-	entry := catalogadmin.AdminProductVariant{
+	return catalogadmin.AdminProductVariant{
 		VariantID: uuidString(row.VariantID), ProductID: uuidString(row.ProductID),
 		SKU: row.Sku, IsActive: row.IsActive, Deleted: row.Deleted,
 		StockQuantity: row.StockQuantity, Position: int(row.Position),
 		CombinationKey: row.CombinationKey, VariantRevision: row.VariantRevision,
 		CatalogRevision: row.CatalogRevision, InventoryRevision: row.InventoryRevision,
 		HasPending: row.HasPending, Attributes: []catalogadmin.AdminProductVariantAttribute{},
-		PriceEGPMinor: "0",
+		PriceEGPMinor: adminVariantMinor(row.PriceEgpCents), PriceUSDMinor: adminVariantMinor(row.PriceUsdCents),
+		CostEGPMinor:           adminVariantMinor(row.CostEgpCents),
+		EffectivePriceEGPMinor: adminVariantEffectiveMinor(row.PriceEgpCents, row.BasePriceEgpCents),
+		EffectivePriceUSDMinor: adminVariantEffectiveMinor(row.PriceUsdCents, row.BasePriceUsdCents),
+		EffectiveCostEGPMinor:  adminVariantEffectiveMinor(row.CostEgpCents, row.BaseCostEgpCents),
 	}
-	if row.PriceEgpCents.Valid {
-		entry.PriceEGPMinor = pgIntToString(row.PriceEgpCents.Int64)
+}
+
+func adminVariantMinor(value pgtype.Int8) *string {
+	if !value.Valid {
+		return nil
 	}
-	if row.PriceUsdCents.Valid {
-		usd := pgIntToString(row.PriceUsdCents.Int64)
-		entry.PriceUSDMinor = &usd
+	text := pgIntToString(value.Int64)
+	return &text
+}
+
+// A present override includes zero; absence alone selects the Product value.
+func adminVariantEffectiveMinor(override, base pgtype.Int8) *string {
+	if override.Valid {
+		return adminVariantMinor(override)
 	}
-	return entry
+	return adminVariantMinor(base)
 }
 
 // adminVariantAttributes loads the option attribute rows for one
@@ -385,7 +401,11 @@ func (d CatalogAdmin) AdminProductVariants(ctx context.Context, storeID, product
 			VariantID: row.VariantID, ProductID: row.ProductID, Sku: row.Sku,
 			IsActive: row.IsActive, Deleted: row.Deleted,
 			PriceEgpCents: row.PriceEgpCents, PriceUsdCents: row.PriceUsdCents,
-			Position: row.Position, CombinationKey: row.CombinationKey,
+			CostEgpCents:      row.CostEgpCents,
+			BasePriceEgpCents: row.BasePriceEgpCents,
+			BasePriceUsdCents: row.BasePriceUsdCents,
+			BaseCostEgpCents:  row.BaseCostEgpCents,
+			Position:          row.Position, CombinationKey: row.CombinationKey,
 			VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
 			StockQuantity: row.StockQuantity, InventoryRevision: row.InventoryRevision,
 			HasPending: row.HasPending,
@@ -427,7 +447,11 @@ func (d CatalogAdmin) AdminProductVariant(ctx context.Context, storeID, variantI
 		VariantID: row.VariantID, ProductID: row.ProductID, Sku: row.Sku,
 		IsActive: row.IsActive, Deleted: row.Deleted,
 		PriceEgpCents: row.PriceEgpCents, PriceUsdCents: row.PriceUsdCents,
-		Position: row.Position, CombinationKey: row.CombinationKey,
+		CostEgpCents:      row.CostEgpCents,
+		BasePriceEgpCents: row.BasePriceEgpCents,
+		BasePriceUsdCents: row.BasePriceUsdCents,
+		BaseCostEgpCents:  row.BaseCostEgpCents,
+		Position:          row.Position, CombinationKey: row.CombinationKey,
 		VariantRevision: row.VariantRevision, CatalogRevision: row.CatalogRevision,
 		StockQuantity: row.StockQuantity, InventoryRevision: row.InventoryRevision,
 		HasPending: row.HasPending,
