@@ -4,10 +4,9 @@
 	import PeriodSelector from './components/PeriodSelector.svelte';
 	import SalesCard from './components/SalesCard.svelte';
 	import Segmented from './components/Segmented.svelte';
-import TrendChart from './components/TrendChart.svelte';
+	import PerformanceCard from './components/PerformanceCard.svelte';
 	import TopProducts from './components/TopProducts.svelte';
 	import type { ProductDisplayRow } from './components/TopProducts.svelte';
-	import CategoryCard from './components/CategoryCard.svelte';
 	import type { CategoryDisplayRow } from './components/CategoryCard.svelte';
 	import BranchCard from './components/BranchCard.svelte';
 	import TagCard from './components/TagCard.svelte';
@@ -735,11 +734,6 @@ let branchContext = $derived.by(() => {
 					</div>
 				{/if}
 				{#if route === 'overview'}
-					<div class="cell a-cat">
-						<CategoryCard rows={categories} kind={catKind} onkind={setCatKind} unit={currency === 'all' ? 'EGP normalized' : currency} status={categoriesState} errStatus={categoriesErr} onretry={retryAll} />
-					</div>
-				{/if}
-				{#if route === 'overview'}
 					<div class="cell a-tags">
 						<TagCard data={tagList} status={tagState} errStatus={tagErr} onretry={retryAll} currency={currency} />
 					</div>
@@ -750,20 +744,32 @@ let branchContext = $derived.by(() => {
 					</div>
 				{/if}
 				{#if route === 'overview'}
-					<div class="cell a-trend">
-						<TrendChart
-							titleAr="الاتجاه اليومي (إجمالي / مرتجعات / صافي)"
-							titleEn="Gross / refunds / net over time"
-							labels={trend.labels}
-							values={trend.values}
-							refundValues={trendRefund.values}
-							netValues={trendNet.values}
-							exact={trendExact}
-							refundExact={trendRefundExact}
-							rangeError={trendRangeError}
-							unit={trendUnit()}
-							status={dailyState}
-							errStatus={dailyErr}
+					<!-- Gross/refunds over time and category performance share one
+					     card: the same period, read as "when" beside "where". -->
+					<div class="cell a-perf">
+						<PerformanceCard
+							trend={{
+								titleAr: 'الاتجاه اليومي (إجمالي / مرتجعات / صافي)',
+								titleEn: 'Gross / refunds / net over time',
+								labels: trend.labels,
+								values: trend.values,
+								refundValues: trendRefund.values,
+								netValues: trendNet.values,
+								exact: trendExact,
+								refundExact: trendRefundExact,
+								rangeError: trendRangeError,
+								unit: trendUnit(),
+								status: dailyState,
+								errStatus: dailyErr,
+								onretry: retryAll
+							}}
+							categories={categories}
+							kind={catKind}
+							onkind={setCatKind}
+							categoryUnit={currency === 'all' ? 'EGP normalized' : currency}
+							money={currency === 'all' ? 'EGP' : currency}
+							categoriesStatus={categoriesState}
+							{categoriesErr}
 							onretry={retryAll}
 						/>
 					</div>
@@ -1047,20 +1053,18 @@ let branchContext = $derived.by(() => {
 	}
 	.dash.ov .a-sync { order: 1; grid-column: span 4; }
 	.dash.ov .a-sales { order: 2; grid-column: span 8; }
-	.dash.ov .a-trend { order: 3; grid-column: span 6; }
-	.dash.ov .a-products { order: 4; grid-column: span 3; }
-	.dash.ov .a-cat { order: 5; grid-column: span 3; }
+	.dash.ov .a-perf { order: 3; grid-column: span 12; }
+	.dash.ov .a-products { order: 4; grid-column: span 5; }
 	.dash.ov .a-branch { order: 6; grid-column: span 7; }
 	.dash.ov .a-tags { order: 7; grid-column: span 5; }
-	.dash.ov .a-latest { order: 8; grid-column: span 6; }
-	.dash.ov .a-act { order: 9; grid-column: span 6; }
+	.dash.ov .a-latest { order: 8; grid-column: span 7; }
+	.dash.ov .a-act { order: 9; grid-column: span 12; }
 	.dash.ov .a-orders { order: 10; }
 	@media (max-width: 1280px) {
 		.dash.ov .a-sync { order: 1; grid-column: span 5; }
 		.dash.ov .a-sales { order: 2; grid-column: span 7; }
-		.dash.ov .a-trend { order: 3; grid-column: span 7; }
+		.dash.ov .a-perf { order: 3; grid-column: span 12; }
 		.dash.ov .a-products { order: 4; grid-column: span 5; }
-		.dash.ov .a-cat { order: 5; grid-column: span 5; }
 		.dash.ov .a-branch { order: 6; grid-column: span 7; }
 		.dash.ov .a-tags { order: 7; grid-column: span 5; }
 		.dash.ov .a-latest { order: 8; grid-column: span 7; }

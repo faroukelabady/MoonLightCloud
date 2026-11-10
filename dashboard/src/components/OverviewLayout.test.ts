@@ -151,7 +151,13 @@ describe('Overview', () => {
 		expect(window.location.search).toBe('?currency=all');
 		const cells = [...container.querySelectorAll('.dash.ov > .cell')].map((c) => [...c.classList].find((k) => k.startsWith('a-')));
 		expect(cells[0]).toBe('a-sync');
-		for (const area of ['a-sales', 'a-trend', 'a-products', 'a-cat', 'a-tags', 'a-branch', 'a-latest', 'a-act', 'a-orders']) expect(cells).toContain(area);
+		for (const area of ['a-sales', 'a-perf', 'a-products', 'a-tags', 'a-branch', 'a-latest', 'a-act', 'a-orders']) expect(cells).toContain(area);
+		// Gross/refunds over time and category performance are one card.
+		expect(cells).not.toContain('a-trend');
+		expect(cells).not.toContain('a-cat');
+		const perf = container.querySelector('.a-perf [data-testid="performance-card"]');
+		expect(perf?.querySelectorAll('.card').length).toBe(1);
+		expect(perf?.querySelectorAll('section.pane').length).toBe(2);
 		// One currency switch, in the top bar.
 		expect(container.querySelector('.topbar [data-testid="currency-mode"]')).toBeTruthy();
 		expect(container.querySelectorAll('.dash [aria-pressed]').length).toBe(container.querySelectorAll('.dash .cell:not(.a-sales) [aria-pressed]').length);

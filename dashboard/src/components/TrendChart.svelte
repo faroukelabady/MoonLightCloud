@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { msg } from '../lib/i18n.svelte.js';
+	import { msg, t } from '../lib/i18n.svelte.js';
 	import Card from './Card.svelte';
 	import Segmented from './Segmented.svelte';
 	import Skeleton from './Skeleton.svelte';
@@ -23,7 +23,8 @@
 		errStatus,
 		onretry,
 		mode,
-		onmode
+		onmode,
+		embedded = false
 	}: {
 		titleAr: string;
 		titleEn: string;
@@ -40,6 +41,8 @@
 		status: 'loading' | 'loaded' | 'empty' | 'error';
 		mode?: 'all' | 'EGP' | 'USD';
 		onmode?: (m: 'all' | 'EGP' | 'USD') => void;
+		/** Rendered inside another card (PerformanceCard): no own card frame. */
+		embedded?: boolean;
 	} = $props();
 
 	let option: EChartsCoreOption | null = $derived.by(() => {
@@ -93,21 +96,22 @@
 	});
 </script>
 
-<Card ar={titleAr} en={`${titleEn} · ${unit}`}>
-	{#snippet actions()}
-		{#if mode && onmode}
-			<Segmented
-				size="sm"
-				options={[
-					{ value: 'all', ar: 'الكل', en: 'All' },
-					{ value: 'EGP', ar: 'EGP' },
-					{ value: 'USD', ar: 'USD' }
-				]}
-				value={mode}
-				onchange={(v) => onmode?.(v as 'all' | 'EGP' | 'USD')}
-			/>
-		{/if}
-	{/snippet}
+{#snippet modeSwitch()}
+	{#if mode && onmode}
+		<Segmented
+			size="sm"
+			options={[
+				{ value: 'all', ar: 'الكل', en: 'All' },
+				{ value: 'EGP', ar: 'EGP' },
+				{ value: 'USD', ar: 'USD' }
+			]}
+			value={mode}
+			onchange={(v) => onmode?.(v as 'all' | 'EGP' | 'USD')}
+		/>
+	{/if}
+{/snippet}
+
+{#snippet body()}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -131,16 +135,39 @@
 			data-testid="sales-trend-chart"
 			use:chart={option}
 			class="chart"
+			class:tall={embedded}
 			role="img"
 			aria-label={`${titleAr}: ${labels.length} days, unit ${unit}`}
 		></div>
 	{/if}
-</Card>
+{/snippet}
+
+{#if embedded}
+	<section class="pane" aria-label={t(titleAr, titleEn)}>
+		<h3 class="pane-title">{t(titleAr, titleEn)} <span class="muted">· {unit}</span></h3>
+		{@render body()}
+	</section>
+{:else}
+	<Card ar={titleAr} en={`${titleEn} · ${unit}`} actions={mode && onmode ? modeSwitch : undefined}>
+		{@render body()}
+	</Card>
+{/if}
 
 <style>
 	.chart {
 		height: 170px;
 		direction: ltr;
+	}
+	.chart.tall {
+		height: 230px;
+	}
+	.pane-title {
+		margin: 0 0 6px;
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+	.pane-title .muted {
+		font-weight: 400;
 	}
 	.exact {
 		list-style: none;
