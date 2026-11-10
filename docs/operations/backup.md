@@ -3,6 +3,13 @@
 Phase 1A needs no full DR solution, but production will run all four layers.
 Development volumes are not backups.
 
+For this pre-production release, `scripts/pg-restore.sh` accepts current schema
+118 directly or baseline 117 with an explicit release binary for the additive
+upgrade. Earlier baselines and future/malformed versions are refused before
+target access, including in verify-only and break-glass modes. Post-restore
+validation requires exact schema 118 before recovery marking. See
+`disaster-recovery.md` §5.2 for the compatibility table and failure states.
+
 1. **Provider snapshot / PITR** where supported (e.g. Railway/Neon/Render/RDS
    automated backups). First line of recovery.
 2. **Logical `pg_dump`** on a schedule (custom format + schema-only copy),

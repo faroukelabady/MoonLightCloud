@@ -10,10 +10,11 @@
 # backup of whatever is there BEFORE using --force.
 set -euo pipefail
 
-# Recovery marking writes the Phase 20 ledger columns. Before the first
-# production install the single baseline carries them; its version is the
-# minimum (ADR-0055). Keep this equal to migrate.TargetVersion.
-MARKING_SCHEMA=109
+# Match migrate.TargetVersion and the oldest supported baseline migration.
+# Older development histories cannot be upgraded across the baseline reset
+# (ADR-0055); only this baseline has a supported additive upgrade path.
+TARGET_SCHEMA=118
+BASELINE_SCHEMA=117
 
 die() { echo "pg-restore: FAIL: $*" >&2; exit 1; }
 
@@ -30,11 +31,13 @@ Usage: pg-restore.sh --url <target-postgres-url> --dump <file>
   --verify-only  Verify the artifact (integrity, digest, schema) and exit
                  without restoring.
   --cloud-binary Path to the moonlight-cloud binary of the release you
-                 will run. Required when the backup predates schema 45
-                 (any backup taken before Phase 20): the restored database
-                 is migrated with `<binary> migrate up` BEFORE devices are
-                 marked. Run this script with that release's production
-                 environment, exactly as you would run `migrate up`.
+                 will run. Required for a schema 117 backup: the restored
+                 database is upgraded to schema 118 with `<binary> migrate up`
+                 BEFORE validation and device marking. Schema 118 backups
+                 restore directly. Older development schemas and newer
+                 schemas are refused, including with break-glass flags.
+                 Run with that release's production environment, exactly
+                 as you would run `migrate up`.
 
   --allow-unmarked-restore
                  BREAK-GLASS. Skip recovery marking. Requires
@@ -80,7 +83,7 @@ done
 [[ -f "$DUMP" ]] || { echo "dump not found: $DUMP" >&2; exit 3; }
 command -v pg_restore >/dev/null || { echo "pg_restore not found" >&2; exit 3; }
 command -v psql >/dev/null || { echo "psql not found" >&2; exit 3; }
-if [[ -n "$CLOUD_BINARY" ]] && [[ ! -x "$CLOUD_BINARY" ]]; then
+if [[ -n "$CLOUD_BINARY" ]] && { [[ ! -f "$CLOUD_BINARY" ]] || [[ ! -x "$CLOUD_BINARY" ]]; }; then
   echo "pg-restore: FAIL - --cloud-binary is not an executable file: $CLOUD_BINARY" >&2
   exit 3
 fi
@@ -175,21 +178,33 @@ else
 fi
 
 # 3. Archive schema version, read from the archive itself (goose_db_version
-# data), BEFORE anything destructive happens.
+# data), BEFORE inspecting or changing the target database. This release
+# compatibility guard also applies to verify-only and break-glass restores.
 ARCHIVE_SCHEMA=$(pg_restore --data-only --table=goose_db_version --file - "$DUMP" 2>/dev/null | awk -F'\t' '
   /^COPY .*goose_db_version/ { inblock = 1; next }
   inblock && /^\\\.$/ { inblock = 0; next }
-  inblock && $3 == "t" && $2 + 0 > max { max = $2 + 0 }
-  END { print max + 0 }')
+  inblock && $3 == "t" {
+    if ($2 !~ /^[0-9]+$/) { invalid = 1; next }
+    if ($2 + 0 > max) { max = $2 + 0 }
+  }
+  END { if (invalid) print "invalid"; else printf "%.0f\n", max + 0 }')
 echo "pg-restore: archive schema version $ARCHIVE_SCHEMA"
-if [[ "$MARKING" == "1" ]] && [[ "$ARCHIVE_SCHEMA" -lt "$MARKING_SCHEMA" ]] && [[ -z "$CLOUD_BINARY" ]]; then
-  echo "pg-restore: REFUSED - the backup predates recovery schema $MARKING_SCHEMA (archive schema $ARCHIVE_SCHEMA)." >&2
-  echo "  Devices cannot be marked for reconciliation until the restored database" >&2
-  echo "  is migrated. Re-run with --cloud-binary <moonlight-cloud binary of the" >&2
-  echo "  release you will run>, using that release's production environment, so" >&2
-  echo "  the script migrates and then marks every device. Nothing was changed." >&2
-  exit 10
-fi
+case "$ARCHIVE_SCHEMA" in
+  "$TARGET_SCHEMA") ;;
+  "$BASELINE_SCHEMA")
+    if [[ -z "$CLOUD_BINARY" ]]; then
+      echo "pg-restore: REFUSED - archive schema $BASELINE_SCHEMA requires --cloud-binary to upgrade to schema $TARGET_SCHEMA." >&2
+      echo "  Use the binary of the release you will run and its production environment." >&2
+      echo "  Nothing was changed." >&2
+      exit 10
+    fi
+    ;;
+  *)
+    echo "pg-restore: REFUSED - unsupported archive schema $ARCHIVE_SCHEMA; expected schema $TARGET_SCHEMA or baseline $BASELINE_SCHEMA with --cloud-binary." >&2
+    echo "  Older development histories and newer schemas cannot be restored by this release. Nothing was changed." >&2
+    exit 10
+    ;;
+esac
 
 if [[ "$VERIFY_ONLY" == "1" ]]; then
   echo "pg-restore: verify-only OK"
@@ -275,9 +290,7 @@ check "sales_projection table" "SELECT count(*) FROM information_schema.tables W
 check "admin_users table" "SELECT count(*) FROM information_schema.tables WHERE table_name='admin_users'" "1"
 check "releases table" "SELECT count(*) FROM information_schema.tables WHERE table_name='releases'" "1"
 check "update_rollouts table" "SELECT count(*) FROM information_schema.tables WHERE table_name='update_rollouts'" "1"
-if [[ "$MARKING" == "1" ]]; then
-  check "schema supports recovery marking" "SELECT coalesce(max(version_id),0) FROM goose_db_version WHERE is_applied" ">=$MARKING_SCHEMA"
-fi
+check "schema matches release" "SELECT coalesce(max(version_id),0) FROM goose_db_version WHERE is_applied" "$TARGET_SCHEMA"
 
 # Store/device scope integrity: every device binding must reference an
 # existing Store. A restore that breaks scope is unusable.

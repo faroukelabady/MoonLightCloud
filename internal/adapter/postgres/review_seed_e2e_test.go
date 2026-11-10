@@ -43,7 +43,7 @@ func TestReviewSeedCloudReports(t *testing.T) {
 	if err := json.Unmarshal(raw, &expected); err != nil {
 		t.Fatal(err)
 	}
-	if len(expected.Sales) != 37 || len(expected.Refunds) == 0 {
+	if len(expected.Sales) != 39 || len(expected.Refunds) == 0 {
 		t.Fatal("missing demo sale/refund evidence")
 	}
 	cfg, err := pgxpool.ParseConfig(target.String())
@@ -161,5 +161,5 @@ func TestReviewSeedCloudReports(t *testing.T) {
 	if err := os.WriteFile(os.Getenv("MOONLIGHT_REVIEW_CLOUD_REPORTS"), encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("Read-only Cloud report proof: 37 sales, all refunds projected; all/EGP/USD detail pages and Store isolation passed")
+	t.Log("Read-only Cloud report proof: 39 sales, all refunds projected; all/EGP/USD detail pages and Store isolation passed")
 }

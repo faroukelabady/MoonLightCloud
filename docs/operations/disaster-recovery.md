@@ -354,17 +354,30 @@ psql "$URL" -Atqc "SELECT id FROM devices" | while read -r dev; do
 done
 ```
 
-**Backups from an older schema.** Before the first production install the
-schema is one baseline (ADR-0055); an archive from an older chain or an older
-baseline revision cannot be migrated forward and must not be restored. After
-the first production install, an archive older than the marking schema has
-no (or an older) recovery ledger. `pg-restore.sh` reads the archive's schema version **before** any
-destructive step and refuses with exit 10 unless you pass
-`--cloud-binary <moonlight-cloud binary of the release you will run>`. With
-it, the script restores, runs `migrate up` with that binary (run the script
-with the release's production environment), validates, and then marks
-every device. A migration failure after restore exits 12 and reports
-`DATABASE_CONTENT_RESTORED = yes`, `RECOVERY_MARKING_COMPLETE = NO`.
+**Archive schema compatibility (current pre-production release).** The restore
+script checks the version from the archive before inspecting or changing the
+target. These rules apply to verify-only and break-glass restores too:
+
+| Archive schema | Supported action |
+| --- | --- |
+| 118 (current target) | Restore directly, then require exact schema 118 and validate before marking devices. |
+| 117 (current baseline) | Require an explicit regular executable `--cloud-binary`; restore and apply the supported additive migration to 118 before validation/marking. |
+| 116 or earlier, future versions, missing or invalid version | Refuse with exit 10 before target access. A binary or break-glass flag cannot bypass this check. |
+
+Older development baseline histories cannot be migrated forward (ADR-0055).
+The 117→118 path is the supported additive report-configuration upgrade;
+it does not recreate an older development baseline. Run the script with the
+release's environment when supplying its binary. The script requires an
+exact target match after restore even if recovery marking is deliberately
+skipped. A binary that returns success without performing the upgrade is
+therefore insufficient. Drift tests tie the script's target/baseline constants
+to `migrate.TargetVersion` and the actual baseline migration filename.
+
+A migration failure after restore exits 12 and reports
+`DATABASE_CONTENT_RESTORED = yes`, `RECOVERY_MARKING_COMPLETE = NO`. An exact
+version mismatch after a nominally successful migration exits 7 with the same
+honest restored-but-not-marked state. Future supported upgrade paths must be
+added explicitly with tests.
 
 **Partial failures are reported, never hidden.** A `pg_restore` error exits
 11 with `DATABASE_CONTENT_RESTORED = PARTIAL / UNKNOWN`; a failed
