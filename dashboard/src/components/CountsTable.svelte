@@ -1,26 +1,32 @@
-<script lang="ts">
-	import { msg } from '../lib/i18n.svelte.js';
+<script lang="ts" module>
 	import { formatInt } from '../lib/money.js';
 	import type { OverviewResponse } from '../lib/api.js';
 
-	// Sale and return transactions and units in one table (part of the
-	// Sales card). Sales and
-	// returned units follow the active currency mode (each mode's own
-	// counts, never mixed). Return transactions have no per-currency count,
-	// so they stay whole-period and say so in a currency mode.
+	// Shared with the Sales card's summary strip. Sales and returned units
+	// follow the active currency mode (each mode's own counts, never mixed).
+	// Return transactions have no per-currency count, so they stay
+	// whole-period and say so in a currency mode.
+	export function activityCounts(data: OverviewResponse | null, mode: 'all' | 'EGP' | 'USD') {
+		if (!data) return { sales: { transactions: '—', units: '—' }, returns: { transactions: '—', units: '—' } };
+		const avg = mode === 'EGP' ? data.averages.egp : data.averages.usd;
+		const sales =
+			mode === 'all'
+				? { transactions: formatInt(data.summary.transaction_count), units: formatInt(data.summary.units_sold) }
+				: { transactions: formatInt(avg.transactions), units: formatInt(avg.units) };
+		const returnedUnits = mode === 'all' ? data.summary.units_returned : (data.summary.currency_totals.find((b) => b.currency === mode)?.returned_units ?? 0);
+		return { sales, returns: { transactions: formatInt(data.summary.return_transaction_count), units: formatInt(returnedUnits) } };
+	}
+</script>
+
+<script lang="ts">
+	import { msg } from '../lib/i18n.svelte.js';
+
+	// Sale and return transactions and units in one table (see activityCounts).
 	let { data, mode }: { data: OverviewResponse | null; mode: 'all' | 'EGP' | 'USD' } = $props();
 
-	let sales = $derived.by(() => {
-		if (!data) return { transactions: '—', units: '—' };
-		if (mode === 'all') return { transactions: formatInt(data.summary.transaction_count), units: formatInt(data.summary.units_sold) };
-		const avg = mode === 'EGP' ? data.averages.egp : data.averages.usd;
-		return { transactions: formatInt(avg.transactions), units: formatInt(avg.units) };
-	});
-	let returns = $derived.by(() => {
-		if (!data) return { transactions: '—', units: '—' };
-		const units = mode === 'all' ? data.summary.units_returned : (data.summary.currency_totals.find((b) => b.currency === mode)?.returned_units ?? 0);
-		return { transactions: formatInt(data.summary.return_transaction_count), units: formatInt(units) };
-	});
+	let counts = $derived(activityCounts(data, mode));
+	let sales = $derived(counts.sales);
+	let returns = $derived(counts.returns);
 	let scope = $derived(mode === 'all' ? msg('countsTable.scopeAll') : `${msg('countsTable.scope')}: ${mode}`);
 </script>
 

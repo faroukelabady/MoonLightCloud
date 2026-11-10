@@ -69,8 +69,9 @@ describe('SalesCard', () => {
 		expect(screen.getByTestId('net-sales').textContent).toBe('1,787.50 EGP');
 		expect(screen.getByTestId('net-profit').textContent).toBe('1,053.50 EGP');
 		expect(screen.getByTestId('average-value').textContent).toBe('883.33 EGP');
-		// Counts sit in the same card.
-		expect(within(screen.getByTestId('activity-totals')).getByRole('row', { name: /Transactions/ }).textContent).toMatch(/3\s*1/);
+		// Counts sit in the same bordered sheet as the money table.
+		expect(screen.getByTestId('sales-transactions').textContent).toMatch(/Transactions\s*3\s*1 returns/);
+		expect(screen.getByTestId('sales-summary').closest('.sheet')?.contains(screen.getByTestId('sales-money'))).toBe(true);
 		expect(container.textContent).toContain('1 USD = 52.000000 EGP');
 	});
 
@@ -84,7 +85,8 @@ describe('SalesCard', () => {
 		expect(screen.getByTestId('average-value').textContent).toBe('1,000 EGP');
 		// No tax in EGP, so no tax row.
 		expect(within(table).queryByRole('row', { name: /Tax/ })).toBeNull();
-		expect(within(screen.getByTestId('activity-totals')).getByRole('row', { name: /Units/ }).textContent).toMatch(/6\s*2/);
+		expect(screen.getByTestId('sales-units').textContent).toMatch(/Units\s*6\s*2 returned/);
+		expect(screen.getByText(/Return transactions count every currency/)).toBeTruthy();
 	});
 
 	it('renders a negative net and a loss with a real minus sign', () => {

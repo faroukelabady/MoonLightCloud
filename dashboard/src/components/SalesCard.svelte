@@ -4,14 +4,15 @@
 	import Skeleton from './Skeleton.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import WidgetError from './WidgetError.svelte';
-	import CountsTable from './CountsTable.svelte';
+	import { activityCounts } from './CountsTable.svelte';
 	import { formatMinor } from '../lib/money.js';
 	import type { OverviewResponse } from '../lib/api.js';
 
-	// One card for the period's sales: a money table (per recorded currency,
-	// plus the EGP total with every USD sale and refund converted at its own
-	// rate) beside the transactions-and-units table. The currency mode comes
-	// from the top bar. All money stays string-exact.
+	// One bordered sheet for the period's sales: a summary strip (net sales,
+	// net profit, transactions and units with their returns) above the money
+	// table (per recorded currency, plus the EGP total with every USD sale and
+	// refund converted at its own rate). The currency mode comes from the top
+	// bar. All money stays string-exact.
 	let {
 		data,
 		mode,
@@ -84,6 +85,7 @@
 			{ key: 'average', ar: 'متوسط قيمة العملية', en: 'Average sale' }
 		] as Row[]
 	);
+	let counts = $derived(activityCounts(data, mode));
 	function cell(c: Column, key: Row['key']): string {
 		const v = c[key];
 		return v === undefined ? '—' : formatMinor(v, c.currency);
@@ -91,23 +93,6 @@
 </script>
 
 <Card ar="المبيعات والربح" en="Sales and profit">
-	{#snippet actions()}
-		{#if status === 'loaded' && data && lead}
-			<!-- The two headline figures sit in the header, beside the title. -->
-			<div class="headline">
-				<div class="kpi">
-					<span class="kpi-label">{msg('salesCard.netSales')}</span>
-					<span class="kpi-value num" data-testid="net-sales">{formatMinor(lead.net, lead.currency)}</span>
-				</div>
-				{#if hasProfit}
-					<div class="kpi">
-						<span class="kpi-label">{msg('salesCard.netProfit')}</span>
-						<span class="kpi-value num profit" class:loss={lead.profit?.startsWith('-')} data-testid="net-profit">{cell(lead, 'profit')}</span>
-					</div>
-				{/if}
-			</div>
-		{/if}
-	{/snippet}
 	{#if status === 'loading'}
 		<Skeleton />
 	{:else if status === 'error'}
@@ -115,7 +100,29 @@
 	{:else if !data || (data.summary.transaction_count === 0 && data.summary.return_transaction_count === 0)}
 		<EmptyState ar="لا توجد مبيعات في هذه الفترة" en="No sales in this period" />
 	{:else}
-		<div class="tables">
+		<div class="sheet">
+			<div class="strip" data-testid="sales-summary">
+				<div class="tile lead">
+					<span class="tile-label">{msg('salesCard.netSales')}</span>
+					<span class="tile-value num" data-testid="net-sales">{formatMinor(lead.net, lead.currency)}</span>
+				</div>
+				{#if hasProfit}
+					<div class="tile lead">
+						<span class="tile-label">{msg('salesCard.netProfit')}</span>
+						<span class="tile-value num profit" class:loss={lead.profit?.startsWith('-')} data-testid="net-profit">{cell(lead, 'profit')}</span>
+					</div>
+				{/if}
+				<div class="tile" data-testid="sales-transactions">
+					<span class="tile-label">{msg('countsTable.transactions')}</span>
+					<span class="tile-value num">{counts.sales.transactions}</span>
+					<span class="tile-sub num">{counts.returns.transactions} {msg('countsTable.returnsSuffix')}{#if mode !== 'all'}<sup aria-hidden="true">*</sup>{/if}</span>
+				</div>
+				<div class="tile" data-testid="sales-units">
+					<span class="tile-label">{msg('countsTable.units')}</span>
+					<span class="tile-value num">{counts.sales.units}</span>
+					<span class="tile-sub num">{counts.returns.units} {msg('countsTable.returnedSuffix')}</span>
+				</div>
+			</div>
 			<table class="money" data-testid="sales-money" aria-label={msg('salesCard.salesAndProfit')}>
 				<thead>
 					<tr>
@@ -136,9 +143,11 @@
 					{/each}
 				</tbody>
 			</table>
-			<CountsTable {data} {mode} />
 		</div>
 		<div class="muted notes">
+			{#if mode !== 'all'}
+				<span role="note">* {msg('countsTable.returnTransactionsCountEveryCurrency')}</span>
+			{/if}
 			{#if columns.some((c) => c.total)}
 				<span>{msg('salesCard.totalInEgpConvertsEachUsd')}</span>
 			{/if}
@@ -156,35 +165,54 @@
 </Card>
 
 <style>
-	.headline {
-		display: flex;
-		gap: 20px;
+	/* One bordered sheet: the summary strip and the money table share the
+	   frame, separated by rules, so the figures read as a single statement. */
+	.sheet {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: var(--surface);
 	}
-	.kpi {
+	.strip {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+		border-bottom: 1px solid var(--border);
+		background: var(--surface-muted);
+	}
+	.tile {
 		display: flex;
 		flex-direction: column;
+		gap: 2px;
+		padding: 10px 12px;
+		border-inline-end: 1px solid var(--border);
+		min-width: 0;
 	}
-	.kpi-label {
-		font-size: 0.78rem;
+	.tile:last-child {
+		border-inline-end: 0;
+	}
+	.tile-label {
+		font-size: 0.74rem;
 		color: var(--text-muted);
 		font-weight: 600;
 	}
-	.kpi-value {
-		font-size: 1.3rem;
+	.tile-value {
+		font-size: 1.15rem;
 		font-weight: 700;
 		line-height: 1.2;
+		white-space: nowrap;
 	}
-	.kpi-value.profit {
+	.tile.lead .tile-value {
+		font-size: 1.3rem;
+	}
+	.tile-value.profit {
 		color: var(--success);
 	}
-	.kpi-value.loss {
+	.tile-value.loss {
 		color: var(--danger);
 	}
-	.tables {
-		display: grid;
-		grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
-		gap: 16px;
-		align-items: start;
+	.tile-sub {
+		font-size: 0.74rem;
+		color: var(--text-muted);
 	}
 	.money {
 		width: 100%;
@@ -193,26 +221,36 @@
 	}
 	.money th,
 	.money td {
-		padding: 4px 6px;
+		padding: 6px 10px;
 		line-height: 1.25;
 		border-bottom: 1px solid var(--border);
 		text-align: end;
 		white-space: nowrap;
+	}
+	.money th + th,
+	.money td,
+	.money thead td + th {
+		border-inline-start: 1px solid var(--border);
 	}
 	.money thead th {
 		font-size: 0.74rem;
 		color: var(--text-muted);
 		font-weight: 600;
 		vertical-align: bottom;
+		background: var(--surface);
 	}
 	.money tbody th {
 		text-align: start;
 		font-weight: 500;
 		white-space: normal;
 	}
+	.money tbody tr:nth-child(even) > * {
+		background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+	}
 	.money tr.strong th,
 	.money tr.strong td {
 		font-weight: 700;
+		background: color-mix(in srgb, var(--primary) 6%, var(--surface));
 	}
 	.money td.total,
 	.money th.total {
@@ -231,10 +269,5 @@
 		margin-top: 6px;
 		font-size: 0.7rem;
 		line-height: 1.3;
-	}
-	@media (max-width: 700px) {
-		.tables {
-			grid-template-columns: 1fr;
-		}
 	}
 </style>

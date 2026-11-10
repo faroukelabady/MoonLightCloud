@@ -90,7 +90,9 @@
 		"returns": "مرتجعات",
 		"transactions": "المعاملات",
 		"units": "الوحدات",
-		"returnTransactionsCountEveryCurrency": "معاملات المرتجعات تشمل كل العملات"
+		"returnTransactionsCountEveryCurrency": "معاملات المرتجعات تشمل كل العملات",
+		"returnedSuffix": "مرتجعة",
+		"returnsSuffix": "مرتجعات"
 	},
 	"devicesPage": {
 		"devices": "الأجهزة",

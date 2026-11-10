@@ -90,7 +90,9 @@
 		"returns": "Returns",
 		"transactions": "Transactions",
 		"units": "Units",
-		"returnTransactionsCountEveryCurrency": "Return transactions count every currency"
+		"returnTransactionsCountEveryCurrency": "Return transactions count every currency",
+		"returnedSuffix": "returned",
+		"returnsSuffix": "returns"
 	},
 	"devicesPage": {
 		"devices": "Devices",
