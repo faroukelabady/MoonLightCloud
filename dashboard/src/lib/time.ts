@@ -33,3 +33,16 @@ export function absoluteTime(iso: string, lang: 'ar' | 'en'): string {
 		return iso;
 	}
 }
+
+// Compact report timestamp: DD/MM/YYYY hh:mm AM/PM in the viewer's local
+// time (Arabic uses ص/م), Latin digits so printed columns stay narrow.
+// Same format as the Retail sales details report.
+export function compactTime(iso: string, lang: 'ar' | 'en'): string {
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return iso;
+	const pad = (n: number) => String(n).padStart(2, '0');
+	const hours = d.getHours();
+	const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+	const marker = lang === 'ar' ? (hours < 12 ? 'ص' : 'م') : hours < 12 ? 'AM' : 'PM';
+	return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(hour12)}:${pad(d.getMinutes())} ${marker}`;
+}

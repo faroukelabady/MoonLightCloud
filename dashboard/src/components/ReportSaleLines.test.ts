@@ -22,7 +22,7 @@ const sale = (id: string, lines?: RecordedSaleLine[]): SalesReport['sales'][numb
   root_names_ar: 'بردي', root_names_en: 'Papyrus', subcategory_names_ar: 'فن', subcategory_names_en: 'Art', items_sold: 2,
   payment_methods: ['cash'], cost_minor: '1200', missing_cost_items: 0, total_minor: '2300', original_currency: 'EGP', original_total_minor: '2300', rate_microrate: null, lines,
 });
-it('shows flat Original and option rows with separate SKU/value columns and one sale total', () => {
+it('shows flat Original and option rows with value and SKU under the product and one sale total', () => {
   render(ReportSaleLines, {sales:[sale('11111111',[original,option]),sale('22222222',[option])]});
   const table=screen.getByRole('table',{name:'Sales details'});
   const rows=within(table).getAllByRole('row');
@@ -32,17 +32,22 @@ it('shows flat Original and option rows with separate SKU/value columns and one 
   expect(within(rows[1]).getByText('Original')).toBeTruthy();
   expect(within(rows[2]).getByText('Gold / Traditional')).toBeTruthy();
   expect(screen.queryByText('Color: Gold')).toBeNull();
-  expect(screen.getByRole('columnheader',{name:'Variant value'})).toBeTruthy();
-  expect(screen.getByRole('columnheader',{name:'SKU'})).toBeTruthy();
+  // Variant value and SKU are subtext of the product cell, not columns.
+  expect(screen.queryByRole('columnheader',{name:'Variant value'})).toBeNull();
+  expect(screen.queryByRole('columnheader',{name:'SKU'})).toBeNull();
+  const product=within(rows[2]).getByTestId('flat-line-product');
+  expect(within(product).getByTestId('flat-line-variant').textContent).toBe('Gold / Traditional');
+  expect(within(product).getByTestId('flat-line-sku').textContent).toBe(option.sku);
+  expect(rows[1].querySelector('.sale-time')?.textContent).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2} (AM|PM)$/);
   expect(within(rows[2]).getByText(option.sku).getAttribute('dir')).toBe('ltr');
   expect(rows[1].textContent).toContain('Cash');
   expect(rows[1].textContent).toContain('Category: Papyrus');
   expect(rows[1].textContent).toContain('Subcategory: Art');
   expect(rows[1].querySelector('.sale-total')?.textContent).toContain('23 EGP');
   expect(rows[2].querySelector('.sale-total')?.textContent).toBe('—');
-  expect(within(rows[2]).getAllByRole('cell')[4].textContent).toBe('7 EGP');
-  expect(within(rows[2]).getAllByRole('cell')[5].textContent).toBe('15 EGP');
-  expect(within(rows[2]).getAllByRole('cell')[6].textContent).toBe('14 EGP');
+  expect(within(rows[2]).getAllByRole('cell')[2].textContent).toBe('7 EGP');
+  expect(within(rows[2]).getAllByRole('cell')[3].textContent).toBe('15 EGP');
+  expect(within(rows[2]).getAllByRole('cell')[4].textContent).toBe('14 EGP');
 });
 it('groups whole reference cells through four tones, repeats per sale and wraps with the page offset',()=>{
  render(ReportSaleLines,{sales:Array.from({length:5},(_,i)=>sale(String(i),[original,option])),offset:3});
@@ -82,7 +87,7 @@ it('does not invent unit prices, unit cost or option identity for older aggregat
 it('keeps Arabic option values and Original labels with LTR references and SKUs',()=>{
  setLang('ar');
  render(ReportSaleLines,{sales:[sale('11111111',[original,option])]});
- expect(screen.getByRole('columnheader',{name:'قيمة الخيار'})).toBeTruthy();
+ expect(screen.queryByRole('columnheader',{name:'قيمة الخيار'})).toBeNull();
  expect(screen.getByText('الأصلي')).toBeTruthy();
  expect(screen.getByText('ذهبي / تقليدي')).toBeTruthy();
  expect(screen.getByText(option.sku).getAttribute('dir')).toBe('ltr');
