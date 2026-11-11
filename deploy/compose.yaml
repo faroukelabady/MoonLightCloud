@@ -38,6 +38,8 @@ services:
       # Development must expose the same authenticated poll channel Retail
       # uses. Explicit false remains available; production stays opt-in.
       DEVICE_CONTROL_ENABLED: ${DEVICE_CONTROL_ENABLED:-true}
+      # Public verification keys only; production private signing keys stay offline.
+      RELEASE_TRUSTED_PUBLIC_KEYS: ${RELEASE_TRUSTED_PUBLIC_KEYS:-}
       # Image bytes (ADR-0057): set MEDIA_STORAGE=r2 and the R2_* values in
       # .env.local (scripts/dev-up.sh exports it) to use the dev bucket;
       # otherwise they stay in the media volume below (development only).

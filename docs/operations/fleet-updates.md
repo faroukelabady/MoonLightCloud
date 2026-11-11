@@ -92,3 +92,7 @@ Legacy Windows builds need one manual full-installer upgrade before they can
 advertise updater capability. Retail must also contain the reviewed public
 signing key and a positive release sequence. Production signing configuration
 is deferred; an R2 upload alone does not enable live self-updates.
+
+## E06 public-key setup (11 November 2026)
+
+The development Compose service passes `RELEASE_TRUSTED_PUBLIC_KEYS` from `.env.local` (via `scripts/dev-up.sh`). Add only the base64 public key from the offline signing host after the matching Retail trust change is reviewed. Restart the Cloud service explicitly to apply it. Existing data volumes stay in place. Do not put a private signing key in this setting, Compose, R2 or CI secrets. See Retail `docs/operations/offline-signing-first-key.md` for the first-key guide. No key is configured by this source change.
