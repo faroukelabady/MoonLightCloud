@@ -1,8 +1,9 @@
 # ADR-0060: TUF/Sigstore Retail release verification
 
-Status: Accepted for implementation; activation requires the reviewed public
-bootstrap and native release acceptance. Extends ADR-0051/0052; Retail ADR-051
-owns the v2 protocol and publishing workflow.
+Status: Implemented with the operator's reviewed public bootstrap on 12 November
+2026. Cloud activation, first automated publication and native release acceptance
+remain pending. Extends ADR-0051/0052; Retail ADR-051 owns the v2 protocol and
+publishing workflow.
 
 Cloud continues to verify/import and orchestrate; it never receives private
 root or online release keys. RELEASE_TUF_BOOTSTRAP selects a reviewed public
