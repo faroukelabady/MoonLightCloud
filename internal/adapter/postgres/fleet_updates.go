@@ -527,7 +527,7 @@ func (f FleetUpdates) RecordStatus(ctx context.Context, deviceID string, s fleet
 			_, err := q.MarkIncapableDeviceTargets(ctx, sqlcgen.MarkIncapableDeviceTargetsParams{DeviceID: did, Reason: reason, Now: pgTime(now)})
 			return err
 		}
-		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, Os: s.OS,
+		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, UpdaterProtocol: int32(s.UpdaterProtocol), Os: s.OS,
 			Arch: s.Arch, Package: fleetupdate.PackageForOS(s.OS), Now: pgTime(now)}); err != nil {
 			return err
 		}
@@ -558,11 +558,11 @@ func (f FleetUpdates) ClaimCommand(ctx context.Context, deviceID string, now tim
 		if !status.UpdaterCapable || status.UpdaterProtocol < fleetupdate.UpdaterProtocol {
 			return nil
 		}
-		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, Os: status.Os,
+		if _, err := q.MarkUnsupportedPlatformTargets(ctx, sqlcgen.MarkUnsupportedPlatformTargetsParams{DeviceID: did, UpdaterProtocol: status.UpdaterProtocol, Os: status.Os,
 			Arch: status.Arch, Package: fleetupdate.PackageForOS(status.Os), Now: pgTime(now)}); err != nil {
 			return err
 		}
-		row, err := q.ClaimDeviceUpdateTarget(ctx, sqlcgen.ClaimDeviceUpdateTargetParams{DeviceID: did, Os: status.Os,
+		row, err := q.ClaimDeviceUpdateTarget(ctx, sqlcgen.ClaimDeviceUpdateTargetParams{DeviceID: did, UpdaterProtocol: status.UpdaterProtocol, Os: status.Os,
 			Arch: status.Arch, Package: fleetupdate.PackageForOS(status.Os), Now: pgTime(now)})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

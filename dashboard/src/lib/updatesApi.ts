@@ -184,3 +184,21 @@ export function previewEnvelope(text: string): { version: string; sequence: numb
 	}
 }
 
+
+// Reads either the envelope alone or CI's public cloud-import.json. This is
+// display/input preparation only; all trust checks remain on the server.
+export function readReleaseImportFile(text: string): { envelope: string; urls: Record<string, string> } {
+	try {
+		const value = JSON.parse(text) as { envelope?: unknown; artifact_urls?: unknown };
+		if (value && value.envelope && typeof value.artifact_urls === 'object' && value.artifact_urls !== null && !Array.isArray(value.artifact_urls)) {
+			const envelope = typeof value.envelope === 'string' ? value.envelope : JSON.stringify(value.envelope);
+			const preview = previewEnvelope(envelope);
+			if (!preview) return { envelope: text, urls: {} };
+			const input = value.artifact_urls as Record<string, unknown>;
+			const urls: Record<string, string> = {};
+			for (const name of preview.files) if (typeof input[name] === 'string') urls[name] = input[name];
+			return { envelope, urls };
+		}
+	} catch { /* The existing invalid-envelope preview explains malformed files. */ }
+	return { envelope: text, urls: {} };
+}

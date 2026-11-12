@@ -6,6 +6,9 @@
 - Scope: importing, storing and revoking signed Retail releases. Cloud
   never builds, signs or alters a release.
 
+> ADR-0060 adds explicit TUF/Sigstore v2 verification. The v1 import rules
+> remain the transition path until public TUF bootstrap is configured.
+
 ## Context
 
 Retail self-update (Phase 18) needs a place to publish which signed

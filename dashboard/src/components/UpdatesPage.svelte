@@ -2,7 +2,7 @@
 	import { msg } from '../lib/i18n.svelte.js';
 	import SingleSelect from './ui/SingleSelect.svelte';
 	import { untrack } from 'svelte';
-	import { updatesApi, updateStateLabel, previewEnvelope, ApiError } from '../lib/api.js';
+	import { updatesApi, updateStateLabel, previewEnvelope, readReleaseImportFile, ApiError } from '../lib/api.js';
 	import type { ReleaseView, RolloutView, FleetDeviceRow, UpdateTargetView } from '../lib/api.js';
 
 	// UpdatesPage: Phase 18 release registry + fleet rollout control
@@ -97,7 +97,11 @@
 
 	async function onEnvelopeFile(ev: Event) {
 		const file = (ev.currentTarget as HTMLInputElement).files?.[0];
-		if (file) envelopeText = await file.text();
+		if (file) {
+			const imported = readReleaseImportFile(await file.text());
+			envelopeText = imported.envelope;
+			urls = imported.urls;
+		}
 	}
 
 	async function importRelease() {

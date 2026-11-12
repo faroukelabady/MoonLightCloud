@@ -75,3 +75,5 @@ The ADR sequence is not one-per-phase. These are intentional, not missing files:
   (commit `408f388`), covered by ADR-0039 store registry intent.
 
 - [0059](0059-report-configuration-management.md) — editable report configuration and retained send history
+
+* [0060: TUF/Sigstore release verification](0060-tuf-sigstore-release-verification.md) — offline root; public verification only in Cloud.

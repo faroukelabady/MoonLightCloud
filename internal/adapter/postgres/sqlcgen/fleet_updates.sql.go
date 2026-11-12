@@ -42,19 +42,21 @@ JOIN release_artifacts a ON a.release_id = rel.id AND a.os = $1::text AND a.arch
 WHERE t.device_id = $4::uuid
   AND t.state IN ('pending','delivered')
   AND r.status = 'active' AND rel.status = 'active'
-  AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= $5::timestamptz)
-  AND (r.not_before IS NULL OR r.not_before <= $5::timestamptz)
+  AND $5::int = (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
+  AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= $6::timestamptz)
+  AND (r.not_before IS NULL OR r.not_before <= $6::timestamptz)
 ORDER BY rel.release_sequence DESC, t.created_at, t.id
 LIMIT 1
 FOR UPDATE OF t FOR SHARE OF r
 `
 
 type ClaimDeviceUpdateTargetParams struct {
-	Os       string             `json:"os"`
-	Arch     string             `json:"arch"`
-	Package  string             `json:"package"`
-	DeviceID pgtype.UUID        `json:"device_id"`
-	Now      pgtype.Timestamptz `json:"now"`
+	Os              string             `json:"os"`
+	Arch            string             `json:"arch"`
+	Package         string             `json:"package"`
+	DeviceID        pgtype.UUID        `json:"device_id"`
+	UpdaterProtocol int32              `json:"updater_protocol"`
+	Now             pgtype.Timestamptz `json:"now"`
 }
 
 type ClaimDeviceUpdateTargetRow struct {
@@ -82,6 +84,7 @@ func (q *Queries) ClaimDeviceUpdateTarget(ctx context.Context, arg ClaimDeviceUp
 		arg.Arch,
 		arg.Package,
 		arg.DeviceID,
+		arg.UpdaterProtocol,
 		arg.Now,
 	)
 	var i ClaimDeviceUpdateTargetRow
@@ -1092,26 +1095,31 @@ func (q *Queries) MarkTargetDelivered(ctx context.Context, arg MarkTargetDeliver
 }
 
 const markUnsupportedPlatformTargets = `-- name: MarkUnsupportedPlatformTargets :execrows
-UPDATE update_rollout_targets t SET state = 'unsupported', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
-    finished_at = $1::timestamptz, updated_at = $1::timestamptz
-FROM update_rollouts r
-WHERE r.id = t.rollout_id AND t.device_id = $2::uuid AND t.state = 'pending'
-  AND NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
-                  AND a.os = $3::text AND a.arch = $4::text AND a.package = $5::text)
+UPDATE update_rollout_targets t SET state = 'unsupported',
+    last_error = CASE WHEN $1::int <> (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
+      THEN 'UPDATE_MANUAL_ACTION_REQUIRED' ELSE 'UPDATE_PLATFORM_UNSUPPORTED' END,
+    finished_at = $2::timestamptz, updated_at = $2::timestamptz
+FROM update_rollouts r JOIN releases rel ON rel.id = r.release_id
+WHERE r.id = t.rollout_id AND t.device_id = $3::uuid AND t.state = 'pending'
+  AND ($1::int <> (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
+    OR NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
+                  AND a.os = $4::text AND a.arch = $5::text AND a.package = $6::text))
 `
 
 type MarkUnsupportedPlatformTargetsParams struct {
-	Now      pgtype.Timestamptz `json:"now"`
-	DeviceID pgtype.UUID        `json:"device_id"`
-	Os       string             `json:"os"`
-	Arch     string             `json:"arch"`
-	Package  string             `json:"package"`
+	UpdaterProtocol int32              `json:"updater_protocol"`
+	Now             pgtype.Timestamptz `json:"now"`
+	DeviceID        pgtype.UUID        `json:"device_id"`
+	Os              string             `json:"os"`
+	Arch            string             `json:"arch"`
+	Package         string             `json:"package"`
 }
 
-// Targets whose release has no artifact for the device platform can never
-// be delivered: terminal UNSUPPORTED instead of permanent retry (§131).
+// A different trust protocol requires a manual bootstrap, not a bad-signature
+// delivery. Platform incompatibility retains its distinct reason.
 func (q *Queries) MarkUnsupportedPlatformTargets(ctx context.Context, arg MarkUnsupportedPlatformTargetsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markUnsupportedPlatformTargets,
+		arg.UpdaterProtocol,
 		arg.Now,
 		arg.DeviceID,
 		arg.Os,

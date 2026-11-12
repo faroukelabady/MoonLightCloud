@@ -24,13 +24,14 @@ RUN CGO_ENABLED=0 go build \
   -o /out/moonlight-cloud ./cmd/moonlight-cloud
 # Development-only local image directory (ADR-0057), owned by the runtime
 # user so a fresh named volume mounted there is writable.
-RUN mkdir -p /out/media
+RUN mkdir -p /out/media /out/release-tuf
 
 # Stage 3: minimal runtime, non-root, no toolchain, no source, no Node.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/moonlight-cloud /usr/local/bin/moonlight-cloud
 COPY --from=frontend /dash/dist /usr/local/share/moonlight-dashboard
 COPY --from=build --chown=65532:65532 /out/media /var/lib/moonlight/media
+COPY --from=build --chown=65532:65532 /out/release-tuf /var/lib/moonlight/release-tuf
 ENV DASHBOARD_ASSETS_DIR=/usr/local/share/moonlight-dashboard
 # Distroless nonroot user is 65532:65532.
 USER 65532:65532

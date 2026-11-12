@@ -8129,7 +8129,7 @@ components:
       properties:
         envelope:
           description: >-
-            The signed moonlight-release-envelope-v1 document, as a JSON object
+            The signed moonlight-release-envelope-v1 or TUF/Sigstore v2 document, as a JSON object
             or as the file's literal text in a JSON string.
           oneOf:
             - type: object

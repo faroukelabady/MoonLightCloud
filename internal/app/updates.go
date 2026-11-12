@@ -3,11 +3,13 @@ package app
 import (
 	"crypto/ed25519"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	adapterhttp "github.com/faroukelabady/MoonLightCloud/internal/adapter/http"
 	"github.com/faroukelabady/MoonLightCloud/internal/adapter/postgres"
+	"github.com/faroukelabady/MoonLightCloud/internal/adapter/repositoryauth"
 	"github.com/faroukelabady/MoonLightCloud/internal/config"
 	"github.com/faroukelabady/MoonLightCloud/internal/fleetupdate"
 	"github.com/faroukelabady/MoonLightCloud/internal/platform/ids"
@@ -20,6 +22,23 @@ import (
 // channels still work (they only relay already-imported releases).
 func newUpdateHandlers(cfg config.Config, pool *pgxpool.Pool, log *slog.Logger) *adapterhttp.UpdateHandlers {
 	trust, trustErr := parseReleaseTrust(cfg.ReleaseTrustedPublicKeys)
+	if cfg.ReleaseTUFBootstrap != "" {
+		// Explicit TUF mode replaces legacy import trust; errors never fall back.
+		trust = release.TrustSet{}
+		raw, err := os.ReadFile(cfg.ReleaseTUFBootstrap)
+		trustErr = err
+		if err == nil {
+			b, err := repositoryauth.DecodeBootstrap(raw)
+			trustErr = err
+			if err == nil {
+				v, err := repositoryauth.New(b, cfg.ReleaseTUFCacheDir, false)
+				trustErr = err
+				if err == nil {
+					trust = release.NewRepositoryTrust(v.Verify)
+				}
+			}
+		}
+	}
 	if trustErr != nil {
 		log.Warn("release trust keys invalid; release import disabled")
 	} else {

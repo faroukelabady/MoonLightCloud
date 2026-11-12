@@ -40,6 +40,8 @@ services:
       DEVICE_CONTROL_ENABLED: ${DEVICE_CONTROL_ENABLED:-true}
       # Public verification keys only; production private signing keys stay offline.
       RELEASE_TRUSTED_PUBLIC_KEYS: ${RELEASE_TRUSTED_PUBLIC_KEYS:-}
+      RELEASE_TUF_BOOTSTRAP: ${RELEASE_TUF_BOOTSTRAP:-}
+      RELEASE_TUF_CACHE_DIR: /var/lib/moonlight/release-tuf
       # Image bytes (ADR-0057): set MEDIA_STORAGE=r2 and the R2_* values in
       # .env.local (scripts/dev-up.sh exports it) to use the dev bucket;
       # otherwise they stay in the media volume below (development only).
@@ -72,6 +74,8 @@ services:
       AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:?run scripts/dev-up.sh (generates a local key) or export AUTH_MFA_ENCRYPTION_KEY}
     volumes:
       - media:/var/lib/moonlight/media
+      - release_tuf:/var/lib/moonlight/release-tuf
+      - ./release-trust:/etc/moonlight/release-trust:ro
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
@@ -87,3 +91,5 @@ volumes:
     name: moonlightcloud_pgdata
   media:
     name: moonlightcloud_media
+  release_tuf:
+    name: moonlightcloud_release_tuf

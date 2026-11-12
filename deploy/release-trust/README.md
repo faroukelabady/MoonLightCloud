@@ -1,0 +1,1 @@
+Public trust only. Copy the reviewed Retail repository-bootstrap.json here after the offline root ceremony. Set RELEASE_TUF_BOOTSTRAP=/etc/moonlight/release-trust/repository-bootstrap.json. Never put any private key here.

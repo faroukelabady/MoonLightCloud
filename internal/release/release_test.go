@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -260,4 +261,16 @@ func TestTrustSetRejectsMalformedKeys(t *testing.T) {
 	require.NoError(t, err)
 	_, err = empty.Verify([]byte(loadVector(t).Envelope))
 	require.Equal(t, CodeKeyUnknown, CodeOf(err), "an empty trust set trusts nothing")
+}
+
+func TestRepositoryTrustNeverFallsBackToLegacy(t *testing.T) {
+	checked := false
+	trust := NewRepositoryTrust(func(raw []byte) ([]byte, error) {
+		checked = true
+		return nil, fmt.Errorf("repository rejects legacy input")
+	})
+	_, err := trust.Verify([]byte(loadVector(t).Envelope))
+	if err == nil || !checked || trust.Len() != 1 {
+		t.Fatal("repository trust did not fail closed")
+	}
 }

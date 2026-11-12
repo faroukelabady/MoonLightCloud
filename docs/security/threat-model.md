@@ -111,3 +111,14 @@ the files Retail still holds; keep the token scoped and public access off.
 | Dashboard users make Cloud hammer the provider | The fetch route needs `settings.manage` on all Stores, CSRF and MFA like every mutation; a repeat within one minute per instance reuses the last answer. The background fetch runs every 12 hours. |
 | Several Cloud instances store duplicate rows | One transaction-scoped advisory lock, then a single insert stamped with the database clock and skipped when the rate in effect is the same. |
 | Tests reach the internet | Test config and the E2E server set `EXCHANGE_RATE_URL=`; HTTP tests use a local server. |
+
+## TUF/Sigstore release migration (ADR-0060)
+
+Cloud imports v2 only when the exact manifest and compact Sigstore bundle are
+TUF-authorised and the approved GitHub workflow identity/commit/log proof pass.
+Retail independently verifies; Cloud never has any release private key. The
+private persistent cache preserves root/version floors; it must not be reset
+with business data or shared by concurrent replicas. Compromising normal CI
+release approval remains sufficient to approve malicious software. Offline root
+helps change authority/recover, not independently approve each normal release.
+Public logs expose signing identity/activity. Rollout withholding remains possible.

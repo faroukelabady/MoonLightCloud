@@ -134,6 +134,8 @@ type Config struct {
 	// disables import (fail closed). Cloud never holds private release keys,
 	// and Retail re-verifies every release against its own embedded keys.
 	ReleaseTrustedPublicKeys string
+	ReleaseTUFBootstrap      string
+	ReleaseTUFCacheDir       string
 	// TrustedProxyCIDRs are the only peers whose X-Forwarded-For chain is
 	// believed for login rate limiting. Empty (default) trusts none:
 	// forwarded headers from untrusted peers are ignored entirely.
@@ -202,6 +204,8 @@ func Load() (Config, error) {
 		ShutdownAfter:            DefaultShutdownTimeout,
 		AuthMFAEncryptionKey:     strings.TrimSpace(os.Getenv("AUTH_MFA_ENCRYPTION_KEY")),
 		ReleaseTrustedPublicKeys: strings.TrimSpace(os.Getenv("RELEASE_TRUSTED_PUBLIC_KEYS")),
+		ReleaseTUFBootstrap:      strings.TrimSpace(os.Getenv("RELEASE_TUF_BOOTSTRAP")),
+		ReleaseTUFCacheDir:       strings.TrimSpace(os.Getenv("RELEASE_TUF_CACHE_DIR")),
 		DashboardAssetsDir:       envOr("DASHBOARD_ASSETS_DIR", "dashboard/dist"),
 		ExchangeRateURL:          exchangeRateURL(),
 		envExplicit:              strings.TrimSpace(os.Getenv("ENVIRONMENT")) != "",

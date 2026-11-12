@@ -1,9 +1,6 @@
-// Package release verifies Phase 18 signed release manifests (ADR-0051)
-// for the Cloud release registry. It mirrors MoonLightRetail's verifier
-// byte-for-byte in behavior (pinned by the shared cross-repository vector
-// in testdata) without sharing code across the repository boundary. Cloud
-// verification protects the registry; Retail always re-verifies
-// independently against its own embedded keys. It is pure: no I/O.
+// Package release defines the Phase 18 signed release manifest (ADR-040)
+// and its verification. V1/canonical validation is pure. V2 authorisation is
+// injected by the repositoryauth adapter, which owns its network/cache I/O.
 //
 // Trust model: an offline/CI release pipeline signs the exact canonical
 // manifest bytes with an Ed25519 key. Retail embeds only public keys and
@@ -52,7 +49,8 @@ const (
 // Package formats Retail understands. Installation support is decided by
 // the platform adapter; the manifest only names the format.
 const (
-	PackageTarGz = "tar.gz"
+	PackageTarGz   = "tar.gz"
+	PackageNSISExe = "nsis-exe"
 )
 
 // Code is a stable machine error code (prompt §72).
@@ -128,6 +126,16 @@ type Envelope struct {
 	Signature string `json:"signature"`
 }
 
+// RepositoryEnvelope carries the canonical release identity and Sigstore proof.
+// TUF authority is obtained independently from the configured repository.
+const RepositoryEnvelopeFormat = "moonlight-release-envelope-v2"
+
+type RepositoryEnvelope struct {
+	Format   string          `json:"format"`
+	Manifest string          `json:"manifest"`
+	Bundle   json.RawMessage `json:"sigstore_bundle"`
+}
+
 // Verified is a release whose signature, structure and canonical form
 // have all been checked. Only Verify constructs it.
 type Verified struct {
@@ -163,7 +171,16 @@ func KeyID(pub ed25519.PublicKey) string {
 // from keys embedded in the binary (or explicit development configuration)
 // and can never be replaced by Cloud (prompt §5).
 type TrustSet struct {
-	keys map[string]ed25519.PublicKey
+	keys               map[string]ed25519.PublicKey
+	repositoryVerifier func([]byte) ([]byte, error)
+}
+
+// Protocol identifies the accepted envelope protocol for fleet routing.
+func (t TrustSet) Protocol() int {
+	if t.repositoryVerifier != nil {
+		return 2
+	}
+	return 1
 }
 
 // NewTrustSet validates and indexes public keys by derived key ID.
@@ -188,10 +205,24 @@ func ParsePublicKey(text string) (ed25519.PublicKey, error) {
 }
 
 // Len reports the number of trusted keys.
-func (t TrustSet) Len() int { return len(t.keys) }
+func (t TrustSet) Len() int {
+	if t.repositoryVerifier != nil {
+		return 1
+	}
+	return len(t.keys)
+}
+
+// NewRepositoryTrust requires an external TUF/Sigstore authorisation check.
+// It replaces legacy trust completely; failure never falls back to v1.
+func NewRepositoryTrust(check func([]byte) ([]byte, error)) TrustSet {
+	return TrustSet{repositoryVerifier: check}
+}
 
 // KeyIDs lists trusted key IDs in sorted order (diagnostics only).
 func (t TrustSet) KeyIDs() []string {
+	if t.repositoryVerifier != nil {
+		return []string{"tuf-sigstore-v2"}
+	}
 	ids := make([]string, 0, len(t.keys))
 	for id := range t.keys {
 		ids = append(ids, id)
@@ -240,6 +271,17 @@ func Digest(manifestBytes []byte) string {
 // Verify performs every authenticity and structure check (prompt §8).
 // Nothing about the release is trusted unless this returns nil error.
 func (t TrustSet) Verify(envelopeBytes []byte) (Verified, error) {
+	if t.repositoryVerifier != nil {
+		raw, err := t.repositoryVerifier(envelopeBytes)
+		if err != nil {
+			return Verified{}, fail(CodeSignatureInvalid, "TUF/Sigstore verification failed")
+		}
+		m, err := ParseManifest(raw)
+		if err != nil {
+			return Verified{}, err
+		}
+		return Verified{Manifest: m, ManifestBytes: raw, Digest: Digest(raw), KeyID: m.KeyID}, nil
+	}
 	if len(envelopeBytes) == 0 || len(envelopeBytes) > MaxEnvelopeBytes {
 		return Verified{}, fail(CodeManifestInvalid, "envelope size out of bounds")
 	}

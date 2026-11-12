@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/faroukelabady/MoonLightCloud/internal/fleetupdate"
 	"github.com/faroukelabady/MoonLightCloud/internal/release"
@@ -58,6 +60,55 @@ func TestFleetSelectsWindowsFullInstallerAndLinuxBundle(t *testing.T) {
 	for _, target := range targets {
 		if target.DeviceID == windowsOnly && target.State != fleetupdate.TargetUnsupported {
 			t.Fatalf("unsupported platform reported %s", target.State)
+		}
+	}
+}
+
+func TestFleetNeverMixesLegacyAndTUFEnvelopeProtocols(t *testing.T) {
+	f := newFleetFixture(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		id       string
+		protocol int
+	}{{f.devA, 1}, {f.devA2, 2}} {
+		if err := f.svc.RecordStatus(ctx, tc.id, fleetupdate.StatusReport{Version: "1.0.0", BuildCommit: strings.Repeat("a", 40), ReleaseSequence: 10, OS: "linux", Arch: "amd64", UpdaterProtocol: tc.protocol, UpdaterCapable: true, UpdateState: "idle"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := f.release(11)
+	f.rollout(fleetupdate.RolloutRequest{ReleaseID: old.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
+	if f.poll(f.devA) == nil {
+		t.Fatal("legacy client lost legacy update")
+	}
+	if f.poll(f.devA2) != nil {
+		t.Fatal("TUF client received legacy envelope")
+	}
+	// Store-boundary fixture only: crypto is tested at the verifier/service
+	// boundary. This synthetic v2 row exercises actual PostgreSQL claim routing.
+	_, verified, err := release.Sign(release.Manifest{ReleaseSequence: 12, Version: "1.2.0", BuildCommit: strings.Repeat("b", 40), Artifacts: []release.Artifact{{OS: "linux", Arch: "amd64", Package: "tar.gz", FileName: "linux.tar.gz", Size: 100, SHA256: strings.Repeat("c", 64)}}}, f.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, _, err := NewFleetUpdates(f.pool, 10*time.Second).ImportRelease(ctx, fleetupdate.ReleaseImport{ID: uuid.NewString(), Verified: verified, Envelope: `{"format":"moonlight-release-envelope-v2"}`, Artifacts: []fleetupdate.ArtifactView{{OS: "linux", Arch: "amd64", Package: "tar.gz", FileName: "linux.tar.gz", Size: 100, SHA256: strings.Repeat("c", 64), URL: "https://artifacts.example.test/tuf-linux.tar.gz"}}}, "op", f.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro := f.rollout(fleetupdate.RolloutRequest{ReleaseID: rel.ID, Scope: "store", StoreID: f.storeA, Mode: "optional", Percentage: 100}, true)
+	cmd := f.poll(f.devA2)
+	if cmd == nil || cmd.ReleaseID != rel.ID {
+		t.Fatal("TUF client did not receive v2")
+	}
+	cmd = f.poll(f.devA)
+	if cmd != nil && cmd.ReleaseID == rel.ID {
+		t.Fatal("legacy client received v2")
+	}
+	targets, _, err := f.svc.ListTargets(ctx, ro.ID, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if target.DeviceID == f.devA && (target.State != fleetupdate.TargetUnsupported || target.LastError != "UPDATE_MANUAL_ACTION_REQUIRED") {
+			t.Fatalf("legacy target should explain manual bootstrap: %+v", target)
 		}
 	}
 }

@@ -135,6 +135,7 @@ JOIN release_artifacts a ON a.release_id = rel.id AND a.os = @os::text AND a.arc
 WHERE t.device_id = @device_id::uuid
   AND t.state IN ('pending','delivered')
   AND r.status = 'active' AND rel.status = 'active'
+  AND @updater_protocol::int = (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
   AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= @now::timestamptz)
   AND (r.not_before IS NULL OR r.not_before <= @now::timestamptz)
 ORDER BY rel.release_sequence DESC, t.created_at, t.id
@@ -147,14 +148,17 @@ UPDATE update_rollout_targets SET state = 'delivered', delivered_at = COALESCE(d
 WHERE id = @id::uuid AND state IN ('pending','delivered');
 
 -- name: MarkUnsupportedPlatformTargets :execrows
--- Targets whose release has no artifact for the device platform can never
--- be delivered: terminal UNSUPPORTED instead of permanent retry (§131).
-UPDATE update_rollout_targets t SET state = 'unsupported', last_error = 'UPDATE_PLATFORM_UNSUPPORTED',
+-- A different trust protocol requires a manual bootstrap, not a bad-signature
+-- delivery. Platform incompatibility retains its distinct reason.
+UPDATE update_rollout_targets t SET state = 'unsupported',
+    last_error = CASE WHEN @updater_protocol::int <> (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
+      THEN 'UPDATE_MANUAL_ACTION_REQUIRED' ELSE 'UPDATE_PLATFORM_UNSUPPORTED' END,
     finished_at = @now::timestamptz, updated_at = @now::timestamptz
-FROM update_rollouts r
+FROM update_rollouts r JOIN releases rel ON rel.id = r.release_id
 WHERE r.id = t.rollout_id AND t.device_id = @device_id::uuid AND t.state = 'pending'
-  AND NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
-                  AND a.os = @os::text AND a.arch = @arch::text AND a.package = @package::text);
+  AND (@updater_protocol::int <> (CASE rel.envelope::jsonb ->> 'format' WHEN 'moonlight-release-envelope-v2' THEN 2 WHEN 'moonlight-release-envelope-v1' THEN 1 ELSE 0 END)
+    OR NOT EXISTS (SELECT 1 FROM release_artifacts a WHERE a.release_id = r.release_id
+                  AND a.os = @os::text AND a.arch = @arch::text AND a.package = @package::text));
 
 -- name: MarkIncapableDeviceTargets :execrows
 UPDATE update_rollout_targets SET state = 'unsupported', last_error = @reason::text,

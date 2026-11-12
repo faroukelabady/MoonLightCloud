@@ -1,5 +1,8 @@
 # Fleet Updates (Phase 18)
 
+> New release setup: [TUF and Sigstore](../../../MoonLightRetail/docs/operations/tuf-sigstore-releases.md).
+> The existing v1 procedure remains available before the public bootstrap is configured.
+
 Architecture: [ADR-0051](../decisions/0051-signed-release-registry.md)
 (registry) and
 [ADR-0052](../decisions/0052-fleet-rollout-device-update-control.md)
